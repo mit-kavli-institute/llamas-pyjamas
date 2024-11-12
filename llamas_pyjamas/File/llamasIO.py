@@ -1,4 +1,7 @@
-from astropy.io import fits
+
+from astropy.io import fits # type: ignore
+
+##############################################################
 
 class llamasOneCamera:
 
@@ -17,13 +20,7 @@ class llamasOneCamera:
         self.channel = self.header['COLOR']
         self.index  = -1
 
-    def findhdu(self, hdulist, bench=bench, side=side, channel=channel):
-        for hdu in hdulist:
-            if (hdu.header['BENCH'] == bench and
-                hdu.header['SIDE'] == side and
-                hdu.header['COLOR'] == channel):
-            print ("AHA")
-
+##############################################################
 
 class llamasAllCameras:
 
@@ -34,11 +31,11 @@ class llamasAllCameras:
             self.Next       = len(hdulist) - 1
             self.extensions = []
             for hdu in hdulist[1:]:
-                if (len(self.extensions) == 0):
-                    self.extensions = llamasOneCamera(hdu)
-                else:
-                    self.extensions.append(self.extensions, llamasOneCamera(hdu))
+                thiscam = llamasOneCamera()
+                thiscam.readhdu(hdu)
+                self.extensions.append(thiscam)
 
         hdulist.close()
 
+##############################################################
             
