@@ -1,11 +1,11 @@
-from   astropy.io import fits
-import numpy as np
-import pyds9
+from   astropy.io import fits # type: ignore
+import numpy as np # type: ignore
+import pyds9 # type: ignore
 import time
-from   matplotlib import pyplot as plt
+from   matplotlib import pyplot as plt # type: ignore
 from   pypeit.core.arc import detect_peaks
 from   pypeit.core import pydl
-from   pypeit.core.fitting import iterfit
+from   pypeit.core.fitting import iterfit # type: ignore
 from   pypeit import bspline
 import pickle
 
