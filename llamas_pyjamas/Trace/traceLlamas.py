@@ -1,16 +1,13 @@
 from   astropy.io import fits
-import scipy
 import numpy as np
 import pyds9
 import time
 from   matplotlib import pyplot as plt
 from   pypeit.core.arc import detect_peaks
 from   pypeit.core import pydl
-from   pypeit.core.pydl import iterfit
-from   pypeit.core.wavecal import fitting
+from   pypeit.core.fitting import iterfit
 from   pypeit import bspline
 import pickle
-
 
 ###############################################################################3
 
