@@ -4,7 +4,6 @@ import sys
 from   astropy.io import fits
 import scipy
 import numpy as np
-import pyds9
 import time
 from   matplotlib import pyplot as plt
 import traceback
