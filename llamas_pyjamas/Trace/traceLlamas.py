@@ -7,44 +7,50 @@ from   pypeit.core.arc import detect_peaks
 from   pypeit.core import pydl
 from   pypeit.core.fitting import iterfit # type: ignore
 from   pypeit import bspline
+from   llamas_pyjamas.File import llamasIO
 import pickle
 
 ###############################################################################3
 
 class TraceLlamas:
 
-    def __init__(self,flat_fitsfile,spectrograph=None,channel=None,mph=None):
+    def __init__(self):
+        self.data = 0
+        self.naxis1 = 0
+        self.naxis2 = 0
+        self.bench = ''
 
-        with fits.open(flat_fitsfile) as hdu:
-            hdr = hdu[0].header
-            raw = hdu[0].data
+    def traceSingleCamera(self, dataobj, mph=None):
 
-        self.data = raw.astype(np.float)
+        hdr = dataobj.header
+        raw = dataobj.data
+
+        self.data = raw.astype(float)
         self.bspline_ssets = []
             
-        self.naxis1 = hdr['naxis1']
-        self.naxis2 = hdr['naxis2']
-        self.spectrograph = spectrograph
+        self.naxis1 = hdr['NAXIS1']
+        self.naxis2 = hdr['NAXIS2']
+        self.bench = hdr['BENCH']
 
         # Take a vertical slice through traces at center of array, and find the "valleys"
         # corresponding to the continuum
 
         middle_row = int(self.naxis1/2)
-        tslice = np.sum(raw[:,middle_row-5:middle_row+4],axis=1).astype(np.float)
+        tslice = np.sum(raw[:,middle_row-5:middle_row+4],axis=1).astype(float)
 
         tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
         valley_indices = np.ndarray(len(tmp))
         valley_depths  = np.ndarray(len(tmp))
-        valley_indices = tmp.astype(np.float)
-        valley_depths  = tslice[tmp].astype(np.float)
+        valley_indices = tmp.astype(float)
+        valley_depths  = tslice[tmp].astype(float)
         invvar         = np.ones(len(tmp))
         
         # Fit out the scatterd light continuum, using uniform weighting
 
-        sset = pydl.bspline(valley_indices,everyn=2)
+        sset = bspline.bspline(valley_indices,everyn=2)
         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
         
-        x_model = np.arange(self.naxis2).astype(np.float)
+        x_model = np.arange(self.naxis2).astype(float)
         y_model = sset.value(x_model)[0]
         
         # Now find trace peaks
@@ -59,15 +65,18 @@ class TraceLlamas:
         self.xmax     = self.naxis1-100
         self.fitspace = 10
 
+        # ds9 = pyds9.DS9()
+        # ds9.set_np2arr(raw)
+
         # We will explicitly fit a vertical slice for peak positions every
         # self.fitspace pixels in the horizontal direction
-        n_tracefit = np.floor((self.xmax-self.xmin)/self.fitspace).astype(np.int)
+        n_tracefit = np.floor((self.xmax-self.xmin)/self.fitspace).astype(int)
         xtrace = self.xmin + self.fitspace * np.arange(n_tracefit)
 
         tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
         print("NFibers = {}".format(self.nfibers))
 
-        if (channel=='blue'):
+        if (dataobj.channel=='blue'):
             min_pkheight = 50
         else:
             min_pkheight = 500
@@ -78,23 +87,23 @@ class TraceLlamas:
         # Loop over each slice to populate tracearr, which is the fitting grid
 
         for xtmp in xtrace:
-            ytrace = np.median(raw[:,xtmp.astype(np.int)-7:xtmp.astype(np.int)+7],axis=1)
+            ytrace = np.median(raw[:,xtmp.astype(int)-7:xtmp.astype(int)+7],axis=1)
             
             valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
             nvalley = len(valleys)
 
-            valley_indices = valleys.astype(np.float)
-            valley_depths  = ytrace[valleys].astype(np.float)
+            valley_indices = valleys.astype(float)
+            valley_depths  = ytrace[valleys].astype(float)
             invvar         = np.ones(nvalley)
 
             # Fit out scattered light / continuum at each x
             
-            sset = pydl.bspline(valley_indices,everyn=2)
+            sset = bspline.bspline(valley_indices,everyn=2)
             res, yfit = sset.fit(valley_indices, valley_depths, invvar)
             
             y_model = sset.value(x_model)[0]
 
-            comb = ytrace.astype(np.float)-y_model
+            comb = ytrace.astype(float)-y_model
 
             # This is a first guess at peaks, which we will then centroid
             # Don't guess at every location, just the first, and then 
@@ -102,7 +111,7 @@ class TraceLlamas:
             if (itrace == 0):
                 peaks = detect_peaks(comb,mpd=2,mph=min_pkheight,show=False,valley=False)
             else:
-                peaks = tracearr[:,itrace-1].astype(np.int)
+                peaks = tracearr[:,itrace-1].astype(int)
 
             # Centroid all of the peaks for this comb
             ifiber = 0
@@ -122,7 +131,7 @@ class TraceLlamas:
                 plt.plot(comb)
                 plt.show()
                 
-                print(peaks)
+                # print(peaks)
                 
             itrace += 1
 
@@ -134,14 +143,16 @@ class TraceLlamas:
 
         # This is a QA plot for tracing the profile centroids
         if (False):
+            plt.clf()
             for i in range(ifiber):
                 plt.plot(xtrace, tracearr[i,:])
-                plt.plot(xtrace,tset.yfit.T[:,i])
+                plt.plot(xtrace,self.tset.yfit.T[:,i])
 
         # Full traces from solution for all pixels
         x2          = np.outer(np.ones(ifiber),np.arange(self.naxis1))
         self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
 
+        print("...All done [traceSingleCamera]!")
         
     def profileFit(self):
         
@@ -153,9 +164,9 @@ class TraceLlamas:
             if (i != 12):
                 data_work[i,:] = self.data[i,:] - ref
 
-        fiberimg = np.zeros(self.data.shape,dtype=np.int)   # Lists the fiber # of each pixel
-        profimg  = np.zeros(self.data.shape,dtype=np.float) # Profile weighting function
-        bpmask   = np.zeros(self.data.shape,dtype=np.bool)  # bad pixel mask
+        fiberimg = np.zeros(self.data.shape,dtype=int)   # Lists the fiber # of each pixel
+        profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
+        bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
         
         print("...Solving profile weights for Fiber #")
         for ifiber in range(self.nfibers):
@@ -177,11 +188,11 @@ class TraceLlamas:
             # (b) not NaNs or Infs
             # Also generate an inverse variance array that is presently flat weighting
 
-            infmask = np.ones(data_work.shape,dtype=np.bool)
-            NaNmask = np.ones(data_work.shape,dtype=np.bool)
-            badmask = np.ones(data_work.shape,dtype=np.bool)
-            profmask = np.zeros(data_work.shape,dtype=np.bool)
-            invvar = np.ones(data_work.shape,dtype=np.float)
+            infmask = np.ones(data_work.shape,dtype=bool)
+            NaNmask = np.ones(data_work.shape,dtype=bool)
+            badmask = np.ones(data_work.shape,dtype=bool)
+            profmask = np.zeros(data_work.shape,dtype=bool)
+            invvar = np.ones(data_work.shape,dtype=float)
             
             infmask[np.where(np.isinf(data_work))]  = False
             NaNmask[np.where(np.isnan(data_work))] = False
@@ -224,14 +235,14 @@ class TraceLlamas:
     
     def fiberProfileImg(self,fiber_index):
 
-        profimg  = np.zeros((self.naxis2,self.naxis1),dtype=np.float)
+        profimg  = np.zeros((self.naxis2,self.naxis1),dtype=float)
         ytrace = self.traces[fiber_index,:]
         
         yy = np.outer(np.arange(self.naxis2),np.ones(self.naxis1)) \
             - np.outer(np.ones(self.naxis2),ytrace)
 
 
-        profmask = np.zeros(profimg.shape,dtype=np.bool)
+        profmask = np.zeros(profimg.shape,dtype=bool)
         profmask[np.where(np.abs(yy) < 3)] = True
         
         inprof = np.where(profmask)
