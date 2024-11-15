@@ -8,17 +8,19 @@ from   pypeit.core import pydl
 from   pypeit.core.fitting import iterfit # type: ignore
 from   pypeit import bspline
 from   llamas_pyjamas.File import llamasIO
-import pickle
+import pickle, h5py
 
 ###############################################################################3
 
 class TraceLlamas:
 
-    def __init__(self):
-        self.data = 0
-        self.naxis1 = 0
-        self.naxis2 = 0
-        self.bench = ''
+    def __init__(self, data=0, naxis1=0, naxis2=0, bench='', side='', channel=''):
+        self.data = data
+        self.naxis1 = naxis1
+        self.naxis2 = naxis2
+        self.bench = bench
+        self.side  = side
+        self.channel = channel
 
     def traceSingleCamera(self, dataobj, mph=None):
 
@@ -31,12 +33,20 @@ class TraceLlamas:
         self.naxis1 = hdr['NAXIS1']
         self.naxis2 = hdr['NAXIS2']
         self.bench = hdr['BENCH']
+        self.side  = hdr['SIDE']
+        self.channel = hdr['COLOR']
+
+        print(f"Tracing Bench {self.bench}{self.side} ({self.channel})")
+
+        if (self.channel == 'red'):
+            print('Red flats are saturated\n\n')
+            return(0)
 
         # Take a vertical slice through traces at center of array, and find the "valleys"
         # corresponding to the continuum
 
         middle_row = int(self.naxis1/2)
-        tslice = np.sum(raw[:,middle_row-5:middle_row+4],axis=1).astype(float)
+        tslice = np.median(raw[:,middle_row-5:middle_row+4],axis=1).astype(float)
 
         tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
         valley_indices = np.ndarray(len(tmp))
@@ -47,18 +57,33 @@ class TraceLlamas:
         
         # Fit out the scatterd light continuum, using uniform weighting
 
-        sset = bspline.bspline(valley_indices,everyn=2)
-        res, yfit = sset.fit(valley_indices, valley_depths, invvar)
-        
         x_model = np.arange(self.naxis2).astype(float)
-        y_model = sset.value(x_model)[0]
-        
+        if (self.channel != 'blue'):
+            sset = bspline.bspline(valley_indices,everyn=2)
+            res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+            x_model = np.arange(self.naxis2).astype(float)
+            y_model = sset.value(x_model)[0]
+        else:
+            y_model = np.zeros(self.naxis2)
+
         # Now find trace peaks
 
-        if (mph==None):
-            peaks = detect_peaks(tslice-y_model,mpd=2,threshold=10,mph=1500,show=False)
+        comb = tslice-y_model
+        peaks = detect_peaks(comb,mpd=2,threshold=10,show=False, valley=False)
+        pkht = comb[peaks]
+
+        if (dataobj.channel=='blue'):
+            min_pkheight = 500
+            print('blue')
         else:
-            peaks = detect_peaks(tslice-y_model,mpd=2,threshold=10,mph=mph,show=False)
+            min_pkheight = 10000
+
+        min_pkheight = 0.3 * np.median(pkht)
+
+        if (mph!=None):
+            peaks = detect_peaks(tslice-y_model,mpd=2,mph=mph,show=False, valley=False)
+        else:
+            peaks = detect_peaks(tslice-y_model,mpd=2,mph=min_pkheight,show=False, valley=False)
 
         self.nfibers  = len(peaks)
         self.xmin     = 200
@@ -76,10 +101,6 @@ class TraceLlamas:
         tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
         print("NFibers = {}".format(self.nfibers))
 
-        if (dataobj.channel=='blue'):
-            min_pkheight = 50
-        else:
-            min_pkheight = 500
         itrace = 0
 
         print("...Generating the trace fitting grid...")
@@ -87,7 +108,10 @@ class TraceLlamas:
         # Loop over each slice to populate tracearr, which is the fitting grid
 
         for xtmp in xtrace:
-            ytrace = np.median(raw[:,xtmp.astype(int)-7:xtmp.astype(int)+7],axis=1)
+
+            window = 7
+            window = 11
+            ytrace = np.median(raw[:,xtmp.astype(int)-window:xtmp.astype(int)+window],axis=1)
             
             valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
             nvalley = len(valleys)
@@ -97,19 +121,22 @@ class TraceLlamas:
             invvar         = np.ones(nvalley)
 
             # Fit out scattered light / continuum at each x
-            
-            sset = bspline.bspline(valley_indices,everyn=2)
-            res, yfit = sset.fit(valley_indices, valley_depths, invvar)
-            
-            y_model = sset.value(x_model)[0]
-
+            if (self.channel != 'blue'):
+                sset = bspline.bspline(valley_indices,everyn=2)
+                res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+                y_model = sset.value(x_model)[0]
+            else:
+                sset = bspline.bspline(valley_indices,everyn=4)
+                res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+                y_model = sset.value(x_model)[0]
+                # y_model = np.zeros(self.naxis2) + np.quantile(ytrace,[0.02])[0]
             comb = ytrace.astype(float)-y_model
 
             # This is a first guess at peaks, which we will then centroid
             # Don't guess at every location, just the first, and then 
             # firts guess is the location of the last column
             if (itrace == 0):
-                peaks = detect_peaks(comb,mpd=2,mph=min_pkheight,show=False,valley=False)
+                peaks = detect_peaks(comb,mpd=2,mph=min_pkheight*2*window/self.naxis1,show=False,valley=False)
             else:
                 peaks = tracearr[:,itrace-1].astype(int)
 
@@ -153,6 +180,7 @@ class TraceLlamas:
         self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
 
         print("...All done [traceSingleCamera]!")
+        print("")
         
     def profileFit(self):
         
@@ -250,11 +278,53 @@ class TraceLlamas:
 
         return profimg
 
-    def saveTrace(self, outfile='LLAMASTrace.pkl'):
-        with open(outfile,'wb') as fp:
-            pickle.dump(self, fp)
 
-    def loadTrace(infile):
+def saveTraces(objlist, outfile='LLAMASTrace.h5'):
+
+    if ('.pkl' in outfile):
+        with open(outfile,'wb') as fp:
+           pickle.dump(objlist, fp)
+
+    if ('.h5' in outfile):
+        with h5py.File(outfile, 'w') as f:
+            # Stack all 2D data arrays along a new axis
+            data_stack = np.stack([trace.data for trace in objlist], axis=0)
+            f.create_dataset('data', data=data_stack)  
+    
+            # Save other attributes
+            f.create_dataset('naxis1', data=[llama.naxis1 for llama in objlist])
+            f.create_dataset('naxis2', data=[llama.naxis2 for llama in objlist])
+            dt = h5py.string_dtype(encoding='utf-8')
+            f.create_dataset('bench', data=[llama.bench for llama in objlist])
+
+
+def loadTraces(infile):
+
+    if ('pkl' in infile):
         with open(infile,'rb') as fp:
             object = pickle.load(fp)
         return(object)
+        
+    if ('h5' in infile):
+        with h5py.File(infile, 'r') as f:
+            data_stack = f['data'][:]  # Load the 3D data array
+            naxis1 = f['naxis1'][:]
+            naxis2 = f['naxis2'][:]
+            bench = f['bench'][:]
+    
+            # Reconstruct the array of TraceLlamas objects
+            loaded_llama_traces = [
+                TraceLlamas(data=data_stack[i], naxis1=naxis1[i], naxis2=naxis2[i], bench=bench[i])
+                for i in range(len(data_stack))]
+        return(loaded_llama_traces)
+
+def traceAllCameras(dataobj_all):
+
+    all_traces = []
+
+    for thisobj in dataobj_all.extensions:
+        thistrace = TraceLlamas()
+        thistrace.traceSingleCamera(thisobj)
+        all_traces.append(thistrace)
+    
+    return(all_traces)
