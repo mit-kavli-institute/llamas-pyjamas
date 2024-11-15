@@ -82,7 +82,7 @@ class TraceLlamas:
         return comb, sset, res, yfit
         
     #@ray.remote   
-    def process_hdu_data(self, hdu: fits.HDUList, hdu_index: int) -> dict:
+    def process_hdu_data(self, hdu: fits.HDUList) -> dict:
         """Processes data from a specific HDU array."""
         
         try:
@@ -163,16 +163,16 @@ class TraceLlamas:
         
         except Exception as e:
             traceback.print_exc()
-            result = {"HDU": hdu_index, "status": "failed", "error":str(e)}
+            result = {"status": "failed", "error":str(e)}
             print(result)
             return result
             
-        result = {"HDU": hdu_index, "status": "success"}
+        result = {"status": "success"}
         return result
     
     @ray.remote
-    def process_hdu_data_ray(self, hdu_data: fits.HDUList, hdu_index: int) -> dict:
-        return self.process_hdu_data(hdu_data, hdu_index)
+    def process_hdu_data_ray(self, hdu_data: fits.HDUList) -> dict:
+        return self.process_hdu_data(hdu_data)
 
     
     def run_ray_processing(self) -> list:
@@ -181,10 +181,10 @@ class TraceLlamas:
         # Open FITS file to access HDUs
         with fits.open(self.flat_fitsfile) as hdu_list:
             # Prepare Ray tasks for each HDU
-            futures = [self.process_hdu_data.remote(hdu_list[i], i) for i in range(len(hdu_list))]
+            futures = [self.process_hdu_data_ray.remote(hdu_list[i]) for i in range(len(hdu_list))]
             # Execute tasks and collect results
             ledger = ray.get(futures)  # Retrieve results from Ray tasks
-        # Print and return the ledger of HDU processing statuses
+        
         print("Processing completed. Ledger:")
         for entry in ledger:
             print(entry)
