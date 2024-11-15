@@ -18,7 +18,7 @@ import ray
 from typing import List, Set, Dict, Tuple, Optional
 
 #Initalising ray for multiprocessing
-ray.init()
+# ray.init()
 
 
 
@@ -131,26 +131,17 @@ class TraceLlamas:
 
             self.min_pkheight = 0.3 * np.median(pkht)
             
-            
-            # if not self.mph:
-            #     peaks = detect_peaks(tslice-y_model,mpd=2,mph=self.mph,show=False, valley=False)
-            # else:
-            #     peaks = detect_peaks(tslice-y_model,mpd=2,mph=self.min_pkheight,show=False, valley=False)
-
 
             self.nfibers  = len(peaks)
-            print(f'nfibers = {self.nfibers}')
             self.xmax     = self.naxis1-100
 
             n_tracefit = np.floor((self.xmax-self.xmin)/self.fitspace).astype(int)
             xtrace = self.xmin + self.fitspace * np.arange(n_tracefit)
-            print(f'ntracefit = {n_tracefit}')
+            
             tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
             logging.info("NFibers = {}".format(self.nfibers))
-
-            itrace = 0
-            print(f'xtrace = {len(xtrace)}')
-            for idxtrace, item in enumerate(xtrace):
+            
+            for itrace, item in enumerate(xtrace):
                 comb, sset, res, yfit = self.fit_grid_single(item, x_model, y_model)
                 
                 if itrace == 0:
@@ -159,12 +150,7 @@ class TraceLlamas:
                     peaks = tracearr[:,itrace-1].astype(int)
 
 
-                #ifiber = 0
-
-                #try:
-                print(f'length peaks = {len(peaks)}')
                 for ifiber, pk_guess in enumerate(peaks):
-                    print(f'ifiber {ifiber}, itrace {itrace}')
                     if pk_guess == 0:
                         continue
                     pk_centroid = \
@@ -176,9 +162,6 @@ class TraceLlamas:
                         tracearr[ifiber,itrace] = pk_centroid
                     else:
                         tracearr[ifiber,itrace] = pk_guess
-                    #ifiber += 1
-               
-                itrace += 1
 
             self.xtracefit = np.outer(np.ones(ifiber),xtrace)
             self.tracearr  = tracearr
@@ -190,7 +173,7 @@ class TraceLlamas:
         except Exception as e:
             traceback.print_exc()
             result = {"status": "failed", "error":str(e)}
-            print(result)
+            logging.warning(result)
             return result
             
         result = {"status": "success"}
@@ -241,8 +224,6 @@ class TraceRay(TraceLlamas):
                 f"Actor index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
             )
 
-        # Again, for n=38, this should be around 20 seconds and the same as each individual actor's
-        # computation time.
         print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
 
         ray.shutdown()
