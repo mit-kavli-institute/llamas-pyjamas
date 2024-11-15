@@ -13,7 +13,7 @@ from pypeit.core.fitting import iterfit
 from   pypeit.core import fitting
 from pypeit.bspline.bspline import bspline
 import pickle
-
+import logging
 import ray
 from typing import List, Set, Dict, Tuple, Optional
 
@@ -25,18 +25,19 @@ ray.init()
 class TraceLlamas:
     
     def __init__(self, 
-                 flat_fitsfile: str, 
-                 spectrograph: Optional[str] = None,
-                 channel: Optional[str] = None,
+                 fitsfile: str,
                  mph: Optional[int] = None):
         
-        self.flat_fitsfile = flat_fitsfile
-        self.spectrograph = spectrograph
-        self.channel = channel
+        self.flat_fitsfile = fitsfile
         self.mph = mph
         
         self.xmin     = 200
         self.fitspace = 10
+        self.min_pkheight = 500
+        
+        self.window = 11
+        
+        return
         
             
     def generate_valleys(self, tslice: float) -> Tuple[np.ndarray, ...]:
@@ -62,7 +63,7 @@ class TraceLlamas:
     
     def fit_grid_single(self, xtmp, x_model, y_model) -> Tuple[float, bspline, int, np.ndarray]:
         
-        ytrace = np.median(self.data[:,xtmp.astype(int)-7:xtmp.astype(int)+7],axis=1)
+        ytrace = np.median(self.data[:,xtmp.astype(int)-self.window:xtmp.astype(int)+self.window],axis=1)
         valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
         
         nvalley = len(valleys)
@@ -71,12 +72,13 @@ class TraceLlamas:
         valley_depths  = ytrace[valleys].astype(float)
         invvar         = np.ones(nvalley)
         
-        # Fit out scattered light / continuum at each x
+        if self.channel == 'blue':
+            sset = bspline(valley_indices,everyn=2) 
+        else:
+            sset = bspline(valley_indices,everyn=4)
             
-        sset = bspline(valley_indices,everyn=2)
-        
         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
-        
+        y_model = sset.value(x_model)[0]
         comb = ytrace.astype(float)-y_model
         
         return comb, sset, res, yfit
@@ -89,56 +91,80 @@ class TraceLlamas:
             self.bspline_ssets = []
 
             self.hdr = hdu.header
-            self.data =hdu.data.astype(float)
+            self.data = hdu.data.astype(float)
 
             self.naxis1 = self.hdr['naxis1']
             self.naxis2 = self.hdr['naxis2']
+            
+            self.channel = self.hdr['COLOR']
+            self.bench = self.hdr['BENCH']
+            self.side  = self.hdr['SIDE']
+            
+            if self.channel == 'red':
+                logging.warning("Red channel selected which is not yet supported.")
+                return 0
 
             middle_row = int(self.naxis1/2)
-            tslice = np.sum(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
+            tslice = np.median(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
 
 
             valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
-
-
-
-            x_model, y_model = self.fit_bspline(valley_indices, valley_depths, invvar)
-            print(f'x_model, y_model {x_model}, {y_model}')
-            if not self.mph:
-                peaks = detect_peaks(tslice-y_model,mpd=2,threshold=10,mph=1500,show=False)
+            
+            
+            x_model = np.arange(self.naxis2).astype(float)
+            if (self.channel != 'blue'):
+                
+                sset = bspline(valley_indices,everyn=2)
+                res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+                x_model = np.arange(self.naxis2).astype(float)
+                y_model = sset.value(x_model)[0]
+                
             else:
-                peaks = detect_peaks(tslice-y_model,mpd=2,threshold=10,mph=self.mph,show=False)
+                y_model = np.zeros(self.naxis2)
+                
+            comb = tslice-y_model
+            peaks = detect_peaks(comb,mpd=2,threshold=10,show=False, valley=False)
+            pkht = comb[peaks]
+
+            if not (self.channel=='blue'):
+                self.min_pkheight = 10000
+
+            self.min_pkheight = 0.3 * np.median(pkht)
+            
+            
+            # if not self.mph:
+            #     peaks = detect_peaks(tslice-y_model,mpd=2,mph=self.mph,show=False, valley=False)
+            # else:
+            #     peaks = detect_peaks(tslice-y_model,mpd=2,mph=self.min_pkheight,show=False, valley=False)
 
 
             self.nfibers  = len(peaks)
+            print(f'nfibers = {self.nfibers}')
             self.xmax     = self.naxis1-100
 
             n_tracefit = np.floor((self.xmax-self.xmin)/self.fitspace).astype(int)
             xtrace = self.xmin + self.fitspace * np.arange(n_tracefit)
-
+            print(f'ntracefit = {n_tracefit}')
             tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
-            print("NFibers = {}".format(self.nfibers))
+            logging.info("NFibers = {}".format(self.nfibers))
 
-            if (self.channel=='blue'):
-                min_pkheight = 50
-            else:
-                min_pkheight = 500
             itrace = 0
-
-            for index, item in enumerate(xtrace):
+            print(f'xtrace = {len(xtrace)}')
+            for idxtrace, item in enumerate(xtrace):
                 comb, sset, res, yfit = self.fit_grid_single(item, x_model, y_model)
-                breakpoint
-                if index == 0:
-                    peaks = detect_peaks(comb,mpd=2,mph=min_pkheight,show=False,valley=False)
+                
+                if itrace == 0:
+                    peaks = detect_peaks(comb,mpd=2,mph=self.min_pkheight*2*self.window/self.naxis1,show=False,valley=False)
                 else:
                     peaks = tracearr[:,itrace-1].astype(int)
 
-                ifiber = 0
+
+                #ifiber = 0
 
                 #try:
-
-                for pk_guess in peaks:
-
+                print(f'length peaks = {len(peaks)}')
+                for ifiber, pk_guess in enumerate(peaks):
+                    print(f'ifiber {ifiber}, itrace {itrace}')
                     if pk_guess == 0:
                         continue
                     pk_centroid = \
@@ -150,7 +176,7 @@ class TraceLlamas:
                         tracearr[ifiber,itrace] = pk_centroid
                     else:
                         tracearr[ifiber,itrace] = pk_guess
-                    ifiber += 1
+                    #ifiber += 1
                
                 itrace += 1
 
@@ -170,24 +196,60 @@ class TraceLlamas:
         result = {"status": "success"}
         return result
     
-    @ray.remote
-    def process_hdu_data_ray(self, hdu_data: fits.HDUList) -> dict:
-        return self.process_hdu_data(hdu_data)
+    
 
     
-    def run_ray_processing(self) -> list:
-        """Processes all HDUs in parallel using Ray and returns a log of results."""
-        ledger = []
-        # Open FITS file to access HDUs
-        with fits.open(self.flat_fitsfile) as hdu_list:
-            # Prepare Ray tasks for each HDU
-            futures = [self.process_hdu_data_ray.remote(hdu_list[i]) for i in range(len(hdu_list))]
-            # Execute tasks and collect results
-            ledger = ray.get(futures)  # Retrieve results from Ray tasks
-        
-        print("Processing completed. Ledger:")
-        for entry in ledger:
-            print(entry)
-        return ledger
+    
+    
+    
+@ray.remote
+class TraceRay(TraceLlamas):
+    
+    def __init__(self, fitsfile: str) -> None:
+        pass
+    
+    def process_hdu_data(self, hdu: fits.HDUList) -> dict:
+        super().process_hdu_data(hdu)
+        return
+    
+    @staticmethod
+    def run(self, n_cpu: int = 5) -> None:
+        #NUMBER_OF_CORES = multiprocessing.cpu_count()
+
+        #initalise ray
+        ray.init(ignore_reinit_error=True)
+
+        # Start a timer to capture the total elapsed computation time.
+        start_time = time.monotonic()
+
+        futures = []
+        results = []
+
+        # Launch all of the actors and call the `calculate` method on them but do not
+        # wait for the results. This is so that all the actors get started at the same
+        # time. We will later wait for the results in another loop.
+        for i in range(n_cpu):
+            hdu_processor = TraceRay.remote()
+            future = hdu_processor.process_hdu_data.remote()
+            futures.append(future)
+
+        # Now wait for the results of all the calculations.
+        for index, future in enumerate(futures):
+            result, elapsed_time = ray.get(future)
+            results.append(result)
+            print(
+                f"Actor index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
+            )
+
+        # Again, for n=38, this should be around 20 seconds and the same as each individual actor's
+        # computation time.
+        print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
+
+        ray.shutdown()
+    
+    
+    
+    
+
     
         
