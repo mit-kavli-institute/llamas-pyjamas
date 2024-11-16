@@ -110,7 +110,8 @@ class TraceLlamas:
             
             if self.channel == 'red':
                 logger.warning("Red channel selected which is not yet supported.")
-                return 0
+                result = {"status": "unable to process red channel"}
+                return result
 
             middle_row = int(self.naxis1/2)
             tslice = np.median(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
@@ -157,10 +158,12 @@ class TraceLlamas:
                 else:
                     peaks = tracearr[:,itrace-1].astype(int)
 
-
+                #print(f'comb: {len(comb)}')
+                #print(f'peaks: {len(peaks)}')
                 for ifiber, pk_guess in enumerate(peaks):
-                    if pk_guess == 0:
+                    if pk_guess -2 < 0:
                         continue
+                    #breakpoint()
                     pk_centroid = \
                         np.sum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
                         / np.sum(comb[pk_guess-2:pk_guess+3])
@@ -219,8 +222,7 @@ if __name__ == "__main__":
     
     with fits.open(fitsfile) as hdul:
         hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
-    
-    
+        
     hdu_processor = TraceRay.remote(fitsfile)
         
     for index, (hdu_data, hdu_header) in enumerate(hdus):
@@ -228,12 +230,12 @@ if __name__ == "__main__":
         futures.append(future)
     # Now wait for the results of all the calculations.
     for index, future in enumerate(futures):
-        result, elapsed_time = ray.get(future)
+        result = ray.get(future)
         results.append(result)
-        print(
-            f"HDU index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
-        )
-    print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
+    #     print(
+    #         f"HDU index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
+    #     )
+    # print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
     ray.shutdown()
     
     
