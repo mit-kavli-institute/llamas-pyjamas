@@ -17,9 +17,18 @@ import logging
 import ray
 from typing import List, Set, Dict, Tuple, Optional
 
-#Initalising ray for multiprocessing
-# ray.init()
+# Enable DEBUG for your specific logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
+
+
+
+#Importing the llamas module for the ray processing
+print(f'Importing path {os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))}')
+module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(module_path)
+os.environ['PYTHONPATH'] = module_path
 
 
 class TraceLlamas:
@@ -38,7 +47,6 @@ class TraceLlamas:
         self.window = 11
         
         return
-        
             
     def generate_valleys(self, tslice: float) -> Tuple[np.ndarray, ...]:
 
@@ -84,24 +92,24 @@ class TraceLlamas:
         return comb, sset, res, yfit
         
     #@ray.remote   
-    def process_hdu_data(self, hdu: fits.HDUList) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
         """Processes data from a specific HDU array."""
         
         try:
             self.bspline_ssets = []
 
-            self.hdr = hdu.header
-            self.data = hdu.data.astype(float)
-
-            self.naxis1 = self.hdr['naxis1']
-            self.naxis2 = self.hdr['naxis2']
+            self.hdr = hdu_header
+            self.data = hdu_data.astype(float)
+            #case sensitive when concerted into a dict for ray processing
+            self.naxis1 = self.hdr['NAXIS1']
+            self.naxis2 = self.hdr['NAXIS2']
             
             self.channel = self.hdr['COLOR']
             self.bench = self.hdr['BENCH']
             self.side  = self.hdr['SIDE']
             
             if self.channel == 'red':
-                logging.warning("Red channel selected which is not yet supported.")
+                logger.warning("Red channel selected which is not yet supported.")
                 return 0
 
             middle_row = int(self.naxis1/2)
@@ -139,7 +147,7 @@ class TraceLlamas:
             xtrace = self.xmin + self.fitspace * np.arange(n_tracefit)
             
             tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
-            logging.info("NFibers = {}".format(self.nfibers))
+            logger.info("NFibers = {}".format(self.nfibers))
             
             for itrace, item in enumerate(xtrace):
                 comb, sset, res, yfit = self.fit_grid_single(item, x_model, y_model)
@@ -173,14 +181,11 @@ class TraceLlamas:
         except Exception as e:
             traceback.print_exc()
             result = {"status": "failed", "error":str(e)}
-            logging.warning(result)
+            logger.warning(result)
             return result
             
         result = {"status": "success"}
         return result
-    
-    
-
     
     
     
@@ -189,44 +194,47 @@ class TraceLlamas:
 class TraceRay(TraceLlamas):
     
     def __init__(self, fitsfile: str) -> None:
-        pass
-    
-    def process_hdu_data(self, hdu: fits.HDUList) -> dict:
-        super().process_hdu_data(hdu)
+        super().__init__(fitsfile)
         return
     
-    @staticmethod
-    def run(self, n_cpu: int = 5) -> None:
-        #NUMBER_OF_CORES = multiprocessing.cpu_count()
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
+        super().process_hdu_data(hdu_data, hdu_header)
+        return
+    
+    
+    
+if __name__ == "__main__":    
+    ray.init(ignore_reinit_error=True) #, runtime_env={"env_vars": {"PYTHONPATH": os.environ['PYTHONPATH']}})
+        #NUMBER_OF_CORES = multiprocessing.cpu_count()    
 
-        #initalise ray
-        ray.init(ignore_reinit_error=True)
-
-        # Start a timer to capture the total elapsed computation time.
-        start_time = time.monotonic()
-
-        futures = []
-        results = []
-
-        # Launch all of the actors and call the `calculate` method on them but do not
-        # wait for the results. This is so that all the actors get started at the same
-        # time. We will later wait for the results in another loop.
-        for i in range(n_cpu):
-            hdu_processor = TraceRay.remote()
-            future = hdu_processor.process_hdu_data.remote()
-            futures.append(future)
-
-        # Now wait for the results of all the calculations.
-        for index, future in enumerate(futures):
-            result, elapsed_time = ray.get(future)
-            results.append(result)
-            print(
-                f"Actor index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
-            )
-
-        print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
-
-        ray.shutdown()
+    # Start a timer to capture the total elapsed computation time.
+    start_time = time.monotonic()
+    futures = []
+    results = []
+    # Launch all of the actors and call the `calculate` method on them but do not
+    # wait for the results. This is so that all the actors get started at the same
+    # time. We will later wait for the results in another loop.
+    #for i in range(n_cpu):
+    fitsfile = '/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/flats/LLAMAS_2024-08-23T16_09_25_217_mef_copy.fits'
+    
+    with fits.open(fitsfile) as hdul:
+        hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+    
+    
+    hdu_processor = TraceRay.remote(fitsfile)
+        
+    for index, (hdu_data, hdu_header) in enumerate(hdus):
+        future = hdu_processor.process_hdu_data.remote(hdu_data, hdu_header)
+        futures.append(future)
+    # Now wait for the results of all the calculations.
+    for index, future in enumerate(futures):
+        result, elapsed_time = ray.get(future)
+        results.append(result)
+        print(
+            f"HDU index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
+        )
+    print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
+    ray.shutdown()
     
     
     
