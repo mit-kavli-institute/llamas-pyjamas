@@ -5,6 +5,7 @@ from   astropy.io import fits
 import scipy
 import numpy as np
 import time
+import psutil
 from   matplotlib import pyplot as plt
 import traceback
 from   pypeit.core.arc import detect_peaks
@@ -12,10 +13,11 @@ from   pypeit.core import pydl
 from pypeit.core.fitting import iterfit
 from   pypeit.core import fitting
 from pypeit.bspline.bspline import bspline
-import pickle
+import pickle, h5py
 import logging
 import ray
 from typing import List, Set, Dict, Tuple, Optional
+import multiprocessing
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -29,6 +31,18 @@ print(f'Importing path {os.path.abspath(os.path.join(os.path.dirname(__file__), 
 module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(module_path)
 os.environ['PYTHONPATH'] = module_path
+
+
+# Add monitoring functions
+def get_cpu_usage() -> float:
+    return psutil.cpu_percent(interval=1)
+
+def monitor_resources():
+    print(f"Available CPUs: {psutil.cpu_count()}")
+    print(f"Ray CPUs: {ray.cluster_resources()['CPU']}")
+    print(f"Current CPU Usage: {get_cpu_usage()}%")
+
+
 
 
 class TraceLlamas:
@@ -190,7 +204,84 @@ class TraceLlamas:
         result = {"status": "success"}
         return result
     
+    def profileFit(self):
+        
+        ref = self.data[12,:]
+
+        # Use a working copy of "data" so as not to overwrite that with normalized data
+        data_work = np.copy(self.data) 
+        for i in range(self.naxis2):
+            if (i != 12):
+                data_work[i,:] = self.data[i,:] - ref
+
+        fiberimg = np.zeros(self.data.shape,dtype=int)   # Lists the fiber # of each pixel
+        profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
+        bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
+        
+        for index, item in enumerate(self.traces):
+            
+            ytrace = item 
+
+            # Generate a curved "y" image
+            yy = np.outer(np.arange(self.naxis2),np.ones(self.naxis1)) \
+                - np.outer(np.ones(self.naxis2),ytrace)
+
+            # Normalize out the spectral shape of the lamp for profile fitting
+            for i in range(self.naxis1):
+                norm = np.sum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
+                data_work[:,i] = data_work[:,i] / norm
+
+            # Generate a mask of pixels that are
+            # (a) within 4 pixels of the profile center for this fiber and
+            # (b) not NaNs or Infs
+            # Also generate an inverse variance array that is presently flat weighting
+
+            infmask = np.ones(data_work.shape,dtype=bool)
+            NaNmask = np.ones(data_work.shape,dtype=bool)
+            badmask = np.ones(data_work.shape,dtype=bool)
+            profmask = np.zeros(data_work.shape,dtype=bool)
+            invvar = np.ones(data_work.shape,dtype=float)
+            
+            infmask[np.where(np.isinf(data_work))]  = False
+            NaNmask[np.where(np.isnan(data_work))] = False
+            badmask[np.where(data_work > 20)] = False
+            badmask[np.where(data_work < -5)] = False
+            profmask[np.where(np.abs(yy) < 3)] = True
+
+            inprof = np.where(infmask & profmask & NaNmask & badmask)
+
+            # Fit the fiber spatial profile with a bspline
+            sset,outmask = iterfit(yy[inprof],data_work[inprof],maxiter=6, \
+                        invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
+            
+            
+            fiberimg[np.where(profmask == True)] = index#ifiber
+            bpmask[np.where(infmask == False)]   = True
+            profimg[inprof] = profimg[inprof] + sset.value(yy[inprof])[0]
+
+            self.bspline_ssets.append(sset)
+
+        return (fiberimg, profimg, bpmask)
     
+    def saveTraces(self, objlist, outfile='LLAMASTrace.h5'):
+
+        if ('.pkl' in outfile):
+            with open(outfile,'wb') as fp:
+               pickle.dump(objlist, fp)
+
+        if ('.h5' in outfile):
+            with h5py.File(outfile, 'w') as f:
+                # Stack all 2D data arrays along a new axis
+                data_stack = np.stack([trace.data for trace in objlist], axis=0)
+                f.create_dataset('data', data=data_stack)  
+
+                # Save other attributes
+                f.create_dataset('naxis1', data=[llama.naxis1 for llama in objlist])
+                f.create_dataset('naxis2', data=[llama.naxis2 for llama in objlist])
+                dt = h5py.string_dtype(encoding='utf-8')
+                f.create_dataset('bench', data=[llama.bench for llama in objlist])
+        return
+
     
     
 @ray.remote
@@ -198,44 +289,79 @@ class TraceRay(TraceLlamas):
     
     def __init__(self, fitsfile: str) -> None:
         super().__init__(fitsfile)
+        
         return
     
+    
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
-        super().process_hdu_data(hdu_data, hdu_header)
+        start_time = time.time()
+        
+        result = super().process_hdu_data(hdu_data, hdu_header)
+        if result["status"] != "success":
+                return result
+        
+        fiberimg, profimg, bpmask = super().profileFit()
+        
+        objlist = [fiberimg, profimg, bpmask]
+        outfile = f'{self.channel}_{self.bench}_{self.side}_traces.pkl'
+        print(f'outfile: {outfile}')
+        super().saveTraces(objlist, outfile)
+        
+        elapsed_time = time.time() - start_time
+        return 
+
+        
+        
         return
     
     
     
 if __name__ == "__main__":    
-    ray.init(ignore_reinit_error=True) #, runtime_env={"env_vars": {"PYTHONPATH": os.environ['PYTHONPATH']}})
-        #NUMBER_OF_CORES = multiprocessing.cpu_count()    
-
-    # Start a timer to capture the total elapsed computation time.
-    start_time = time.monotonic()
+    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
+    
+    print(f"\nStarting with {NUMBER_OF_CORES} cores available")
+    print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
+    
     futures = []
     results = []
-    # Launch all of the actors and call the `calculate` method on them but do not
-    # wait for the results. This is so that all the actors get started at the same
-    # time. We will later wait for the results in another loop.
-    #for i in range(n_cpu):
+    
     fitsfile = '/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/flats/LLAMAS_2024-08-23T16_09_25_217_mef_copy.fits'
     
     with fits.open(fitsfile) as hdul:
         hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
-    hdu_processor = TraceRay.remote(fitsfile)
+    hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
+    print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
         
-    for index, (hdu_data, hdu_header) in enumerate(hdus):
-        future = hdu_processor.process_hdu_data.remote(hdu_data, hdu_header)
+    #hdu_processor = TraceRay.remote(fitsfile)
+        
+    for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
         futures.append(future)
-    # Now wait for the results of all the calculations.
-    for index, future in enumerate(futures):
-        result = ray.get(future)
+    
+    # Monitor processing
+    total_jobs = len(futures)
+    completed = 0
+        
+    # Monitor processing
+    print("\nProcessing Status:")
+    while futures:
+        
+        # Print current CPU usage every 5 seconds
+        if completed % 5 == 0:
+            print(f"CPU Usage: {psutil.cpu_percent(percpu=True)}%")
+            print(f"Progress: {completed}/{total_jobs} jobs complete")
+        
+        
+        done_id, futures = ray.wait(futures)
+        result = ray.get(done_id[0])
         results.append(result)
-    #     print(
-    #         f"HDU index: {index}. Result: {result}. Elapsed time: {elapsed_time} seconds"
-    #     )
-    # print(f"Total elapsed time: {time.monotonic() - start_time} seconds")
+        completed += 1
+        
+    print(f"\nAll {total_jobs} jobs complete")
+    print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
+    
     ray.shutdown()
     
     
