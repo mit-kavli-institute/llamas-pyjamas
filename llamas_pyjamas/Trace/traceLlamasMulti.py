@@ -18,32 +18,11 @@ import logging
 import ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
+import argparse
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-
-
-
-#Importing the llamas module for the ray processing
-print(f'Importing path {os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))}')
-module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(module_path)
-os.environ['PYTHONPATH'] = module_path
-
-
-# Add monitoring functions
-def get_cpu_usage() -> float:
-    return psutil.cpu_percent(interval=1)
-
-def monitor_resources():
-    print(f"Available CPUs: {psutil.cpu_count()}")
-    print(f"Ray CPUs: {ray.cluster_resources()['CPU']}")
-    print(f"Current CPU Usage: {get_cpu_usage()}%")
-
-
-
 
 class TraceLlamas:
     
@@ -200,8 +179,7 @@ class TraceLlamas:
         
         except Exception as e:
             traceback.print_exc()
-            result = {"status": "failed", "error":str(e), 'nfibers':self.nfibers, 'N peaks':len(peaks)}
-            print(f'channel: {self.channel}, bench: {self.bench}, side: {self.side}')
+            result = {"status": "failed", "error":str(e), 'channel': {self.channel}, 'bench': {self.bench}, 'side': {self.side}}
             logger.warning(result)
             return result
             
@@ -317,7 +295,12 @@ class TraceRay(TraceLlamas):
     
     
     
-if __name__ == "__main__":    
+if __name__ == "__main__":  
+    
+    parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
+    parser.add_argument('filename', type=str, help='Path to input FITS file')
+    args = parser.parse_args()
+      
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     
@@ -325,10 +308,9 @@ if __name__ == "__main__":
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
     futures = []
-    results = []
+    results = []    
     
-    #fitsfile = '/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/flats/LLAMAS_2024-08-23T16_09_25_217_mef_copy.fits'
-    fitsfile = '/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/llamas-pyjamas/llamas_pyjamas/Docs/DATA/LLAMAS_2024-08-23T16_12_14.742_mef.fits'
+    fitsfile = args.filename
     with fits.open(fitsfile) as hdul:
         hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
@@ -338,7 +320,6 @@ if __name__ == "__main__":
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        print(f'index: {index}')
         future = processor.process_hdu_data.remote(hdu_data, hdu_header)
         futures.append(future)
     
