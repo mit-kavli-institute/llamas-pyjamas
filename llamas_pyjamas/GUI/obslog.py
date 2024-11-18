@@ -11,7 +11,7 @@ from ginga.util.loader import load_data
 
 from glob import glob
 from astropy.io import fits
-from astropy.samp import SAMPIntegratedClient, SAMPHubServer
+from astropy.samp import SAMPIntegratedClient
 import logging
 
 class HeaderWindow(QWidget):
