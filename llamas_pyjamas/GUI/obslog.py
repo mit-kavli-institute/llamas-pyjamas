@@ -2,12 +2,17 @@
 
 import sys, os
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QTableWidgetItem, QWidget
+from PyQt6.QtCore import QObject, pyqtSignal
 from obslog_qt import Ui_LLAMASObservingLog  # Import the generated class
 from header_qt import Ui_HeaderWidget
+
+from ginga.qtw.ImageViewQt import CanvasView
+from ginga.util.loader import load_data
 
 from glob import glob
 from astropy.io import fits
 from astropy.samp import SAMPIntegratedClient, SAMPHubServer
+import logging
 
 class HeaderWindow(QWidget):
     def __init__(self):
@@ -66,8 +71,18 @@ class MainWindow(QMainWindow):
         self.ui.observationTable.verticalHeader().setDefaultSectionSize(20)
         self.ui.datapath_label.setText(f'DataPath: {self.data_path}')
 
-        # self.samp_hub = SAMPHubServer()
-        # self.samp_hub.start()
+        self.logger = logging.getLogger()
+        self.ginga = CanvasView(logger = self.logger, render='widget')
+        self.ginga.enable_autozoom('on')
+        self.ginga.enable_autocuts('on')
+        self.ginga.ui_set_active(True)
+        self.ginga.set_bg(0.2, 0.2, 0.2)  # Dark background
+        self.ginga_widget = self.ginga.get_widget()
+
+        self.imageviewer = 'ds9' # or ginga
+
+        self.ds9 = SAMPIntegratedClient()
+        self.ds9.connect()
 
     def refreshObservations(self):
         files = glob(f'{self.data_path}/*mef.fits')
@@ -115,19 +130,51 @@ class MainWindow(QMainWindow):
 
     def showQuickLook(self):
         print("Making quick look")
-        params = {}
-        params['url'] = f"file://{self.data_path}/IFU_testpattern.fits"
-        params['name'] = "Test image"
-        message = {}
-        message['samp.mtype'] = 'image.load.fits'
-        message['samp.params'] = params
-        client = SAMPIntegratedClient()
-        client.connect()
-        client.notify_all(message)
-        client.disconnect()
+
+        if (self.imageviewer == 'ds9'):
+            params = {}
+            params['url'] = f"file://{self.data_path}/ifu_testpattern.fits"
+            params['name'] = "Test image"
+            message = {}
+            message['samp.mtype'] = 'image.load.fits'
+            message['samp.params'] = params
+            # self.ds9.notify_all(message)
+            self.ds9.ecall_and_wait("c1","ds9.set","10",cmd="fits ifu_testpattern.fits")
+            self.ds9.ecall_and_wait("c1","ds9.set","10",cmd="zoom to fit")
+            tmp = self.ds9.ecall_and_wait("c1","ds9.get","10",cmd="imexam")
+            print(tmp)
+
+        else:
+            self.logger.setLevel(logging.DEBUG)
+            image = load_data(f"ifu_testpattern.fits", logger=self.logger)
+            print("Loaded data")
+            self.ginga.set_data(image)
+            print("Set data")
+            #self.ginga.add_callback('cursor-changed', self.getGingaCursor)
+
+    def getGingaCursor(self, ginga, event, data_x, data_y):
+            print(f"{data_x} {data_y}")
+
+
+    def closeEvent(self, event):
+        try:
+            self.ds9.disconnect()
+            print("Closing sockets")
+        except:
+            print("All clients closed")
+
+
+class CoordinateSignal(QObject):
+    new_coordinates = pyqtSignal(float, float)
 
 if __name__ == "__main__":
+  
     app = QApplication(sys.argv)
+    signal = CoordinateSignal()
+
     window = MainWindow()
+
+  
+
     window.show()
     sys.exit(app.exec())
