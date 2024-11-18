@@ -18,32 +18,11 @@ import logging
 import ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
+import argparse
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-
-
-
-#Importing the llamas module for the ray processing
-print(f'Importing path {os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))}')
-module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(module_path)
-os.environ['PYTHONPATH'] = module_path
-
-
-# Add monitoring functions
-def get_cpu_usage() -> float:
-    return psutil.cpu_percent(interval=1)
-
-def monitor_resources():
-    print(f"Available CPUs: {psutil.cpu_count()}")
-    print(f"Ray CPUs: {ray.cluster_resources()['CPU']}")
-    print(f"Current CPU Usage: {get_cpu_usage()}%")
-
-
-
 
 class TraceLlamas:
     
@@ -95,9 +74,9 @@ class TraceLlamas:
         invvar         = np.ones(nvalley)
         
         if self.channel == 'blue':
-            sset = bspline(valley_indices,everyn=2) 
+            sset = bspline(valley_indices,everyn=4) 
         else:
-            sset = bspline(valley_indices,everyn=4)
+            sset = bspline(valley_indices,everyn=2)
             
         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
         y_model = sset.value(x_model)[0]
@@ -127,6 +106,8 @@ class TraceLlamas:
                 result = {"status": "unable to process red channel"}
                 return result
 
+
+            #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
             middle_row = int(self.naxis1/2)
             tslice = np.median(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
 
@@ -172,12 +153,13 @@ class TraceLlamas:
                 else:
                     peaks = tracearr[:,itrace-1].astype(int)
 
-                #print(f'comb: {len(comb)}')
-                #print(f'peaks: {len(peaks)}')
                 for ifiber, pk_guess in enumerate(peaks):
+                    if ifiber >= self.nfibers:
+                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
+                        continue
+                    
                     if pk_guess -2 < 0:
                         continue
-                    #breakpoint()
                     pk_centroid = \
                         np.sum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
                         / np.sum(comb[pk_guess-2:pk_guess+3])
@@ -197,7 +179,7 @@ class TraceLlamas:
         
         except Exception as e:
             traceback.print_exc()
-            result = {"status": "failed", "error":str(e)}
+            result = {"status": "failed", "error":str(e), 'channel': {self.channel}, 'bench': {self.bench}, 'side': {self.side}}
             logger.warning(result)
             return result
             
@@ -310,13 +292,15 @@ class TraceRay(TraceLlamas):
         elapsed_time = time.time() - start_time
         return 
 
-        
-        
-        return
     
     
     
-if __name__ == "__main__":    
+if __name__ == "__main__":  
+    
+    parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
+    parser.add_argument('filename', type=str, help='Path to input FITS file')
+    args = parser.parse_args()
+      
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     
@@ -324,10 +308,9 @@ if __name__ == "__main__":
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
     futures = []
-    results = []
+    results = []    
     
-    fitsfile = '/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/flats/LLAMAS_2024-08-23T16_09_25_217_mef_copy.fits'
-    
+    fitsfile = args.filename
     with fits.open(fitsfile) as hdul:
         hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
