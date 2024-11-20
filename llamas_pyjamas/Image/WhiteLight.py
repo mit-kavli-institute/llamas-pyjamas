@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from ..Extract.extractLlamas import ExtractLlamas
+from ..QA import plot_ds9
 from astropy.table import Table
 
 fibermap_lut = Table.read('LLAMAS_FiberMap_revA.dat', format='ascii.fixed_width')
@@ -34,8 +35,9 @@ def WhiteLight(extraction_array, ds9plot=True):
     whitelight = flux_interpolator(x_grid, y_grid)
 
     if (ds9plot):
-        ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
-        ds9.set_np2arr(whitelight)
+        #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
+        #ds9.set_np2arr(whitelight)
+        plot_ds9(whitelight)
 
     return(xdata, ydata, flux)
         
