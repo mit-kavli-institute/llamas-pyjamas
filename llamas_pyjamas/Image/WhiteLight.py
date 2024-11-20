@@ -1,11 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
-import pyds9
-from LlamasPipeline.Extract.extractLlamas import ExtractLlamas
+from ..Extract.extractLlamas import ExtractLlamas
 from astropy.table import Table
 
-fibermap_lut = Table.read('LLAMAS_FiberMap_rev02.dat', format='ascii.fixed_width')
+fibermap_lut = Table.read('LLAMAS_FiberMap_revA.dat', format='ascii.fixed_width')
 
 def WhiteLight(extraction_array, ds9plot=True):
 
