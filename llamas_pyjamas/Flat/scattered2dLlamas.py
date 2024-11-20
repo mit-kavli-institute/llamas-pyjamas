@@ -1,6 +1,6 @@
-from   LlamasPipeline.Trace import traceLlamas
+from   ..Trace import traceLlamas
 import numpy as np
-import pyds9
+#import pyds9
 from   matplotlib import pyplot as plt
 from   astropy.io import fits
 from   pypeit.core import fitting as f
