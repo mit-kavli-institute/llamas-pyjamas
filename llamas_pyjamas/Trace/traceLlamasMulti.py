@@ -19,6 +19,7 @@ import ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
+import cloudpickle
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -83,8 +84,7 @@ class TraceLlamas:
         comb = ytrace.astype(float)-y_model
         
         return comb, sset, res, yfit
-        
-    #@ray.remote   
+         
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
         """Processes data from a specific HDU array."""
         
@@ -245,11 +245,11 @@ class TraceLlamas:
 
         return (fiberimg, profimg, bpmask)
     
-    def saveTraces(self, objlist, outfile='LLAMASTrace.h5'):
+    def saveTraces(self, outfile='LLAMASTrace.h5'):
 
         if ('.pkl' in outfile):
             with open(outfile,'wb') as fp:
-               pickle.dump(objlist, fp)
+               cloudpickle.dump(self, fp)
 
         if ('.h5' in outfile):
             with h5py.File(outfile, 'w') as f:
@@ -282,12 +282,11 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
         
-        fiberimg, profimg, bpmask = super().profileFit()
+        self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
-        objlist = [fiberimg, profimg, bpmask]
         outfile = f'{self.channel}_{self.bench}_{self.side}_traces.pkl'
         print(f'outfile: {outfile}')
-        super().saveTraces(objlist, outfile)
+        super().saveTraces(outfile)
         
         elapsed_time = time.time() - start_time
         return 
