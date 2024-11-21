@@ -54,65 +54,11 @@ def WhiteLight(extraction_array, ds9plot=True):
     return(xdata, ydata, flux)
         
 def WhiteLightHex(extraction_array, ds9plot=True):
-    
-    assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
-    
-    fiber_positions = {}  # Dictionary to store fiber positions for lookup
-    height, width = 43, 46  # Maintain original dimensions
-    whitelight = np.zeros((height, width))
+    pass
 
-    xdata = np.array([])
-    ydata = np.array([])
-    flux  = np.array([])
-    
-    for extraction_file in extraction_array:
+    ## placeholder for eventual hexagonal grid inclusion
 
-        extraction = ExtractLlamas.loadExtraction(extraction_file)
-        
-        nfib, naxis1 = np.shape(extraction.counts)
-        thisflux = [np.sum(extraction.counts[ifib]) for ifib in range(nfib)]
-        flux = np.append(flux, thisflux)
-        
-        for ifib in range(nfib):
-            benchside = f'{extraction.bench}{extraction.side}'
-            try:
-                x, y = FiberMap_LUT(benchside,ifib)
-            except Exception as e:
-                print(f'Number of fibres in map exceed, skipping....')
-                continue
-            xdata = np.append(xdata,x)
-            ydata = np.append(ydata,y)
-            
-            flux = np.sum(extraction.counts[ifib])
-            
-            x_idx = int(round(x))
-            y_idx = int(round(y))
-            
-            
-            if 0 <= x_idx < width and 0 <= y_idx < height:
-                # Store fiber position and spectrum for later lookup
-                fiber_positions[(x_idx, y_idx)] = {
-                    'fiber_id': ifib,
-                    'bench': extraction.bench,
-                    'side': extraction.side,
-                    'spectrum': extraction.counts[ifib]
-                }
-                
-                # Fill hexagonal region centered on fiber
-                hex_radius = 1  # Adjust based on desired hexagon size
-                for dx in range(-hex_radius, hex_radius+1):
-                    for dy in range(-hex_radius, hex_radius+1):
-                        if (dx*dx + dy*dy <= hex_radius*hex_radius):  # Approximate hex shape
-                            px, py = x_idx + dx, y_idx + dy
-                            if 0 <= px < width and 0 <= py < height:
-                                whitelight[py, px] = flux
-                                
-    if (ds9plot):
-        #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
-        #ds9.set_np2arr(whitelight)
-        plot_ds9(whitelight)
-
-    return(xdata, ydata, flux)
+    return
 
 
 
