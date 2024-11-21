@@ -4,11 +4,18 @@ from scipy.interpolate import LinearNDInterpolator
 from ..Extract.extractLlamas import ExtractLlamas
 from ..QA import plot_ds9
 from astropy.table import Table
+import os
+from matplotlib.tri import Triangulation, LinearTriInterpolator
 
-fibermap_lut = Table.read('LLAMAS_FiberMap_revA.dat', format='ascii.fixed_width')
+fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
+print(f'Fibre map path: {fibre_map_path}')
+fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
 
 def WhiteLight(extraction_array, ds9plot=True):
-
+    
+    assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
+    
     xdata = np.array([])
     ydata = np.array([])
     flux  = np.array([])
@@ -18,11 +25,16 @@ def WhiteLight(extraction_array, ds9plot=True):
         extraction = ExtractLlamas.loadExtraction(extraction_file)
         
         nfib, naxis1 = np.shape(extraction.counts)
-        thisflux = [np.sum(extraction.counts[ifib]) for ifib in range(nfib)]
-        flux = np.append(flux, thisflux)
         
         for ifib in range(nfib):
-            x, y = FiberMap_LUT(extraction.bench,ifib)
+            benchside = f'{extraction.bench}{extraction.side}'
+            try:
+                x, y = FiberMap_LUT(benchside,ifib)
+            except Exception as e:
+                print(f'Number of fibres in map exceed, skipping....')
+                continue
+            thisflux = np.sum(extraction.counts[ifib])
+            flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
 
@@ -41,6 +53,69 @@ def WhiteLight(extraction_array, ds9plot=True):
 
     return(xdata, ydata, flux)
         
+def WhiteLightHex(extraction_array, ds9plot=True):
+    
+    assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
+    
+    fiber_positions = {}  # Dictionary to store fiber positions for lookup
+    height, width = 43, 46  # Maintain original dimensions
+    whitelight = np.zeros((height, width))
+
+    xdata = np.array([])
+    ydata = np.array([])
+    flux  = np.array([])
+    
+    for extraction_file in extraction_array:
+
+        extraction = ExtractLlamas.loadExtraction(extraction_file)
+        
+        nfib, naxis1 = np.shape(extraction.counts)
+        thisflux = [np.sum(extraction.counts[ifib]) for ifib in range(nfib)]
+        flux = np.append(flux, thisflux)
+        
+        for ifib in range(nfib):
+            benchside = f'{extraction.bench}{extraction.side}'
+            try:
+                x, y = FiberMap_LUT(benchside,ifib)
+            except Exception as e:
+                print(f'Number of fibres in map exceed, skipping....')
+                continue
+            xdata = np.append(xdata,x)
+            ydata = np.append(ydata,y)
+            
+            flux = np.sum(extraction.counts[ifib])
+            
+            x_idx = int(round(x))
+            y_idx = int(round(y))
+            
+            
+            if 0 <= x_idx < width and 0 <= y_idx < height:
+                # Store fiber position and spectrum for later lookup
+                fiber_positions[(x_idx, y_idx)] = {
+                    'fiber_id': ifib,
+                    'bench': extraction.bench,
+                    'side': extraction.side,
+                    'spectrum': extraction.counts[ifib]
+                }
+                
+                # Fill hexagonal region centered on fiber
+                hex_radius = 1  # Adjust based on desired hexagon size
+                for dx in range(-hex_radius, hex_radius+1):
+                    for dy in range(-hex_radius, hex_radius+1):
+                        if (dx*dx + dy*dy <= hex_radius*hex_radius):  # Approximate hex shape
+                            px, py = x_idx + dx, y_idx + dy
+                            if 0 <= px < width and 0 <= py < height:
+                                whitelight[py, px] = flux
+                                
+    if (ds9plot):
+        #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
+        #ds9.set_np2arr(whitelight)
+        plot_ds9(whitelight)
+
+    return(xdata, ydata, flux)
+
+
+
    
 def FiberMap(bench, infiber):
 
@@ -167,6 +242,7 @@ def FiberMap_LUT(bench, fiber):
     
     fiber_row = fibermap_lut[np.logical_and(fibermap_lut['bench']==bench, \
                                             fibermap_lut['fiber']==fiber)]
+    #breakpoint()
     return(fiber_row['xpos'][0],fiber_row['ypos'][0])
 
 def plot_fibermap():
