@@ -1,6 +1,6 @@
 from   astropy.io import fits # type: ignore
 import numpy as np # type: ignore
-import pyds9 # type: ignore
+#import pyds9 # type: ignore
 import time
 from   matplotlib import pyplot as plt # type: ignore
 from   pypeit.core.arc import detect_peaks
@@ -72,7 +72,7 @@ class TraceLlamas:
         peaks = detect_peaks(comb,mpd=2,threshold=10,show=False, valley=False)
         pkht = comb[peaks]
 
-        if (dataobj.channel=='blue'):
+        if (self.channel=='blue'):
             min_pkheight = 500
             print('blue')
         else:
