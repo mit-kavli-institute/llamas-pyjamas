@@ -1,1 +1,1 @@
-from .WhiteLight import WhiteLight
+from .WhiteLight import *
