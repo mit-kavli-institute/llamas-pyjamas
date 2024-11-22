@@ -4,11 +4,18 @@ from scipy.interpolate import LinearNDInterpolator
 from ..Extract.extractLlamas import ExtractLlamas
 from ..QA import plot_ds9
 from astropy.table import Table
+import os
+from matplotlib.tri import Triangulation, LinearTriInterpolator
 
-fibermap_lut = Table.read('LLAMAS_FiberMap_revA.dat', format='ascii.fixed_width')
+fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
+print(f'Fibre map path: {fibre_map_path}')
+fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
 
 def WhiteLight(extraction_array, ds9plot=True):
-
+    
+    assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
+    
     xdata = np.array([])
     ydata = np.array([])
     flux  = np.array([])
@@ -18,11 +25,16 @@ def WhiteLight(extraction_array, ds9plot=True):
         extraction = ExtractLlamas.loadExtraction(extraction_file)
         
         nfib, naxis1 = np.shape(extraction.counts)
-        thisflux = [np.sum(extraction.counts[ifib]) for ifib in range(nfib)]
-        flux = np.append(flux, thisflux)
         
         for ifib in range(nfib):
-            x, y = FiberMap_LUT(extraction.bench,ifib)
+            benchside = f'{extraction.bench}{extraction.side}'
+            try:
+                x, y = FiberMap_LUT(benchside,ifib)
+            except Exception as e:
+                print(f'Number of fibres in map exceed, skipping....')
+                continue
+            thisflux = np.sum(extraction.counts[ifib])
+            flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
 
@@ -41,6 +53,15 @@ def WhiteLight(extraction_array, ds9plot=True):
 
     return(xdata, ydata, flux)
         
+def WhiteLightHex(extraction_array, ds9plot=True):
+    pass
+
+    ## placeholder for eventual hexagonal grid inclusion
+
+    return
+
+
+
    
 def FiberMap(bench, infiber):
 
@@ -167,6 +188,7 @@ def FiberMap_LUT(bench, fiber):
     
     fiber_row = fibermap_lut[np.logical_and(fibermap_lut['bench']==bench, \
                                             fibermap_lut['fiber']==fiber)]
+    #breakpoint()
     return(fiber_row['xpos'][0],fiber_row['ypos'][0])
 
 def plot_fibermap():
