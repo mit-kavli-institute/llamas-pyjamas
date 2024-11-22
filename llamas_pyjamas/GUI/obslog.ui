@@ -9,8 +9,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1099</width>
-    <height>606</height>
+    <width>1115</width>
+    <height>863</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -77,7 +77,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>Refresh List</string>
+     <string>Update List</string>
     </property>
    </widget>
    <widget class="QPushButton" name="headerButton">
@@ -111,12 +111,55 @@
      <rect>
       <x>300</x>
       <y>250</y>
-      <width>113</width>
+      <width>171</width>
       <height>32</height>
      </rect>
     </property>
     <property name="text">
-     <string>Quick Look</string>
+     <string>Display Spectral Image</string>
+    </property>
+   </widget>
+   <widget class="QProgressBar" name="progressBar">
+    <property name="geometry">
+     <rect>
+      <x>100</x>
+      <y>770</y>
+      <width>981</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="value">
+     <number>24</number>
+    </property>
+   </widget>
+   <widget class="QWidget" name="plotWindow" native="true">
+    <property name="geometry">
+     <rect>
+      <x>30</x>
+      <y>300</y>
+      <width>1041</width>
+      <height>451</height>
+     </rect>
+    </property>
+    <property name="sizePolicy">
+     <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+      <horstretch>0</horstretch>
+      <verstretch>0</verstretch>
+     </sizepolicy>
+    </property>
+    <layout class="QVBoxLayout" name="plotLayout"/>
+   </widget>
+   <widget class="QPushButton" name="tcsOffsetButton">
+    <property name="geometry">
+     <rect>
+      <x>480</x>
+      <y>250</y>
+      <width>141</width>
+      <height>32</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Offset Telescope</string>
     </property>
    </widget>
   </widget>
@@ -125,7 +168,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1099</width>
+     <width>1115</width>
      <height>24</height>
     </rect>
    </property>
