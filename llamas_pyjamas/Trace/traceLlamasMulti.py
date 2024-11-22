@@ -245,14 +245,18 @@ class TraceLlamas:
 
         return (fiberimg, profimg, bpmask)
     
-    def saveTraces(self, outfile='LLAMASTrace.h5'):
+    def saveTraces(self, outfile='LLAMASTrace.pkl'):
+        save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        outpath = os.path.join(save_dir, outfile)
 
         if ('.pkl' in outfile):
-            with open(outfile,'wb') as fp:
+            with open(outpath,'wb') as fp:
                cloudpickle.dump(self, fp)
 
         if ('.h5' in outfile):
-            with h5py.File(outfile, 'w') as f:
+            with h5py.File(outpath, 'w') as f:
                 # Stack all 2D data arrays along a new axis
                 data_stack = np.stack([trace.data for trace in objlist], axis=0)
                 f.create_dataset('data', data=data_stack)  
@@ -291,7 +295,55 @@ class TraceRay(TraceLlamas):
         elapsed_time = time.time() - start_time
         return 
 
+
+def main(fitsfile: str) -> None:
     
+    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
+    
+    print(f"\nStarting with {NUMBER_OF_CORES} cores available")
+    print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
+    
+    futures = []
+    results = []    
+    
+    with fits.open(fitsfile) as hdul:
+        hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+        
+    hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
+    print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
+        
+    #hdu_processor = TraceRay.remote(fitsfile)
+        
+    for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
+        futures.append(future)
+    
+    # Monitor processing
+    total_jobs = len(futures)
+    completed = 0
+        
+    # Monitor processing
+    print("\nProcessing Status:")
+    while futures:
+        
+        # Print current CPU usage every 5 seconds
+        if completed % 5 == 0:
+            print(f"CPU Usage: {psutil.cpu_percent(percpu=True)}%")
+            print(f"Progress: {completed}/{total_jobs} jobs complete")
+        
+        
+        done_id, futures = ray.wait(futures)
+        result = ray.get(done_id[0])
+        results.append(result)
+        completed += 1
+        
+    print(f"\nAll {total_jobs} jobs complete")
+    print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
+    
+    ray.shutdown()
+    
+    return
     
     
 if __name__ == "__main__":  
