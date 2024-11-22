@@ -3,3 +3,5 @@
 *.pyc
 
 *.pkl
+
+llamas_pyjamas/output/
