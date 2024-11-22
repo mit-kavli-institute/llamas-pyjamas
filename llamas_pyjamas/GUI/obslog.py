@@ -131,17 +131,36 @@ class MainWindow(QMainWindow):
 
     def refreshObservations(self):
         files = glob(f'{self.data_path}/*mef.fits')
+        files2 = glob(f'{self.data_path}/ifu_testpattern.fits')
+        files = files+files2
         filebase = [os.path.basename(x) for x in files]
         print("Refreshing Observing Log\n")
+
+        self.ui.observationTable.clearContents()
+        self.ui.observationTable.setRowCount(0)
+
         for thisfile in filebase:
             hdu = fits.getheader(self.data_path+'/'+thisfile)
-            exptime = hdu['exptime']
-            object  = hdu['OBS TARGET NAME']
-            airmass = hdu['TEL AIRMASS']
+            try:
+                exptime = hdu['exptime']
+            except:
+                exptime = 'Unknown'
+            
+            try:
+                object  = hdu['OBS TARGET NAME']
+            except:
+                object = 'Unknown'
+
+            try:
+                airmass = hdu['TEL AIRMASS']
+            except:
+                airmass = 'Unknown'
+
             try:
                 ut_start = (hdu['UTC']).split('T')[1]
             except:
                 print("ERROR: bad UTC in header")
+                ut_start = 'Unknown'
             print(f'{thisfile}\t{object}\t{ut_start}')
             self.add_row([thisfile,str(object),str(exptime),ut_start,'1.0'])
 
@@ -164,7 +183,7 @@ class MainWindow(QMainWindow):
     def showHeader(self):
         selected_row = self.ui.observationTable.currentRow()
         if (selected_row == -1):
-            print("No row selected!")
+            reply = QMessageBox.question(self, "Confirm", f'Confirm telescope move: {dx:3.1f}"E; \t {dy:3.1f}"N', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         else:
             filename = self.ui.observationTable.item(selected_row,0)
             header = fits.getheader(self.data_path+'/'+filename.text())
@@ -177,13 +196,21 @@ class MainWindow(QMainWindow):
 
         if (self.imageviewer == 'ds9'):
 
+            # Check that an image file is selected and exists (or make it if not)
+            selected_row = self.ui.observationTable.currentRow()
+            if (selected_row == -1):
+                reply = QMessageBox.question(self, "Error", f'Please select a data file from the list', QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+                return()
+            else:
+                filename = self.ui.observationTable.item(selected_row,0).text()
+                if (filename != 'ifu_testpattern.fits'):
+                    reply = QMessageBox.question(self, "Error", f'Sorry, right now only displaying the test pattern', QMessageBox.StandardButton.Ok)
+                    return()
+
             self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd="frame 1")
             self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd=f"fits {self.data_path}/ifu_testpattern.fits")
             self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd="zoom to fit")
-            #try:
-            #    tmp = self.ds9.ecall_and_wait("c1","ds9.get","10",cmd="imexam")
-            #except:
-            #    print("Error encountered in interaction with ds9")
+
             self.reg = ImageRegions()
             self.reg.drawCrosshair(self.ds9, self.client_id)
             self.reg.drawCompass(self.ds9, self.client_id)
