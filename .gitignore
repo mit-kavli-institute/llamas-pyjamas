@@ -5,5 +5,5 @@
 *.pkl
 
 llamas_pyjamas/output/
-
-logs/*.log
+llamas_pyjamas/Utils/logs/
+llamas_pyjamas/Utils/logs/*.log
