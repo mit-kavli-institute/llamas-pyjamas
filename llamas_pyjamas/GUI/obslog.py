@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 from matplotlib import use
 use("Qt5Agg")
 
-from ginga.qtw.ImageViewQt import CanvasView
-from ginga.util.loader import load_data
+# from ginga.qtw.ImageViewQt import CanvasView
+# from ginga.util.loader import load_data
 
 from glob import glob
 from astropy.io import fits
@@ -83,12 +83,12 @@ class MainWindow(QMainWindow):
         self.ui.datapath_label.setText(f'DataPath: {self.data_path}')
 
         self.logger = logging.getLogger()
-        self.ginga = CanvasView(logger = self.logger, render='widget')
-        self.ginga.enable_autozoom('on')
-        self.ginga.enable_autocuts('on')
-        self.ginga.ui_set_active(True)
-        self.ginga.set_bg(0.2, 0.2, 0.2)  # Dark background
-        self.ginga_widget = self.ginga.get_widget()
+#        self.ginga = CanvasView(logger = self.logger, render='widget')
+#        self.ginga.enable_autozoom('on')
+#        self.ginga.enable_autocuts('on')
+#        self.ginga.ui_set_active(True)
+#        self.ginga.set_bg(0.2, 0.2, 0.2)  # Dark background
+#        self.ginga_widget = self.ginga.get_widget()
 
         self.imageviewer = 'ds9' # or ginga
 
@@ -217,14 +217,14 @@ class MainWindow(QMainWindow):
             
         else:
             self.logger.setLevel(logging.DEBUG)
-            image = load_data(f"ifu_testpattern.fits", logger=self.logger)
-            print("Loaded data")
-            self.ginga.set_data(image)
-            print("Set data")
+            #image = load_data(f"ifu_testpattern.fits", logger=self.logger)
+            #print("Loaded data")
+            #self.ginga.set_data(image)
+            #print("Set data")
             #self.ginga.add_callback('cursor-changed', self.getGingaCursor)
 
-    def getGingaCursor(self, ginga, event, data_x, data_y):
-            print(f"{data_x} {data_y}")
+#    def getGingaCursor(self, ginga, event, data_x, data_y):
+#            print(f"{data_x} {data_y}")
 
     def offsetTCSFromGui(self):
         imexam_return = self.ds9.ecall_and_wait(self.client_id,"ds9.get","10",cmd="imexam")
