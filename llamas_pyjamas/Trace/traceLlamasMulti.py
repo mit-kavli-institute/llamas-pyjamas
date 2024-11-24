@@ -5,6 +5,7 @@ from   astropy.io import fits
 import scipy
 import numpy as np
 import time
+from datetime import datetime
 import psutil
 from   matplotlib import pyplot as plt
 import traceback
@@ -20,10 +21,15 @@ from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
 import cloudpickle
+from llamas_pyjamas.Utils.utils import setup_logger
 
 # Enable DEBUG for your specific logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+
+# Add timestamp to log filename
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 class TraceLlamas:
     
