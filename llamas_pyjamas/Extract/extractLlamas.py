@@ -2,6 +2,7 @@ from   astropy.io import fits
 import scipy
 import numpy as np
 import os
+from datetime import datetime
 from   matplotlib import pyplot as plt
 from   pypeit.core.arc import detect_peaks
 from   pypeit.core import pydl
@@ -9,10 +10,14 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 ####################################################################################
+from llamas_pyjamas.Utils.utils import setup_logger
+
 
 # Enable DEBUG for your specific logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 class ExtractLlamas:
 
@@ -23,8 +28,7 @@ class ExtractLlamas:
         self.channel = trace.channel
         
         if self.channel == 'red':
-            logger.warning("Red channel not implemented yet...ending extraction")
-            return
+            logger.warning("Red channel may not extract correctly")
         
         self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
         
