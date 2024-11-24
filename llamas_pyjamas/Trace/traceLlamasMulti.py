@@ -234,7 +234,7 @@ class TraceLlamas:
             NaNmask[np.where(np.isnan(data_work))] = False
             badmask[np.where(data_work > 20)] = False
             badmask[np.where(data_work < -5)] = False
-            profmask[np.where(np.abs(yy) < 3)] = True
+            profmask[np.where(np.abs(yy) < 1)] = True
 
             inprof = np.where(infmask & profmask & NaNmask & badmask)
 

@@ -12,10 +12,6 @@ import argparse, glob
 ####################################################################################
 from llamas_pyjamas.Utils.utils import setup_logger
 
-
-# Enable DEBUG for your specific logger
-# logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
@@ -58,16 +54,18 @@ class ExtractLlamas:
             
             
     def isolateProfile(self,ifiber):
-        profile  = self.trace.profimg[ifiber]
+        #profile  = self.trace.profimg[ifiber]
+        weights = self.trace.fiberimg == ifiber
+        profile = self.trace.profimg[self.trace.fiberimg == ifiber]
             
-        inprof = np.where(profile > 0)
-        if inprof[0].size == 0:
+        #inprof = np.where(profile > 0)
+        if weights.size == 0:
             logger.warning("No profile for fiber #{}".format(ifiber))
             return None,None,None
         
-        x_spec = self.xx[ifiber][inprof]
-        f_spec = self.frame[ifiber][inprof]
-        invvar = profile[inprof]
+        x_spec = self.xx[weights]
+        f_spec = self.frame[weights]
+        invvar = self.trace.profimg[weights]
         
         return x_spec,f_spec,invvar
 
