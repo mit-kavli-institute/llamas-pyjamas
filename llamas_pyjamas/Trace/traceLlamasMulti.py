@@ -109,8 +109,6 @@ class TraceLlamas:
             
             if self.channel == 'red':
                 logger.warning("Red channel selected which is not yet supported.")
-                result = {"status": "unable to process red channel"}
-                return result
 
 
             #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
