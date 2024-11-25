@@ -36,9 +36,10 @@ def color_isolation(extractions):
 def WhiteLightFits(extraction_array):
     
     blue, green, red = color_isolation(extraction_array)
-    
+    print(blue, green, red)
+    fitsfile = None
     ###For now assuming that all extraction objects came from the same original file
-    if not blue or not green or not red:
+    if all(not color for color in [blue, green, red]):
         logger.error('No blue, green, or red extractions found. Exiting...')
         return
     
@@ -46,10 +47,10 @@ def WhiteLightFits(extraction_array):
     hdul = fits.HDUList()
     primary_hdu = fits.PrimaryHDU()
     
-    if blue or green or red:
-        fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
-        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-        hdul.append(fits.PrimaryHDU())
+    
+    fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
+    primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+    hdul.append(fits.PrimaryHDU())
 
     # Process blue data if exists
     if blue:
@@ -98,7 +99,7 @@ def WhiteLightFits(extraction_array):
     # Write to file
     hdul.writeto(os.path.join(OUTPUT_DIR, white_light_file), overwrite=True)
     
-    return hdul
+    return white_light_file
 
 
 def WhiteLight(extraction_array, ds9plot=True):
