@@ -1,13 +1,28 @@
 #! /Users/simcoe/.conda/envs/llamas/bin/python3
 
 import sys, os
-from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QTableWidgetItem, QWidget
-from obslog_qt import Ui_LLAMASObservingLog  # Import the generated class
-from header_qt import Ui_HeaderWidget
+from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QTableWidgetItem, QWidget, QMessageBox
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6 import QtWidgets
+from obslog_qt import Ui_LLAMASObservingLog  # type: ignore # Import the generated class
+from header_qt import Ui_HeaderWidget # type: ignore
+import numpy as np
+from astropy.table import Table
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+from matplotlib import use
+use("Qt5Agg")
+
+# from ginga.qtw.ImageViewQt import CanvasView
+# from ginga.util.loader import load_data
 
 from glob import glob
 from astropy.io import fits
-from astropy.samp import SAMPIntegratedClient, SAMPHubServer
+from astropy.samp import SAMPIntegratedClient
+import logging
 
 class HeaderWindow(QWidget):
     def __init__(self):
@@ -56,6 +71,7 @@ class MainWindow(QMainWindow):
         self.ui.menuFile.triggered.connect(self.setDataPath)
         self.ui.headerButton.clicked.connect(self.showHeader)
         self.ui.quicklookButton.clicked.connect(self.showQuickLook)
+        self.ui.tcsOffsetButton.clicked.connect(self.offsetTCSFromGui)
 
         # Formatting styles for the GUI
         self.ui.observationTable.setColumnWidth(0,300)
@@ -66,22 +82,85 @@ class MainWindow(QMainWindow):
         self.ui.observationTable.verticalHeader().setDefaultSectionSize(20)
         self.ui.datapath_label.setText(f'DataPath: {self.data_path}')
 
-        # self.samp_hub = SAMPHubServer()
-        # self.samp_hub.start()
+        self.logger = logging.getLogger()
+#        self.ginga = CanvasView(logger = self.logger, render='widget')
+#        self.ginga.enable_autozoom('on')
+#        self.ginga.enable_autocuts('on')
+#        self.ginga.ui_set_active(True)
+#        self.ginga.set_bg(0.2, 0.2, 0.2)  # Dark background
+#        self.ginga_widget = self.ginga.get_widget()
+
+        self.imageviewer = 'ds9' # or ginga
+
+        self.ds9 = SAMPIntegratedClient()
+        self.ds9.connect()
+        key = self.ds9.get_private_key()
+        clients = self.ds9.hub.get_registered_clients(key)
+        self.client_id = clients[-1]
+        for c in clients:
+            metadata = self.ds9.get_metadata(c)
+            if (metadata['samp.name'] == 'ds9'):
+                print(f"Binding client ID {c} to ds9")
+                self.client_id = c
+
+        self.configPlotWindow()
+        self.plotSpectra()
+
+    def configPlotWindow(self):
+        pw = PlotWindow()
+        self.canvas = FigureCanvas(Figure())
+        self.ui.plotWindow.layout().addWidget(self.canvas)
+        self.ax = self.canvas.figure.subplots()
+        self.toolbar = NavigationToolbar(self.canvas, self.ui.plotWindow, coordinates=True)
+        self.ui.plotWindow.layout().addWidget(self.toolbar)
+        self.ax.set_xlim([pw.xmin,pw.xmax])
+        self.ax.set_ylim([pw.ymin,pw.ymax])
+        self.ax.set_xlabel('Wavelength (A)')
+        self.ax.set_ylabel('Counts')
+
+    def plotSpectra(self):
+
+        # NOTE: This janky file is the same one that is distributed in the public
+        # llamas-etc gitgub repo.  WE will change this to pass in extracted spectra.
+        junkfile = 'SN1a_R20mag.fits'
+        spectrum = Table.read(junkfile)
+        wave = spectrum['wave(nm)'] * 10.0
+        flux = spectrum['flux(erg/cm2/s/A)']
+        self.ax.plot(wave, flux)
+        self.ax.set_ylim(0,np.max(flux))
 
     def refreshObservations(self):
         files = glob(f'{self.data_path}/*mef.fits')
+        files2 = glob(f'{self.data_path}/ifu_testpattern.fits')
+        files = files+files2
         filebase = [os.path.basename(x) for x in files]
         print("Refreshing Observing Log\n")
+
+        self.ui.observationTable.clearContents()
+        self.ui.observationTable.setRowCount(0)
+
         for thisfile in filebase:
             hdu = fits.getheader(self.data_path+'/'+thisfile)
-            exptime = hdu['exptime']
-            object  = hdu['OBS TARGET NAME']
-            airmass = hdu['TEL AIRMASS']
+            try:
+                exptime = hdu['exptime']
+            except:
+                exptime = 'Unknown'
+            
+            try:
+                object  = hdu['OBS TARGET NAME']
+            except:
+                object = 'Unknown'
+
+            try:
+                airmass = hdu['TEL AIRMASS']
+            except:
+                airmass = 'Unknown'
+
             try:
                 ut_start = (hdu['UTC']).split('T')[1]
             except:
                 print("ERROR: bad UTC in header")
+                ut_start = 'Unknown'
             print(f'{thisfile}\t{object}\t{ut_start}')
             self.add_row([thisfile,str(object),str(exptime),ut_start,'1.0'])
 
@@ -104,7 +183,7 @@ class MainWindow(QMainWindow):
     def showHeader(self):
         selected_row = self.ui.observationTable.currentRow()
         if (selected_row == -1):
-            print("No row selected!")
+            reply = QMessageBox.question(self, "Confirm", f'Confirm telescope move: {dx:3.1f}"E; \t {dy:3.1f}"N', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         else:
             filename = self.ui.observationTable.item(selected_row,0)
             header = fits.getheader(self.data_path+'/'+filename.text())
@@ -114,19 +193,102 @@ class MainWindow(QMainWindow):
             self.header_window.show()
 
     def showQuickLook(self):
-        print("Making quick look")
-        params = {}
-        params['url'] = f"file://{self.data_path}/IFU_testpattern.fits"
-        params['name'] = "Test image"
-        message = {}
-        message['samp.mtype'] = 'image.load.fits'
-        message['samp.params'] = params
-        client = SAMPIntegratedClient()
-        client.connect()
-        client.notify_all(message)
-        client.disconnect()
+
+        if (self.imageviewer == 'ds9'):
+
+            # Check that an image file is selected and exists (or make it if not)
+            selected_row = self.ui.observationTable.currentRow()
+            if (selected_row == -1):
+                reply = QMessageBox.question(self, "Error", f'Please select a data file from the list', QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+                return()
+            else:
+                filename = self.ui.observationTable.item(selected_row,0).text()
+                if (filename != 'ifu_testpattern.fits'):
+                    reply = QMessageBox.question(self, "Error", f'Sorry, right now only displaying the test pattern', QMessageBox.StandardButton.Ok)
+                    return()
+
+            self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd="frame 1")
+            self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd=f"fits {self.data_path}/ifu_testpattern.fits")
+            self.ds9.ecall_and_wait(self.client_id,"ds9.set","10",cmd="zoom to fit")
+
+            self.reg = ImageRegions()
+            self.reg.drawCrosshair(self.ds9, self.client_id)
+            self.reg.drawCompass(self.ds9, self.client_id)
+            
+        else:
+            self.logger.setLevel(logging.DEBUG)
+            #image = load_data(f"ifu_testpattern.fits", logger=self.logger)
+            #print("Loaded data")
+            #self.ginga.set_data(image)
+            #print("Set data")
+            #self.ginga.add_callback('cursor-changed', self.getGingaCursor)
+
+#    def getGingaCursor(self, ginga, event, data_x, data_y):
+#            print(f"{data_x} {data_y}")
+
+    def offsetTCSFromGui(self):
+        imexam_return = self.ds9.ecall_and_wait(self.client_id,"ds9.get","10",cmd="imexam")
+        coords = imexam_return['samp.result']['value']
+        xcursor, ycursor = coords.split(' ')
+        dx = float(self.reg.x_crosshair) - float(xcursor)
+        dy = float(self.reg.y_crosshair) - float(ycursor)
+
+        reply = QMessageBox.question(self, "Confirm", f'Confirm telescope move: {dx:3.1f}"E; \t {dy:3.1f}"N', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if (reply == QMessageBox.StandardButton.Yes):
+            print("Moving the telescope")
+            print(f"tcscoffsetrc {dx} {dy}")
+        else:
+            print("Move cancelled")
+
+    def closeEvent(self, event):
+        try:
+            self.ds9.disconnect()
+            print("Closing sockets")
+        except:
+            print("All clients closed")
+
+class PlotWindow():
+    def __init__(self):
+        self.xmin = 3200
+        self.xmax = 10000
+        self.ymin = 0
+        self.ymax = 10000
+
+class ImageRegions():
+
+    def __init__(self):
+        self.x_crosshair = 20
+        self.y_crosshair = 20
+
+    def drawCrosshair(self, sampclient, id):
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {self.x_crosshair+1} {self.y_crosshair} {self.x_crosshair+3} {self.y_crosshair} # color=red width=3"')
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {self.x_crosshair-1} {self.y_crosshair} {self.x_crosshair-3} {self.y_crosshair} # color=red width=3"')
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {self.x_crosshair} {self.y_crosshair-1} {self.x_crosshair} {self.y_crosshair-3} # color=red width=3"')
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {self.x_crosshair} {self.y_crosshair+1} {self.x_crosshair} {self.y_crosshair+3} # color=red width=3"')
+
+    def drawCompass(self, sampclient, id):
+        # sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "compass(-7,2,50) # color=red width=2"')
+        rotangle = np.radians(20)
+        x_anchor = -3
+        y_anchor = 7
+        dx  = 0
+        dy  = 6
+        dx_new = dx * np.cos(rotangle) - dy * np.sin(rotangle)
+        dy_new = dx * np.sin(rotangle) + dy * np.cos(rotangle)
+        print(dx_new, dy_new)
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {x_anchor} {y_anchor} {x_anchor+dx_new:5.3f} {y_anchor+dy_new:5.3f} # line=0 1 color=red width=3"')
+
+        dx  = -3.5
+        dy  = 0
+        dx_new = dx * np.cos(rotangle) - dy * np.sin(rotangle)
+        dy_new = dx * np.sin(rotangle) + dy * np.cos(rotangle)
+        print(dx_new, dy_new)
+        sampclient.ecall_and_wait(id,"ds9.set","10",cmd=f'region command "line {x_anchor} {y_anchor} {x_anchor+dx_new:5.3f} {y_anchor+dy_new:5.3f} # line=0 1 color=red width=3"')
+
+
 
 if __name__ == "__main__":
+  
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
