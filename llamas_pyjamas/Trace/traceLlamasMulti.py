@@ -20,9 +20,11 @@ from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
 import cloudpickle
+from scipy.signal import find_peaks
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
+logging.basicConfig(filename='tracing.log')
 logger.setLevel(logging.DEBUG)
 
 class TraceLlamas:
@@ -33,13 +35,19 @@ class TraceLlamas:
         
         self.flat_fitsfile = fitsfile
         self.mph = mph
-        
         self.xmin     = 200
         self.fitspace = 10
         self.min_pkheight = 500
-        
         self.window = 11
-        
+
+        # 1A    298 (Green) / 298 Blue
+        # 1B    300 (Green) / 300 Blue
+        # 2A    299 (Green) / 299 Blue - potentially 2 lost fibers
+        # 2B    297 (Green) / 297 Blue - 1 dead fiber
+        # 3A    298 (Green) / 298 Blue
+        # 3B    300 (Green) / 300 Blue
+        # 4A    300 (Green) / 300 Blue
+
         return
             
     def generate_valleys(self, tslice: float) -> Tuple[np.ndarray, ...]:
@@ -111,13 +119,10 @@ class TraceLlamas:
             middle_row = int(self.naxis1/2)
             tslice = np.median(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
 
-
             valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
-            
             
             x_model = np.arange(self.naxis2).astype(float)
             if (self.channel != 'blue'):
-                
                 sset = bspline(valley_indices,everyn=2)
                 res, yfit = sset.fit(valley_indices, valley_depths, invvar)
                 x_model = np.arange(self.naxis2).astype(float)
@@ -126,16 +131,24 @@ class TraceLlamas:
             else:
                 y_model = np.zeros(self.naxis2)
                 
-            comb = tslice-y_model
-            peaks = detect_peaks(comb,mpd=2,threshold=10,show=False, valley=False)
-            pkht = comb[peaks]
-
             if not (self.channel=='blue'):
                 self.min_pkheight = 10000
+            else:
+                self.min_pkheight = 100
+
+            comb = tslice-y_model
+            # peaks = detect_peaks(comb,mpd=1,mph=self.min_pkheight,threshold=0,show=True,valley=False)
+            peaks, _ = find_peaks(comb,distance=2,height=100,threshold=None)
+
+            peaks = peaks[np.logical_and(peaks > 20, peaks < 2020)]
+
+            pkht = comb[peaks]
+            #plt.plot(comb)
+            #plt.plot(peaks, pkht, '+')
+            #plt.title(f"{len(peaks)} Peaks")
+            #plt.show()
 
             self.min_pkheight = 0.3 * np.median(pkht)
-            
-
             self.nfibers  = len(peaks)
             self.xmax     = self.naxis1-100
 
@@ -143,7 +156,8 @@ class TraceLlamas:
             xtrace = self.xmin + self.fitspace * np.arange(n_tracefit)
             
             tracearr = np.zeros(shape=(self.nfibers,n_tracefit))
-            logger.info("NFibers = {}".format(self.nfibers))
+            logger.info(f"Bench {self.bench}{self.side} - {self.channel}")
+            logger.info(f"NFibers = {self.nfibers}")
             
             for itrace, item in enumerate(xtrace):
                 comb, sset, res, yfit = self.fit_grid_single(item, x_model, y_model)
