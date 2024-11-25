@@ -165,8 +165,8 @@ class TraceLlamas:
                     if pk_guess -2 < 0:
                         continue
                     pk_centroid = \
-                        np.sum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
-                        / np.sum(comb[pk_guess-2:pk_guess+3])
+                        np.nansum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
+                        / np.nansum(comb[pk_guess-2:pk_guess+3])
 
 
                     if (np.abs(pk_centroid-pk_guess) < 1.5):
@@ -214,7 +214,7 @@ class TraceLlamas:
 
             # Normalize out the spectral shape of the lamp for profile fitting
             for i in range(self.naxis1):
-                norm = np.sum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
+                norm = np.nansum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
                 data_work[:,i] = data_work[:,i] / norm
 
             # Generate a mask of pixels that are
