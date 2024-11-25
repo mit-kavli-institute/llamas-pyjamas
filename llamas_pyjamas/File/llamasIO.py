@@ -39,3 +39,15 @@ class llamasAllCameras:
 
 ##############################################################
             
+def getBenchSideChannel(fitsfile, bench, side, channel):
+
+    hdul = fits.open(fitsfile)
+    for hdu in hdul[1:]:
+        if (hdu.header['BENCH'] == bench):
+            if (hdu.header['SIDE'] == side):
+                if (hdu.header['COLOR']=='Color'):
+                    return(hdu.data)
+                
+
+
+    

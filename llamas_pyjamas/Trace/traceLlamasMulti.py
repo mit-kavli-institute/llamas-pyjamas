@@ -23,6 +23,7 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
+from config import BASE_DIR, OUTPUT_DIR, DATA_DIR
 
 # Enable DEBUG for your specific logger
 # logger = logging.getLogger(__name__)
@@ -263,10 +264,10 @@ class TraceLlamas:
         return (fiberimg, profimg, bpmask)
     
     def saveTraces(self, outfile='LLAMASTrace.pkl'):
-        save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
-        os.makedirs(save_dir, exist_ok=True)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         
-        outpath = os.path.join(save_dir, outfile)
+        outpath = os.path.join(OUTPUT_DIR, outfile)
+        print(f'outpath: {outpath}')
 
         if ('.pkl' in outfile):
             with open(outpath,'wb') as fp:
@@ -292,7 +293,8 @@ class TraceRay(TraceLlamas):
     
     def __init__(self, fitsfile: str) -> None:
         super().__init__(fitsfile)
-        
+        self.fitsfile = os.path.basename(fitsfile)
+        print(f'fitsfile: {self.fitsfile}')
         return
     
     
@@ -305,16 +307,17 @@ class TraceRay(TraceLlamas):
         
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
-        outfile = f'{self.channel}_{self.bench}_{self.side}_traces.pkl'
-        print(f'outfile: {outfile}')
-        super().saveTraces(outfile)
+        origfile = self.fitsfile.split('.fits')[0]
+        self.outfile = f'{origfile}_{self.channel}_{self.bench}_{self.side}_traces.pkl'
+        print(f'outfile: {self.outfile}')
+        super().saveTraces(self.outfile)
         
         elapsed_time = time.time() - start_time
         return 
 
 
 def main(fitsfile: str) -> None:
-    
+
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     
