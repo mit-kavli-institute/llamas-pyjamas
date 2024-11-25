@@ -46,8 +46,8 @@ class ExtractLlamas:
             extracted = np.zeros(self.trace.naxis1)
             for i in range(self.trace.naxis1):
                 thisx = (x_spec == i)
-                if np.sum(thisx) > 0:
-                    extracted[i] = np.sum(f_spec[thisx]*invvar[thisx])/np.sum(invvar[thisx])
+                if np.nansum(thisx) > 0:
+                    extracted[i] = np.nansum(f_spec[thisx]*invvar[thisx])/np.nansum(invvar[thisx])
                 #handles case where there are no elements
                 else:
                     extracted[i] = 0.0
