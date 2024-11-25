@@ -150,6 +150,52 @@ def WhiteLight(extraction_array, ds9plot=True):
 
     return whitelight, xdata, ydata, flux
 
+def WhiteLightQuickLook(tracefiles, data):
+        
+    #    hdul = fits.open(data)
+
+    # Each trace object represents one camera / side pair
+    for tracefile in tracefiles:
+        with open(tracefile, "rb") as fp:
+            traceobj = pickle.load(fp)
+
+        fiberimg = traceobj.fiberimg
+        nfib     = traceobj.nfibers
+        
+        xdata = np.array([])
+        ydata = np.array([])
+        flux  = np.array([])
+
+        print(f""
+
+        for ifib in range(nfib):
+            benchside = f'{traceobj.bench}{traceobj.side}'
+            try:
+                x, y = FiberMap_LUT(benchside,ifib)
+            except Exception as e:
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
+                continue
+            
+            thisflux = np.nansum(data[fiberimg == ifib])
+            flux = np.append(flux, thisflux)
+            xdata = np.append(xdata,x)
+            ydata = np.append(ydata,y)
+
+    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
+        
+    xx = np.arange(46)
+    yy = np.arange(43)
+    x_grid, y_grid = np.meshgrid(xx, yy)
+    
+    whitelight = flux_interpolator(x_grid, y_grid)
+
+    ds9plot = False
+    if (ds9plot):
+        plot_ds9(whitelight, samp=True)
+
+    return whitelight, xdata, ydata, flux
+
         
 def WhiteLightHex(extraction_array, ds9plot=True):
     pass

@@ -19,7 +19,7 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 class ExtractLlamas:
 
-    def __init__(self,trace: "TraceLlamas") -> None:
+    def __init__(self,trace: "TraceLlamas", optimal=True) -> None:
         self.trace = trace
         self.bench = trace.bench
         self.side = trace.side
@@ -39,38 +39,44 @@ class ExtractLlamas:
 
         for ifiber in range(trace.nfibers):
 
-            logger.info("..Extracting fiber #{}".format(ifiber))
-            x_spec,f_spec,invvar = self.isolateProfile(ifiber)
-            if x_spec is None:
-                continue
+            if (optimal == True):
+                # Optimally weighted extraction (a la Horne et al ~1986)
+                logger.info("..Optimally Extracting fiber #{}".format(ifiber))
+                x_spec,f_spec,weights = self.isolateProfile(ifiber)
+                if x_spec is None:
+                    continue
             
-            extracted = np.zeros(self.trace.naxis1)
-            for i in range(self.trace.naxis1):
-                thisx = (x_spec == i)
-                if np.nansum(thisx) > 0:
-                    extracted[i] = np.nansum(f_spec[thisx]*invvar[thisx])/np.nansum(invvar[thisx])
-                #handles case where there are no elements
-                else:
-                    extracted[i] = 0.0
+                extracted = np.zeros(self.trace.naxis1)
+                for i in range(self.trace.naxis1):
+                    thisx = (x_spec == i)
+                    if np.nansum(thisx) > 0:
+                        extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
+                    #handles case where there are no elements
+                    else:
+                        extracted[i] = 0.0
 
-            self.counts[ifiber,:] = extracted
-            
-            
+                self.counts[ifiber,:] = extracted
+            else:
+                # Boxcar Extraction - fast!
+                logger.info("..Boxcar extracting fiber #{}".format(ifiber))
+                fiberimg = trace.fiberimg
+                print(f"Fiber image size: {fiberimg.shape}")
+
     def isolateProfile(self,ifiber):
         #profile  = self.trace.profimg[ifiber]
-        weights = self.trace.fiberimg == ifiber
+        inprofile = self.trace.fiberimg == ifiber
         profile = self.trace.profimg[self.trace.fiberimg == ifiber]
             
         #inprof = np.where(profile > 0)
-        if weights.size == 0:
+        if inprofile.size == 0:
             logger.warning("No profile for fiber #{}".format(ifiber))
             return None,None,None
         
-        x_spec = self.xx[weights]
-        f_spec = self.frame[weights]
-        invvar = self.trace.profimg[weights]
+        x_spec = self.xx[inprofile]
+        f_spec = self.frame[inprofile]
+        weights = self.trace.profimg[inprofile]
         
-        return x_spec,f_spec,invvar
+        return x_spec,f_spec,weights
 
 
     def saveExtraction(self, save_dir):
