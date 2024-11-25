@@ -8,6 +8,12 @@ from astropy.io import fits
 from astropy.table import Table
 import os
 from matplotlib.tri import Triangulation, LinearTriInterpolator
+from llamas_pyjamas.Utils.utils import setup_logger
+from datetime import datetime
+import traceback
+
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
 
 fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 print(f'Fibre map path: {fibre_map_path}')
@@ -32,19 +38,21 @@ def WhiteLightFits(extraction_array):
     blue, green, red = color_isolation(extraction_array)
     
     ###For now assuming that all extraction objects came from the same original file
-    
+    if not blue or not green or not red:
+        logger.error('No blue, green, or red extractions found. Exiting...')
+        return
     
     # Create HDU list
     hdul = fits.HDUList()
     primary_hdu = fits.PrimaryHDU()
     
+    if blue or green or red:
+        fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
+        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+        hdul.append(fits.PrimaryHDU())
 
     # Process blue data if exists
     if blue:
-        fitsfile = blue[0].fitsfile
-        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-        
-        hdul.append(fits.PrimaryHDU())
         
         blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, ds9plot=False)
         blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(np.float32), name='BLUE')
@@ -59,10 +67,7 @@ def WhiteLightFits(extraction_array):
     
     # Process green data if exists
     if green:
-        fitsfile = green[0].fitsfile
-        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-        
-        hdul.append(fits.PrimaryHDU())
+      
         green_whitelight, green_x, green_y, green_flux = WhiteLight(green, ds9plot=False)
         green_hdu = fits.ImageHDU(data=green_whitelight.astype(np.float32), name='GREEN')
         hdul.append(green_hdu)
@@ -76,10 +81,6 @@ def WhiteLightFits(extraction_array):
     
     # Process red data if exists
     if red:
-        fitsfile = red[0].fitsfile
-        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-        
-        hdul.append(fits.PrimaryHDU())
         red_whitelight, red_x, red_y, red_flux = WhiteLight(red, ds9plot=False)
         red_hdu = fits.ImageHDU(data=red_whitelight.astype(np.float32), name='RED')
         hdul.append(red_hdu)
@@ -91,7 +92,8 @@ def WhiteLightFits(extraction_array):
         ], name='RED_TAB', nrows=len(red_whitelight))
         hdul.append(red_tab)
         
-    white_light_file = fitsfile.replace('.fits', '_whitelight.fits')
+    fitsfilebase = fitsfile.split('/')[-1]
+    white_light_file = fitsfilebase.replace('.fits', '_whitelight.fits')
     print(f'Writing white light file to {white_light_file}')
     # Write to file
     hdul.writeto(os.path.join(OUTPUT_DIR, white_light_file), overwrite=True)
@@ -110,6 +112,7 @@ def WhiteLight(extraction_array, ds9plot=True):
     for extraction_obj in extraction_array:
         if isinstance(extraction_obj, str):
             extraction = ExtractLlamas.loadExtraction(extraction_obj)
+            logger.info(f'Loaded extraction object {extraction.bench}{extraction.side}')
         elif isinstance(extraction_obj, ExtractLlamas):
             extraction = extraction_obj
         else:
@@ -123,7 +126,8 @@ def WhiteLight(extraction_array, ds9plot=True):
             try:
                 x, y = FiberMap_LUT(benchside,ifib)
             except Exception as e:
-                print(f'Number of fibres in map exceed, skipping....')
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
                 continue
             thisflux = np.nansum(extraction.counts[ifib])
             flux = np.append(flux, thisflux)
