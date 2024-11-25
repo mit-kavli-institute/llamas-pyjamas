@@ -36,9 +36,10 @@ def color_isolation(extractions):
 def WhiteLightFits(extraction_array):
     
     blue, green, red = color_isolation(extraction_array)
-    
+    print(blue, green, red)
+    fitsfile = None
     ###For now assuming that all extraction objects came from the same original file
-    if not blue or not green or not red:
+    if all(not color for color in [blue, green, red]):
         logger.error('No blue, green, or red extractions found. Exiting...')
         return
     
@@ -46,10 +47,10 @@ def WhiteLightFits(extraction_array):
     hdul = fits.HDUList()
     primary_hdu = fits.PrimaryHDU()
     
-    if blue or green or red:
-        fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
-        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-        hdul.append(fits.PrimaryHDU())
+    
+    fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
+    primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+    hdul.append(fits.PrimaryHDU())
 
     # Process blue data if exists
     if blue:
@@ -98,7 +99,7 @@ def WhiteLightFits(extraction_array):
     # Write to file
     hdul.writeto(os.path.join(OUTPUT_DIR, white_light_file), overwrite=True)
     
-    return hdul
+    return white_light_file
 
 
 def WhiteLight(extraction_array, ds9plot=True):
@@ -146,6 +147,50 @@ def WhiteLight(extraction_array, ds9plot=True):
         #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
         #ds9.set_np2arr(whitelight)
         plot_ds9(whitelight)
+
+    return whitelight, xdata, ydata, flux
+
+def WhiteLightQuickLook(tracefiles, data):
+        
+    #    hdul = fits.open(data)
+
+    # Each trace object represents one camera / side pair
+    for tracefile in tracefiles:
+        with open(tracefile, "rb") as fp:
+            traceobj = pickle.load(fp)
+
+        fiberimg = traceobj.fiberimg
+        nfib     = traceobj.nfibers
+        
+        xdata = np.array([])
+        ydata = np.array([])
+        flux  = np.array([])
+
+        for ifib in range(nfib):
+            benchside = f'{traceobj.bench}{traceobj.side}'
+            try:
+                x, y = FiberMap_LUT(benchside,ifib)
+            except Exception as e:
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
+                continue
+            
+            thisflux = np.nansum(data[fiberimg == ifib])
+            flux = np.append(flux, thisflux)
+            xdata = np.append(xdata,x)
+            ydata = np.append(ydata,y)
+
+    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
+        
+    xx = np.arange(46)
+    yy = np.arange(43)
+    x_grid, y_grid = np.meshgrid(xx, yy)
+    
+    whitelight = flux_interpolator(x_grid, y_grid)
+
+    ds9plot = False
+    if (ds9plot):
+        plot_ds9(whitelight, samp=True)
 
     return whitelight, xdata, ydata, flux
 
