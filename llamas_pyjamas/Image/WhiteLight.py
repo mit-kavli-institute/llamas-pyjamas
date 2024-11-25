@@ -59,6 +59,10 @@ def WhiteLightFits(extraction_array):
     
     # Process green data if exists
     if green:
+        fitsfile = green[0].fitsfile
+        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+        
+        hdul.append(fits.PrimaryHDU())
         green_whitelight, green_x, green_y, green_flux = WhiteLight(green, ds9plot=False)
         green_hdu = fits.ImageHDU(data=green_whitelight.astype(np.float32), name='GREEN')
         hdul.append(green_hdu)
@@ -72,6 +76,10 @@ def WhiteLightFits(extraction_array):
     
     # Process red data if exists
     if red:
+        fitsfile = red[0].fitsfile
+        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+        
+        hdul.append(fits.PrimaryHDU())
         red_whitelight, red_x, red_y, red_flux = WhiteLight(red, ds9plot=False)
         red_hdu = fits.ImageHDU(data=red_whitelight.astype(np.float32), name='RED')
         hdul.append(red_hdu)
@@ -82,9 +90,11 @@ def WhiteLightFits(extraction_array):
             fits.Column(name='FLUX', format='E', array=red_flux.astype(np.float32))
         ], name='RED_TAB', nrows=len(red_whitelight))
         hdul.append(red_tab)
-
+        
+    white_light_file = fitsfile.replace('.fits', '_whitelight.fits')
+    print(f'Writing white light file to {white_light_file}')
     # Write to file
-    hdul.writeto(os.path.join(OUTPUT_DIR, 'whitelight_rgb.fits'), overwrite=True)
+    hdul.writeto(os.path.join(OUTPUT_DIR, white_light_file), overwrite=True)
     
     return hdul
 
@@ -134,9 +144,6 @@ def WhiteLight(extraction_array, ds9plot=True):
         plot_ds9(whitelight)
 
     return whitelight, xdata, ydata, flux
-
-
-
 
         
 def WhiteLightHex(extraction_array, ds9plot=True):
