@@ -24,6 +24,7 @@ class ExtractLlamas:
         self.bench = trace.bench
         self.side = trace.side
         self.channel = trace.channel
+        self.fitsfile = self.trace.fitsfile
         
         if self.channel == 'red':
             logger.warning("Red channel may not extract correctly")
