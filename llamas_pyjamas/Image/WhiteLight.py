@@ -166,8 +166,6 @@ def WhiteLightQuickLook(tracefiles, data):
         ydata = np.array([])
         flux  = np.array([])
 
-        print(f""
-
         for ifib in range(nfib):
             benchside = f'{traceobj.bench}{traceobj.side}'
             try:
