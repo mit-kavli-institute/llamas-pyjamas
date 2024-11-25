@@ -31,12 +31,21 @@ def WhiteLightFits(extraction_array):
     
     blue, green, red = color_isolation(extraction_array)
     
+    ###For now assuming that all extraction objects came from the same original file
+    
+    
     # Create HDU list
     hdul = fits.HDUList()
-    hdul.append(fits.PrimaryHDU()) 
+    primary_hdu = fits.PrimaryHDU()
+    
 
     # Process blue data if exists
     if blue:
+        fitsfile = blue[0].fitsfile
+        primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
+        
+        hdul.append(fits.PrimaryHDU())
+        
         blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, ds9plot=False)
         blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(np.float32), name='BLUE')
         hdul.append(blue_hdu)

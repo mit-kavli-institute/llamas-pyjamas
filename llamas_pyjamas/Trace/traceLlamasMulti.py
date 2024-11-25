@@ -37,7 +37,7 @@ class TraceLlamas:
                  fitsfile: str,
                  mph: Optional[int] = None):
         
-        self.flat_fitsfile = fitsfile
+        self.fitsfile = fitsfile
         self.mph = mph
         
         self.xmin     = 200
