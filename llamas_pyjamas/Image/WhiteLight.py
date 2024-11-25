@@ -12,6 +12,26 @@ print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 
+def color_isolation(extractions):
+    """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
+
+    Args:
+        extractions (list): A list of extraction objects loaded from ExtractLlamas
+    """
+    blue_extractions = [ext for ext in extractions if ext.channel.lower() == 'blue']
+    green_extractions = [ext for ext in extractions if ext.channel.lower() == 'green']
+    red_extractions = [ext for ext in extractions if ext.channel.lower() == 'red']
+    
+    return blue_extractions, green_extractions, red_extractions
+
+
+def WhiteLightFits(extraction_array):
+    
+    
+    
+    return
+
+
 def WhiteLight(extraction_array, ds9plot=True):
     
     assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
@@ -20,9 +40,14 @@ def WhiteLight(extraction_array, ds9plot=True):
     ydata = np.array([])
     flux  = np.array([])
     
-    for extraction_file in extraction_array:
-
-        extraction = ExtractLlamas.loadExtraction(extraction_file)
+    for extraction_obj in extraction_array:
+        if isinstance(extraction_obj, str):
+            extraction = ExtractLlamas.loadExtraction(extraction_obj)
+        elif isinstance(extraction_obj, ExtractLlamas):
+            extraction = extraction_obj
+        else:
+            raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
+        
         
         nfib, naxis1 = np.shape(extraction.counts)
         
@@ -52,6 +77,10 @@ def WhiteLight(extraction_array, ds9plot=True):
         plot_ds9(whitelight)
 
     return(xdata, ydata, flux)
+
+
+
+
         
 def WhiteLightHex(extraction_array, ds9plot=True):
     pass
