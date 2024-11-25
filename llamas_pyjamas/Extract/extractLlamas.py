@@ -24,6 +24,7 @@ class ExtractLlamas:
         self.bench = trace.bench
         self.side = trace.side
         self.channel = trace.channel
+        self.fitsfile = trace.fitsfile
         
         if self.channel == 'red':
             logger.warning("Red channel may not extract correctly")
@@ -81,62 +82,10 @@ class ExtractLlamas:
             cloudpickle.dump(self, fp)
         return
 
-    def loadExtraction(infile):
-        with open(infile,'rb') as fp:
-            object = pickle.load(fp)
-        return(object)
-    
-def save_extractions(extraction_list, save_dir=None, prefix='LLAMASExtract_batch'):
-    """Save multiple extraction objects to single file"""
-    if save_dir is None:
-        save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Create metadata for each extraction
-    batch_data = {
-        'extractions': extraction_list,
-        'metadata': [{
-            'channel': ext.channel,
-            'bench': ext.bench,
-            'side': ext.side,
-            'nfibers': ext.trace.nfibers
-        } for ext in extraction_list]
-    }
-    
-    # Save with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    outfile = f'{prefix}_{timestamp}.pkl'
-    outpath = os.path.join(save_dir, outfile)
-    
-    logger.info(f'Saving batch extraction to: {outpath}')
-    with open(outpath, 'wb') as fp:
-        cloudpickle.dump(batch_data, fp)
-    return outpath
-
-@staticmethod
-def load_extractions(infile):
-    """Load batch of extraction objects"""
-    with open(infile, 'rb') as fp:
-        batch_data = cloudpickle.load(fp)
-    
-    logger.info(f"Loaded {len(batch_data['extractions'])} extractions")
-    return batch_data['extractions'], batch_data['metadata']
-
-@ray.remote
-class ExtractLlamasRay(ExtractLlamas):
-    
-    def __init__(self, files) -> None:
-        self.files = files
-        pass
-        
-   
-    def process_extractions(self, tracepkl: "TraceLlamas") -> None:
-        with open(tracepkl, "rb") as tracer:
-            trace = pickle.load(tracer)
-        
-        extraction = super.__init__(trace)
-        extraction.saveExtraction()
-        return
+def loadExtraction(infile):
+    with open(infile,'rb') as fp:
+        object = pickle.load(fp)
+    return(object)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process LLAMAS pkl files.')
