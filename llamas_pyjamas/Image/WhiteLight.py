@@ -10,6 +10,7 @@ import os
 from matplotlib.tri import Triangulation, LinearTriInterpolator
 from llamas_pyjamas.Utils.utils import setup_logger
 from datetime import datetime
+import traceback
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
@@ -37,7 +38,9 @@ def WhiteLightFits(extraction_array):
     blue, green, red = color_isolation(extraction_array)
     
     ###For now assuming that all extraction objects came from the same original file
-    
+    if not blue or not green or not red:
+        logger.error('No blue, green, or red extractions found. Exiting...')
+        return
     
     # Create HDU list
     hdul = fits.HDUList()
@@ -109,6 +112,7 @@ def WhiteLight(extraction_array, ds9plot=True):
     for extraction_obj in extraction_array:
         if isinstance(extraction_obj, str):
             extraction = ExtractLlamas.loadExtraction(extraction_obj)
+            logger.info(f'Loaded extraction object {extraction.bench}{extraction.side}')
         elif isinstance(extraction_obj, ExtractLlamas):
             extraction = extraction_obj
         else:
@@ -122,8 +126,8 @@ def WhiteLight(extraction_array, ds9plot=True):
             try:
                 x, y = FiberMap_LUT(benchside,ifib)
             except Exception as e:
-                logger.info(f'Fiber {ifib} not found in fiber map')
-                logger.error(e)
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
                 continue
             thisflux = np.nansum(extraction.counts[ifib])
             flux = np.append(flux, thisflux)
