@@ -5,6 +5,7 @@ from   astropy.io import fits
 import scipy
 import numpy as np
 import time
+from datetime import datetime
 import psutil
 from   matplotlib import pyplot as plt
 import traceback
@@ -20,10 +21,15 @@ from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
 import cloudpickle
+from llamas_pyjamas.Utils.utils import setup_logger
 
 # Enable DEBUG for your specific logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+
+# Add timestamp to log filename
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 class TraceLlamas:
     
@@ -103,8 +109,6 @@ class TraceLlamas:
             
             if self.channel == 'red':
                 logger.warning("Red channel selected which is not yet supported.")
-                result = {"status": "unable to process red channel"}
-                return result
 
 
             #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
@@ -161,8 +165,8 @@ class TraceLlamas:
                     if pk_guess -2 < 0:
                         continue
                     pk_centroid = \
-                        np.sum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
-                        / np.sum(comb[pk_guess-2:pk_guess+3])
+                        np.nansum(np.multiply(comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
+                        / np.nansum(comb[pk_guess-2:pk_guess+3])
 
 
                     if (np.abs(pk_centroid-pk_guess) < 1.5):
@@ -210,7 +214,7 @@ class TraceLlamas:
 
             # Normalize out the spectral shape of the lamp for profile fitting
             for i in range(self.naxis1):
-                norm = np.sum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
+                norm = np.nansum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
                 data_work[:,i] = data_work[:,i] / norm
 
             # Generate a mask of pixels that are
@@ -228,7 +232,7 @@ class TraceLlamas:
             NaNmask[np.where(np.isnan(data_work))] = False
             badmask[np.where(data_work > 20)] = False
             badmask[np.where(data_work < -5)] = False
-            profmask[np.where(np.abs(yy) < 3)] = True
+            profmask[np.where(np.abs(yy) < 1)] = True
 
             inprof = np.where(infmask & profmask & NaNmask & badmask)
 
