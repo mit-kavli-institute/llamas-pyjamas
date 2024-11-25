@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from ..Extract.extractLlamas import ExtractLlamas
 from ..QA import plot_ds9
+from ..config import OUTPUT_DIR
+from astropy.io import fits
 from astropy.table import Table
 import os
 from matplotlib.tri import Triangulation, LinearTriInterpolator
@@ -10,6 +12,72 @@ from matplotlib.tri import Triangulation, LinearTriInterpolator
 fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
+
+def color_isolation(extractions):
+    """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
+
+    Args:
+        extractions (list): A list of extraction objects loaded from ExtractLlamas
+    """
+    blue_extractions = [ext for ext in extractions if ext.channel.lower() == 'blue']
+    green_extractions = [ext for ext in extractions if ext.channel.lower() == 'green']
+    red_extractions = [ext for ext in extractions if ext.channel.lower() == 'red']
+    
+    return blue_extractions, green_extractions, red_extractions
+
+
+def WhiteLightFits(extraction_array):
+    
+    blue, green, red = color_isolation(extraction_array)
+    
+    # Create HDU list
+    hdul = fits.HDUList()
+    hdul.append(fits.PrimaryHDU()) 
+
+    # Process blue data if exists
+    if blue:
+        blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, ds9plot=False)
+        blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(np.float32), name='BLUE')
+        hdul.append(blue_hdu)
+        
+        blue_tab = fits.BinTableHDU.from_columns([
+            fits.Column(name='XDATA', format='E', array=blue_x.astype(np.float32)),
+            fits.Column(name='YDATA', format='E', array=blue_y.astype(np.float32)),
+            fits.Column(name='FLUX', format='E', array=blue_flux.astype(np.float32))
+        ], name='BLUE_TAB', nrows=len(blue_whitelight))
+        hdul.append(blue_tab)
+    
+    # Process green data if exists
+    if green:
+        green_whitelight, green_x, green_y, green_flux = WhiteLight(green, ds9plot=False)
+        green_hdu = fits.ImageHDU(data=green_whitelight.astype(np.float32), name='GREEN')
+        hdul.append(green_hdu)
+        
+        green_tab = fits.BinTableHDU.from_columns([
+            fits.Column(name='XDATA', format='E', array=green_x.astype(np.float32)),
+            fits.Column(name='YDATA', format='E', array=green_y.astype(np.float32)),
+            fits.Column(name='FLUX', format='E', array=green_flux.astype(np.float32))
+        ], name='GREEN_TAB')
+        hdul.append(green_tab)
+    
+    # Process red data if exists
+    if red:
+        red_whitelight, red_x, red_y, red_flux = WhiteLight(red, ds9plot=False)
+        red_hdu = fits.ImageHDU(data=red_whitelight.astype(np.float32), name='RED')
+        hdul.append(red_hdu)
+        
+        red_tab = fits.BinTableHDU.from_columns([
+            fits.Column(name='XDATA', format='E', array=red_x.astype(np.float32)),
+            fits.Column(name='YDATA', format='E', array=red_y.astype(np.float32)),
+            fits.Column(name='FLUX', format='E', array=red_flux.astype(np.float32))
+        ], name='RED_TAB', nrows=len(red_whitelight))
+        hdul.append(red_tab)
+
+    # Write to file
+    hdul.writeto(os.path.join(OUTPUT_DIR, 'whitelight_rgb.fits'), overwrite=True)
+    
+    return hdul
 
 
 def WhiteLight(extraction_array, ds9plot=True):
@@ -20,9 +88,14 @@ def WhiteLight(extraction_array, ds9plot=True):
     ydata = np.array([])
     flux  = np.array([])
     
-    for extraction_file in extraction_array:
-
-        extraction = ExtractLlamas.loadExtraction(extraction_file)
+    for extraction_obj in extraction_array:
+        if isinstance(extraction_obj, str):
+            extraction = ExtractLlamas.loadExtraction(extraction_obj)
+        elif isinstance(extraction_obj, ExtractLlamas):
+            extraction = extraction_obj
+        else:
+            raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
+        
         
         nfib, naxis1 = np.shape(extraction.counts)
         
@@ -33,7 +106,7 @@ def WhiteLight(extraction_array, ds9plot=True):
             except Exception as e:
                 print(f'Number of fibres in map exceed, skipping....')
                 continue
-            thisflux = np.sum(extraction.counts[ifib])
+            thisflux = np.nansum(extraction.counts[ifib])
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
@@ -51,7 +124,11 @@ def WhiteLight(extraction_array, ds9plot=True):
         #ds9.set_np2arr(whitelight)
         plot_ds9(whitelight)
 
-    return(xdata, ydata, flux)
+    return whitelight, xdata, ydata, flux
+
+
+
+
         
 def WhiteLightHex(extraction_array, ds9plot=True):
     pass
