@@ -77,10 +77,10 @@ class ExtractLlamas:
             cloudpickle.dump(self, fp)
         return
 
-    def loadExtraction(infile):
-        with open(infile,'rb') as fp:
-            object = pickle.load(fp)
-        return(object)
+def loadExtraction(infile):
+    with open(infile,'rb') as fp:
+        object = pickle.load(fp)
+    return(object)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process LLAMAS pkl files.')
