@@ -5,6 +5,8 @@ from io import BytesIO
 import traceback
 from astropy.samp import SAMPIntegratedClient
 import os
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 def plot_ds9(image_array: fits, samp=False) -> None:
     
@@ -67,5 +69,27 @@ def plot_ds9(image_array: fits, samp=False) -> None:
             except Exception as e:
                 traceback.print_exc()
                 return
+
+    return
+
+def plot_trace_qa(trace_obj, save_dir=None):
+    """Plot QA for fiber tracing"""
+
+    # Plot 2: Individual fiber profiles
+    fig, axes = plt.subplots(4, 4, figsize=(15, 15))
+    axes = axes.ravel()
+    
+    for i, sset in enumerate(trace_obj.bspline_ssets[:16]):  # Plot first 16 fibers
+        ax = axes[i]
+        yy = np.linspace(-5, 5, 100)
+        profile = sset.value(yy)[0]
+        ax.plot(yy, profile, 'b-', label='Fit')
+        ax.set_title(f'Fiber {i}')
+        ax.grid(True)
+    
+    plt.tight_layout()
+    #plt.savefig(os.path.join(save_dir, f'profiles_{trace_obj.bench}_{trace_obj.side}.png'))
+    plt.show()
+    
 
     return
