@@ -106,7 +106,7 @@ def WhiteLight(extraction_array, ds9plot=True):
             except Exception as e:
                 print(f'Number of fibres in map exceed, skipping....')
                 continue
-            thisflux = np.sum(extraction.counts[ifib])
+            thisflux = np.nansum(extraction.counts[ifib])
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
