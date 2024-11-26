@@ -1,6 +1,13 @@
 #! /Users/simcoe/.conda/envs/llamas/bin/python3
 
 import sys, os
+from pathlib import Path
+
+# Get package root (2 levels up from GUI folder)
+package_root = Path(__file__).parent.parent.parent
+sys.path.append(str(package_root))
+
+
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QTableWidgetItem, QWidget, QMessageBox
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6 import QtWidgets
@@ -8,7 +15,7 @@ from obslog_qt import Ui_LLAMASObservingLog  # type: ignore # Import the generat
 from header_qt import Ui_HeaderWidget # type: ignore
 import numpy as np
 from astropy.table import Table
-
+import traceback
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -23,6 +30,7 @@ from glob import glob
 from astropy.io import fits
 from astropy.samp import SAMPIntegratedClient
 import logging
+
 
 class HeaderWindow(QWidget):
     def __init__(self):
@@ -72,6 +80,7 @@ class MainWindow(QMainWindow):
         self.ui.headerButton.clicked.connect(self.showHeader)
         self.ui.quicklookButton.clicked.connect(self.showQuickLook)
         self.ui.tcsOffsetButton.clicked.connect(self.offsetTCSFromGui)
+        self.ui.extractButton.clicked.connect(self.deployExtraction)
 
         # Formatting styles for the GUI
         self.ui.observationTable.setColumnWidth(0,300)
@@ -191,6 +200,56 @@ class MainWindow(QMainWindow):
                 self.header_window = HeaderWindow()
                 self.header_window.fill(header)
             self.header_window.show()
+            
+    def deployExtraction(self):
+        
+        selected_row = self.ui.observationTable.currentRow()
+
+        # Check if row selected
+        if selected_row == -1:
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                "Please select a data file from the list",
+                QMessageBox.StandardButton.Ok
+            )
+            return
+
+        # Get filename and construct full path
+        filename = self.ui.observationTable.item(selected_row, 0).text()
+        filepath = os.path.join(self.data_path, filename)
+
+        # Validate file exists
+        if not os.path.exists(filepath):
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                f"File not found: {filepath}",
+                QMessageBox.StandardButton.Ok
+            )
+            return
+
+        try:
+            # Import and run extraction
+            from llamas_pyjamas.__main__ import main_extract
+            result = main_extract(filepath)
+
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Extraction completed for {filename}",
+                QMessageBox.StandardButton.Ok
+            )
+
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Extraction failed: {e}",
+                QMessageBox.StandardButton.Ok
+            )
 
     def showQuickLook(self):
 

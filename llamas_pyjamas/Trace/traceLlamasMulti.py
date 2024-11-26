@@ -23,7 +23,7 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
-from config import BASE_DIR, OUTPUT_DIR, DATA_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR
 
 # Enable DEBUG for your specific logger
 # logger = logging.getLogger(__name__)
@@ -37,7 +37,9 @@ class TraceLlamas:
     
     def __init__(self, 
                  fitsfile: str,
-                 mph: Optional[int] = None):
+                 mph: Optional[int] = None,
+                 master_trace: Optional[str] = None,
+                 ):
         
         self.fitsfile = fitsfile
         self.mph = mph
