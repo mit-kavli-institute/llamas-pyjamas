@@ -19,20 +19,22 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 class ExtractLlamas:
 
-    def __init__(self,trace: "TraceLlamas", optimal=True) -> None:
+    def __init__(self,trace: "TraceLlamas", hdu_data: np.ndarray, hdr: dict,optimal=True) -> None:
         self.trace = trace
         self.bench = trace.bench
         self.side = trace.side
         self.channel = trace.channel
         self.fitsfile = self.trace.fitsfile
         
+        ##put in a check here for hdu against trace attributes when I have more brain capacity
+        
         if self.channel == 'red':
             logger.warning("Red channel may not extract correctly")
         
         self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
         
-        self.hdr   = trace.hdr
-        self.frame = trace.data.astype(float)
+        self.hdr   = hdr#trace.hdr
+        self.frame = hdu_data.astype(float)
         
         self.x  = np.arange(trace.naxis1)
         self.xx = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))

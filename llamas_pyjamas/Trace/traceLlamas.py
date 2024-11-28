@@ -51,8 +51,10 @@ class TraceLlamas:
         tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
         valley_indices = np.ndarray(len(tmp))
         valley_depths  = np.ndarray(len(tmp))
+        
         valley_indices = tmp.astype(float)
         valley_depths  = tslice[tmp].astype(float)
+        
         invvar         = np.ones(len(tmp))
         
         # Fit out the scatterd light continuum, using uniform weighting
