@@ -30,12 +30,19 @@ def setup_logger(name, log_filename=None):
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)  # Set desired console log level
+    
+    
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
     
     # Add only file handler
     logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     
     return logger
 
@@ -130,7 +137,7 @@ def dump_LUT(channel, hdu, trace_obj):
         with open('traceLUT.json', 'r') as f:
             master_lut = json.load(f)
     except FileNotFoundError:
-        master_lut = {"red": {}}
+        master_lut = {channel: {}}
 
     # Loop through and add each LUT
     for i in channel_hdu_idx:
@@ -140,12 +147,13 @@ def dump_LUT(channel, hdu, trace_obj):
         benchside = f"{bench}{side}"
 
         trace_obj.process_hdu_data(hdu[i].data, dict(hdu[i].header))
+        comb = trace_obj.comb
         peaks = trace_obj.orig_peaks
         # Convert numpy array to regular Python types
         peaks_dict = create_peak_lookups(peaks, benchside=benchside)
-
+        master_lut["combs"][channel][benchside] = trace_obj.comb.tolist()
         # Add to master LUT
-        master_lut["red"][benchside] = peaks_dict
+        master_lut["fib_pos"][channel][benchside] = peaks_dict
         print(f"Added {benchside} peaks to LUT")
 
     # Save updated master LUT 

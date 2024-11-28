@@ -7,6 +7,8 @@ from astropy.samp import SAMPIntegratedClient
 import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from llamas_pyjamas.Trace.traceLlamasMulti import TraceLlamas
+
 
 def plot_ds9(image_array: fits, samp=False) -> None:
     
@@ -92,4 +94,56 @@ def plot_trace_qa(trace_obj, save_dir=None):
     plt.show()
     
 
+    return
+
+
+
+def plot_comb_template(fitsfile, channel):
+    
+    trace = TraceLlamas(fitsfile)
+    hdu = fits.open(fitsfile)
+    
+    #find the hdu extensions for the channel we want
+    #channel_hdu_idx = [i for i in range(1, len(hdu)) if hdu[i].header['COLOR'] == channel]
+    channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['CAM_NAME'].lower()]
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+    
+    # Process green HDUs
+    for i, (ax, hdu_idx) in enumerate(zip(axes, channel_hdu_idx)):
+        try:
+            # Process HDU data (adding 1 to skip primary)
+            trace.process_hdu_data(hdu[hdu_idx].data, dict(hdu[hdu_idx].header))
+            comb = trace.orig_comb
+            peaks = trace.orig_peaks
+            peak_heights = trace.orig_pkht
+            
+            # Plot data
+            ax.plot(comb, 'b-', alpha=0.6, label='Data')
+            ax.plot(peaks, peak_heights, 'rx', label='Peaks')
+            
+            # Add vertical lines from peaks to x-axis
+            for idx, (peak, height) in enumerate(zip(peaks, peak_heights)):
+                ax.vlines(peak, 0, height, colors='r', linestyles=':', alpha=0.5)
+                
+                ax.text(peak, height + 100, str(int(idx)), 
+                       horizontalalignment='center',
+                       verticalalignment='bottom',
+                       color='red',
+                       fontsize=8)
+            
+            ax.set_title(f'HDU {hdu_idx}: {trace.bench}{trace.side}')
+            ax.grid(True, alpha=0.3)
+            
+            if i == 0:  # Legend only on first plot
+                ax.legend()
+                
+        except Exception as e:
+            print(f"Error processing HDU {hdu_idx+1}: {e}")
+            continue
+
+    plt.suptitle('Green Channel Trace Profiles', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+        
     return

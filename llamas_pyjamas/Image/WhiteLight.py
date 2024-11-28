@@ -34,7 +34,7 @@ def color_isolation(extractions):
     return blue_extractions, green_extractions, red_extractions
 
 
-def WhiteLightFits(extraction_array):
+def WhiteLightFits(extraction_array, outfile=None):
     
     blue, green, red = color_isolation(extraction_array)
     print(blue, green, red)
@@ -93,9 +93,12 @@ def WhiteLightFits(extraction_array):
             fits.Column(name='FLUX', format='E', array=red_flux.astype(np.float32))
         ], name='RED_TAB', nrows=len(red_whitelight))
         hdul.append(red_tab)
-        
-    fitsfilebase = fitsfile.split('/')[-1]
-    white_light_file = fitsfilebase.replace('.fits', '_whitelight.fits')
+    if not outfile:
+        fitsfilebase = fitsfile.split('/')[-1]
+        white_light_file = fitsfilebase.replace('.fits', '_whitelight.fits')
+    else:
+        white_light_file = outfile
+    
     print(f'Writing white light file to {white_light_file}')
     # Write to file
     hdul.writeto(os.path.join(OUTPUT_DIR, white_light_file), overwrite=True)
@@ -128,7 +131,7 @@ def WhiteLight(extraction_array, ds9plot=True):
             try:
                 x, y = FiberMap_LUT(benchside,ifib)
             except Exception as e:
-                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside} for color {extraction.channel}')
                 logger.error(traceback.format_exc())
                 continue
             thisflux = np.nansum(extraction.counts[ifib])
