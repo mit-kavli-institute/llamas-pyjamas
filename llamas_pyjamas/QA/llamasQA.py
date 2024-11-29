@@ -8,7 +8,8 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from llamas_pyjamas.Trace.traceLlamasMulti import TraceLlamas
-
+from llamas_pyjamas.config import LUT_DIR
+import json
 
 def plot_ds9(image_array: fits, samp=False) -> None:
     
@@ -146,4 +147,122 @@ def plot_comb_template(fitsfile, channel):
     plt.tight_layout()
     plt.show()
         
+    return
+
+
+def plot_master_comb(channel):
+    
+    pkht_value = 10000
+    
+    with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'rb') as f:
+        master_LUT = json.load(f)
+    #find the hdu extensions for the channel we want
+    #channel_hdu_idx = [i for i in range(1, len(hdu)) if hdu[i].header['COLOR'] == channel]
+    #channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['CAM_NAME'].lower()]
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+    
+    benchsides = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B']
+    
+    try:
+        for idx, bench in enumerate(benchsides):
+            print(idx)
+            comb = np.array(master_LUT['combs'][channel][bench])
+            peaks = master_LUT['fib_pos'][channel][bench]
+            
+            master_peaks = [int(pos) for pos in peaks.values()]
+            
+            
+            peak_heights = comb[master_peaks]#np.full_like(master_peaks, pkht_value)
+
+            # Plot data
+            axes[idx].plot(comb, 'b-', alpha=0.6, label='Data')
+            axes[idx].plot(master_peaks, peak_heights, 'rx', label='Peaks')
+
+            # Add vertical lines from peaks to x-axis
+            for peak_idx, (peak, height) in enumerate(zip(master_peaks, peak_heights)):
+                axes[idx].vlines(peak, 0, height, colors='r', linestyles=':', alpha=0.5)
+
+                axes[idx].text(peak, height + 100, str(int(peak_idx)), 
+                       horizontalalignment='center',
+                       verticalalignment='bottom',
+                       color='red',
+                       fontsize=8)
+
+            axes[idx].set_title(f'{channel}: {bench}')
+            axes[idx].grid(True, alpha=0.3)
+
+            if idx == 0:  # Legend only on first plot
+                axes[idx].legend()
+            
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error plotting master combs: {e}")
+        return
+        
+
+    plt.suptitle('Green Channel Trace Profiles', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+        
+    return
+
+
+def compare_combs(channel1, benchside1, channel2, benchside2):
+    with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'rb') as f:
+        master_LUT = json.load(f)
+    
+    # Create vertical subplot layout
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10))
+    
+    try:
+        # Plot first benchside
+        comb1 = np.array(master_LUT['combs'][channel1][benchside1])
+        peaks1 = master_LUT['fib_pos'][channel1][benchside1]
+        master_peaks1 = [int(pos) for pos in peaks1.values()]
+        peak_heights1 = comb1[master_peaks1]
+        
+        ax1.plot(comb1, 'b-', alpha=0.6, label='Data')
+        ax1.plot(master_peaks1, peak_heights1, 'rx', label='Peaks')
+        
+        for peak_idx, (peak, height) in enumerate(zip(master_peaks1, peak_heights1)):
+            ax1.vlines(peak, 0, height, colors='r', linestyles=':', alpha=0.5)
+            ax1.text(peak, height + 100, str(peak_idx),
+                    horizontalalignment='center',
+                    verticalalignment='bottom',
+                    color='red', fontsize=8)
+        
+        ax1.set_title(f'{channel1}: {benchside1}')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        
+        # Plot second benchside
+        comb2 = np.array(master_LUT['combs'][channel2][benchside2])
+        peaks2 = master_LUT['fib_pos'][channel2][benchside2]
+        master_peaks2 = [int(pos) for pos in peaks2.values()]
+        peak_heights2 = comb2[master_peaks2]
+        
+        ax2.plot(comb2, 'b-', alpha=0.6, label='Data')
+        ax2.plot(master_peaks2, peak_heights2, 'rx', label='Peaks')
+        
+        for peak_idx, (peak, height) in enumerate(zip(master_peaks2, peak_heights2)):
+            ax2.vlines(peak, 0, height, colors='r', linestyles=':', alpha=0.5)
+            ax2.text(peak, height + 100, str(peak_idx),
+                    horizontalalignment='center',
+                    verticalalignment='bottom',
+                    color='red', fontsize=8)
+        
+        ax2.set_title(f'{channel2}: {benchside2}')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error comparing combs: {e}")
+        return
+    
+    plt.suptitle(f'Comparing Channel Combs', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+    
     return

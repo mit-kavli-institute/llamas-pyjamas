@@ -67,7 +67,7 @@ class TraceLlamas:
     def __init__(self, 
                  fitsfile: str,
                  mph: Optional[int] = None,
-                 master_trace: Optional[str] = None,
+                 master_trace: Optional[str] = None
                  ):
         
         self.fitsfile = fitsfile
@@ -77,6 +77,7 @@ class TraceLlamas:
         self.min_pkheight = 500
         self.window = 11 #can update to 15
         self.offset_cutoff = 3
+        
 
         # 1A    298 (Green) / 298 Blue
         # 1B    300 (Green) / 300 Blue
@@ -180,12 +181,13 @@ class TraceLlamas:
         # peaks = detect_peaks(comb,mpd=1,mph=self.min_pkheight,threshold=0,show=True,valley=False)
         
         #refinding the peaks after subtracting the valleys from the tslice
-        #peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+        
+        self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
         
         return self.comb
     
          
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
         """Processes data from a specific HDU array."""
         
         try:
@@ -217,29 +219,33 @@ class TraceLlamas:
             #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
             #finding the inital comb for the data we are trying to fit
             self.comb = self.find_initial_comb()
-            
+            self.orig_comb = self.comb
+            if find_LUT:
+                return
             #make sure peaks aren't too close to the edge
             #peaks = peaks[np.logical_and(peaks > 20, peaks < 2020)]
             
             #find the height value of the comb using the new peak locations
             #pkht = self.comb[peaks]
             
-            #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
-            self.orig_comb = self.comb
-            # self.orig_pkht = pkht
-            # self.orig_peaks = peaks
+            
             
             #code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers
             with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
                 LUT = json.load(f)
-            
+                self.LUT = LUT    
+        
             self.master_comb = np.array(LUT['combs'][self.channel.lower()][self.benchside])
             masterpeaks_dict = LUT["fib_pos"][self.channel.lower()][self.benchside]
             
             self.master_peaks = [int(pos) for pos in masterpeaks_dict.values()]
-            #pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
             
-            #self.pkht = pkht
+            #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
+            #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
+            #self.orig_pkht = self.pkht
+            
+            
+            
             
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
             
@@ -456,7 +462,7 @@ def main(fitsfile: str) -> None:
     results = []    
     
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -513,7 +519,7 @@ if __name__ == "__main__":
     
     fitsfile = args.filename
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data, dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")

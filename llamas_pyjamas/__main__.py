@@ -269,17 +269,20 @@ def brute_extract(file, flat=False):
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
         #print(hdu_trace_pairs)
-    
+        
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
-            print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
+            
+            bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+            
+            #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
             
             try:
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
       
-                extraction = ExtractLlamas(tracer, hdu[hdu_index].data, hdu[hdu_index].header)
+                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
                 extraction_list.append(extraction)
                 
             except Exception as e:
