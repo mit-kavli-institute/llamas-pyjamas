@@ -25,6 +25,7 @@ class ExtractLlamas:
         self.side = trace.side
         self.channel = trace.channel
         self.fitsfile = self.trace.fitsfile
+        print(f'Optimal {optimal}')
         
         ##put in a check here for hdu against trace attributes when I have more brain capacity
         
@@ -58,13 +59,29 @@ class ExtractLlamas:
                         extracted[i] = 0.0
 
                 self.counts[ifiber,:] = extracted
-            else:
+            
+            elif optimal == False:
                 # Boxcar Extraction - fast!
                 logger.info("..Boxcar extracting fiber #{}".format(ifiber))
-                fiberimg = trace.fiberimg
-                print(f"Fiber image size: {fiberimg.shape}")
+                x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
+                
+                if x_spec is None:
+                    continue
+            
+                extracted = np.zeros(self.trace.naxis1)
+                for i in range(self.trace.naxis1):
+                    thisx = (x_spec == i)
+                    
+                    if np.nansum(thisx) > 0:
+                        extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
+                    #handles case where there are no elements
+                    else:
+                        extracted[i] = 0.0
 
-    def isolateProfile(self,ifiber):
+                self.counts[ifiber,:] = extracted
+                
+
+    def isolateProfile(self,ifiber, boxcar=False):
         #profile  = self.trace.profimg[ifiber]
         inprofile = self.trace.fiberimg == ifiber
         profile = self.trace.profimg[self.trace.fiberimg == ifiber]
@@ -76,7 +93,11 @@ class ExtractLlamas:
         
         x_spec = self.xx[inprofile]
         f_spec = self.frame[inprofile]
-        weights = self.trace.profimg[inprofile]
+        if boxcar == True:
+            weights = np.where(inprofile, 1, 0)[inprofile]#[weights]
+            
+        elif boxcar == False:
+            weights = self.trace.profimg[inprofile]#self.trace.profimg[inprofile]
         
         return x_spec,f_spec,weights
 

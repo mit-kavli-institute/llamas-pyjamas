@@ -90,7 +90,6 @@ class TraceLlamas:
         return
     
     def insert_dead_fibers(self, LUT, benchside, pkhts):
-        
         dead_fibers = LUT.get('dead_fibers', {}).get(benchside, [])
         dead_fibers = sorted(dead_fibers)
 
