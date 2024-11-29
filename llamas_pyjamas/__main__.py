@@ -307,6 +307,104 @@ def brute_extract(file, flat=False):
     return 
 
 
+def box_extract(file, flat=False):
+    try:
+    
+        assert file.endswith('.fits'), 'File must be a .fits file'
+        
+        master_pkls = glob.glob(os.path.join(CALIB_DIR, '*.pkl'))
+        
+        if not master_pkls:
+            raise ValueError("No master calibration files found in CALIB_DIR")
+        
+        #getting package sources for Ray
+        # Get absolute path to llamas_pyjamas package
+        package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
+        package_root = os.path.dirname(package_path)
+
+        # Configure Ray runtime environment
+        runtime_env = {
+            "py_modules": [package_root],
+            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
+            "excludes": [
+                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
+                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.pkl",                  # Exclude all pickle files anywhere
+                "**/.git/**",               # Exclude git directory
+            ]
+        }
+
+        # Initialize Ray
+        ray.shutdown()
+        ray.init(runtime_env=runtime_env)
+
+        #opening the fitsfile
+        hdu = fits.open(file)
+
+        #Defining the base filename
+        basefile = os.path.basename(file).split('.fits')[0]
+
+        #Debug statements
+        print(f'basefile = {basefile}')
+
+        if flat:
+            print(f'Running trace routine with flat fielding')
+            ##Running the trace routine
+            main(file)
+            trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
+        else:
+            print('Using master traces')
+            trace_files = glob.glob(os.path.join(CALIB_DIR, f'*traces.pkl'))
+
+        #print(os.path.join(CALIB_DIR, f'{basefile}*traces.pkl'))
+
+        #Running the extract routine
+        #This code should isolate to only the traces for the given fitsfile
+        
+        print(f'trace_files = {trace_files}')
+        extraction_list = []
+        
+        hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
+        #print(hdu_trace_pairs)
+        
+        #for file in trace_files:
+        for hdu_index, file in hdu_trace_pairs:
+            hdr = hdu[hdu_index].header
+            
+            bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+            
+            #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
+            
+            try:
+                with open(file, mode='rb') as f:
+                    tracer = pickle.load(f)
+      
+                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header, optimal=False)
+                extraction_list.append(extraction)
+                
+            except Exception as e:
+                print(f"Error extracting trace from {file}")
+                print(traceback.format_exc())
+        
+        print(f'Extraction list = {extraction_list}')        
+        filename = save_extractions(extraction_list)
+        print(f'extraction saved filename = {filename}')
+
+        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        print(f'obj = {obj}')
+        outfile = basefile + '_whitelight.fits'
+        white_light_file = WhiteLightFits(obj, outfile=outfile)
+        print(f'white_light_file = {white_light_file}')
+    
+    except Exception as e:
+        traceback.print_exc()
+        return
+    
+    
+    return 
+
+
+
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
@@ -315,5 +413,6 @@ if __name__=='__main__':
     
     args = parser.parse_args()
     
-    brute_extract(args.filename, flat=args.flat)
+    #brute_extract(args.filename, flat=args.flat)
+    box_extract(args.filename, flat=args.flat)
     #main_extract(args.filename)

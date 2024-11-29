@@ -176,7 +176,7 @@ def dump_LUT(channel, hdu, trace_obj):
     return
 
 
-flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
+
 
 def flip_b_side_positions():
     # Load LUT
@@ -204,6 +204,7 @@ def flip_b_side_positions():
         json.dump(lut, f, indent=4)
         
 def flip_positions():
+    flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
     # Load LUT
     with open('LUT/traceLUT.json', 'r') as f:
         lut = json.load(f)
