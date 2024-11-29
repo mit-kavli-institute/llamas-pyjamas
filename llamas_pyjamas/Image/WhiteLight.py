@@ -12,11 +12,13 @@ from matplotlib.tri import Triangulation, LinearTriInterpolator
 from llamas_pyjamas.Utils.utils import setup_logger
 from datetime import datetime
 import traceback
+from llamas_pyjamas.config import LUT_DIR
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
 
-fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
+#fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
+fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev02.dat')
 print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
@@ -57,7 +59,7 @@ def WhiteLightFits(extraction_array, outfile=None):
     if blue:
         
         blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, ds9plot=False)
-        blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(np.float32), name='BLUE')
+        blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(float), name='BLUE')
         hdul.append(blue_hdu)
         
         blue_tab = fits.BinTableHDU.from_columns([
@@ -71,13 +73,13 @@ def WhiteLightFits(extraction_array, outfile=None):
     if green:
       
         green_whitelight, green_x, green_y, green_flux = WhiteLight(green, ds9plot=False)
-        green_hdu = fits.ImageHDU(data=green_whitelight.astype(np.float32), name='GREEN')
+        green_hdu = fits.ImageHDU(data=green_whitelight.astype(float), name='GREEN')
         hdul.append(green_hdu)
         
         green_tab = fits.BinTableHDU.from_columns([
-            fits.Column(name='XDATA', format='E', array=green_x.astype(np.float32)),
-            fits.Column(name='YDATA', format='E', array=green_y.astype(np.float32)),
-            fits.Column(name='FLUX', format='E', array=green_flux.astype(np.float32))
+            fits.Column(name='XDATA', format='E', array=green_x.astype(float)),
+            fits.Column(name='YDATA', format='E', array=green_y.astype(float)),
+            fits.Column(name='FLUX', format='E', array=green_flux.astype(float))
         ], name='GREEN_TAB')
         hdul.append(green_tab)
     
@@ -141,8 +143,8 @@ def WhiteLight(extraction_array, ds9plot=True):
 
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
         
-    xx = np.arange(46)
-    yy = np.arange(43)
+    xx = np.arange(53)
+    yy = np.arange(53)
     x_grid, y_grid = np.meshgrid(xx, yy)
     
     whitelight = flux_interpolator(x_grid, y_grid)
@@ -204,8 +206,6 @@ def WhiteLightHex(extraction_array, ds9plot=True):
 
     return
 
-
-
    
 def FiberMap(bench, infiber):
 
@@ -239,21 +239,21 @@ def FiberMap(bench, infiber):
     elif (bench == '1B'):
         x0 = 0.0
         y0 = 45
-        Nfib = 298
+        Nfib = 300#298
         wrap = 23
     elif (bench == '2B'):
         x0 = np.floor_divide(n_right,2)
         y0 = 39.0
-        Nfib = 300
+        Nfib = 298#300
     elif (bench == '3B'):
         x0 = 0.0
         y0 = 32.0
-        Nfib=298
+        Nfib=300#298
         wrap = 23
     elif (bench == '4B'):
         x0 = np.floor_divide(n_right,2)
         y0 = 26.0
-        Nfib = 300
+        Nfib = 298#300
         
     fiber = infiber
         
@@ -438,7 +438,7 @@ def fibermap_table():
         ix, iy = FiberMap('4B',ifib)
         fiber_table.add_row(['4B',int(297-ifib),ix,iy,ix,iy*np.sin(60*np.pi/180)])
 
-    fiber_table.write('LLAMAS_FiberMap_rev02.dat', format='ascii.fixed_width', overwrite=True)
+    fiber_table.write('LLAMAS_FiberMap_rev02_updated.dat', format='ascii.fixed_width', overwrite=True)
         
     return(fiber_table)
     
