@@ -159,7 +159,7 @@ def plot_master_comb(channel):
     #find the hdu extensions for the channel we want
     #channel_hdu_idx = [i for i in range(1, len(hdu)) if hdu[i].header['COLOR'] == channel]
     #channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['CAM_NAME'].lower()]
-    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    fig, axes = plt.subplots(2, 4, figsize=(15, 9), constrained_layout=True)
     axes = axes.flatten()
     
     benchsides = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B']
