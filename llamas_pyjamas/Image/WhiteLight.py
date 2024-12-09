@@ -148,7 +148,7 @@ def WhiteLight(extraction_array, ds9plot=True):
     x_grid, y_grid = np.meshgrid(xx, yy)
     
     whitelight = flux_interpolator(x_grid, y_grid)
-
+    whitelight = np.fliplr(whitelight)
     if (ds9plot):
         #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
         #ds9.set_np2arr(whitelight)

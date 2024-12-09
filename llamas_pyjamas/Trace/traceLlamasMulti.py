@@ -244,8 +244,6 @@ class TraceLlamas:
             #self.orig_pkht = self.pkht
             
             
-            
-            
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
             
             

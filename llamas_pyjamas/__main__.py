@@ -73,7 +73,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
 
 
 
-
+### DO not use this method as it is outdated and likely wrong due to 4am coding skills
 def main_extract(file):
     try:
     
@@ -371,7 +371,9 @@ def box_extract(file, flat=False):
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
             
-            bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+            data = hdu[hdu_index].data.astype(float)
+            
+            bias = np.nanmedian(data)
             
             #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
             
@@ -379,7 +381,7 @@ def box_extract(file, flat=False):
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
       
-                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header, optimal=False)
+                extraction = ExtractLlamas(tracer, data-bias, hdu[hdu_index].header, optimal=False)
                 extraction_list.append(extraction)
                 
             except Exception as e:
@@ -402,8 +404,6 @@ def box_extract(file, flat=False):
     
     
     return 
-
-
 
 
 if __name__=='__main__':
