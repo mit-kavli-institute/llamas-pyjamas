@@ -151,11 +151,16 @@ class TraceLlamas:
         
         return comb, sset, res, yfit
     
-    def find_initial_comb(self):
+    def find_comb(self, rownum=None):
         
-        middle_row = int(self.naxis1/2)
+        # When in doubt, extract in the middle
+        if (rownum == None):
+            rownum = int(self.naxis1/2)
+
+        rownum = int(rownum)
+
         #straight up to _+ 15 pixels on either side
-        tslice = np.median(self.data[:,middle_row-5:middle_row+4],axis=1).astype(float)
+        tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)
         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
         
         self.x_model = np.arange(self.naxis2).astype(float)
@@ -205,10 +210,7 @@ class TraceLlamas:
                 self.channel = self.hdr['COLOR'].lower()
                 self.bench = self.hdr['BENCH']
                 self.side  = self.hdr['SIDE']
-            
-            if self.channel == 'red':
-                logger.warning("Red channel selected which is not yet supported.")
-            
+                      
             self.naxis1 = self.hdr['NAXIS1']
             self.naxis2 = self.hdr['NAXIS2']
             
@@ -217,7 +219,7 @@ class TraceLlamas:
 
             #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
             #finding the inital comb for the data we are trying to fit
-            self.comb = self.find_initial_comb()
+            self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
             if find_LUT:
                 return
@@ -242,21 +244,23 @@ class TraceLlamas:
             #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
             #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
             #self.orig_pkht = self.pkht
-            
-            
+        
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
-            
             
             offset, _ = cross_correlate_combs(self.comb, self.master_comb)
             
             if np.abs(offset) > self.offset_cutoff:
                 #find a way to print this error to terminal still and the logger
                 print(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff}")
+                #plt.plot(self.comb, color='blue')
+                #plt.plot(self.master_comb, color='green')
+                #plt.show()
                 logger.error(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff}")
-                return 1
+                offset=0
+                #return 1
             
             #update the peaks to the master peaks
-            self.updated_peaks = self.master_peaks + offset
+            self.updated_peaks = np.array(self.master_peaks) + offset
 
             #self.min_pkheight = 0.3 * np.median(pkht)
             
@@ -274,18 +278,21 @@ class TraceLlamas:
             logger.info(f"Bench {self.bench}{self.side} - {self.channel}")
             logger.info(f"NFibers = {self.nfibers}")
             
-            for itrace, item in enumerate(xtrace):
-                
+            ######## Fit combs from the midpoint forward ########
+            mid_index = int(n_tracefit / 2)
+            tt = xtrace[mid_index:]
+            for itrace, thisx in enumerate(tt):
+                thiscomb = self.find_comb(thisx)
+
                 if itrace == 0:
                     peaks = self.updated_peaks
                 else:
-                    peaks = tracearr[:,itrace-1].astype(int)
+                    peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
                 for ifiber, pk_guess in enumerate(peaks):
                     if ifiber >= self.nfibers:
                         logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
                         continue
-                    #breakpoint()
                     
                     #if the guess is too close to the edge, skip
                     ###Shouldn't this not be needed if we exclude peaks too close to the edge?
@@ -293,27 +300,59 @@ class TraceLlamas:
                         print('Peak guess too close condition hit')
                         continue
                     
-                    #taking the weighted sum
-                    
+                    #taking the weighted sum  
                     pk_centroid = \
-                        np.nansum(np.multiply(self.comb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
-                        / np.nansum(self.comb[pk_guess-2:pk_guess+3])
+                        np.nansum(np.multiply(thiscomb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
+                        / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
                     if (np.abs(pk_centroid-pk_guess) < 1.5):
-                        tracearr[ifiber,itrace] = pk_centroid
+                        tracearr[ifiber,mid_index+itrace] = pk_centroid
                     else:
-                        tracearr[ifiber,itrace] = pk_guess
+                        tracearr[ifiber,mid_index+itrace] = pk_guess
+
+
+            ######### Now go back and fit from the midpoint backward ######
+            for itrace, thisx in enumerate(reversed(xtrace[0:mid_index])):
+                thiscomb = self.find_comb(thisx)
+
+                if itrace == 0:
+                    peaks = self.updated_peaks
+                else:
+                    peaks = tracearr[:,mid_index-itrace+1].astype(int)
+
+                for ifiber, pk_guess in enumerate(peaks):
+                    if ifiber >= self.nfibers:
+                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
+                        continue
+                    
+                    #if the guess is too close to the edge, skip
+                    ###Shouldn't this not be needed if we exclude peaks too close to the edge?
+                    if pk_guess -2 < 0:
+                        print('Peak guess too close condition hit')
+                        continue
+                    
+                    #taking the weighted sum  
+                    pk_centroid = \
+                        np.nansum(np.multiply(thiscomb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
+                        / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
+
+                    #if the updated peak diverges too far from the peak guess then use the peak guess
+                    if (np.abs(pk_centroid-pk_guess) < 1.5):
+                        tracearr[ifiber,mid_index-itrace-1] = pk_centroid
+                    else:
+                        tracearr[ifiber,mid_index-itrace-1] = pk_guess
+
 
             #defines the coordinates of the trace along the x axis
-            self.xtracefit = np.outer(np.ones(ifiber),xtrace)
+            self.xtracefit = np.outer(np.ones(self.nfibers),xtrace)
             #defining the y (peak coord) of the trace for that window along xthe x axis for every fiber
             self.tracearr  = tracearr
             #defines the traces by fitting a spline along the x axis
             
             self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.5)
             
-            x2          = np.outer(np.ones(ifiber),np.arange(self.naxis1))
+            x2          = np.outer(np.ones(self.nfibers),np.arange(self.naxis1))
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
             self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
@@ -428,9 +467,8 @@ class TraceRay(TraceLlamas):
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header)
-        if result["status"] != "success":
-                return result
-        
+
+               
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
         origfile = self.fitsfile.split('.fits')[0]
@@ -442,7 +480,8 @@ class TraceRay(TraceLlamas):
         
         elapsed_time = time.time() - start_time
         return 
-
+        if result["status"] != "success":
+                return result
 
 def main(fitsfile: str) -> None:
 
