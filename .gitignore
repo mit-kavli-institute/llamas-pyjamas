@@ -2,8 +2,8 @@
 
 *.pyc
 
-*.pkl
-
 llamas_pyjamas/output/
 llamas_pyjamas/Utils/logs/
 llamas_pyjamas/Utils/logs/*.log
+llamas_pyjamas/Docs/DATA
+*mef.fits
