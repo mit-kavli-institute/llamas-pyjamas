@@ -6,6 +6,6 @@ DATA_DIR = os.path.join(BASE_DIR, "Docs/DATA")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 CALIB_DIR = os.path.join(BASE_DIR, "mastercalib")
 LUT_DIR = os.path.join(BASE_DIR, "LUT")
-
+MASTER_DIR = os.path.join(BASE_DIR, "mastercalib")
 # Ensure the output directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
