@@ -1,4 +1,4 @@
-#! /Users/simcoe/.conda/envs/llamas/bin/python3
+#! /Users/simcoe/.conda/envs/llamas_reduce/bin/python3
 
 import sys, os
 from pathlib import Path
