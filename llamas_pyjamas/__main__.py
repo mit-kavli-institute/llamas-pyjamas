@@ -98,6 +98,9 @@ def main_extract(file):
                 "**/*.fits",                 # Exclude all FITS files anywhere
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
+                "**/*.zip/**",
+                "**/*.tar.gz/**",
+                "**/mastercalib*/**",
             ]
         }
 
@@ -234,6 +237,10 @@ def brute_extract(file, flat=False):
                 "**/*.fits",                 # Exclude all FITS files anywhere
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
+                "**/*.zip/**",
+                "**/*.tar.gz/**",
+                "**/mastercalib*/**",
+                
             ]
         }
 
@@ -337,6 +344,9 @@ def box_extract(file, flat=False):
                 "**/*.fits",                 # Exclude all FITS files anywhere
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
+                "**/*.zip/**",
+                "**/*.tar.gz/**",
+                "**/mastercalib*/**",
             ]
         }
 
