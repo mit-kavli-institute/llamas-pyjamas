@@ -30,12 +30,19 @@ def setup_logger(name, log_filename=None):
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)  # Set desired console log level
+    
+    
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
     
     # Add only file handler
     logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     
     return logger
 
@@ -126,26 +133,40 @@ def create_peak_lookups(peaks, benchside=None):
 def dump_LUT(channel, hdu, trace_obj):
     # Initialize or load master LUT
     try:
-        channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['CAM_NAME'].lower()]
+        if 'CAM_NAME' in hdu[1].header:
+            channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['CAM_NAME'].lower()]
+        else:
+            channel_hdu_idx = [i for i in range(1, len(hdu)) if channel in hdu[i].header['COLOR'].lower()]
+        
         with open('traceLUT.json', 'r') as f:
             master_lut = json.load(f)
     except FileNotFoundError:
-        master_lut = {"red": {}}
+        master_lut = {channel: {}}
 
     # Loop through and add each LUT
     for i in channel_hdu_idx:
-        cam_name = hdu[i].header['CAM_NAME']
-        bench = cam_name.split('_')[0][0]
-        side = cam_name.split('_')[0][1]
+        
+        if 'CAM_NAME' in hdu[i].header:
+            cam_name = hdu[i].header['CAM_NAME']
+            bench = cam_name.split('_')[0][0]
+            side = cam_name.split('_')[0][1]
+            
+        else:
+            channel = hdu[i].header['COLOR'].lower()
+            bench = hdu[i].header['BENCH']
+            side  = hdu[i].header['SIDE']
+            
         benchside = f"{bench}{side}"
-
-        trace_obj.process_hdu_data(hdu[i].data, dict(hdu[i].header))
+        
+        trace_obj.process_hdu_data(hdu[i].data, dict(hdu[i].header), find_LUT=True)
+        comb = trace_obj.comb
         peaks = trace_obj.orig_peaks
         # Convert numpy array to regular Python types
         peaks_dict = create_peak_lookups(peaks, benchside=benchside)
-
+        
+        master_lut["combs"][channel][benchside] = trace_obj.comb.tolist()
         # Add to master LUT
-        master_lut["red"][benchside] = peaks_dict
+        master_lut["fib_pos"][channel][benchside] = peaks_dict
         print(f"Added {benchside} peaks to LUT")
 
     # Save updated master LUT 
@@ -154,6 +175,73 @@ def dump_LUT(channel, hdu, trace_obj):
     
     return
 
+
+
+
+def flip_b_side_positions():
+    # Load LUT
+    with open('LUT/traceLUT.json', 'r') as f:
+        lut = json.load(f)
+    # Process each color
+    for color in ['green', 'blue', 'red']:
+        if color not in lut['fib_pos']:
+            continue
+        # Process each benchside
+        for benchside in lut['fib_pos'][color].keys():
+            if 'B' in benchside:
+                positions = lut['fib_pos'][color][benchside]
+                # Get max fiber number
+                max_fiber = max(int(k) for k in positions.keys())
+                # Create new flipped mapping
+                flipped = {}
+                for k, v in positions.items():
+                    new_key = str(max_fiber - int(k))
+                    flipped[new_key] = v
+                # Replace original mapping
+                lut['fib_pos'][color][benchside] = flipped
+    # Save updated LUT
+    with open('LUT/traceLUT_copy.json', 'w') as f:
+        json.dump(lut, f, indent=4)
+        
+def flip_positions():
+    #flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
+    flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    # Load LUT
+    with open('LUT/traceLUT.json', 'r') as f:
+        lut = json.load(f)
+    
+    # Process each color
+    for color in ['green', 'blue', 'red']:
+        if color not in lut['fib_pos']:
+            continue
+            
+        # Process each benchside
+        for benchside in lut['fib_pos'][color].keys():
+            side = 'A' if 'A' in benchside else 'B'
+            lookup_key = f"{color}{side}"
+            
+            # Only flip if specified in flipped dict
+            if flipped.get(lookup_key, False):
+                positions = lut['fib_pos'][color][benchside]
+                
+                # Get max fiber number
+                max_fiber = max(int(k) for k in positions.keys())
+                
+                # Create new flipped mapping
+                flipped_positions = {}
+                for k, v in positions.items():
+                    new_key = str(max_fiber - int(k))
+                    flipped_positions[new_key] = v
+                    
+                # Replace original mapping
+                lut['fib_pos'][color][benchside] = flipped_positions
+                print(f"Flipped {color} {benchside}")
+    
+    # Save updated LUT
+    with open('LUT/traceLUT.json', 'w') as f:
+        json.dump(lut, f, indent=4)
+
+    
 
 
     

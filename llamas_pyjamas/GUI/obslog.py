@@ -1,4 +1,4 @@
-#! /Users/simcoe/.conda/envs/llamas/bin/python3
+#! /Users/simcoe/.conda/envs/llamas_reduce/bin/python3
 
 import sys, os
 from pathlib import Path
@@ -231,8 +231,8 @@ class MainWindow(QMainWindow):
 
         try:
             # Import and run extraction
-            from llamas_pyjamas.__main__ import main_extract
-            result = main_extract(filepath)
+            from llamas_pyjamas.__main__ import main_extract, brute_extract
+            result = brute_extract(filepath)
 
             # Show success message
             QMessageBox.information(
