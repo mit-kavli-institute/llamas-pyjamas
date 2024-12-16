@@ -7,3 +7,10 @@ llamas_pyjamas/Utils/logs/
 llamas_pyjamas/Utils/logs/*.log
 llamas_pyjamas/Docs/DATA
 *mef.fits
+llamas_pyjamas/mastercalib.zip
+llamas_pyjamas/Docs/Extraction routine.pdf
+llamas_pyjamas/LUT/traceLUT_*.json
+*traces.pkl
+llamas_pyjamas/Trace/traceLlamasLUT.py
+llamas_pyjamas/Trace/traceLlamasMaster.py
+llamas_pyjamas/Trace/traceLlamasMaster.py
