@@ -313,6 +313,12 @@ def brute_extract(file, flat=False):
     
     return 
 
+def make_ifuimage(extraction_file, flat=False):
+    obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
+    outfile = 'test_whitelight.fits'
+    white_light_file = WhiteLightFits(obj, outfile=outfile)
+    print(f'white_light_file = {white_light_file}')
+
 
 def box_extract(file, flat=False):
     try:
