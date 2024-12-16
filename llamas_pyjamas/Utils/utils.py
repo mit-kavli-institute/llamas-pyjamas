@@ -206,6 +206,7 @@ def flip_b_side_positions():
 def flip_positions():
     #flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
     flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    
     # Load LUT
     with open('LUT/traceLUT.json', 'r') as f:
         lut = json.load(f)
