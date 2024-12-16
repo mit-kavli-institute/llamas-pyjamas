@@ -24,7 +24,7 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR
 import pkg_resources
 from pathlib import Path
 import rpdb
@@ -140,10 +140,8 @@ class TraceLlamas:
         valley_depths  = ytrace[valleys].astype(float)
         invvar         = np.ones(nvalley)
         
-        if self.channel == 'blue':
-            sset = bspline(valley_indices,everyn=4) 
-        else:
-            sset = bspline(valley_indices,everyn=2)
+
+        sset = bspline(valley_indices,everyn=2)
             
         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
         y_model = sset.value(self.x_model)[0]
@@ -165,26 +163,17 @@ class TraceLlamas:
         
         self.x_model = np.arange(self.naxis2).astype(float)
         
-        if (self.channel != 'blue'):
-            sset = bspline(valley_indices,everyn=2, nord=2)
-            res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+        
+        sset = bspline(valley_indices,everyn=2, nord=2)
+        res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+        
+        #x_model = np.arange(self.naxis2).astype(float)
+        y_model = sset.value(self.x_model)[0]
             
-            #x_model = np.arange(self.naxis2).astype(float)
-            y_model = sset.value(self.x_model)[0]
-            
-        else:
-            y_model = np.zeros(self.naxis2)
-            
-        if not (self.channel=='blue'):
-            self.min_pkheight = 10000
-        else:
-            self.min_pkheight = 100
-        #subtracting the dark level from the tslice
+        
+        self.min_pkheight = 10000
+
         self.comb = tslice - y_model
-        
-        # peaks = detect_peaks(comb,mpd=1,mph=self.min_pkheight,threshold=0,show=True,valley=False)
-        
-        #refinding the peaks after subtracting the valleys from the tslice
         
         self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
         
@@ -431,8 +420,9 @@ class TraceLlamas:
     
     def saveTraces(self, outfile='LLAMASTrace.pkl'):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        
         outpath = os.path.join(OUTPUT_DIR, outfile)
+        
+            
         print(f'outpath: {outpath}')
 
         if ('.pkl' in outfile):
@@ -540,6 +530,7 @@ if __name__ == "__main__":
     os.environ["RAY_RUNTIME_ENV_TEMPORARY_REFERENCE_EXPIRATION_S"] = "1200"
     parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
     parser.add_argument('filename', type=str, help='Path to input FITS file')
+    parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
     args = parser.parse_args()
       
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
