@@ -7,6 +7,8 @@ from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR
 import json
 import matplotlib.pyplot as plt
+import traceback
+
 
 def setup_logger(name, log_filename=None):
     """
@@ -254,6 +256,33 @@ def plot_trace(traceobj):
             plt.plot(np.arange(2048), traceobj.traces[i])
         except:
             print(f"ERROR {i}")
+    plt.show()
+    
+    
+def plot_traces_on_image(traceobj, data):
+    """Plot traces overlaid on raw data"""
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray')
+    plt.colorbar(im)
+    
+    # Plot each fiber trace
+    for i in range(len(traceobj.tracearr[:, 0])):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        ax.plot(xpos, ypos, ".", label=f"Trace {i}")
+        
+        # Plot trace line
+        try:
+            ax.plot(np.arange(2048), traceobj.traces[i], label=f"Trace Line {i}")
+        except Exception as e:
+            traceback.print_exc()
+            print(f"ERROR {i}: {e}")
+            break
+    
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
+    plt.tight_layout()
     plt.show()
     
 
