@@ -150,7 +150,7 @@ class TraceLlamas:
         rownum = int(rownum)
 
         #straight up to _+ 15 pixels on either side
-        tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)
+        tslice = np.median(self.data[:,rownum-8:rownum+7],axis=1).astype(float)
         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
         
         self.x_model = np.arange(self.naxis2).astype(float)
