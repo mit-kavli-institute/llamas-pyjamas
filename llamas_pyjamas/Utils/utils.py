@@ -6,6 +6,7 @@ import numpy as np
 from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR
 import json
+import matplotlib.pyplot as plt
 
 def setup_logger(name, log_filename=None):
     """
@@ -242,6 +243,18 @@ def flip_positions():
     with open('LUT/traceLUT.json', 'w') as f:
         json.dump(lut, f, indent=4)
 
+
+def plot_trace(traceobj):
+    for i in range(len(traceobj.tracearr[:, 0])):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        plt.plot(xpos, ypos, ".")
+        # Move line plot inside loop
+        try:
+            plt.plot(np.arange(2048), traceobj.traces[i])
+        except:
+            print(f"ERROR {i}")
+    plt.show()
     
 
 
