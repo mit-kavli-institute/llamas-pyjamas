@@ -17,6 +17,7 @@ sys.path.append(str(package_root))
 
 
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+from llamas_pyjamas.Trace.traceLlamasMulti import main as run_trace# type: ignore
 from astropy.io import fits
 
 sys.path.append(BASE_DIR+'/')
@@ -35,8 +36,25 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 
-def match_hdu_to_traces(hdu_list, trace_files):
-    """Match HDU extensions to their corresponding trace files"""
+# Define the function to run traceLlamasMulti.py
+def run_trace_script(file):
+    run_trace(file)
+
+def match_hdu_to_traces(hdu_list: list, trace_files: list) -> list:
+    """
+    Match HDU extensions to their corresponding trace files.
+    Parameters:
+    hdu_list (list): A list of HDU (Header Data Unit) objects from a FITS file.
+    trace_files (list): A list of file paths to trace files.
+    Returns:
+    list: A list of tuples where each tuple contains the index of the HDU and the matching trace file path.
+    The function skips the primary HDU (index 0) and processes the remaining HDUs. It extracts the color, bench, 
+    and side information from the HDU header to form a pattern. This pattern is then used to find a matching 
+    trace file from the provided list of trace files. If a matching trace file is found, it is added to the 
+    matches list along with the HDU index. If no matching trace file is found, a message is printed.
+    """
+    
+
     matches = []
     
     # Skip primary HDU (index 0)
@@ -213,12 +231,27 @@ def main_extract(file):
     
     return 
 
-def brute_extract(file, flat=False):
-    try:
+##Main function currently used by the Quicklook for full extraction
+
+def brute_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = None) -> None:
+    """
+    Extracts data from a FITS file using calibration files and saves the extracted data.
+    Parameters:
+    file (str): Path to the FITS file to be processed. Must have a .fits extension.
+    flatfiles (str, optional): Path to the flat files for generating new traces. Defaults to None.
+    biasfiles (str, optional): Path to the bias files for calibration. Defaults to None.
     
+    Returns:
+    None
+    """
+    
+    
+    try:
+        print(f'file is {file}')
         assert file.endswith('.fits'), 'File must be a .fits file'
         
         master_pkls = glob.glob(os.path.join(CALIB_DIR, '*.pkl'))
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         
         if not master_pkls:
             raise ValueError("No master calibration files found in CALIB_DIR")
@@ -257,16 +290,18 @@ def brute_extract(file, flat=False):
         #Debug statements
         print(f'basefile = {basefile}')
 
-        if flat:
-            print(f'Running trace routine with flat fielding')
-            ##Running the trace routine
-            main(file)
-            trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
+        if flatfiles:
+            try:
+                print(f'generating new traces routine with flat file {flatfiles}')
+                ##Running the trace routine
+                main(file)
+                trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
+            
+            except Exception as e:
+                traceback.print_exc()
         else:
-            print('Using master traces')
             trace_files = glob.glob(os.path.join(CALIB_DIR, f'*traces.pkl'))
-
-        #print(os.path.join(CALIB_DIR, f'{basefile}*traces.pkl'))
+            print(f'Using master traces {trace_files}')
 
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
