@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
 
         try:
             # Import and run extraction
-            from llamas_pyjamas.__main__ import main_extract, brute_extract
+            from llamas_pyjamas.GUI.__main__ import main_extract, brute_extract
             result = brute_extract(filepath)
 
             # Show success message
