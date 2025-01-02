@@ -306,7 +306,6 @@ def brute_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str 
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
         
-        print(f'trace_files = {trace_files}')
         extraction_list = []
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
