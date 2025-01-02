@@ -150,32 +150,40 @@ class TraceLlamas:
         return comb, sset, res, yfit
     
     def find_comb(self, rownum=None):
-        
-        # When in doubt, extract in the middle
-        if (rownum == None):
-            rownum = int(self.naxis1/2)
+        try:
+            # When in doubt, extract in the middle
+            if (rownum == None):
+                rownum = int(self.naxis1/2)
 
-        rownum = int(rownum)
+            rownum = int(rownum)
 
-        #straight up to _+ 15 pixels on either side
-        tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)
-        valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
+            #straight up to _+ 15 pixels on either side
+            tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)
+            valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
+
+            self.x_model = np.arange(self.naxis2).astype(float)
+
+
+            sset = bspline(valley_indices,everyn=2, nord=2)
+            res, yfit = sset.fit(valley_indices, valley_depths, invvar)
+
+            #x_model = np.arange(self.naxis2).astype(float)
+            y_model = sset.value(self.x_model)[0]
+
+
+            self.min_pkheight = 10000
+            if self.channel.lower() == 'blue':
+                logger.info(f"Setting min peak height to 1000 for blue channel")
+                self.min_pkheight = 1000
+
+            self.comb = tslice - y_model
         
-        self.x_model = np.arange(self.naxis2).astype(float)
-        
-        
-        sset = bspline(valley_indices,everyn=2, nord=2)
-        res, yfit = sset.fit(valley_indices, valley_depths, invvar)
-        
-        #x_model = np.arange(self.naxis2).astype(float)
-        y_model = sset.value(self.x_model)[0]
+            #self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+        except:
+            self.min_pkheight = 1000
+            self.comb = self.master_comb
             
-        
-        self.min_pkheight = 10000
-
-        self.comb = tslice - y_model
-        
-        self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+            
         
         return self.comb
     
@@ -205,21 +213,6 @@ class TraceLlamas:
             
             self.benchside = f'{self.bench}{self.side}'
             
-
-            #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
-            #finding the inital comb for the data we are trying to fit
-            self.comb = self.find_comb(rownum=self.naxis1/2)
-            self.orig_comb = self.comb
-            if find_LUT:
-                return
-            #make sure peaks aren't too close to the edge
-            #peaks = peaks[np.logical_and(peaks > 20, peaks < 2020)]
-            
-            #find the height value of the comb using the new peak locations
-            #pkht = self.comb[peaks]
-            
-            
-            
             #code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers
             with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
                 LUT = json.load(f)
@@ -229,6 +222,22 @@ class TraceLlamas:
             masterpeaks_dict = LUT["fib_pos"][self.channel.lower()][self.benchside]
             
             self.master_peaks = [int(pos) for pos in masterpeaks_dict.values()]
+            
+
+            #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
+            #finding the inital comb for the data we are trying to fit
+            
+            self.comb = self.find_comb(rownum=self.naxis1/2)
+            
+                
+            if find_LUT:
+                return
+            
+            #make sure peaks aren't too close to the edge
+            #peaks[np.logical_and(peaks > 20, peaks < 2020)]
+            
+            #find the height value of the comb using the new peak locations
+            #pkht = self.comb[peaks]
             
             #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
             #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
@@ -246,7 +255,7 @@ class TraceLlamas:
                 #plt.show()
                 logger.error(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff}")
                 offset=0
-                #return 1
+                return 1
             
             #update the peaks to the master peaks
             self.updated_peaks = np.array(self.master_peaks) + offset
@@ -345,6 +354,11 @@ class TraceLlamas:
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
             self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
+            # Check if traces are generated
+            # if self.traces is None or len(self.traces) == 0:
+            #     logger.error(f"Traces not generated for channel {self.channel} Bench {self.bench} side {self.side}")
+            #     result = {"status": "failed", "error": "Traces not generated", 'channel': self.channel, 'bench': self.bench, 'side': self.side}
+            #     return result
 
         except Exception as e:
             traceback.print_exc()
@@ -419,8 +433,10 @@ class TraceLlamas:
         return (fiberimg, profimg, bpmask)
     
     def saveTraces(self, outfile='LLAMASTrace.pkl'):
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        outpath = os.path.join(OUTPUT_DIR, outfile)
+        name = os.path.basename(self.fitsfile).replace('.fits', '_traces')
+        self.traceloc = os.path.join(OUTPUT_DIR, name)
+        os.makedirs(self.traceloc, exist_ok=True)
+        outpath = os.path.join(self.traceloc, outfile)
         
             
         print(f'outpath: {outpath}')
@@ -458,7 +474,7 @@ class TraceRay(TraceLlamas):
         
         result = super().process_hdu_data(hdu_data, hdu_header)
 
-               
+    
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
         origfile = self.fitsfile.split('.fits')[0]
@@ -488,7 +504,7 @@ def main(fitsfile: str) -> None:
     results = []    
     
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -522,6 +538,7 @@ def main(fitsfile: str) -> None:
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
     
     ray.shutdown()
+    
     
     return
     

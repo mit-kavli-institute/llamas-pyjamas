@@ -8,7 +8,7 @@ from llamas_pyjamas.config import CALIB_DIR
 import json
 import matplotlib.pyplot as plt
 import traceback
-
+from matplotlib import cm
 
 def setup_logger(name, log_filename=None):
     """
@@ -267,15 +267,19 @@ def plot_traces_on_image(traceobj, data):
     im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray')
     plt.colorbar(im)
     
+    # Generate color gradient
+    colors = cm.viridis(np.linspace(0, 1, len(traceobj.tracearr[:, 0])))
+    
     # Plot each fiber trace
-    for i in range(len(traceobj.tracearr[:, 0])):
+    #for i in range(len(traceobj.tracearr[:, 0])):
+    for i, color in enumerate(colors):
         ypos = traceobj.tracearr[i, :]
         xpos = traceobj.xtracefit[0, :]
-        ax.plot(xpos, ypos, ".", label=f"Trace {i}")
+        ax.plot(xpos, ypos, ".", color=color, label=f"Trace {i}")
         
         # Plot trace line
         try:
-            ax.plot(np.arange(2048), traceobj.traces[i], label=f"Trace Line {i}")
+            ax.plot(np.arange(2048), traceobj.traces[i], color=color, label=f"Trace Line {i}")
         except Exception as e:
             traceback.print_exc()
             print(f"ERROR {i}: {e}")
