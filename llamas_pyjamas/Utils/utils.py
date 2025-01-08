@@ -163,12 +163,12 @@ def dump_LUT(channel, hdu, trace_obj):
         benchside = f"{bench}{side}"
         
         trace_obj.process_hdu_data(hdu[i].data, dict(hdu[i].header), find_LUT=True)
-        comb = trace_obj.comb
-        peaks = trace_obj.orig_peaks
+        comb = trace_obj.orig_comb
+        peaks = trace_obj.first_peaks
         # Convert numpy array to regular Python types
         peaks_dict = create_peak_lookups(peaks, benchside=benchside)
         
-        master_lut["combs"][channel][benchside] = trace_obj.comb.tolist()
+        master_lut["combs"][channel][benchside] = trace_obj.orig_comb.tolist()
         # Add to master LUT
         master_lut["fib_pos"][channel][benchside] = peaks_dict
         print(f"Added {benchside} peaks to LUT")
@@ -208,8 +208,9 @@ def flip_b_side_positions():
         json.dump(lut, f, indent=4)
         
 def flip_positions():
-    #flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
-    flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
+    ##temp one
+    #flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
     
     # Load LUT
     with open('LUT/traceLUT.json', 'r') as f:
