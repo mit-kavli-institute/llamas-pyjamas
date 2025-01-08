@@ -10,9 +10,12 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+import traceback
+
 ####################################################################################
 
 from llamas_pyjamas.Utils.utils import setup_logger
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
@@ -29,16 +32,18 @@ class ExtractLlamas:
         
         ##put in a check here for hdu against trace attributes when I have more brain capacity
         
-        if self.channel == 'red':
-            logger.warning("Red channel may not extract correctly")
-        
         self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
         
-        self.hdr   = hdr#trace.hdr
-        self.frame = hdu_data.astype(float)
-        
-        self.x  = np.arange(trace.naxis1)
-        self.xx = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
+        self.hdr    = hdr#trace.hdr
+        self.frame  = hdu_data.astype(float)
+        self.x      = np.arange(trace.naxis1)
+
+        # xshift and wave will be populated only after an arc solution
+        self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
+        self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+        self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+
+        self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
 
         for ifiber in range(trace.nfibers):
 
@@ -91,7 +96,7 @@ class ExtractLlamas:
             logger.warning("No profile for fiber #{}".format(ifiber))
             return None,None,None
         
-        x_spec = self.xx[inprofile]
+        x_spec = self.ximage[inprofile]
         f_spec = self.frame[inprofile]
         if boxcar == True:
             weights = np.where(inprofile, 1, 0)[inprofile]#[weights]
@@ -115,8 +120,57 @@ class ExtractLlamas:
         with open(infile,'rb') as fp:
             object = pickle.load(fp)
         return(object)
+
+####################################################################################
+
+def ExtractLlamasCube(infits, tracefits, optimal=True):
+
+    assert infits.endswith('.fits'), 'File must be a .fits file'  
+    hdu = fits.open(infits)
+
+    # Find the trace files
+    basefile = os.path.basename(tracefits).split('.fits')[0]
+    trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
+    extraction_file = os.path.basename(infits).split('mef.fits')[0] + 'extract.pkl'
+
+    if len(trace_files) == 0:
+        logger.error("No trace files found for the indicated file root!")
+        return None
     
-def save_extractions(extraction_list, save_dir=None, prefix='LLAMASExtract_batch'):
+    hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
+    print(hdu_trace_pairs)
+
+    extraction_list = []
+
+    print(f"Saving extractions to {extraction_file}")
+
+    counter = 1
+    for hdu_index, file in hdu_trace_pairs:
+
+        print(f"Extracting extension number {counter} of 24")
+        hdr = hdu[hdu_index].header 
+        bias = np.nanmedian(hdu[hdu_index].data.astype(float))  
+        
+        try:
+            with open(file, mode='rb') as f:
+                tracer = pickle.load(f)
+    
+            extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
+            extraction_list.append(extraction)
+            
+        except Exception as e:
+            print(f"Error extracting trace from {file}")
+            print(traceback.format_exc())
+        counter += 1
+        
+    print(f'Extraction list = {extraction_list}')        
+    filename = save_extractions(extraction_list, savefile=extraction_file)
+    print(f'extraction saved filename = {filename}')
+
+    return None
+
+
+def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch'):
     """Save multiple extraction objects to single file"""
     if save_dir is None:
         save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
@@ -136,7 +190,10 @@ def save_extractions(extraction_list, save_dir=None, prefix='LLAMASExtract_batch
     # Save with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     outfile = f'{prefix}_{timestamp}.pkl'
-    outpath = os.path.join(save_dir, outfile)
+    if (savefile != None):
+        outpath = os.path.join(save_dir, savefile)
+    else:   
+        outpath = os.path.join(save_dir, outfile)
     
     logger.info(f'Saving batch extraction to: {outpath}')
     with open(outpath, 'wb') as fp:
@@ -186,6 +243,42 @@ def parse_args():
         raise ValueError("No .pkl files found!")
         
     return pkl_files
+
+def match_hdu_to_traces(hdu_list, trace_files):
+    """Match HDU extensions to their corresponding trace files"""
+    matches = []
+    
+    # Skip primary HDU (index 0)
+    for idx in range(1, len(hdu_list)):
+        header = hdu_list[idx].header
+        
+        # Get color and benchside from header
+        if 'COLOR' in header:
+            color = header['COLOR'].lower()
+            bench = header['BENCH']
+            side = header['SIDE']
+        else:
+            camname = header['CAM_NAME']
+            color = camname.split('_')[1].lower()
+            bench = camname.split('_')[0][0]
+            side = camname.split('_')[0][1]
+            
+        benchside = f"{bench}{side}"
+        pattern = f"{color}_{bench}_{side}_traces"
+        
+        # Find matching trace file
+        matching_trace = next(
+            (tf for tf in trace_files 
+             if pattern in os.path.basename(tf)),
+            None
+        )
+        #print(f'HDU {idx}: {color} {benchside} -> {matching_trace}')
+        if matching_trace:
+            matches.append((idx, matching_trace))
+        else:
+            print(f"No matching trace found for HDU {idx}: {color} {benchside}")
+            
+    return matches
 
 def main(files):
     pass
