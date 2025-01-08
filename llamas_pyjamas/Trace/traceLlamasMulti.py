@@ -504,7 +504,7 @@ def run_ray_tracing(fitsfile: str) -> None:
     results = []    
     
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul[1:] if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
