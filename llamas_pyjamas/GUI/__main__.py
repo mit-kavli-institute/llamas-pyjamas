@@ -17,7 +17,7 @@ sys.path.append(str(package_root))
 
 
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
-from llamas_pyjamas.Trace.traceLlamasMulti import main as run_trace# type: ignore
+from llamas_pyjamas.Trace.traceLlamasMulti import run_ray_tracing
 from astropy.io import fits
 
 sys.path.append(BASE_DIR+'/')
@@ -25,7 +25,7 @@ sys.path.append(BASE_DIR+'/')
 
 ray.init(ignore_reinit_error=True)
 
-from llamas_pyjamas.Trace.traceLlamasMulti import main # type: ignore
+
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions # type: ignore
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook # type: ignore
 from llamas_pyjamas.Utils.utils import setup_logger
@@ -285,8 +285,8 @@ def brute_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str 
         hdu = fits.open(file)
 
         #Defining the base filename
-        basefile = os.path.basename(file).split('.fits')[0]
-
+        #basefile = os.path.basename(file).split('.fits')[0]
+        basefile = 'LLAMAS_master'
         #Debug statements
         print(f'basefile = {basefile}')
 
@@ -300,7 +300,7 @@ def brute_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str 
             except Exception as e:
                 traceback.print_exc()
         else:
-            trace_files = glob.glob(os.path.join(CALIB_DIR, f'*traces.pkl'))
+            trace_files = glob.glob(os.path.join(CALIB_DIR, f'{basefile}*traces.pkl'))
             print(f'Using master traces {trace_files}')
 
         #Running the extract routine

@@ -169,7 +169,8 @@ class TraceLlamas:
 
         self.comb = tslice - self.y_model
         
-        self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+        self.peaks, self.peak_properties = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+        self.pkht = self.peak_properties['peak_heights']
         
         return self.comb
     
@@ -212,9 +213,14 @@ class TraceLlamas:
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
+            
+            self.first_peaks = self.peaks
+            self.first_pkht = self.pkht
+            
 
             #make sure peaks aren't too close to the edge
-            peaks = self.orig_peaks[np.logical_and(self.orig_peaks > 20, self.orig_peaks < 2020)]
+            self.updated_peaks = self.first_peaks[np.logical_and(self.first_peaks > 20, self.first_peaks < 2020)]
+            pkhts = self.first_pkht[np.logical_and(self.first_peaks > 20, self.first_peaks < 2020)]
             
             
             # #code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers
@@ -222,18 +228,18 @@ class TraceLlamas:
                 LUT = json.load(f)
                 self.LUT = LUT    
         
-            self.master_comb = np.array(LUT['combs'][self.channel.lower()][self.benchside])
-            masterpeaks_dict = LUT["fib_pos"][self.channel.lower()][self.benchside]
+            # self.master_comb = np.array(LUT['combs'][self.channel.lower()][self.benchside])
+            # masterpeaks_dict = LUT["fib_pos"][self.channel.lower()][self.benchside]
             
-            self.master_peaks = [int(pos) for pos in masterpeaks_dict.values()]
+            # self.master_peaks = [int(pos) for pos in masterpeaks_dict.values()]
             
             #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
-            #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
-            #self.orig_pkht = self.pkht
+            self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkhts)
+            self.orig_pkht = self.pkht
 
             #self.min_pkheight = 0.3 * np.median(pkht)
             
-            self.nfibers  = len(peaks)
+            self.nfibers  = len(self.updated_peaks)
             self.xmax     = self.naxis1-100
 
             ###Note to self: window was originall fitspace here, in principle should be the same thing
@@ -255,7 +261,8 @@ class TraceLlamas:
                 thiscomb = self.find_comb(thisx)
 
                 if itrace == 0:
-                    peaks = np.array(self.master_peaks)
+                    #peaks = np.array(self.master_peaks)
+                    peaks = np.array(self.updated_peaks)
                 else:
                     peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
@@ -287,7 +294,7 @@ class TraceLlamas:
                 thiscomb = self.find_comb(thisx)
 
                 if itrace == 0:
-                    peaks = np.array(self.master_peaks)
+                    peaks = np.array(self.updated_peaks)
                 else:
                     peaks = tracearr[:,mid_index-itrace+1].astype(int)
 
@@ -455,7 +462,7 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
 
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
@@ -470,7 +477,10 @@ def run_ray_tracing(fitsfile: str) -> None:
     results = []    
     
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+        if channel is not None:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        else:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
