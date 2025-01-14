@@ -205,11 +205,11 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            n_rows = 12
-            top_rows = self.data[-n_rows:, :]
-            background = np.median(top_rows)
+            # n_rows = 12
+            # top_rows = self.data[-n_rows:, :]
+            # background = np.median(top_rows)
             
-            self.data = self.data - background
+            # self.data = self.data - background
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
@@ -453,7 +453,7 @@ class TraceRay(TraceLlamas):
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
         print(f'color: {color}')
-        self.outfile = f'{origfile}_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+        self.outfile = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
         print(f'outfile: {self.outfile}')
         super().saveTraces(self.outfile)
         
@@ -477,8 +477,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
     results = []    
     
     with fits.open(fitsfile) as hdul:
-        if channel is not None:
+        if channel is not None and 'COLOR' in hdul[1].header:
             hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        elif channel is not None and 'CAM_NAME' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
         else:
             hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
@@ -538,8 +540,15 @@ if __name__ == "__main__":
     results = []    
     
     fitsfile = args.filename
+    
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+        if args.channel is not None and 'COLOR' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+        elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
+        else:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+        
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
