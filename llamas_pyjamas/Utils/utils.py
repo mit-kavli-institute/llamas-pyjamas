@@ -261,45 +261,49 @@ def plot_trace(traceobj):
     plt.show()
     
     
+
 def plot_traces_on_image(traceobj, data, zscale=False):
     """Plot traces overlaid on raw data with optional zscale"""
     fig, ax = plt.subplots(figsize=(12, 8))
 
-     # Apply zscale if requested
+    # Apply zscale if requested
     if zscale:
         interval = ZScaleInterval()
         vmin, vmax = interval.get_limits(data)
     else:
         vmin, vmax = None, None
 
-     # Plot raw data
+    # Plot raw data
     im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
     plt.colorbar(im)
 
-     # Generate color gradient
+    # Generate color gradient
     colors = cm.viridis(np.linspace(0, 1, len(traceobj.tracearr[:, 0])))
 
-     # Plot each fiber trace
+    # Plot each fiber trace
     for i, color in enumerate(colors):
         ypos = traceobj.tracearr[i, :]
         xpos = traceobj.xtracefit[0, :]
         ax.plot(xpos, ypos, ".", color=color, label=f"Trace {i}")
 
-         # Plot trace line
+        # Plot trace line
         try:
             ax.plot(np.arange(2048), traceobj.traces[i], color=color, label=f"Trace Line {i}")
         except Exception as e:
             traceback.print_exc()
             print(f"ERROR {i}: {e}")
             break
-    
+
+        # Add trace index number next to the red vertical line
+        midpoint = data.shape[1] // 2
+        ypos_midpoint = min(midpoint, len(ypos) - 1)
+        ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='bottom')
+
     # Plot vertical red line at the midpoint of NAXIS2
     midpoint = data.shape[1] // 2
     ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
-    
+
     ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
     plt.tight_layout()
     plt.show()
-
-
     
