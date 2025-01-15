@@ -231,8 +231,8 @@ class MainWindow(QMainWindow):
 
         try:
             # Import and run extraction
-            from llamas_pyjamas.__main__ import main_extract, brute_extract
-            result = brute_extract(filepath)
+            from llamas_pyjamas.GUI.guiExtract import GUI_extract, box_extract
+            result = GUI_extract(filepath)
 
             # Show success message
             QMessageBox.information(
