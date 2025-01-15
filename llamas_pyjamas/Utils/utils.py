@@ -297,7 +297,7 @@ def plot_traces_on_image(traceobj, data, zscale=False):
         # Add trace index number next to the red vertical line
         midpoint = data.shape[1] // 2
         ypos_midpoint = min(midpoint, len(ypos) - 1)
-        ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='bottom')
+        ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='center')
 
     # Plot vertical red line at the midpoint of NAXIS2
     midpoint = data.shape[1] // 2
