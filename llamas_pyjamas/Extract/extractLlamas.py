@@ -10,9 +10,21 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+import traceback
+
+import pkg_resources
+from pathlib import Path
+
 ####################################################################################
 
 from llamas_pyjamas.Utils.utils import setup_logger
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+
+
+
+
+ray.init(ignore_reinit_error=True)
+
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
@@ -29,16 +41,18 @@ class ExtractLlamas:
         
         ##put in a check here for hdu against trace attributes when I have more brain capacity
         
-        if self.channel == 'red':
-            logger.warning("Red channel may not extract correctly")
-        
         self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
         
-        self.hdr   = hdr#trace.hdr
-        self.frame = hdu_data.astype(float)
-        
-        self.x  = np.arange(trace.naxis1)
-        self.xx = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
+        self.hdr    = hdr#trace.hdr
+        self.frame  = hdu_data.astype(float)
+        self.x      = np.arange(trace.naxis1)
+
+        # xshift and wave will be populated only after an arc solution
+        self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
+        self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+        self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+
+        self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
 
         for ifiber in range(trace.nfibers):
 
@@ -91,7 +105,7 @@ class ExtractLlamas:
             logger.warning("No profile for fiber #{}".format(ifiber))
             return None,None,None
         
-        x_spec = self.xx[inprofile]
+        x_spec = self.ximage[inprofile]
         f_spec = self.frame[inprofile]
         if boxcar == True:
             weights = np.where(inprofile, 1, 0)[inprofile]#[weights]
@@ -115,8 +129,9 @@ class ExtractLlamas:
         with open(infile,'rb') as fp:
             object = pickle.load(fp)
         return(object)
-    
-def save_extractions(extraction_list, save_dir=None, prefix='LLAMASExtract_batch'):
+
+
+def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch'):
     """Save multiple extraction objects to single file"""
     if save_dir is None:
         save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
@@ -136,7 +151,10 @@ def save_extractions(extraction_list, save_dir=None, prefix='LLAMASExtract_batch
     # Save with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     outfile = f'{prefix}_{timestamp}.pkl'
-    outpath = os.path.join(save_dir, outfile)
+    if (savefile != None):
+        outpath = os.path.join(save_dir, savefile)
+    else:   
+        outpath = os.path.join(save_dir, outfile)
     
     logger.info(f'Saving batch extraction to: {outpath}')
     with open(outpath, 'wb') as fp:
@@ -187,8 +205,6 @@ def parse_args():
         
     return pkl_files
 
-def main(files):
-    pass
 
 if __name__ == '__main__':
     # Example of how to run the extraction

@@ -1,60 +1,54 @@
 from   astropy.io import fits
 import scipy
 import numpy as np
-import extractLlamas 
-import pickle
+import llamas_pyjamas.Extract.extractLlamas as extract
 from   matplotlib import pyplot as plt
-from   pypeit.core.arc import detect_peaks,iter_continuum
-from   pypeit.core import pydl
-from   pypeit.par import pypeitpar
-from   pypeit.core.wavecal import autoid
+# from   pypeit.core.arc import detect_peaks,iter_continuum
+# from   pypeit.core import pydl
+# from   pypeit.par import pypeitpar
+# from   pypeit.core.wavecal import autoid
 
+from pypeit.core.wavecal.wvutils import xcorr_shift_stretch
+import warnings
 
 ###############################################################################3
 
-class ArcLlamas:
+def shiftArcX(arc_extraction_pickle):
 
-    def __init__(self,arc_fitsfile,trace):
+    warnings.filterwarnings("ignore", category=UserWarning, module="astropy.stats.sigma_clipping")
+    arcspec, metadata = extract.load_extractions(arc_extraction_pickle)
 
-        print("...ExtractingArcSpectrum...")
-        self.arcspec = extractLlamas.ExtractLlamas(arc_fitsfile,trace)
+    # We will use fiber #150 in spectrograph 4A as the reference (near the center of the IFU)
+    # This corresponds to extension 18 (red), 19 (green) and 20 (blue) in the arc extraction object
+
+    # Red first
+    red_refspec = arcspec[18].counts[150]
+
+    fits_ext = 18
+    x = np.arange(2048)
+
+    for ifiber in range(0,metadata[fits_ext]['nfibers']):
+    # for ifiber in range(0,5):
+        print(f"Shifting fiber number {ifiber} in extension {metadata[fits_ext]['bench']}{metadata[fits_ext]['side']}")
+        func = 'quadratic'
+        success, shift, stretch, stretch2, _, _, _ = \
+            xcorr_shift_stretch(red_refspec, arcspec[fits_ext].counts[ifiber], stretch_func=func)
         
-        print("...Removing underlying continuum...")
-        self.removeArcContinuum()
+        if (success == 1):
+            arcspec[fits_ext].xshift[ifiber,:] = (x*stretch+x**2*stretch2)+shift
+        else:
+            print("....Warning: arc shift failed for this fiber!")
+            arcspec[fits_ext].xshift[ifiber,:] = x
+
+    # Re-save with new information populated
+    sv = arc_extraction_pickle.replace('.pkl','_shifted.pkl')
+    extract.save_extractions(arcspec, savefile=sv)
+
+def fiberRelativeThroughput(arc_extraction_pickle):
+
+    arcspec, metadata = extract.load_extractions(arc_extraction_pickle)
+    fits_ext = 18
+
+    for ifiber in range(0,metadata[fits_ext]['nfibers']):   
+        trace = arcspec[fits_ext].trace
         
-        llamas_lamps = ['ArI','NeI','KrI']
-        print("...Setting up wavelength fitting parameters...")
-        arcsol_params = pypeitpar.WavelengthSolutionPar(lamps=llamas_lamps)
-
-        arc_input = np.transpose(self.arcspec.counts)
-
-
-        if (True):
-            print("...Brute force wavelength fit (only do this if no reference arc available...")
-            self.arcsol = autoid.HolyGrail(arc_input, par=arcsol_params, \
-                                      islinelist=False, use_unknowns=False)
-
-        if (False):
-            f = open("wavesol.pickle","wb")
-            pickle.dump(self.arcsol,f)
-            f.close()
-
-            #
-            # Note: to load this solution:
-            #   import pickle
-            #   f = open("wavesol.pickle","rb")
-            #   tt = pickle.load(f)
-            #   f.close()
-            #   
-            #   Now you can access the object as tt
-            
-    def removeArcContinuum(self):
-
-        nfibers,naxis1 = self.arcspec.counts.shape
-
-        for ifiber in range(nfibers):
-            contin = iter_continuum(self.arcspec.counts[ifiber,:],npoly=12)
-            self.arcspec.counts[ifiber,:] -= contin[0]
-
-        
-

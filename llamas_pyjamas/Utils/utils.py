@@ -6,6 +6,10 @@ import numpy as np
 from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR
 import json
+import matplotlib.pyplot as plt
+import traceback
+from matplotlib import cm
+from astropy.visualization import ZScaleInterval
 
 def setup_logger(name, log_filename=None):
     """
@@ -159,12 +163,12 @@ def dump_LUT(channel, hdu, trace_obj):
         benchside = f"{bench}{side}"
         
         trace_obj.process_hdu_data(hdu[i].data, dict(hdu[i].header), find_LUT=True)
-        comb = trace_obj.comb
-        peaks = trace_obj.orig_peaks
+        comb = trace_obj.orig_comb
+        peaks = trace_obj.first_peaks
         # Convert numpy array to regular Python types
         peaks_dict = create_peak_lookups(peaks, benchside=benchside)
         
-        master_lut["combs"][channel][benchside] = trace_obj.comb.tolist()
+        master_lut["combs"][channel][benchside] = trace_obj.orig_comb.tolist()
         # Add to master LUT
         master_lut["fib_pos"][channel][benchside] = peaks_dict
         print(f"Added {benchside} peaks to LUT")
@@ -204,8 +208,10 @@ def flip_b_side_positions():
         json.dump(lut, f, indent=4)
         
 def flip_positions():
-    #flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
-    flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
+    ##temp one
+    #flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    
     # Load LUT
     with open('LUT/traceLUT.json', 'r') as f:
         lut = json.load(f)
@@ -241,7 +247,63 @@ def flip_positions():
     with open('LUT/traceLUT.json', 'w') as f:
         json.dump(lut, f, indent=4)
 
+
+def plot_trace(traceobj):
+    for i in range(len(traceobj.tracearr[:, 0])):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        plt.plot(xpos, ypos, ".")
+        # Move line plot inside loop
+        try:
+            plt.plot(np.arange(2048), traceobj.traces[i])
+        except:
+            print(f"ERROR {i}")
+    plt.show()
+    
     
 
+def plot_traces_on_image(traceobj, data, zscale=False):
+    """Plot traces overlaid on raw data with optional zscale"""
+    fig, ax = plt.subplots(figsize=(12, 8))
 
+    # Apply zscale if requested
+    if zscale:
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(data)
+    else:
+        vmin, vmax = None, None
+
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
+    plt.colorbar(im)
+
+    # Generate color gradient
+    colors = cm.viridis(np.linspace(0, 1, len(traceobj.tracearr[:, 0])))
+
+    # Plot each fiber trace
+    for i, color in enumerate(colors):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        ax.plot(xpos, ypos, ".", color=color, label=f"Trace {i}")
+
+        # Plot trace line
+        try:
+            ax.plot(np.arange(2048), traceobj.traces[i], color=color, label=f"Trace Line {i}")
+        except Exception as e:
+            traceback.print_exc()
+            print(f"ERROR {i}: {e}")
+            break
+
+        # Add trace index number next to the red vertical line
+        midpoint = data.shape[1] // 2
+        ypos_midpoint = min(midpoint, len(ypos) - 1)
+        ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='bottom')
+
+    # Plot vertical red line at the midpoint of NAXIS2
+    midpoint = data.shape[1] // 2
+    ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
+
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
+    plt.tight_layout()
+    plt.show()
     
