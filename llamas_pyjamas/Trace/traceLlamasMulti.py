@@ -236,12 +236,7 @@ class TraceLlamas:
             #make sure peaks aren't too close to the edge
             #peaks[np.logical_and(peaks > 20, peaks < 2020)]
             
-            #find the height value of the comb using the new peak locations
-            #pkht = self.comb[peaks]
             
-            #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
-            #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
-            #self.orig_pkht = self.pkht
         
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
             
@@ -258,6 +253,7 @@ class TraceLlamas:
                 return 1
             
             #update the peaks to the master peaks
+            self.updated_comb = np.array(self.master_comb) + offset
             self.updated_peaks = np.array(self.master_peaks) + offset
 
             #self.min_pkheight = 0.3 * np.median(pkht)
@@ -283,7 +279,7 @@ class TraceLlamas:
                 thiscomb = self.find_comb(thisx)
 
                 if itrace == 0:
-                    peaks = self.updated_peaks
+                    peaks = self.updated_comb
                 else:
                     peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
