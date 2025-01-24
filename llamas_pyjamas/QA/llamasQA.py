@@ -1,3 +1,21 @@
+"""
+This module provides various functions for plotting and analyzing data related to the llamas_pyjamas pipeline 
+using FITS files and matplotlib for visualization. It includes functions to plot images in DS9, 
+generate QA plots for fiber tracing, plot combined templates, and compare combs between different 
+channels and bench sides.
+
+Functions:
+    plot_ds9(image_array: fits, samp=False) -> None:
+        Plots a FITS image array in DS9, with optional SAMP integration.
+    plot_trace_qa(trace_obj, save_dir=None):
+        Plots QA for fiber tracing, including individual fiber profiles.
+    plot_comb_template(fitsfile, channel):
+        Plots combined templates for a specified channel from a FITS file.
+    plot_master_comb(channel):
+        Plots master combs for a specified channel using data from a lookup table.
+    compare_combs(channel1, benchside1, channel2, benchside2):
+        Compares combs between two specified channels and bench sides.
+"""
 from astropy.io import fits
 import numpy as np
 import subprocess
@@ -75,7 +93,7 @@ def plot_ds9(image_array: fits, samp=False) -> None:
 
     return
 
-def plot_trace_qa(trace_obj, save_dir=None):
+def plot_trace_qa(trace_obj: TraceLlamas, save_dir=None)-> None:
     """Plot QA for fiber tracing"""
 
     # Plot 2: Individual fiber profiles
@@ -99,7 +117,7 @@ def plot_trace_qa(trace_obj, save_dir=None):
 
 
 
-def plot_comb_template(fitsfile, channel):
+def plot_comb_template(fitsfile: str, channel)-> None:
     
     trace = TraceLlamas(fitsfile)
     hdu = fits.open(fitsfile)
@@ -153,7 +171,7 @@ def plot_comb_template(fitsfile, channel):
     return
 
 
-def plot_master_comb(channel):
+def plot_master_comb(channel: str)-> None:
     
     pkht_value = 10000
     
@@ -211,7 +229,7 @@ def plot_master_comb(channel):
     return
 
 
-def compare_combs(channel1, benchside1, channel2, benchside2):
+def compare_combs(channel1: str, benchside1: str, channel2: str, benchside2: str)-> None:
     with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'rb') as f:
         master_LUT = json.load(f)
     
