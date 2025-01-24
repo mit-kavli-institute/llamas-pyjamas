@@ -1,3 +1,19 @@
+"""
+This module provides functions for processing and analyzing white light images from the LLAMAS instrument.
+It includes functions for isolating color channels, creating FITS files, and mapping fibers.
+Functions:
+    color_isolation(extractions): Isolates blue, green, and red channels from a list of extraction objects.
+    WhiteLightFits(extraction_array, outfile=None): Creates a FITS file from an array of extraction objects.
+    WhiteLight(extraction_array, ds9plot=True): Generates a white light image from an array of extraction objects.
+    WhiteLightQuickLook(tracefile, data): Generates a quick look white light image from a trace file and data.
+    WhiteLightHex(extraction_array, ds9plot=True): Placeholder for hexagonal grid inclusion.
+    FiberMap(bench, infiber): Maps a fiber to its x and y coordinates based on the bench and fiber number.
+    FiberMap_LUT(bench, fiber): Looks up the x and y coordinates of a fiber using a lookup table.
+    plot_fibermap(): Plots the fiber map for the LLAMAS instrument.
+    fibermap_table(): Generates a table of fiber mappings and writes it to a file.
+    rerun(): Reruns the white light generation process for a set of extraction objects.
+"""
+
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
@@ -13,6 +29,7 @@ from llamas_pyjamas.Utils.utils import setup_logger
 from datetime import datetime
 import traceback
 from llamas_pyjamas.config import LUT_DIR
+from typing import Tuple
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
@@ -23,7 +40,7 @@ print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 
-def color_isolation(extractions):
+def color_isolation(extractions)-> Tuple[list, list, list]:
     """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
 
     Args:
@@ -36,7 +53,22 @@ def color_isolation(extractions):
     return blue_extractions, green_extractions, red_extractions
 
 
-def WhiteLightFits(extraction_array, outfile=None):
+def WhiteLightFits(extraction_array: list, outfile=None)-> str:
+    """
+    Process an array of extracted color data to create a white light FITS file.
+    Parameters:
+    extraction_array (list): A list of extracted color data arrays.
+    outfile (str, optional): The output file path for the white light FITS file. 
+                             If None, the output file name is generated based on the input file name.
+    Returns:
+    str: The file path of the created white light FITS file.
+    Notes:
+    - The function assumes that all extraction objects came from the same original file.
+    - The function processes blue, green, and red data if they exist in the extraction array.
+    - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.
+    - The function writes the created HDU list to a FITS file in the specified output directory.
+    """
+
     
     blue, green, red = color_isolation(extraction_array)
     print(blue, green, red)
@@ -108,7 +140,23 @@ def WhiteLightFits(extraction_array, outfile=None):
     return white_light_file
 
 
-def WhiteLight(extraction_array, ds9plot=True):
+def WhiteLight(extraction_array: list, ds9plot=True)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Generate a white light image from an array of extraction files or objects.
+    Parameters:
+    extraction_array (list): A list of extraction files (str) or ExtractLlamas objects.
+    ds9plot (bool, optional): If True, plot the white light image using DS9. Default is True.
+    Returns:
+    tuple: A tuple containing:
+        - whitelight (numpy.ndarray): The interpolated white light image.
+        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
+        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
+        - flux (numpy.ndarray): The flux values for each fiber.
+    Raises:
+    AssertionError: If extraction_array is not a list.
+    TypeError: If an element in extraction_array is not a string or ExtractLlamas object.
+    """
+
     
     assert type(extraction_array) == list, 'Extraction array must be a list of extraction files'
     
@@ -164,8 +212,26 @@ def WhiteLight(extraction_array, ds9plot=True):
 
     return whitelight, xdata, ydata, flux
 
-def WhiteLightQuickLook(tracefile, data):
-        
+def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Generate a quick look white light image from trace data and image data.
+    Parameters:
+    tracefile (str): Path to the trace file containing the trace object.
+    data (numpy.ndarray): Image data array.
+    Returns:
+    tuple: A tuple containing:
+        - whitelight (numpy.ndarray): Interpolated white light image.
+        - xdata (numpy.ndarray): Array of x-coordinates for fibers.
+        - ydata (numpy.ndarray): Array of y-coordinates for fibers.
+        - flux (numpy.ndarray): Array of flux values for fibers.
+    Notes:
+    - The function reads the trace object from the provided tracefile.
+    - It uses a fiber map lookup table (FiberMap_LUT) to get x and y coordinates for each fiber.
+    - The flux for each fiber is calculated by summing the data values where the fiber image matches the fiber index.
+    - A linear interpolator (LinearNDInterpolator) is used to create the white light image.
+    - Optionally, the white light image can be plotted using DS9 (if ds9plot is set to True).
+    """
+
     #    hdul = fits.open(data)
 
     # Each trace object represents one camera / side pair
@@ -215,7 +281,16 @@ def WhiteLightHex(extraction_array, ds9plot=True):
     return
 
    
-def FiberMap(bench, infiber):
+def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
+    """
+    Calculate the fiber map coordinates for a given bench and fiber number.
+    Parameters:
+    bench (str): The bench identifier, which can be '1A', '2A', '3A', '4A', '1B', '2B', '3B', or '4B'.
+    infiber (int): The fiber number.
+    Returns:
+    tuple: A tuple containing the x and y coordinates of the fiber.
+    """
+
 
     n_right    = 23
     n_left     = 23
@@ -333,7 +408,7 @@ def FiberMap(bench, infiber):
     # return(x_value,y_value)
     return(x_fiber,n_vertical-int(y0+y_rownum))
 
-def FiberMap_LUT(bench, fiber):
+def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
 
     #if (np.logical_and(bench == '2B',fiber >= 49)):
     #    fiber += 1
@@ -346,7 +421,21 @@ def FiberMap_LUT(bench, fiber):
     except:
         return(-1,-1)
 
-def plot_fibermap():
+def plot_fibermap()-> None:
+    """
+    Plots the fiber map for the LLAMAS IFU, showing the mapping of fibers to different configurations.
+    This function generates a plot with the fiber numbers annotated at their respective positions for 
+    different configurations (1A, 2A, 3A, 4A, 1B, 2B, 3B, 4B). It also includes directional annotations 
+    (N for North, E for East) and saves the plot as an image file.
+    Annotations:
+    - Fibers in configuration 1A, 3A, 4B, and 2B are plotted in black and red.
+    - Fibers in configuration 2A, 4A, 3B, and 1B are plotted in blue and green.
+    - Directional annotations for North and East are included.
+    The plot is saved as "fiber.png" in the specified directory.
+    Returns:
+        None
+    """
+
 
     # 1A - N=298
     # 2A - N=300
@@ -449,7 +538,17 @@ def plot_fibermap():
     plt.show()
 
 
-def fibermap_table():
+def fibermap_table()-> Table:
+    """
+    Generates a fiber map table for the LLAMAS instrument and writes it to a file.
+    The function creates a table with columns: 'bench', 'fiber', 'xindex', 'yindex', 'xpos', and 'ypos'.
+    It populates the table with fiber positions for both A and B sides of the instrument, using the FiberMap function
+    to get the x and y indices for each fiber. The y position is adjusted by the sine of 60 degrees.
+    The table is then written to a file named 'LLAMAS_FiberMap_rev02_updated.dat' in fixed-width ASCII format.
+    Returns:
+        astropy.table.Table: The populated fiber map table.
+    """
+
 
     fiber_table = Table(names=('bench','fiber','xindex','yindex','xpos','ypos'),\
                         dtype=('S4','i4','i4','i4','f4','f4'))
@@ -495,6 +594,21 @@ def fibermap_table():
     return(fiber_table)
     
 def rerun():
+    """
+    Reruns the WhiteLight process with a set of predefined extractions.
+    This function loads several extraction files using the ExtractLlamas class and then
+    runs the WhiteLight process with these extractions.
+    The following extraction files are loaded:
+    - Extract_1A.pkl
+    - Extract_2A.pkl
+    - Extract_3A.pkl
+    - Extract_4A.pkl
+    - Extract_1B.pkl
+    - Extract_2B.pkl
+    - Extract_3B.pkl
+    - Extract_4B.pkl
+    The loaded extractions are then passed to the WhiteLight function for processing.
+    """
 
     extraction1a = ('Extract_1A.pkl')
     extraction2a = ExtractLlamas.loadExtraction('Extract_2A.pkl')

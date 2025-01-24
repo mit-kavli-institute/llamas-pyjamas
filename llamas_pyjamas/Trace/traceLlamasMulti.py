@@ -1,4 +1,24 @@
 
+"""
+Module: traceLlamasMulti
+This module provides functionality for processing and tracing fibers in LLAMAS FITS files using Ray multiprocessing. 
+It includes classes and methods for detecting peaks, fitting B-splines, and generating fiber profiles.
+The main class, TraceLlamas, handles the core processing logic, including:
+- Loading and processing FITS files
+- Detecting peaks and valleys in the data
+- Fitting B-splines to the detected features
+- Generating fiber profiles and bad pixel masks
+- Saving the processed traces to output files
+The module relies on a set of master traces already being produced to apply cross-correlation methods of matching the combs. 
+This ensures accurate alignment and tracing of fibers across different channels and bench sides.
+Classes:
+- TraceLlamas: Core class for processing and tracing fibers in LLAMAS FITS files.
+- TraceRay: Subclass of TraceLlamas that integrates Ray for parallel processing.
+Functions:
+- run_ray_tracing: Function to initiate Ray-based tracing on a given FITS file.
+Usage:
+- The module can be run as a standalone script with command-line arguments to specify the input FITS file and other options.
+"""
 import os
 import sys
 from   astropy.io import fits
@@ -39,7 +59,20 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 #logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 
-def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
+def get_fiber_position(channel:str, benchside: str, fiber: str) -> int: 
+    """
+    Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber identifier.
+    Args:
+        channel (str): The channel name to look up in the LUT (red, blue or green).
+        benchside (str): The benchside identifier to look up in the LUT (e.g., '1A').
+        fiber (str): The fiber identifier to look up in the LUT.
+    Returns:
+        int: The position of the specified fiber.
+    Raises:
+        FileNotFoundError: If the LUT file does not exist.
+        KeyError: If the specified channel, benchside, or fiber is not found in the LUT.
+    """
+
     json_file = os.path.join(LUT_DIR, 'traceLUT.json')
     with open(json_file, 'r') as f:
         lut = json.load(f)
@@ -63,6 +96,46 @@ def cross_correlate_combs(comb1: np.ndarray, comb2: np.ndarray) -> Tuple[float, 
 
 
 class TraceLlamas:
+    """
+    A class to trace and process fiber positions in a FITS file.
+    Attributes:
+    -----------
+    fitsfile : str
+        The path to the FITS file to be processed.
+    mph : Optional[int]
+        Minimum peak height for peak detection.
+    master_trace : Optional[str]
+        Path to the master trace file.
+    xmin : int
+        Minimum x-coordinate for trace fitting.
+    fitspace : int
+        Space for fitting.
+    min_pkheight : int
+        Minimum peak height for peak detection.
+    window : int
+        Window size for median calculation.
+    offset_cutoff : int
+        Cutoff for offset in cross-correlation.
+    Methods:
+    --------
+    insert_dead_fibers(LUT, benchside, pkhts):
+        Inserts dead fibers into the peak heights array.
+    generate_valleys(tslice: float) -> Tuple[np.ndarray, ...]:
+        Generates valleys in the given slice.
+    fit_bspline(valley_indices: np.ndarray, valley_depths: np.ndarray, invvar: np.ndarray) -> Tuple[np.ndarray, ...]:
+        Fits a B-spline to the given valleys.
+    fit_grid_single(xtmp) -> Tuple[float, bspline, int, np.ndarray]:
+        Fits a grid to a single x-window.
+    find_comb(rownum=None):
+        Finds the comb for the given row number.
+    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
+        Processes data from a specific HDU array.
+    profileFit():
+        Fits the profile of the fibers.
+    saveTraces(outfile='LLAMASTrace.pkl'):
+        Saves the traces to a file.
+    """
+
     
     def __init__(self, 
                  fitsfile: str,
@@ -89,7 +162,17 @@ class TraceLlamas:
 
         return
     
-    def insert_dead_fibers(self, LUT, benchside, pkhts):
+    def insert_dead_fibers(self, LUT: dict, benchside: str, pkhts: np.ndarray) -> np.ndarray:
+        """
+        Inserts dead fibers into the pkhts list at the positions specified in the LUT.
+        Parameters:
+        - LUT (dict): Lookup table containing information about dead fibers.
+        - benchside (str): The benchside identifier to look up dead fibers in the LUT.
+        - pkhts (list): List of peak heights to insert dead fibers into.
+        Returns:
+        - list: The updated pkhts list with dead fibers inserted at the specified positions.
+        """
+
         dead_fibers = LUT.get('dead_fibers', {}).get(benchside, [])
         dead_fibers = sorted(dead_fibers)
 
@@ -104,6 +187,19 @@ class TraceLlamas:
     
             
     def generate_valleys(self, tslice: float) -> Tuple[np.ndarray, ...]:
+        """
+        Generate valleys from a given slice of the raw image.
+        This method detects valleys in the provided slice data and returns
+        the indices and depths of the valleys, along with an array of inverse variances.
+        Parameters:
+        tslice (float): The slice data from which valleys are to be detected.
+        Returns:
+        Tuple[np.ndarray, ...]: A tuple containing:
+            - valley_indices (np.ndarray): The indices of the detected valleys.
+            - valley_depths (np.ndarray): The depths of the detected valleys.
+            - invvar (np.ndarray): An array of ones with the same length as the number of detected valleys.
+        """
+
 
         tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
         valley_indices = np.ndarray(len(tmp))
@@ -117,6 +213,15 @@ class TraceLlamas:
         return valley_indices, valley_depths, invvar
     
     def fit_bspline(self, valley_indices: np.ndarray, valley_depths: np.ndarray, invvar: np.ndarray) -> Tuple[np.ndarray, ...]:
+        """
+        Fit a B-spline to the given valley indices and depths.
+        Parameters:
+        valley_indices (np.ndarray): Array of indices where valleys are located.
+        valley_depths (np.ndarray): Array of depths corresponding to the valley indices.
+        invvar (np.ndarray): Array of inverse variances for the valley depths.
+        Returns:
+        Tuple[np.ndarray, ...]: A tuple containing the x_model and the fitted y_model values.
+        """
         
         sset = bspline(valley_indices,everyn=2) #pydl.bspline(valley_indices,everyn=2)
         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
@@ -127,7 +232,26 @@ class TraceLlamas:
     
     
     # takes in location of xwindow, and the y_model which the the dark base level along the comb
-    def fit_grid_single(self, xtmp) -> Tuple[float, bspline, int, np.ndarray]:
+    def fit_grid_single(self, xtmp: int) -> Tuple[float, bspline, int, np.ndarray]:
+        """
+        Fits a grid to a single x-window point and returns the residuals, bspline object, 
+        fit result, and fitted y-values.
+        Parameters:
+        -----------
+        xtmp : int
+            The x-window point around which the fitting is performed.
+        Returns:
+        --------
+        comb : np.ndarray
+            The residuals after subtracting the model from the y-trace.
+        sset : bspline
+            The bspline object used for fitting.
+        res : int
+            The result of the bspline fit.
+        yfit : np.ndarray
+            The fitted y-values from the bspline model.
+        """
+
         
         #defining a new yslice for a given xwindow point
         ytrace = np.median(self.data[:,xtmp.astype(int)-self.window:xtmp.astype(int)+self.window],axis=1)
@@ -149,7 +273,20 @@ class TraceLlamas:
         
         return comb, sset, res, yfit
     
-    def find_comb(self, rownum=None):
+    def find_comb(self, rownum=None)-> np.ndarray:
+        """
+        Finds and returns the comb for a given row number in the data.
+        Parameters:
+        rownum (int, optional): The row number to process. If None, defaults to the middle row.
+        Returns:
+        numpy.ndarray: The computed comb for the specified row.
+        Notes:
+        - If `rownum` is not provided, it defaults to the middle row of the data.
+        - The method extracts a slice of the data around the specified row and computes the valleys.
+        - A B-spline is fitted to the valley depths, and the comb is calculated by subtracting the fitted model from the slice.
+        - If an exception occurs, a default minimum peak height and master comb are used.
+        """
+
         try:
             # When in doubt, extract in the middle
             if (rownum == None):
@@ -189,6 +326,38 @@ class TraceLlamas:
     
          
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
+        """
+        Processes data from a specific HDU (Header Data Unit) array.
+        Parameters:
+        -----------
+        hdu_data : np.ndarray
+            The data array from the HDU to be processed.
+        hdu_header : dict
+            The header information associated with the HDU data.
+        find_LUT : bool, optional
+            If True, the function will only find the LUT (Lookup Table) and return without further processing. Default is False.
+        Returns:
+        --------
+        dict
+            A dictionary containing the status of the processing. If successful, returns {"status": "success"}.
+            If an error occurs, returns {"status": "failed", "error": str(e), 'channel': self.channel, 'bench': self.bench, 'side': self.side}.
+        Raises:
+        -------
+        Exception
+            If any error occurs during the processing, it will be caught and logged, and the function will return a failure status.
+        Notes:
+        ------
+        - The function processes the HDU data by extracting relevant information from the header and data array.
+        - It handles different cases based on the presence of specific header keys ('COLOR', 'CAM_NAME').
+        - The function reads a trace LUT (Lookup Table) from a JSON file and updates peaks and peak heights arrays.
+        - It performs cross-correlation to find offsets and updates the comb and peaks accordingly.
+        - The function fits traces from the midpoint forward and backward, updating the trace array.
+        - It defines the coordinates of the trace along the x-axis and fits a spline along the x-axis for each fiber.
+        - The function interpolates the traces to give x, y positions for each fiber along the naxis.
+        Example:
+        --------
+        result = process_hdu_data(hdu_data, hdu_header, find_LUT=True)
+        """
         """Processes data from a specific HDU array."""
         
         try:
@@ -230,18 +399,11 @@ class TraceLlamas:
             self.comb = self.find_comb(rownum=self.naxis1/2)
             
                 
-            if find_LUT:
-                return
             
             #make sure peaks aren't too close to the edge
             #peaks[np.logical_and(peaks > 20, peaks < 2020)]
             
-            #find the height value of the comb using the new peak locations
-            #pkht = self.comb[peaks]
             
-            #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
-            #self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkht)
-            #self.orig_pkht = self.pkht
         
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
             
@@ -258,6 +420,7 @@ class TraceLlamas:
                 return 1
             
             #update the peaks to the master peaks
+            self.updated_comb = np.array(self.master_comb) + offset
             self.updated_peaks = np.array(self.master_peaks) + offset
 
             #self.min_pkheight = 0.3 * np.median(pkht)
@@ -283,7 +446,7 @@ class TraceLlamas:
                 thiscomb = self.find_comb(thisx)
 
                 if itrace == 0:
-                    peaks = self.updated_peaks
+                    peaks = self.updated_comb
                 else:
                     peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
@@ -315,7 +478,7 @@ class TraceLlamas:
                 thiscomb = self.find_comb(thisx)
 
                 if itrace == 0:
-                    peaks = self.updated_peaks
+                    peaks = self.updated_comb
                 else:
                     peaks = tracearr[:,mid_index-itrace+1].astype(int)
 
@@ -369,7 +532,18 @@ class TraceLlamas:
         result = {"status": "success"}
         return result
     
-    def profileFit(self):
+    def profileFit(self)-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Fits the spatial profile of fibers in the data.
+        This method normalizes the data, generates masks for bad pixels, and fits 
+        the fiber spatial profile using a bspline. It updates the fiber image, 
+        profile image, and bad pixel mask attributes of the class.
+        Returns:
+            tuple: A tuple containing:
+                - fiberimg (numpy.ndarray): An array listing the fiber number of each pixel.
+                - profimg (numpy.ndarray): An array representing the profile weighting function.
+                - bpmask (numpy.ndarray): A boolean array representing the bad pixel mask.
+        """
         
         ref = self.data[12,:]
 
@@ -432,7 +606,22 @@ class TraceLlamas:
         
         return (fiberimg, profimg, bpmask)
     
-    def saveTraces(self, outfile='LLAMASTrace.pkl'):
+    def saveTraces(self, outfile='LLAMASTrace.pkl')-> None:
+        """
+        Save trace data to a specified file format.
+        Parameters:
+        outfile (str): The name of the output file. Default is 'LLAMASTrace.pkl'.
+                       Supported formats are '.pkl' for pickle files and '.h5' for HDF5 files.
+        This method saves the trace data of the object to a file in the specified format.
+        If the output file is a pickle file ('.pkl'), the entire object is serialized using cloudpickle.
+        If the output file is an HDF5 file ('.h5'), the trace data and other attributes are saved in datasets.
+        The output file is saved in a directory named after the base name of the FITS file with '_traces' appended.
+        Raises:
+        OSError: If there is an error creating the output directory or writing the file.
+        Example:
+        >>> obj.saveTraces('output_traces.h5')
+        """
+
         name = os.path.basename(self.fitsfile).replace('.fits', '_traces')
         self.traceloc = os.path.join(OUTPUT_DIR, name)
         os.makedirs(self.traceloc, exist_ok=True)
@@ -461,6 +650,17 @@ class TraceLlamas:
     
 @ray.remote
 class TraceRay(TraceLlamas):
+    """
+    TraceRay class inherits from TraceLlamas and is used to process and trace data from a FITS file.
+    Attributes:
+        fitsfile (str): The name of the FITS file being processed.
+    Methods:
+        __init__(fitsfile: str) -> None:
+            Initializes the TraceRay object with the given FITS file.
+        process_hdu_data(hdu_data: np.ndarray, hdu_header: dict) -> dict:
+            Processes the HDU data and header, performs profile fitting, saves the traces, and returns the result.
+    """
+
     
     def __init__(self, fitsfile: str) -> None:
         super().__init__(fitsfile)
@@ -470,6 +670,25 @@ class TraceRay(TraceLlamas):
     
     
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
+        """
+        Processes HDU (Header Data Unit) data and performs profile fitting.
+        Parameters:
+        hdu_data (np.ndarray): The HDU data to be processed.
+        hdu_header (dict): The header information associated with the HDU data.
+        Returns:
+        dict: A dictionary containing the result of the processing, including status and any relevant data.
+        This method performs the following steps:
+        1. Records the start time of the processing.
+        2. Calls the superclass's process_hdu_data method to process the HDU data.
+        3. Performs profile fitting by calling the superclass's profileFit method and stores the results in instance variables.
+        4. Constructs the output file name based on the fitsfile, channel, bench, and side attributes.
+        5. Saves the traces to the constructed output file by calling the superclass's saveTraces method.
+        6. Calculates the elapsed time for the processing.
+        7. Returns the result of the processing if the status is not "success".
+        Note:
+        - The method currently has a return statement before checking the result status, which may need to be adjusted.
+        """
+
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header)
@@ -485,11 +704,21 @@ class TraceRay(TraceLlamas):
         super().saveTraces(self.outfile)
         
         elapsed_time = time.time() - start_time
-        return 
         if result["status"] != "success":
                 return result
 
 def run_ray_tracing(fitsfile: str) -> None:
+    """
+    Perform ray tracing on a FITS file using parallel processing with Ray.
+    This function initializes Ray with the number of available CPU cores, processes
+    each HDU (Header Data Unit) in the FITS file using a remote TraceRay actor, and
+    monitors the processing status, including CPU usage.
+    Parameters:
+    fitsfile (str): The path to the FITS file to be processed.
+    Returns:
+    None
+    """
+
 
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
