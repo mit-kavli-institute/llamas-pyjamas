@@ -11,6 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath('..'))
 
+html_output = "../../docs"
 
 project = 'Llamaspyjamas Documentation'
 copyright = '2025, Sarah Hughes and Rob Simcoe'
@@ -32,3 +33,4 @@ exclude_patterns = []
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+
