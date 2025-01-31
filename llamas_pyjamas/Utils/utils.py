@@ -36,7 +36,7 @@ import traceback
 from matplotlib import cm
 from astropy.visualization import ZScaleInterval
 from typing import Union
-from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
+#from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 def setup_logger(name, log_filename=None)-> logging.Logger:
     """
@@ -205,7 +205,7 @@ def create_peak_lookups(peaks: np.ndarray, benchside=None)-> dict:
     # Create lookup with regular Python ints
     return {str(idx): int(pos) for idx, pos in enumerate(peaks)}
 
-def dump_LUT(channel: str, hdu, trace_obj: TraceLlamas)-> None:
+def dump_LUT(channel: str, hdu, trace_obj: 'TraceLlamas')-> None:
     """
     Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.
     Parameters:
@@ -382,7 +382,7 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
-def plot_trace(traceobj: TraceLlamas)-> None:
+def plot_trace(traceobj: 'TraceLlamas')-> None:
     """
     Plots the trace data from a given trace object.
     Parameters:
@@ -409,7 +409,7 @@ def plot_trace(traceobj: TraceLlamas)-> None:
     
     
 
-def plot_traces_on_image(traceobj: TraceLlamas, data: np.ndarray, zscale=False)-> None:
+def plot_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, zscale=False)-> None:
     """
     Plot traces overlaid on raw data with optional zscale.
 
@@ -475,12 +475,12 @@ def plot_traces_on_image(traceobj: TraceLlamas, data: np.ndarray, zscale=False)-
         # Add trace index number next to the red vertical line
         midpoint = data.shape[1] // 2
         ypos_midpoint = min(midpoint, len(ypos) - 1)
-        ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='center')
+        #ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='center')
 
     # Plot vertical red line at the midpoint of NAXIS2
     midpoint = data.shape[1] // 2
     ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
-    plt.legend()
+    #plt.legend()
     ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
     plt.tight_layout()
     plt.show()
