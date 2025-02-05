@@ -484,4 +484,46 @@ def plot_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, zscale=False
     ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
     plt.tight_layout()
     plt.show()
+
+
+def plot_fiber_masks_on_image(traceobj, data, zscale=False):
+    """Plot fiber masks overlaid on raw data with optional zscale"""
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Apply zscale if requested
+    if zscale:
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(data)
+    else:
+        vmin, vmax = None, None
+
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
+    plt.colorbar(im)
+
+    # Generate color gradient
+    colors = cm.viridis(np.linspace(0, 1, len(traceobj.traces)))
+
+    # Plot each fiber mask
+    for i, color in enumerate(colors):
+        ytrace = traceobj.traces[i]
+        yy = np.outer(np.arange(traceobj.naxis2), np.ones(traceobj.naxis1)) - np.outer(np.ones(traceobj.naxis2), ytrace)
+        profmask = np.abs(yy) < 2
+
+        # Overlay the fiber mask
+        mask_overlay = np.ma.masked_where(~profmask, profmask)
+        ax.imshow(mask_overlay, origin='lower', aspect='auto', cmap='cool', alpha=0.5)
+
+        # Add trace index number next to the trace line
+        midpoint = data.shape[1] // 2
+        ypos_midpoint = ytrace[midpoint] if midpoint < len(ytrace) else ytrace[-1]
+        ax.text(midpoint + 5, ypos_midpoint, f'{i}', color='red', fontsize=8, verticalalignment='center')
+
+    # Plot vertical red line at the midpoint of NAXIS2
+    midpoint = data.shape[1] // 2
+    ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
+    plt.legend()
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Fiber Masks')
+    plt.tight_layout()
+    plt.show()
     
