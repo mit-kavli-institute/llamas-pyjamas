@@ -169,6 +169,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #opening the fitsfile
         hdu = fits.open(file)
 
+        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+
         #Defining the base filename
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
@@ -209,10 +211,12 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
                 print(traceback.format_exc())
         
         print(f'Extraction list = {extraction_list}')        
-        filename = save_extractions(extraction_list)
-        print(f'extraction saved filename = {filename}')
+        filename = save_extractions(extraction_list, savefile=extraction_file)
+        #print(f'extraction saved filename = {filename}')
+        print(f'extraction saved filename = {extraction_file}')
 
-        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        # obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile + '_whitelight.fits'
         white_light_file = WhiteLightFits(obj, outfile=outfile)
