@@ -596,6 +596,9 @@ class TraceLlamas:
                         invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
             
             
+            self.profmask = profmask
+            self.inprof = inprof
+
             fiberimg[np.where(profmask == True)] = index#ifiber
             bpmask[np.where(infmask == False)]   = True
             profimg[inprof] = profimg[inprof] + sset.value(yy[inprof])[0]
