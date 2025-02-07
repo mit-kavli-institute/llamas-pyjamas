@@ -194,6 +194,18 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
+
+            if 'CAM_NAME' in hdr:
+                cam_name = hdr['CAM_NAME']
+                channel = cam_name.split('_')[1].lower()
+                bench = cam_name.split('_')[0][0]
+                side = cam_name.split('_')[0][1]
+            
+            else:
+                channel = hdr['COLOR'].lower()
+                bench = hdr['BENCH']
+                side  = hdr['SIDE']
+
             
             bias = np.nanmedian(hdu[hdu_index].data.astype(float))
             
@@ -205,6 +217,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
       
                 extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
                 extraction_list.append(extraction)
+                
                 
             except Exception as e:
                 print(f"Error extracting trace from {file}")
