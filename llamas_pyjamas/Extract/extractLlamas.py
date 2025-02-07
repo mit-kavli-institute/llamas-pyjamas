@@ -100,6 +100,7 @@ class ExtractLlamas:
         self.channel = trace.channel
         self.fitsfile = self.trace.fitsfile
         print(f'Optimal {optimal}')
+        print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
         
         ##put in a check here for hdu against trace attributes when I have more brain capacity
         
@@ -120,7 +121,7 @@ class ExtractLlamas:
 
             if (optimal == True):
                 # Optimally weighted extraction (a la Horne et al ~1986)
-                logger.info("..Optimally Extracting fiber #{}".format(ifiber))
+                #logger.info("..Optimally Extracting fiber #{}".format(ifiber))
                 x_spec,f_spec,weights = self.isolateProfile(ifiber)
                 if x_spec is None:
                     continue
