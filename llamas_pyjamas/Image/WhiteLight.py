@@ -130,6 +130,10 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     if not outfile:
         fitsfilebase = fitsfile.split('/')[-1]
         white_light_file = fitsfilebase.replace('.fits', '_whitelight.fits')
+    
+    #code added in to allow for normalisation in flat fielding process
+    elif outfile == -1:
+        return hdul
     else:
         white_light_file = outfile
     
