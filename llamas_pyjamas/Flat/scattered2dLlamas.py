@@ -15,7 +15,9 @@ Functions:
             - fitsurface (numpy.ndarray): The fitted surface.
             - profdata-dark (numpy.ndarray): The profile data after dark subtraction.
 """
-from   ..Trace import traceLlamas
+# from   ..Trace import traceLlamas
+from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
+from llamas_pyjamas.Image.WhiteLight import WhiteLightFits
 import numpy as np
 #import pyds9
 from   matplotlib import pyplot as plt
@@ -82,4 +84,5 @@ def scattered2dLlamas()->Tuple[np.ndarray, np.ndarray, np.ndarray]:
     ds9.set_np2arr(fitsurface)
     
     return fitimg,fitsurface,profdata-dark
+
 

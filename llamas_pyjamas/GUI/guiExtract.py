@@ -169,6 +169,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #opening the fitsfile
         hdu = fits.open(file)
 
+        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+
         #Defining the base filename
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
@@ -192,6 +194,18 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
+
+            if 'CAM_NAME' in hdr:
+                cam_name = hdr['CAM_NAME']
+                channel = cam_name.split('_')[1].lower()
+                bench = cam_name.split('_')[0][0]
+                side = cam_name.split('_')[0][1]
+            
+            else:
+                channel = hdr['COLOR'].lower()
+                bench = hdr['BENCH']
+                side  = hdr['SIDE']
+
             
             bias = np.nanmedian(hdu[hdu_index].data.astype(float))
             
@@ -204,15 +218,18 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
                 extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
                 extraction_list.append(extraction)
                 
+                
             except Exception as e:
                 print(f"Error extracting trace from {file}")
                 print(traceback.format_exc())
         
         print(f'Extraction list = {extraction_list}')        
-        filename = save_extractions(extraction_list)
-        print(f'extraction saved filename = {filename}')
+        filename = save_extractions(extraction_list, savefile=extraction_file)
+        #print(f'extraction saved filename = {filename}')
+        print(f'extraction saved filename = {extraction_file}')
 
-        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        # obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile + '_whitelight.fits'
         white_light_file = WhiteLightFits(obj, outfile=outfile)
