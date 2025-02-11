@@ -232,7 +232,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile + '_whitelight.fits'
-        white_light_file = WhiteLightFits(obj, outfile=outfile)
+        white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
     
     except Exception as e:

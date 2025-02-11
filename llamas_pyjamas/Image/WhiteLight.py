@@ -40,20 +40,26 @@ print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 
-def color_isolation(extractions)-> Tuple[list, list, list]:
+def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]:
     """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
 
     Args:
         extractions (list): A list of extraction objects loaded from ExtractLlamas
     """
+
     blue_extractions = [ext for ext in extractions if ext.channel.lower() == 'blue']
     green_extractions = [ext for ext in extractions if ext.channel.lower() == 'green']
     red_extractions = [ext for ext in extractions if ext.channel.lower() == 'red']
+
+    blue_meta = [meta for meta in metadata if meta['channel'].lower() == 'blue']
+    green_meta = [meta for meta in metadata if meta['channel'].lower() == 'green']
+    red_meta = [meta for meta in metadata if meta['channel'].lower() == 'red']
+
     
-    return blue_extractions, green_extractions, red_extractions
+    return blue_extractions, green_extractions, red_extractions, blue_meta, green_meta, red_meta
 
 
-def WhiteLightFits(extraction_array: list, outfile=None)-> str:
+def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
     """
     Process an array of extracted color data to create a white light FITS file.
     Parameters:
@@ -70,7 +76,7 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     """
 
     
-    blue, green, red = color_isolation(extraction_array)
+    blue, green, red, blue_meta, green_meta, red_meta = color_isolation(extraction_array, metadata)
     print(blue, green, red)
     fitsfile = None
     ###For now assuming that all extraction objects came from the same original file
@@ -90,7 +96,7 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     # Process blue data if exists
     if blue:
         
-        blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, ds9plot=False)
+        blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, blue_meta, ds9plot=False)
         blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(float), name='BLUE')
         hdul.append(blue_hdu)
         
@@ -104,7 +110,7 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     # Process green data if exists
     if green:
       
-        green_whitelight, green_x, green_y, green_flux = WhiteLight(green, ds9plot=False)
+        green_whitelight, green_x, green_y, green_flux = WhiteLight(green, green_meta, ds9plot=False)
         green_hdu = fits.ImageHDU(data=green_whitelight.astype(float), name='GREEN')
         hdul.append(green_hdu)
         
@@ -117,7 +123,7 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     
     # Process red data if exists
     if red:
-        red_whitelight, red_x, red_y, red_flux = WhiteLight(red, ds9plot=False)
+        red_whitelight, red_x, red_y, red_flux = WhiteLight(red, red_meta, ds9plot=False)
         red_hdu = fits.ImageHDU(data=red_whitelight.astype(np.float32), name='RED')
         hdul.append(red_hdu)
         
@@ -144,7 +150,7 @@ def WhiteLightFits(extraction_array: list, outfile=None)-> str:
     return white_light_file
 
 
-def WhiteLight(extraction_array: list, ds9plot=True)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Generate a white light image from an array of extraction files or objects.
     Parameters:
@@ -168,9 +174,16 @@ def WhiteLight(extraction_array: list, ds9plot=True)-> Tuple[np.ndarray, np.ndar
     ydata = np.array([])
     flux  = np.array([])
     
-    for extraction_obj in extraction_array:
+    for extraction_obj, meta in zip(extraction_array, metadata):
+        channel = meta['channel']
+        side = meta['side']
+        counts = extraction_obj.counts
+        #Might need to put in side condition here as well it depends on the outcome
+        if channel == 'blue':
+            counts = np.flipud(extraction_obj.counts)
+    
         if isinstance(extraction_obj, str):
-            extraction = ExtractLlamas.loadExtraction(extraction_obj)
+            extraction, _ = ExtractLlamas.loadExtraction(extraction_obj)
             logger.info(f'Loaded extraction object {extraction.bench}{extraction.side}')
         elif isinstance(extraction_obj, ExtractLlamas):
             extraction = extraction_obj
@@ -182,13 +195,18 @@ def WhiteLight(extraction_array: list, ds9plot=True)-> Tuple[np.ndarray, np.ndar
         
         for ifib in range(nfib):
             benchside = f'{extraction.bench}{extraction.side}'
+            
+            
             try:
                 x, y = FiberMap_LUT(benchside,ifib)
             except Exception as e:
                 logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside} for color {extraction.channel}')
                 logger.error(traceback.format_exc())
                 continue
-            thisflux = np.nansum(extraction.counts[ifib])
+            
+            
+            # thisflux = np.nansum(extraction.counts[ifib])
+            thisflux = np.nansum(counts[ifib])
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
@@ -250,6 +268,7 @@ def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np
     flux  = np.array([])
     for ifib in range(nfib):
         benchside = f'{traceobj.bench}{traceobj.side}'
+        channel = f'{traceobj.channel}'
         try:
             x, y = FiberMap_LUT(benchside,ifib)
         except Exception as e:
