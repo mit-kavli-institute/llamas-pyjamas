@@ -1,4 +1,5 @@
 
+
 """
 This module provides functionality to create a master bias frame from a directory of bias images or a list of files.
 Classes:
@@ -37,7 +38,8 @@ import ccdproc as ccdp
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
-
+from astropy.io import fits
+from llamas_pyjamas.config import CALIB_DIR
 
 class BiasLlamas:
     """
@@ -66,6 +68,7 @@ class BiasLlamas:
             
         elif isinstance(input_data, list):
             self.files = input_data
+            self.bias_path = CALIB_DIR
         
         else:
             raise TypeError("Input must be a string (directory path) or a list of files.")
@@ -75,38 +78,48 @@ class BiasLlamas:
         
         return
     
-    def master_bias(self)-> None:
+
+    def master_bias(self) -> None:
         """
-        Create a master bias frame from a directory of bias images.
-        This function reads bias images from the specified directory, combines them using
-        sigma-clipping and averaging, and writes the resulting master bias frame to a file.
-        Parameters:
-        None
-        Returns:
-        None
+        Create a master bias frame from a list of bias images.
+        Each input FITS file is assumed to have a primary HDU and one or more extensions,
+        where each extension contains a bias image from a detector.
+        The function loops over all extensions (determined dynamically), 
+        averages the corresponding images across all files, and builds a new FITS file with:
+          - A primary HDU (using the primary header from the first file)
+          - One ImageHDU per extension, where the data is the mean of all corresponding exposures.
+        The resulting combined FITS file is written to 'combined_bias.fits' in the bias_path.
         """
-
+        # Open first file to get primary header and number of extensions
+        with fits.open(self.files[0]) as hdulist_first:
+            primary_hdr = hdulist_first[0].header.copy()
+            num_ext = len(hdulist_first) - 1  # excluding primary HDU
         
-        bias_images = ccdp.ImageFileCollection(self.bias_path)
-        calibrated_biases = bias_images.files_filtered(imagetyp='bias', include_path=True)
+        combined_hdus = []
+        # Create primary HDU using the primary header
+        primary_hdu = fits.PrimaryHDU(header=primary_hdr)
+        combined_hdus.append(primary_hdu)
+
+        # Loop over each extension (1, 2, ... num_ext)
+        for ext in range(1, num_ext + 1):
+            data_list = []
+            header_list = []
+            for file in self.files:
+                with fits.open(file) as hdul:
+                    # Read the data and header for current extension
+                    data = hdul[ext].data
+                    hdr = hdul[ext].header.copy()
+                    data_list.append(data)
+                    header_list.append(hdr)
+            # Stack and compute mean (using nanmean to avoid any NaN issues)
+            combined_data = np.nanmean(np.array(data_list), axis=0)
+            combined_header = header_list[0]
+            combined_header['COMBINED'] = True
+            # Create an ImageHDU for the combined extension data
+            image_hdu = fits.ImageHDU(data=combined_data, header=combined_header, name=f'EXT{ext}')
+            combined_hdus.append(image_hdu)
         
-        combined_bias = ccdp.combine(calibrated_biases,
-                             method='average',
-                             sigma_clip=True, sigma_clip_low_thresh=5, sigma_clip_high_thresh=5,
-                             sigma_clip_func=np.ma.median, sigma_clip_dev_func=mad_std,
-                             mem_limit=350e6
-                            )
-
-        combined_bias.meta['combined'] = True
-
-        combined_bias.write(self.bias_path / 'combined_bias.fit')
-
-        if __name__ == "__main__":
-
-            parser = argparse.ArgumentParser(description="Create a master bias frame from a directory of bias images or a list of files.")
-            parser.add_argument('input_data', type=str, help="Directory path containing bias images or a list of bias image files.")
-            
-            args = parser.parse_args()
-            
-            bias_llamas = BiasLlamas(args.input_data)
-            bias_llamas.master_bias()
+        # Assemble all HDUs into an HDUList and write to file
+        hdul_out = fits.HDUList(combined_hdus)
+        out_filename = os.path.join(self.bias_path, 'combined_bias.fits')
+        hdul_out.writeto(out_filename, overwrite=True)
