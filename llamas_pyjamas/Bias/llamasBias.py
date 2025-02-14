@@ -41,6 +41,8 @@ import argparse
 from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR
 
+
+
 class BiasLlamas:
     """
     A class to handle the creation of a master bias frame from a directory of bias images or a list of files.
@@ -112,7 +114,7 @@ class BiasLlamas:
                     data_list.append(data)
                     header_list.append(hdr)
             # Stack and compute mean (using nanmean to avoid any NaN issues)
-            combined_data = np.nanmean(np.array(data_list), axis=0)
+            combined_data = np.nanmedian(np.array(data_list), axis=0)
             combined_header = header_list[0]
             combined_header['COMBINED'] = True
             # Create an ImageHDU for the combined extension data
@@ -123,3 +125,5 @@ class BiasLlamas:
         hdul_out = fits.HDUList(combined_hdus)
         out_filename = os.path.join(self.bias_path, 'combined_bias.fits')
         hdul_out.writeto(out_filename, overwrite=True)
+
+ 
