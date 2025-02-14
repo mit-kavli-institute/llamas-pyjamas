@@ -86,7 +86,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
     # Skip primary HDU (index 0)
     for idx in range(1, len(hdu_list)):
         header = hdu_list[idx].header
-        
+
         # Get color and benchside from header
         if 'COLOR' in header:
             color = header['COLOR'].lower()
@@ -97,7 +97,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
             color = camname.split('_')[1].lower()
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
-            
+
         benchside = f"{bench}{side}"
         pattern = f"{color}_{bench}_{side}_traces"
         
@@ -118,7 +118,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
 
 ##Main function currently used by the Quicklook for full extraction
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None) -> None:
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -169,20 +169,30 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #opening the fitsfile
         hdu = fits.open(file)
 
+        
+
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
         #Defining the base filename
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
+        masterbiasfile = os.path.join(CALIB_DIR, 'combined_bias.fits')
+
         #Debug statements
         print(f'basefile = {basefile}')
         print(f'masterfile = {masterfile}')
+        print(f'Bias file is {masterbiasfile}')
+
+        if bias == None:
+            #opening the masterbias
+            bias_hdu = fits.open(masterbiasfile)
+            assert len(hdu) == len(bias_hdu), 'Number of extensions in the bias and fits file do not match'
 
         
         trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
         print(f'Using master traces {trace_files}')
-
+        
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
         
@@ -190,7 +200,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
         #print(hdu_trace_pairs)
-        
+        print(f'hdu_trace_pairs = {hdu_trace_pairs}')
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
@@ -207,7 +217,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
                 side  = hdr['SIDE']
 
             
-            bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+            #bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+
+            bias_data = bias_hdu[hdu_index].data.astype(float)
             
             #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
             
@@ -215,7 +227,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
       
-                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
+                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias_data, hdu[hdu_index].header)
                 extraction_list.append(extraction)
                 
                 
