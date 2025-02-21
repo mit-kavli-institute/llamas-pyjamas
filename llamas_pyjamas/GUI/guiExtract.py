@@ -20,7 +20,7 @@ from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
-
+import time
 
 ray.init(ignore_reinit_error=True)
 
@@ -86,7 +86,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
     # Skip primary HDU (index 0)
     for idx in range(1, len(hdu_list)):
         header = hdu_list[idx].header
-        
+
         # Get color and benchside from header
         if 'COLOR' in header:
             color = header['COLOR'].lower()
@@ -97,7 +97,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
             color = camname.split('_')[1].lower()
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
-            
+
         benchside = f"{bench}{side}"
         pattern = f"{color}_{bench}_{side}_traces"
         
@@ -115,10 +115,35 @@ def match_hdu_to_traces(hdu_list, trace_files):
             
     return matches
 
+# Define a Ray remote function for processing a single trace extraction.
+@ray.remote
+def process_trace(hdu_data, header, trace_file):
+    """
+    Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
+    Returns the extraction object or None if there is an error.
+    """
+    try:
+        # Compute the bias from the current extension data.
+        bias = np.nanmedian(hdu_data.astype(float))
+        # Load the trace object from the pickle file.
+        with open(trace_file, mode='rb') as f:
+            tracer = pickle.load(f)
+        # Create an ExtractLlamas object; note the subtraction of the bias.
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float) - bias, header)
+        return extraction
+    except Exception as e:
+        print(f"Error extracting trace from {trace_file}")
+        print(traceback.format_exc())
+        return None
+
+
+
+
+
 
 ##Main function currently used by the Quicklook for full extraction
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None) -> None:
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -129,7 +154,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
     Returns:
     None
     """
-    
+    start_time = time.perf_counter()  # Start timer
     
     try:
         print(f'file is {file}')
@@ -169,20 +194,34 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #opening the fitsfile
         hdu = fits.open(file)
 
+        
+
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
         #Defining the base filename
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
+        masterbiasfile = os.path.join(CALIB_DIR, 'combined_bias.fits')
+
         #Debug statements
         print(f'basefile = {basefile}')
         print(f'masterfile = {masterfile}')
+        print(f'Bias file is {masterbiasfile}')
+
+
+        bias_hdu = None
+        #if bias == None:
+            #opening the masterbias
+
+            ##not implementing this yet
+            #bias_hdu = fits.open(masterbiasfile)
+            #assert len(hdu) == len(bias_hdu), 'Number of extensions in the bias and fits file do not match'
 
         
         trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
         print(f'Using master traces {trace_files}')
-
+        
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
         
@@ -190,39 +229,60 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
         #print(hdu_trace_pairs)
+
+        ### Testing ray usage
+
+        # Process each HDU-trace pair in parallel using Ray.
+        futures = []
+        for hdu_index, trace_file in hdu_trace_pairs:
+            if bias_hdu is not None:
+                bias_data = np.nanmedian(hdu[hdu_index].data[10:20].astype(float))
+                hdu_data = hdu[hdu_index].data - bias_data
+            else:
+                hdu_data = hdu[hdu_index].data
+            
+            # Get the data and header from the current extension.
+            
+            hdr = hdu[hdu_index].header
+            future = process_trace.remote(hdu_data, hdr, trace_file)
+            futures.append(future)
+        
+        # Wait for all remote tasks to complete.
+        extraction_list = ray.get(futures)
+        extraction_list = [ex for ex in extraction_list if ex is not None]
+
+
+
+
+        ##commenting from here
         
         #for file in trace_files:
-        for hdu_index, file in hdu_trace_pairs:
-            hdr = hdu[hdu_index].header
-
-            if 'CAM_NAME' in hdr:
-                cam_name = hdr['CAM_NAME']
-                channel = cam_name.split('_')[1].lower()
-                bench = cam_name.split('_')[0][0]
-                side = cam_name.split('_')[0][1]
+        # for hdu_index, file in hdu_trace_pairs:
+        #     hdr = hdu[hdu_index].header
             
-            else:
-                channel = hdr['COLOR'].lower()
-                bench = hdr['BENCH']
-                side  = hdr['SIDE']
+        #     bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+
 
             
-            bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+
             
-            #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
+        #     #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
             
-            try:
-                with open(file, mode='rb') as f:
-                    tracer = pickle.load(f)
+        #     try:
+        #         with open(file, mode='rb') as f:
+        #             tracer = pickle.load(f)
       
-                extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
-                extraction_list.append(extraction)
+        #         extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
+        #         extraction_list.append(extraction)
                 
-                
-            except Exception as e:
-                print(f"Error extracting trace from {file}")
-                print(traceback.format_exc())
+        #     except Exception as e:
+        #         print(f"Error extracting trace from {file}")
+        #         print(traceback.format_exc())
         
+
+        ### To here
+
+
         print(f'Extraction list = {extraction_list}')        
         filename = save_extractions(extraction_list, savefile=extraction_file)
         #print(f'extraction saved filename = {filename}')
@@ -239,7 +299,11 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         traceback.print_exc()
         return
     
-    
+    end_time = time.perf_counter()  # End timer
+    elapsed = end_time - start_time
+    # Log or print out the elapsed time
+    print(f"Full GUI extraction process completed in {elapsed:.2f} seconds.")
+
     return 
 
 def make_ifuimage(extraction_file, flat=False):
