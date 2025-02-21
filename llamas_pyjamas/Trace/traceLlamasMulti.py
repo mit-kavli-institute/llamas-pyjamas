@@ -411,13 +411,15 @@ class TraceLlamas:
             
             if np.abs(offset) > self.offset_cutoff:
                 #find a way to print this error to terminal still and the logger
-                print(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff}")
+                print(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff} for channel {self.channel} Bench {self.bench} side {self.side}")
                 #plt.plot(self.comb, color='blue')
                 #plt.plot(self.master_comb, color='green')
                 #plt.show()
                 logger.error(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff}")
-                offset=0
-                return 1
+                
+                
+                #offset=0
+                #return 1
             
             #update the peaks to the master peaks
             self.updated_comb = np.array(self.master_comb) + offset
@@ -596,6 +598,9 @@ class TraceLlamas:
                         invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
             
             
+            self.profmask = profmask
+            self.inprof = inprof
+
             fiberimg[np.where(profmask == True)] = index#ifiber
             bpmask[np.where(infmask == False)]   = True
             profimg[inprof] = profimg[inprof] + sset.value(yy[inprof])[0]
@@ -792,8 +797,19 @@ if __name__ == "__main__":
     results = []    
     
     fitsfile = args.filename
+
     with fits.open(fitsfile) as hdul:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+        if args.channel is not None and 'COLOR' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+        elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
+        else:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+
+
+
+    #with fits.open(fitsfile) as hdul:
+    #    hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
