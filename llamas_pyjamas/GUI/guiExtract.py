@@ -86,7 +86,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
     # Skip primary HDU (index 0)
     for idx in range(1, len(hdu_list)):
         header = hdu_list[idx].header
-        
+
         # Get color and benchside from header
         if 'COLOR' in header:
             color = header['COLOR'].lower()
@@ -97,7 +97,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
             color = camname.split('_')[1].lower()
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
-            
+
         benchside = f"{bench}{side}"
         pattern = f"{color}_{bench}_{side}_traces"
         
@@ -143,7 +143,7 @@ def process_trace(hdu_data, header, trace_file):
 
 ##Main function currently used by the Quicklook for full extraction
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None) -> None:
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -194,18 +194,34 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #opening the fitsfile
         hdu = fits.open(file)
 
+        
+
+        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+
         #Defining the base filename
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
+        masterbiasfile = os.path.join(CALIB_DIR, 'combined_bias.fits')
+
         #Debug statements
         print(f'basefile = {basefile}')
         print(f'masterfile = {masterfile}')
+        print(f'Bias file is {masterbiasfile}')
+
+
+        bias_hdu = None
+        #if bias == None:
+            #opening the masterbias
+
+            ##not implementing this yet
+            #bias_hdu = fits.open(masterbiasfile)
+            #assert len(hdu) == len(bias_hdu), 'Number of extensions in the bias and fits file do not match'
 
         
         trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
         print(f'Using master traces {trace_files}')
-
+        
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
         
@@ -219,8 +235,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         # Process each HDU-trace pair in parallel using Ray.
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
+            if bias_hdu is not None:
+                bias_data = np.nanmedian(hdu[hdu_index].data[10:20].astype(float))
+                hdu_data = hdu[hdu_index].data - bias_data
+            else:
+                hdu_data = hdu[hdu_index].data
+            
             # Get the data and header from the current extension.
-            hdu_data = hdu[hdu_index].data
+            
             hdr = hdu[hdu_index].header
             future = process_trace.remote(hdu_data, hdr, trace_file)
             futures.append(future)
@@ -239,6 +261,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         #     hdr = hdu[hdu_index].header
             
         #     bias = np.nanmedian(hdu[hdu_index].data.astype(float))
+
+
+            
+
             
         #     #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
             
@@ -257,16 +283,16 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, biasfiles: str = 
         ### To here
 
 
-
-
         print(f'Extraction list = {extraction_list}')        
-        filename = save_extractions(extraction_list)
-        print(f'extraction saved filename = {filename}')
+        filename = save_extractions(extraction_list, savefile=extraction_file)
+        #print(f'extraction saved filename = {filename}')
+        print(f'extraction saved filename = {extraction_file}')
 
-        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        # obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
+        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile + '_whitelight.fits'
-        white_light_file = WhiteLightFits(obj, outfile=outfile)
+        white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
     
     except Exception as e:

@@ -59,6 +59,47 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 #logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 
+
+def check_fibre_number(fibre_number: int, benchside: str) -> bool:
+    """
+    Check if the given fibre number is within the valid range.
+    Args:
+        fibre_number (int): The fibre number to check.
+    Returns:
+        bool: True if the fibre number is valid, False otherwise.
+    """
+
+    # 1A    298 (Green) / 298 Blue
+    # 1B    300 (Green) / 300 Blue
+    # 2A    299 (Green) / 299 Blue - potentially 2 lost fibers (only found one in comb)
+    # 2B    297 (Green) / 297 Blue - 1 dead fiber
+    # 3A    298 (Green) / 298 Blue
+    # 3B    300 (Green) / 300 Blue
+    # 4A    300 (Green) / 300 Blue
+
+    allowed = True
+
+    fibre_list = {
+        '1A': 298,
+        '1B': 300,
+        '2A': 299,
+        '2B': 297,
+        '3A': 298,
+        '3B': 300,
+        '4A': 300,
+
+    }
+
+
+    N_allowed = fibre_list.get(benchside, 0)
+    if fibre_number > N_allowed:
+        logger.warning(f'Fibre number {fibre_number} is out of range for benchside {benchside}.')
+        allowed = False
+    
+    return allowed
+
+
+
 def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
     def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
         """
@@ -137,7 +178,7 @@ class TraceLlamas:
         self.xmin     = 200
         self.fitspace = 10
         self.min_pkheight = 500
-        self.window = 11 #can update to 15
+        self.window = 5 #can update to 15
         self.offset_cutoff = 3
         
 
@@ -197,7 +238,7 @@ class TraceLlamas:
         """
 
 
-        tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
+        tmp            = detect_peaks(tslice,mpd=5,threshold=10,show=False,valley=True)
         
         if len(tmp) == 0:
             logger.info("No valleys detected - check threshold")
@@ -256,7 +297,7 @@ class TraceLlamas:
         #defining a new yslice for a given xwindow point
         ytrace = np.median(self.data[:,xtmp.astype(int)-self.window:xtmp.astype(int)+self.window],axis=1)
         #detect the valleys along this new slice
-        valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
+        valleys = detect_peaks(ytrace,mpd=5,show=False,valley=True)
         
         nvalley = len(valleys)
 
@@ -294,7 +335,7 @@ class TraceLlamas:
         rownum = int(rownum)
 
         #straight up to _+ 15 pixels on either side
-        tslice = np.median(self.data[:,rownum-8:rownum+7],axis=1).astype(float)
+        tslice = np.median(self.data[:,rownum-3:rownum+2],axis=1).astype(float)
         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
         
         self.x_model = np.arange(self.naxis2).astype(float)
@@ -308,12 +349,12 @@ class TraceLlamas:
         
         self.min_pkheight = 10000    
         if self.channel.lower() == 'blue':
-            self.min_pkheight = 1000
+            self.min_pkheight = 5000
         
 
         self.comb = tslice - self.y_model
         
-        self.peaks, self.peak_properties = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
+        self.peaks, self.peak_properties = find_peaks(self.comb,distance=5,height=100,threshold=None, prominence=500)
         self.pkht = self.peak_properties['peak_heights']
         
         return self.comb
@@ -380,11 +421,11 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            # n_rows = 12
-            # top_rows = self.data[-n_rows:, :]
-            # background = np.median(top_rows)
+            n_rows = 12
+            top_rows = self.data[-n_rows:, :]
+            background = np.median(top_rows)
             
-            # self.data = self.data - background
+            self.data = self.data - background
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
@@ -583,7 +624,9 @@ class TraceLlamas:
             sset,outmask = iterfit(yy[inprof],data_work[inprof],maxiter=6, \
                         invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
             
-            
+            self.profmask = profmask
+            self.inprof = inprof
+
             fiberimg[np.where(profmask == True)] = index#ifiber
             bpmask[np.where(infmask == False)]   = True
             profimg[inprof] = profimg[inprof] + sset.value(yy[inprof])[0]
