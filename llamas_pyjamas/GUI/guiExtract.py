@@ -129,7 +129,7 @@ def process_trace(hdu_data, header, trace_file):
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float) - bias, header)
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float), header)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")
@@ -235,11 +235,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         # Process each HDU-trace pair in parallel using Ray.
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
-            if bias_hdu is not None:
-                bias_data = np.nanmedian(hdu[hdu_index].data[10:20].astype(float))
-                hdu_data = hdu[hdu_index].data - bias_data
-            else:
-                hdu_data = hdu[hdu_index].data
+            
+            hdu_data = hdu[hdu_index].data
             
             # Get the data and header from the current extension.
             
@@ -252,37 +249,6 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         extraction_list = [ex for ex in extraction_list if ex is not None]
 
 
-
-
-        ##commenting from here
-        
-        #for file in trace_files:
-        # for hdu_index, file in hdu_trace_pairs:
-        #     hdr = hdu[hdu_index].header
-            
-        #     bias = np.nanmedian(hdu[hdu_index].data.astype(float))
-
-
-            
-
-            
-        #     #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
-            
-        #     try:
-        #         with open(file, mode='rb') as f:
-        #             tracer = pickle.load(f)
-      
-        #         extraction = ExtractLlamas(tracer, hdu[hdu_index].data.astype(float)-bias, hdu[hdu_index].header)
-        #         extraction_list.append(extraction)
-                
-        #     except Exception as e:
-        #         print(f"Error extracting trace from {file}")
-        #         print(traceback.format_exc())
-        
-
-        ### To here
-
-
         print(f'Extraction list = {extraction_list}')        
         filename = save_extractions(extraction_list, savefile=extraction_file)
         #print(f'extraction saved filename = {filename}')
@@ -291,7 +257,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         # obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
         obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
-        outfile = basefile + '_whitelight.fits'
+        outfile = basefile+'_whitelight.fits'
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
     
