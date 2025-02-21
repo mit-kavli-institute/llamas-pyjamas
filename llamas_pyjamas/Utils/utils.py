@@ -384,9 +384,9 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
-def count_trace_fibres():
+def count_trace_fibres(mastercalib_dir: str = CALIB_DIR)-> None:
     N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
-    files = glob.glob(CALIB_DIR+'/*.pkl')
+    files = glob.glob(mastercalib_dir+'/*.pkl')
     assert type(files) == list, 'File extraction did not return as list'
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
