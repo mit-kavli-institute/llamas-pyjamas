@@ -26,12 +26,14 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from llamas_pyjamas.Trace.traceLlamasMulti import TraceLlamas
-from llamas_pyjamas.config import LUT_DIR
+from llamas_pyjamas.config import LUT_DIR, CALIB_DIR
 import json
 
 from matplotlib import cm
 from astropy.visualization import ZScaleInterval
 from typing import Union
+import glob
+import pickle
 
 def plot_ds9(image_array: fits, samp=False) -> None:
     
@@ -118,6 +120,32 @@ def plot_trace_qa(trace_obj: TraceLlamas, save_dir=None)-> None:
     
 
     return
+
+def plot_pkl_combs(channel: str)-> None:
+
+    files = glob.glob(os.path.join(CALIB_DIR, f'*{channel}_*.pkl'))
+    N_combs = len(files)
+    print(f"Found {N_combs} files for channel {channel}")
+
+    try:
+        for file in files:
+            print(file)
+            plt.figure()
+            with open(file, 'rb') as f:
+                data = pickle.load(f)
+                comb = data.comb
+                plt.plot(comb, label=f"{data.benchside}{data.channel}")
+                plt.show()
+
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error loading file {file}: {e}")
+
+
+    return
+
+
+
 
 
 
