@@ -231,7 +231,7 @@ class ExtractLlamas:
             object: The object loaded from the pickle file.
         """
 
-        with open(infile,'rb') as fp:
+        with open(infile,'r+b') as fp:
             object = pickle.load(fp)
         return(object)
 
