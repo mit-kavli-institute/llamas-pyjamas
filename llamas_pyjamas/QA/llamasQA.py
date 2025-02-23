@@ -26,8 +26,14 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from llamas_pyjamas.Trace.traceLlamasMulti import TraceLlamas
-from llamas_pyjamas.config import LUT_DIR
+from llamas_pyjamas.config import LUT_DIR, CALIB_DIR
 import json
+
+from matplotlib import cm
+from astropy.visualization import ZScaleInterval
+from typing import Union
+import glob
+import pickle
 
 def plot_ds9(image_array: fits, samp=False) -> None:
     
@@ -114,6 +120,32 @@ def plot_trace_qa(trace_obj: TraceLlamas, save_dir=None)-> None:
     
 
     return
+
+def plot_pkl_combs(channel: str)-> None:
+
+    files = glob.glob(os.path.join(CALIB_DIR, f'*{channel}_*.pkl'))
+    N_combs = len(files)
+    print(f"Found {N_combs} files for channel {channel}")
+
+    try:
+        for file in files:
+            print(file)
+            plt.figure()
+            with open(file, 'rb') as f:
+                data = pickle.load(f)
+                comb = data.comb
+                plt.plot(comb, label=f"{data.benchside}{data.channel}")
+                plt.show()
+
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error loading file {file}: {e}")
+
+
+    return
+
+
+
 
 
 
@@ -287,3 +319,150 @@ def compare_combs(channel1: str, benchside1: str, channel2: str, benchside2: str
     plt.show()
     
     return
+
+
+def plot_trace(traceobj: 'TraceLlamas')-> None:
+    """
+    Plots the trace data from a given trace object.
+    Parameters:
+    traceobj (object): An object containing trace data. It should have the following attributes:
+        - tracearr (numpy.ndarray): A 2D array where each row represents a trace.
+        - xtracefit (numpy.ndarray): A 2D array where the first row represents the x-coordinates for the trace.
+        - traces (list or numpy.ndarray): A list or array of traces to be plotted.
+    The function iterates over each trace in tracearr, plots the y-coordinates against the x-coordinates,
+    and attempts to plot an additional trace using the traces attribute. If an error occurs during plotting,
+    it prints an error message with the index of the trace that caused the error.
+    The plot is displayed using plt.show() at the end.
+    """
+    
+    for i in range(len(traceobj.tracearr[:, 0])):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        plt.plot(xpos, ypos, ".")
+        # Move line plot inside loop
+        try:
+            plt.plot(np.arange(2048), traceobj.traces[i])
+        except:
+            print(f"ERROR {i}")
+    plt.show()
+    
+    
+
+def plot_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, zscale=False)-> None:
+    """
+    Plot traces overlaid on raw data with optional zscale.
+
+    Parameters:
+    -----------
+    traceobj : object
+        An object containing trace information. It should have the following attributes:
+        - tracearr: A 2D numpy array where each row represents a fiber trace.
+        - xtracefit: A 2D numpy array containing the x-coordinates for the trace fits.
+        - traces: A list or array of trace lines.
+        - channel: A string representing the channel information.
+        - bench: A string representing the bench information.
+        - side: A string representing the side information.
+    data : numpy.ndarray
+        A 2D array representing the raw data image on which the traces will be overlaid.
+    zscale : bool, optional
+        If True, apply zscale to the image data for better contrast. Default is False.
+
+    Returns:
+    --------
+    None
+        This function does not return any value. It displays a plot with the traces overlaid on the raw data.
+
+    Notes:
+    ------
+    - The function uses matplotlib for plotting and astropy.visualization for zscale interval.
+    - Each trace is plotted with a unique color from the viridis colormap.
+    - A vertical red dashed line is plotted at the midpoint of the image.
+    - Trace indices are annotated next to the red vertical line.
+    - If an error occurs while plotting a trace line, the error is printed and the plotting stops.
+    """
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Apply zscale if requested
+    if zscale:
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(data)
+    else:
+        vmin, vmax = None, None
+
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
+    plt.colorbar(im)
+
+    # Generate color gradient
+    colors = cm.viridis(np.linspace(0, 1, len(traceobj.tracearr[:, 0])))
+
+    # Plot each fiber trace
+    for i, color in enumerate(colors):
+        ypos = traceobj.tracearr[i, :]
+        xpos = traceobj.xtracefit[0, :]
+        ax.plot(xpos, ypos, ".", color=color, label=f"Trace {i}")
+
+        # Plot trace line
+        try:
+            ax.plot(np.arange(2048), traceobj.traces[i], color=color, label=f"Trace Line {i}")
+        except Exception as e:
+            traceback.print_exc()
+            print(f"ERROR {i}: {e}")
+            break
+
+        # Add trace index number next to the red vertical line
+        midpoint = data.shape[1] // 2
+        ypos_midpoint = min(midpoint, len(ypos) - 1)
+        #ax.text(midpoint + 5, ypos[ypos_midpoint], f'{i}', color='red', fontsize=8, verticalalignment='center')
+
+    # Plot vertical red line at the midpoint of NAXIS2
+    midpoint = data.shape[1] // 2
+    ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
+    #plt.legend()
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Traces')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_fiber_masks_on_image(traceobj, data, zscale=False):
+    """Plot fiber masks overlaid on raw data with optional zscale"""
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Apply zscale if requested
+    if zscale:
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(data)
+    else:
+        vmin, vmax = None, None
+
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
+    plt.colorbar(im)
+
+    # Generate color gradient
+    colors = cm.viridis(np.linspace(0, 1, len(traceobj.traces)))
+
+    # Plot each fiber mask
+    for i, color in enumerate(colors):
+        ytrace = traceobj.traces[i]
+        yy = np.outer(np.arange(traceobj.naxis2), np.ones(traceobj.naxis1)) - np.outer(np.ones(traceobj.naxis2), ytrace)
+        profmask = np.abs(yy) < 2
+
+        # Overlay the fiber mask
+        mask_overlay = np.ma.masked_where(~profmask, profmask)
+        ax.imshow(mask_overlay, origin='lower', aspect='auto', cmap='cool', alpha=0.5)
+
+        # Add trace index number next to the trace line
+        midpoint = data.shape[1] // 2
+        ypos_midpoint = ytrace[midpoint] if midpoint < len(ytrace) else ytrace[-1]
+        ax.text(midpoint + 5, ypos_midpoint, f'{i}', color='red', fontsize=8, verticalalignment='center')
+
+    # Plot vertical red line at the midpoint of NAXIS2
+    midpoint = data.shape[1] // 2
+    ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
+    plt.legend()
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} Fiber Masks')
+    plt.tight_layout()
+    plt.show()
+    
