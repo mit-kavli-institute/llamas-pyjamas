@@ -116,7 +116,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote(num_cpus=5)
+@ray.remote(num_cpus=1)
 def process_trace(hdu_data, header, trace_file):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
