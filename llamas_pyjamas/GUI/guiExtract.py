@@ -22,9 +22,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
 import time
 
-ray.init(ignore_reinit_error=True)
-
-
+# Set up logging
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
@@ -116,7 +114,7 @@ def match_hdu_to_traces(hdu_list, trace_files):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote(num_cpus=1)
+@ray.remote
 def process_trace(hdu_data, header, trace_file):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
@@ -188,8 +186,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         }
 
         # Initialize Ray
+        num_cpus = 5
         ray.shutdown()
-        ray.init(runtime_env=runtime_env)
+        ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
         #opening the fitsfile
         hdu = fits.open(file)
