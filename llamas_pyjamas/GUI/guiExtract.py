@@ -22,9 +22,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
 import time
 
-ray.init(ignore_reinit_error=True)
-
-
+# Set up logging
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
@@ -219,8 +217,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         }
 
         # Initialize Ray
+        num_cpus = 5
         ray.shutdown()
-        ray.init(runtime_env=runtime_env)
+        ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
         #opening the fitsfile
         hdu = fits.open(file)
