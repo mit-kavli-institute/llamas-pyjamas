@@ -16,7 +16,9 @@ import warnings
 def shiftArcX(arc_extraction_pickle):
 
     warnings.filterwarnings("ignore", category=UserWarning, module="astropy.stats.sigma_clipping")
-    arcspec, metadata = extract.load_extractions(arc_extraction_pickle)
+    arcdict = extract.load_extractions(arc_extraction_pickle)
+    arcspec = arcdict['extraction']
+    metadata = arcdict['metadata']
 
     # We will use fiber #150 in spectrograph 4A as the reference (near the center of the IFU)
     # This corresponds to extension 18 (red), 19 (green) and 20 (blue) in the arc extraction object
