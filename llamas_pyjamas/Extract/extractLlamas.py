@@ -43,11 +43,7 @@ from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
-
-
-
 ray.init(ignore_reinit_error=True)
-
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
@@ -94,69 +90,83 @@ class ExtractLlamas:
     """
 
     def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True) -> None:
-        self.trace = trace
-        self.bench = trace.bench
-        self.side = trace.side
-        self.channel = trace.channel
-        self.fitsfile = self.trace.fitsfile
-        print(f'Optimal {optimal}')
-        print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
-        
-        ##put in a check here for hdu against trace attributes when I have more brain capacity
-        
-        self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
-        
-        self.hdr    = hdr#trace.hdr
-        self.frame  = hdu_data.astype(float)
-        self.x      = np.arange(trace.naxis1)
 
-        # xshift and wave will be populated only after an arc solution
-        self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
-        self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
-        self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+        if (trace is None or hdu_data is None or hdr is None):
+            # Instantiate a blank object that can be used for a deep copy
+            self.trace = None
+            self.bench = None
+            self.side = None
+            self.channel = None
+            self.fitsfile = None     
+            self.counts = None
+            self.hdr    = None
+            self.frame  = None
+            self.x      = None
+            self.xshift = None
+            self.wave   = None
+            self.counts = None
+            self.ximage = None
 
-        self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
+        else:
+            self.trace = trace
+            self.bench = trace.bench
+            self.side = trace.side
+            self.channel = trace.channel
+            self.fitsfile = self.trace.fitsfile
+            ##put in a check here for hdu against trace attributes when I have more brain capacity        
+            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.hdr    = hdr
+            self.frame  = hdu_data.astype(float)
+            self.x      = np.arange(trace.naxis1)
+            # xshift and wave will be populated only after an arc solution
+            self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
 
-        for ifiber in range(trace.nfibers):
+            print(f'Optimal {optimal}')
+            print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
 
-            if (optimal == True):
-                # Optimally weighted extraction (a la Horne et al ~1986)
-                #logger.info("..Optimally Extracting fiber #{}".format(ifiber))
-                x_spec,f_spec,weights = self.isolateProfile(ifiber)
-                if x_spec is None:
-                    continue
-            
-                extracted = np.zeros(self.trace.naxis1)
-                for i in range(self.trace.naxis1):
-                    thisx = (x_spec == i)
-                    if np.nansum(thisx) > 0:
-                        extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
-                    #handles case where there are no elements
-                    else:
-                        extracted[i] = 0.0
+            for ifiber in range(trace.nfibers):
 
-                self.counts[ifiber,:] = extracted
-            
-            elif optimal == False:
-                # Boxcar Extraction - fast!
-                logger.info("..Boxcar extracting fiber #{}".format(ifiber))
-                x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
+                if (optimal == True):
+                    # Optimally weighted extraction (a la Horne et al ~1986)
+                    #logger.info("..Optimally Extracting fiber #{}".format(ifiber))
+                    x_spec,f_spec,weights = self.isolateProfile(ifiber)
+                    if x_spec is None:
+                        continue
                 
-                if x_spec is None:
-                    continue
-            
-                extracted = np.zeros(self.trace.naxis1)
-                for i in range(self.trace.naxis1):
-                    thisx = (x_spec == i)
+                    extracted = np.zeros(self.trace.naxis1)
+                    for i in range(self.trace.naxis1):
+                        thisx = (x_spec == i)
+                        if np.nansum(thisx) > 0:
+                            extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
+                        #handles case where there are no elements
+                        else:
+                            extracted[i] = 0.0
+
+                    self.counts[ifiber,:] = extracted
+                
+                elif optimal == False:
+                    # Boxcar Extraction - fast!
+                    logger.info("..Boxcar extracting fiber #{}".format(ifiber))
+                    x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
                     
-                    if np.nansum(thisx) > 0:
-                        extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
-                    #handles case where there are no elements
-                    else:
-                        extracted[i] = 0.0
-
-                self.counts[ifiber,:] = extracted
+                    if x_spec is None:
+                        continue
                 
+                    extracted = np.zeros(self.trace.naxis1)
+                    for i in range(self.trace.naxis1):
+                        thisx = (x_spec == i)
+                        
+                        if np.nansum(thisx) > 0:
+                            extracted[i] = np.nansum(f_spec[thisx]*weights[thisx])/np.nansum(weights[thisx])
+                        #handles case where there are no elements
+                        else:
+                            extracted[i] = 0.0
+
+                    self.counts[ifiber,:] = extracted
+                    
 
     def isolateProfile(self,ifiber, boxcar=False)-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
