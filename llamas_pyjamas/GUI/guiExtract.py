@@ -135,7 +135,38 @@ def process_trace(hdu_data, header, trace_file):
         return None
 
 
-
+def make_writable(extraction_obj):
+    """Convert a Ray-returned extraction object to a writable version."""
+    import copy
+    import pickle
+    
+    # First approach: Deep copy
+    try:
+        return copy.deepcopy(extraction_obj)
+    except:
+        pass
+    
+    # Second approach: Pickle and unpickle
+    try:
+        # This forces a complete serialization and deserialization
+        pickled = pickle.dumps(extraction_obj)
+        return pickle.loads(pickled)
+    except:
+        pass
+    
+    # Third approach: If the object has a to_dict method, use it
+    if hasattr(extraction_obj, 'to_dict') and callable(extraction_obj.to_dict):
+        try:
+            obj_dict = extraction_obj.to_dict()
+            # Assuming there's a from_dict or similar constructor
+            if hasattr(type(extraction_obj), 'from_dict') and callable(type(extraction_obj).from_dict):
+                return type(extraction_obj).from_dict(obj_dict)
+        except:
+            pass
+    
+    # If all else fails, return the original object and log a warning
+    print(f"Warning: Could not make object of type {type(extraction_obj)} writable")
+    return extraction_obj
 
 
 
@@ -244,8 +275,15 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
             futures.append(future)
         
         # Wait for all remote tasks to complete.
-        extraction_list = ray.get(futures)
-        extraction_list = [ex for ex in extraction_list if ex is not None]
+        raw_extraction_list = ray.get(futures)
+        #extraction_list = [ex for ex in extraction_list if ex is not None]
+
+        # Post-process to make objects writable
+        extraction_list = []
+        for ex in raw_extraction_list:
+            if ex is not None:
+                writable_ex = make_writable(ex)
+                extraction_list.append(writable_ex)
 
 
         print(f'Extraction list = {extraction_list}')        
