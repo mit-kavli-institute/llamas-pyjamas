@@ -106,6 +106,7 @@ class ExtractLlamas:
             self.wave   = None
             self.counts = None
             self.ximage = None
+            self.relative_throughput = None
 
         else:
             self.trace = trace
@@ -123,6 +124,7 @@ class ExtractLlamas:
             self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
+            self.relative_throughput = np.zeros(shape=(trace.nfibers))
 
             print(f'Optimal {optimal}')
             print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
