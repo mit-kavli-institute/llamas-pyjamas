@@ -424,6 +424,79 @@ def plot_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, zscale=False
     plt.tight_layout()
     plt.show()
 
+def plot_specific_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, trace_indices: list, zscale=False) -> None:
+    """
+    Plot specific traces overlaid on raw data with optional zscale.
+    Parameters:
+    -----------
+    traceobj : object
+        An object containing trace information with tracearr, xtracefit, traces attributes.
+    data : numpy.ndarray
+        A 2D array representing the raw data image on which the traces will be overlaid.
+    trace_indices : list
+        List of indices of the specific traces to plot.
+    zscale : bool, optional
+        If True, apply zscale to the image data for better contrast. Default is False.
+    Returns:
+    --------
+    None
+        Displays a plot with the specified traces overlaid on the raw data.
+    """
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    # Apply zscale if requested
+    if zscale:
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(data)
+    else:
+        vmin, vmax = None, None
+    
+    # Plot raw data
+    im = ax.imshow(data, origin='lower', aspect='auto', cmap='gray', vmin=vmin, vmax=vmax)
+    plt.colorbar(im)
+    
+    # Check if any trace indices are valid
+    max_index = len(traceobj.tracearr[:, 0]) - 1
+    valid_indices = [idx for idx in trace_indices if 0 <= idx <= max_index]
+    
+    if not valid_indices:
+        raise ValueError(f"No valid trace indices provided. Valid range: 0-{max_index}")
+    
+    # Generate colors for each trace from a colormap
+    colors = cm.rainbow(np.linspace(0, 1, len(valid_indices)))
+    
+    # Plot each specified fiber trace
+    for i, trace_index in enumerate(valid_indices):
+        color = colors[i]
+        ypos = traceobj.tracearr[trace_index, :]
+        xpos = traceobj.xtracefit[0, :]
+        ax.plot(xpos, ypos, ".", color=color)
+        
+        # Plot trace line
+        try:
+            line = ax.plot(np.arange(2048), traceobj.traces[trace_index], color=color, 
+                          label=f"Trace {trace_index}")
+            
+            # Add trace index number at regular intervals along the line
+            for x in range(0, data.shape[1], 500):
+                if x < len(traceobj.traces[trace_index]):
+                    y = traceobj.traces[trace_index][x]
+                    ax.text(x, y + 5, f'{trace_index}', color=color, fontsize=10, 
+                           ha='center', va='bottom', bbox=dict(facecolor='white', alpha=0.7))
+        
+        except Exception as e:
+            traceback.print_exc()
+            print(f"ERROR plotting trace {trace_index}: {e}")
+    
+    # Plot vertical red line at the midpoint of NAXIS2
+    midpoint = data.shape[1] // 2
+    ax.axvline(midpoint, color='red', linestyle='--', label='Midpoint')
+    
+    ax.legend()
+    ax.set_title(f'{traceobj.channel} {traceobj.bench}{traceobj.side} - Selected Traces')
+    plt.tight_layout()
+    plt.show()
+
 
 def plot_fiber_masks_on_image(traceobj, data, zscale=False):
     """Plot fiber masks overlaid on raw data with optional zscale"""

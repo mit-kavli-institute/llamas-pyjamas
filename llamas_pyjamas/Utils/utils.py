@@ -36,6 +36,7 @@ import traceback
 from matplotlib import cm
 from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
+from typing import Dict, Any, List, Union
 
 import glob
 import pickle
@@ -344,9 +345,9 @@ def flip_positions()-> None:
 
     # flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
     #Attempt to check on 23rd Jan 2025
+    ###RESTORE THIS ONE
     flipped = {"greenA":False, "greenB":True, "blueA": True, "blueB":False, "redA":False, "redB":True}
-    ##temp one
-    #flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
+    
     print(f'flipping {flipped}')
     # Load LUT
     with open('LUT/traceLUT.json', 'r') as f:
@@ -396,3 +397,214 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR)-> None:
         benchside = traceobj.benchside
         req = N_fib[benchside]
         print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
+        
+        
+        
+
+
+
+def check_negative_values(fits_file: str) -> List[Dict[str, Any]]:
+    """
+    Checks for negative values in all HDUs of a FITS file.
+    
+    Parameters:
+    -----------
+    fits_file : str
+        Path to the FITS file to check
+    
+    Returns:
+    --------
+    List[Dict[str, Any]]
+        A list of dictionaries, one for each HDU, with the following keys:
+        - 'hdu_index': Index of the HDU
+        - 'color': Color attribute from the header (if available)
+        - 'benchside': Benchside attribute (if available)
+        - 'has_negative_values': Boolean indicating if negative values are present
+        - 'negative_mask': Boolean mask where True indicates negative values
+        - 'negative_count': Number of negative values found
+        - 'min_value': Minimum value in the HDU data (if negative values exist)
+    """
+    results = []
+    
+    # Open the FITS file
+    with fits.open(fits_file) as hdul:
+        # Skip the first HDU if it doesn't have data (often just a header)
+        start_idx = 1 if len(hdul) > 1 and hdul[0].data is None else 0
+        
+        # Iterate through data-containing HDUs
+        for idx in range(start_idx, len(hdul)):
+            hdu = hdul[idx]
+            
+            # Skip non-image HDUs
+            if not hasattr(hdu, 'data') or hdu.data is None:
+                continue
+            
+            # Get color and benchside from header
+            color = None
+            benchside = None
+            
+            if 'COLOR' in hdu.header:
+                color = hdu.header['COLOR'].lower()
+            elif 'CAM_NAME' in hdu.header and '_' in hdu.header['CAM_NAME']:
+                # Extract color from CAM_NAME (format like "AB_blue")
+                color = hdu.header['CAM_NAME'].split('_')[1].lower()
+            
+            if 'BENCH' in hdu.header and 'SIDE' in hdu.header:
+                benchside = f"{hdu.header['BENCH']}{hdu.header['SIDE']}"
+            elif 'CAM_NAME' in hdu.header and '_' in hdu.header['CAM_NAME']:
+                # Extract benchside from CAM_NAME (format like "AB_blue")
+                cam_prefix = hdu.header['CAM_NAME'].split('_')[0]
+                if len(cam_prefix) >= 2:
+                    benchside = cam_prefix
+            
+            # Check for negative values
+            data = hdu.data.astype(float)  # Convert to float to handle unsigned integers
+            negative_mask = data < 0
+            has_negative = np.any(negative_mask)
+            negative_count = np.sum(negative_mask)
+            min_value = np.min(data) if has_negative else None
+            
+            # Create result dictionary
+            result = {
+                'hdu_index': idx,
+                'color': color,
+                'benchside': benchside,
+                'has_negative_values': has_negative,
+                'negative_mask': negative_mask,
+                'negative_count': negative_count,
+                'min_value': min_value
+            }
+            
+            results.append(result)
+    
+    return results
+
+def check_negative_and_nan_values(fits_file: str) -> List[Dict[str, Any]]:
+    """
+    Checks for negative and NaN values in all HDUs of a FITS file.
+    
+    Parameters:
+    -----------
+    fits_file : str
+        Path to the FITS file to check
+    
+    Returns:
+    --------
+    List[Dict[str, Any]]
+        A list of dictionaries, one for each HDU, with the following keys:
+        - 'hdu_index': Index of the HDU
+        - 'color': Color attribute from the header (if available)
+        - 'benchside': Benchside attribute (if available)
+        - 'has_negative_values': Boolean indicating if negative values are present
+        - 'negative_mask': Boolean mask where True indicates negative values
+        - 'negative_count': Number of negative values found
+        - 'min_value': Minimum value in the HDU data (if negative values exist)
+        - 'has_nan_values': Boolean indicating if NaN values are present
+        - 'nan_mask': Boolean mask where True indicates NaN values
+        - 'nan_count': Number of NaN values found
+    """
+    results = []
+    
+    # Open the FITS file
+    with fits.open(fits_file) as hdul:
+        # Skip the first HDU if it doesn't have data (often just a header)
+        start_idx = 1 if len(hdul) > 1 and hdul[0].data is None else 0
+        
+        # Iterate through data-containing HDUs
+        for idx in range(start_idx, len(hdul)):
+            hdu = hdul[idx]
+            
+            # Skip non-image HDUs
+            if not hasattr(hdu, 'data') or hdu.data is None:
+                continue
+            
+            # Get color and benchside from header
+            color = None
+            benchside = None
+            
+            if 'COLOR' in hdu.header:
+                color = hdu.header['COLOR'].lower()
+            elif 'CAM_NAME' in hdu.header and '_' in hdu.header['CAM_NAME']:
+                # Extract color from CAM_NAME (format like "AB_blue")
+                color = hdu.header['CAM_NAME'].split('_')[1].lower()
+            
+            if 'BENCH' in hdu.header and 'SIDE' in hdu.header:
+                benchside = f"{hdu.header['BENCH']}{hdu.header['SIDE']}"
+            elif 'CAM_NAME' in hdu.header and '_' in hdu.header['CAM_NAME']:
+                # Extract benchside from CAM_NAME (format like "AB_blue")
+                cam_prefix = hdu.header['CAM_NAME'].split('_')[0]
+                if len(cam_prefix) >= 2:
+                    benchside = cam_prefix
+            
+            # Check for negative values
+            data = hdu.data.astype(float)  # Convert to float to handle unsigned integers
+            negative_mask = data < 0
+            has_negative = np.any(negative_mask)
+            negative_count = np.sum(negative_mask)
+            min_value = np.min(data) if has_negative else None
+            
+            # Check for NaN values
+            nan_mask = np.isnan(data)
+            has_nan = np.any(nan_mask)
+            nan_count = np.sum(nan_mask)
+            
+            # Create result dictionary
+            result = {
+                'hdu_index': idx,
+                'color': color,
+                'benchside': benchside,
+                'has_negative_values': has_negative,
+                'negative_mask': negative_mask,
+                'negative_count': negative_count,
+                'min_value': min_value,
+                'has_nan_values': has_nan,
+                'nan_mask': nan_mask,
+                'nan_count': nan_count
+            }
+            
+            results.append(result)
+    
+    return results
+
+
+def print_values_summary(results: List[Dict[str, Any]]) -> None:
+    """
+    Prints a summary of the negative and NaN value check results.
+    
+    Parameters:
+    -----------
+    results : List[Dict[str, Any]]
+        Results from check_negative_and_nan_values function
+    """
+    print(f"{'HDU':^5} | {'Color':^8} | {'Benchside':^10} | {'Has Neg':^7} | {'Neg Count':^10} | {'Min Value':^10} | {'Has NaN':^7} | {'NaN Count':^10}")
+    print("-" * 92)
+    
+    for result in results:
+        min_val = f"{result['min_value']:.2f}" if result['min_value'] is not None else "N/A"
+        print(f"{result['hdu_index']:^5} | {result['color'] or 'N/A':^8} | "
+              f"{result['benchside'] or 'N/A':^10} | {str(result['has_negative_values']):^7} | "
+              f"{result['negative_count']:^10} | {min_val:^10} | {str(result['has_nan_values']):^7} | "
+              f"{result['nan_count']:^10}")
+
+
+
+
+
+# def print_negative_summary(results: List[Dict[str, Any]]) -> None:
+#     """
+#     Prints a summary of the negative value check results.
+    
+#     Parameters:
+#     -----------
+#     results : List[Dict[str, Any]]
+#         Results from check_negative_values function
+#     """
+#     print(f"{'HDU':^5} | {'Color':^8} | {'Benchside':^10} | {'Has Neg':^7} | {'Neg Count':^10} | {'Min Value':^10}")
+#     print("-" * 62)
+    
+#     for result in results:
+#         min_val = f"{result['min_value']:.2f}" if result['min_value'] is not None else "N/A"
+#         print(f"{result['hdu_index']:^5} | {result['color'] or 'N/A':^8} | "
+#               f"{result['benchside'] or 'N/A':^10} | {str(result['has_negative_values']):^7} | "
+#               f"{result['negative_count']:^10} | {min_val:^10}")
+
