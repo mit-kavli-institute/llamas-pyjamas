@@ -22,6 +22,8 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
 import time
 
+from llamas_pyjamas.File.llamasIO import process_fits_by_color
+
 # Set up logging
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
@@ -33,7 +35,8 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 def ExtractLlamasCube(infits, tracefits, optimal=True):
 
     assert infits.endswith('.fits'), 'File must be a .fits file'  
-    hdu = fits.open(infits)
+    # hdu = fits.open(infits)
+    hdu = process_fits_by_color(infits)
 
     # Find the trace files
     basefile = os.path.basename(tracefits).split('.fits')[0]
@@ -222,7 +225,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
         #opening the fitsfile
-        hdu = fits.open(file)
+        hdu = process_fits_by_color(file)
 
         
 
@@ -351,7 +354,7 @@ def box_extract(file, flat=False):
         ray.init(runtime_env=runtime_env)
 
         #opening the fitsfile
-        hdu = fits.open(file)
+        hdu = process_fits_by_color(file)
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]
