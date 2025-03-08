@@ -49,6 +49,7 @@ import pkg_resources
 from pathlib import Path
 import rpdb
 
+from llamas_pyjamas.File.llamasIO import process_fits_by_color
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -717,13 +718,13 @@ def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
     futures = []
     results = []    
     
-    with fits.open(fitsfile) as hdul:
-        if channel is not None and 'COLOR' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
-        elif channel is not None and 'CAM_NAME' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
-        else:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+    hdul = process_fits_by_color(fitsfile)
+    if channel is not None and 'COLOR' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+    elif channel is not None and 'CAM_NAME' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+    else:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -782,13 +783,13 @@ if __name__ == "__main__":
     
     fitsfile = args.filename
     
-    with fits.open(fitsfile) as hdul:
-        if args.channel is not None and 'COLOR' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
-        elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
-        else:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+    hdul = process_fits_by_color(fitsfile)
+    if args.channel is not None and 'COLOR' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+    elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
+    else:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]

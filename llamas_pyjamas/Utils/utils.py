@@ -396,3 +396,54 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR)-> None:
         benchside = traceobj.benchside
         req = N_fib[benchside]
         print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
+        
+        
+def flip_blue_combs()-> None:
+    """
+    Flips all blue combs in the lookup table (LUT) file.
+    
+    This function reads the LUT JSON file, processes all benchsides ('1A' through '4B')
+    in the blue combs section, and flips those comb arrays. The updated LUT is then 
+    saved back to the JSON file.
+    
+    The function performs the following steps:
+    1. Loads the LUT from 'LUT/traceLUT.json'.
+    2. Checks if 'combs' and 'blue' keys exist in the LUT structure.
+    3. For each benchside (1A-4B) in the blue combs, flips the comb array.
+    4. Saves the updated LUT back to the original file.
+    
+    Raises:
+        FileNotFoundError: If the LUT file does not exist.
+        json.JSONDecodeError: If the LUT file is not a valid JSON.
+        KeyError: If the expected structure ('combs' > 'blue') is not found.
+    """
+    # Load LUT
+    with open('LUT/traceLUT.json', 'r') as f:
+        lut = json.load(f)
+    
+    # Check if 'combs' and 'blue' keys exist
+    if 'combs' not in lut:
+        print("Combs data not found in LUT")
+        return
+        
+    if 'blue' not in lut['combs']:
+        print("Blue comb data not found in LUT")
+        return
+    
+    # Process each benchside for blue combs
+    for benchside in lut['combs']['blue'].keys():
+        # Get the comb as a list
+        comb = lut['combs']['blue'][benchside]
+        
+        # Flip the comb array
+        flipped_comb = list(reversed(comb))
+        
+        # Replace the original comb with the flipped one
+        lut['combs']['blue'][benchside] = flipped_comb
+        print(f"Flipped blue comb for benchside {benchside}")
+    
+    # Save the updated LUT
+    with open('LUT/traceLUT.json', 'w') as f:
+        json.dump(lut, f, indent=4)
+    
+    print("Blue combs successfully flipped and saved to LUT/traceLUT.json")
