@@ -173,5 +173,94 @@ def getBenchSideChannel(fitsfile: str, bench: str, side: str, channel: str)-> No
                     return(hdu.data)
                 
 
-
+def process_fits_by_color(fits_file):
+    """
+    Process a FITS file, transform image data based on color attribute, and return a table of HDUs.
     
+    The function applies the following transformations:
+    - Blue: Flip both x and y axes
+    - Green: Flip only x axis (horizontally)
+    - Red: No transformation
+    
+    Parameters:
+    ----------
+    fits_file : str
+        Path to the FITS file
+        
+    Returns:
+    -------
+    astropy.io.fits.HDUList
+        HDUList with color-based transformations applied
+    """
+    from astropy.io import fits
+    import numpy as np
+    
+    try:
+        # Open the FITS file
+        with fits.open(fits_file) as hdul:
+            # Create a new HDU list for the result
+            result_hdus = fits.HDUList()
+            
+            # Add the primary HDU without changes
+            result_hdus.append(hdul[0].copy())
+            
+            # Process each extension HDU
+            for i in range(1, len(hdul)):
+                hdu = hdul[i].copy()  # Create a copy to avoid modifying the original
+                
+                if 'DATASEC' in hdu.header:
+                    datasec = hdu.header['DATASEC']
+                    
+                    # Parse the DATASEC string '[x1:x2, y1:y2]'
+                    import re
+                    match = re.match(r'\[(\d+):(\d+),\s*(\d+):(\d+)\]', datasec)
+                    if match:
+                        x1, x2, y1, y2 = map(int, match.groups())
+
+                        # Convert from FITS 1-based indexing to Python 0-based indexing
+                        x1 -= 1
+                        y1 -= 1
+
+                        # Trim the data
+                        original_shape = hdu.data.shape
+                        if x2 <= original_shape[1] and y2 <= original_shape[0]:
+                            hdu.data = hdu.data[y1:y2, x1:x2]
+                            print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
+                        else:
+                            print(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
+                
+                # Check if the HDU has data
+                if hdu.data is not None:
+                    # Determine the color
+                    color = None
+                    
+                    # If COLOR is in the header, use it directly
+                    if 'COLOR' in hdu.header:
+                        color = hdu.header['COLOR'].lower()
+                        side  = hdu.header['SIDE']
+                    # If COLOR is not in the header but CAM_NAME is, extract color from CAM_NAME
+                    elif 'CAM_NAME' in hdu.header:
+                        camname = hdu.header['CAM_NAME']
+                        color = camname.split('_')[1].lower()
+                        side = camname.split('_')[0][1]
+                    
+                    # Apply transformations based on color if we have determined it
+                    if color:
+                        if color == 'blue':
+                            # Flip both x and y axes
+                            #hdu.data = np.flip(hdu.data, (0, 1))
+                            hdu.data = np.fliplr(hdu.data)
+                            hdu.data = np.flipud(hdu.data)
+                        elif color == 'green':
+                            # Flip only x axis (flip horizontally)
+                            hdu.data = np.fliplr(hdu.data)
+                        # No change for red
+                        
+                
+                result_hdus.append(hdu)
+        
+        return result_hdus
+    
+    except Exception as e:
+        print(f"Error processing FITS file: {e}")
+        return None  
