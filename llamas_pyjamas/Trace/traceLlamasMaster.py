@@ -49,6 +49,7 @@ import pkg_resources
 from pathlib import Path
 import rpdb
 
+from llamas_pyjamas.File.llamasIO import process_fits_by_color
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -180,6 +181,12 @@ class TraceLlamas:
         self.min_pkheight = 500
         self.window = 5 #can update to 15
         self.offset_cutoff = 3
+        
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+                LUT = json.load(f)
+                self.LUT = LUT
+        
+        self.dead_fibres = LUT['dead_fibers']
         
 
         # 1A    298 (Green) / 298 Blue
@@ -549,6 +556,55 @@ class TraceLlamas:
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
             self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
+            
+            
+            # Filter traces to match expected fiber count
+            fiber_list = {
+                '1A': 298, '1B': 300, '2A': 298, 
+                '2B': 297, '3A': 298, '3B': 300, '4A': 300
+            }
+            expected_count = fiber_list.get(self.benchside)
+            
+            if expected_count and len(self.traces) > expected_count:
+                logger.info(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
+                
+                # Calculate edge proximity scores for each trace
+                # Lower score = further from edge = better
+                edge_scores = np.zeros(len(self.traces))
+                
+                # Get the middle position of each trace (at center of detector)
+                mid_x = self.naxis1 // 2
+                mid_positions = self.traces[:, mid_x]
+                
+                # Calculate distance from edges
+                for i, pos in enumerate(mid_positions):
+                    # Distance from top and bottom edges
+                    dist_from_top = pos
+                    dist_from_bottom = self.naxis2 - pos
+                    
+                    # Use minimum distance to either edge as score
+                    edge_scores[i] = min(dist_from_top, dist_from_bottom)
+
+                # Sort traces by distance from edge (descending)
+                # This keeps traces furthest from edges
+                sorted_indices = np.argsort(edge_scores)[::-1]
+                
+                # Keep only the expected number of traces
+                keep_indices = sorted_indices[:expected_count]
+                keep_indices.sort()  # Sort back to original order
+                
+                # Filter the traces
+                self.traces = self.traces[keep_indices]
+                
+                # Update other related arrays to match
+                self.tracearr = self.tracearr[keep_indices]
+                self.xtracefit = self.xtracefit[keep_indices]
+                self.nfibers = len(self.traces)
+                
+                logger.info(f"Filtered to {self.nfibers} traces for {self.benchside}")
+                
+            
+            
 
 
         except Exception as e:
@@ -637,9 +693,17 @@ class TraceLlamas:
         
         return (fiberimg, profimg, bpmask)
     
-    def saveTraces(self, outfile='LLAMASTrace.pkl')-> None:
-        os.makedirs(CALIB_DIR, exist_ok=True)
-        outpath = os.path.join(CALIB_DIR, outfile)
+    def saveTraces(self, outfile='LLAMASTrace.pkl', newpath=None)-> None:
+        
+        
+        if newpath:
+            print(f'Making directory newpath: {newpath}')   
+            path = os.path.dirname(newpath)
+            os.makedirs(path, exist_ok=True)
+            outpath = outpath = os.path.join(newpath, outfile)
+        else:
+            os.makedirs(CALIB_DIR, exist_ok=True)
+            outpath = os.path.join(CALIB_DIR, outfile)
         
             
         print(f'outpath: {outpath}')
@@ -683,7 +747,7 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath=None) -> dict:
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header)
@@ -694,9 +758,19 @@ class TraceRay(TraceLlamas):
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
         print(f'color: {color}')
-        self.outfile = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
-        print(f'outfile: {self.outfile}')
-        super().saveTraces(self.outfile)
+        
+        filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+        
+        if outpath:
+            os.makedirs(outpath, exist_ok=True)
+            super().saveTraces(filename, newpath=outpath)
+        else:
+            super().saveTraces(filename)
+        
+        
+        
+        
+            
         
         elapsed_time = time.time() - start_time
         return 
@@ -717,13 +791,13 @@ def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
     futures = []
     results = []    
     
-    with fits.open(fitsfile) as hdul:
-        if channel is not None and 'COLOR' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
-        elif channel is not None and 'CAM_NAME' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
-        else:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+    hdul = process_fits_by_color(fitsfile)
+    if channel is not None and 'COLOR' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+    elif channel is not None and 'CAM_NAME' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+    else:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -767,6 +841,7 @@ if __name__ == "__main__":
     parser.add_argument('filename', type=str, help='Path to input FITS file')
     parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
+    parser.add_argument('--outpath', type=str, help='Path to save output files')
     args = parser.parse_args()
       
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
@@ -782,13 +857,13 @@ if __name__ == "__main__":
     
     fitsfile = args.filename
     
-    with fits.open(fitsfile) as hdul:
-        if args.channel is not None and 'COLOR' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
-        elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
-        else:
-            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+    hdul = process_fits_by_color(fitsfile)
+    if args.channel is not None and 'COLOR' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+    elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
+    else:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
@@ -797,7 +872,7 @@ if __name__ == "__main__":
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath)
         futures.append(future)
     
     # Monitor processing

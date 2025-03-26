@@ -180,13 +180,9 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
         bench = meta['bench']
         counts = extraction_obj.counts
         #Might need to put in side condition here as well it depends on the outcome
-        
-        # if (channel == 'blue' and side=='B'):
+        # if channel == 'blue':
         #     counts = np.flipud(extraction_obj.counts)
-        # elif (channel == 'blue' and side=='A' and bench != '4'):
-        #     counts = np.flipud(extraction_obj.counts)
-        
-        
+
     
         if isinstance(extraction_obj, str):
             extraction, _ = ExtractLlamas.loadExtraction(extraction_obj)
@@ -232,7 +228,7 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
     x_grid, y_grid = np.meshgrid(xx, yy)
     
     whitelight = flux_interpolator(x_grid, y_grid)
-    whitelight = np.fliplr(whitelight)
+    # whitelight = np.fliplr(whitelight)
     if (ds9plot):
         #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
         #ds9.set_np2arr(whitelight)
