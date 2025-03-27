@@ -130,7 +130,7 @@ def process_trace(hdu_data, header, trace_file):
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float), header)
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias, header)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")
@@ -220,7 +220,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         }
 
         # Initialize Ray
-        num_cpus = 5
+        num_cpus = 8
         ray.shutdown()
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
