@@ -127,23 +127,58 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None) -> 
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
-    
-    parser.add_argument('filename', type=str, help='Path to input FITS file')
+    parser = argparse.ArgumentParser(
+        description='Process LLAMAS FITS files using Ray multiprocessing.'
+    )
+    parser.add_argument(
+        'filenames',
+        type=str,
+        nargs='+',
+        help='Path(s) to input FITS file. Supply one file for single-channel extraction (use --channel or --all) or exactly three files for red, green, and blue channels.'
+    )
     parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
-    parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
-    parser.add_argument('--outpath', type=str, help='Path to save output files')
+    parser.add_argument(
+        '--channel',
+        type=str,
+        choices=['red', 'green', 'blue'],
+        help='Specify the color channel to use for a single file extraction'
+    )
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='Extract all channels from a single file'
+    )
+    parser.add_argument(
+        '--outpath',
+        type=str,
+        help='Path to save output files'
+    )
+    
     args = parser.parse_args()
     
-    red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
-    green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
-    blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
-    
-    if args.channel == 'red':
-        reduce_flat(args.filename, red_idxs, channel=args.channel)
-    elif args.channel == 'green':
-        reduce_flat(args.filename, green_idxs, channel=args.channel)
-    elif args.channel == 'blue':
-        reduce_flat(args.filename, blue_idxs, channel=args.channel)
+    # Multiple files provided: use produce_flat_extractions if exactly three files given.
+    if len(args.filenames) > 1:
+        if len(args.filenames) != 3:
+            parser.error("When providing multiple files, exactly three files are required for red, green, and blue channels.")
+        produce_flat_extractions(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
     else:
-        raise ValueError('Channel must be red, green, or blue')
+        # Single file provided. Must supply either --channel or --all.
+        if not (args.channel or args.all):
+            parser.error("For a single file extraction, you must supply --channel or --all.")
+        if args.channel:
+            if args.channel == 'red':
+                idxs = [1, 4, 7, 10, 13, 16, 19, 22]
+            elif args.channel == 'green':
+                idxs = [2, 5, 8, 11, 14, 17, 20, 23]
+            elif args.channel == 'blue':
+                idxs = [3, 6, 9, 12, 15, 18, 21, 24]
+            reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel)
+        elif args.all:
+            # Process all channels for the single file.
+            red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
+            green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
+            blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
+            reduce_flat(args.filenames[0], red_idxs, tracedir=args.outpath, channel='red')
+            reduce_flat(args.filenames[0], green_idxs, tracedir=args.outpath, channel='green')
+            reduce_flat(args.filenames[0], blue_idxs, tracedir=args.outpath, channel='blue')
+
