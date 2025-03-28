@@ -80,12 +80,14 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
     return None
 
 
-def match_hdu_to_traces(hdu_list, trace_files):
+def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     """Match HDU extensions to their corresponding trace files"""
     matches = []
     
     # Skip primary HDU (index 0)
-    for idx in range(1, len(hdu_list)):
+    #### need to be super careful with this starting index
+    for idx in range(start_idx, len(hdu_list)):
+        
         header = hdu_list[idx].header
 
         # Get color and benchside from header
