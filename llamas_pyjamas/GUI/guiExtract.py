@@ -80,12 +80,14 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
     return None
 
 
-def match_hdu_to_traces(hdu_list, trace_files):
+def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     """Match HDU extensions to their corresponding trace files"""
     matches = []
     
     # Skip primary HDU (index 0)
-    for idx in range(1, len(hdu_list)):
+    #### need to be super careful with this starting index
+    for idx in range(start_idx, len(hdu_list)):
+        
         header = hdu_list[idx].header
 
         # Get color and benchside from header
@@ -130,7 +132,7 @@ def process_trace(hdu_data, header, trace_file):
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float), header)
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias, header)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")
@@ -220,7 +222,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         }
 
         # Initialize Ray
-        num_cpus = 5
+        num_cpus = 8
         ray.shutdown()
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
