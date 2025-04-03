@@ -490,8 +490,10 @@ class TraceLlamas:
                     peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
                 for ifiber, pk_guess in enumerate(peaks):
+    
+                    
                     if ifiber >= self.nfibers:
-                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
+                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}")
                         continue
                     
                     #if the guess is too close to the edge, skip
@@ -506,10 +508,12 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 1.5):
+                    if (np.abs(pk_centroid-pk_guess) < 0.7):
                         tracearr[ifiber,mid_index+itrace] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index+itrace] = pk_guess
+
+                    
 
 
             ######### Now go back and fit from the midpoint backward ######
@@ -538,7 +542,7 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 1.5):
+                    if (np.abs(pk_centroid-pk_guess) < 0.7):
                         tracearr[ifiber,mid_index-itrace-1] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index-itrace-1] = pk_guess
@@ -561,58 +565,104 @@ class TraceLlamas:
             # Filter traces to match expected fiber count
             fiber_list = {
                 '1A': 298, '1B': 300, '2A': 298, 
-                '2B': 297, '3A': 298, '3B': 300, '4A': 300
+                '2B': 297, '3A': 298, '3B': 300, '4A': 300, '4B':298
             }
             expected_count = fiber_list.get(self.benchside)
-            
-            if expected_count and len(self.traces) > expected_count:
-                logger.info(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
+
+           
+            # if expected_count and len(self.traces) > expected_count:
+            #     print(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
                 
-                # Calculate edge proximity scores for each trace
-                # Lower score = further from edge = better
-                edge_scores = np.zeros(len(self.traces))
+            #     # Calculate edge proximity scores for each trace
+            #     # Lower score = further from edge = better
+            #     edge_scores = np.zeros(len(self.traces))
                 
-                # Get the middle position of each trace (at center of detector)
-                mid_x = self.naxis1 // 2
-                mid_positions = self.traces[:, mid_x]
+            #     # Get the middle position of each trace (at center of detector)
+            #     mid_x = self.naxis1 // 2
+            #     mid_positions = self.traces[:, mid_x]
                 
-                # Calculate distance from edges
-                for i, pos in enumerate(mid_positions):
-                    # Distance from top and bottom edges
-                    dist_from_top = pos
-                    dist_from_bottom = self.naxis2 - pos
+            #     # Calculate distance from edges
+            #     for i, pos in enumerate(mid_positions):
+            #         # Distance from top and bottom edges
+            #         dist_from_top = pos
+            #         dist_from_bottom = self.naxis2 - pos
                     
-                    # Use minimum distance to either edge as score
-                    edge_scores[i] = min(dist_from_top, dist_from_bottom)
+            #         # Use minimum distance to either edge as score
+            #         edge_scores[i] = min(dist_from_top, dist_from_bottom)
+            #         print(edge_scores[i], f" for trace {i}: pos={pos}, dist_from_top={dist_from_top}, dist_from_bottom={dist_from_bottom}")
 
-                # Sort traces by distance from edge (descending)
-                # This keeps traces furthest from edges
-                sorted_indices = np.argsort(edge_scores)[::-1]
+            #     # Sort traces by distance from edge (descending)
+            #     # This keeps traces furthest from edges
+            #     sorted_indices = np.argsort(edge_scores)[::-1]
                 
-                # Keep only the expected number of traces
-                keep_indices = sorted_indices[:expected_count]
-                keep_indices.sort()  # Sort back to original order
+            #     # Keep only the expected number of traces
+            #     keep_indices = sorted_indices[:expected_count]
+            #     keep_indices.sort()  # Sort back to original order
                 
-                # Filter the traces
-                self.traces = self.traces[keep_indices]
+            #     # Filter the traces
+            #     self.traces = self.traces[keep_indices]
                 
-                # Update other related arrays to match
-                self.tracearr = self.tracearr[keep_indices]
-                self.xtracefit = self.xtracefit[keep_indices]
-                self.nfibers = len(self.traces)
+            #     # Update other related arrays to match
+            #     self.tracearr = self.tracearr[keep_indices]
+            #     self.xtracefit = self.xtracefit[keep_indices]
+            #     self.nfibers = len(self.traces)
                 
-                logger.info(f"Filtered to {self.nfibers} traces for {self.benchside}")
-                
-            
-            
+            #     #logger.info(f"Filtered to {self.nfibers} traces for {self.benchside}")
+            #     print(f"Filtered to {self.nfibers} traces for {self.benchside}")
 
+            # Define a minimum acceptable distance (in pixels) from the top and bottom edges.
+            min_edge_distance = 30  # Adjust threshold as needed
+
+            # Get the middle position of each trace (at center of detector)
+            mid_x = self.naxis1 // 2
+            mid_positions = self.traces[:, mid_x]
+
+            # Convert None to np.nan so the comparisons work
+            safe_mid_positions = np.array([np.nan if pos is None else pos for pos in mid_positions])
+
+            # Filter out any traces that fall too close to the top or bottom
+            valid_edge_indices = np.where((safe_mid_positions >= min_edge_distance) & 
+                                          (safe_mid_positions <= (self.naxis2 - min_edge_distance)))[0]
+
+            if len(valid_edge_indices) < expected_count:
+                print(f"Only {len(valid_edge_indices)} traces pass the edge criteria for {self.benchside}")
+                # Decide how to handle this situation. For example, you might use all valid edges:
+                keep_indices = valid_edge_indices
+            else:
+                # Now, for the traces that remain, calculate edge proximity scores.
+                valid_traces = self.traces[valid_edge_indices]
+                valid_mid_positions = mid_positions[valid_edge_indices]
+                edge_scores = np.array([
+                    min(pos, self.naxis2 - pos) for pos in valid_mid_positions
+                ])
+
+                # Sort traces by their edge scores (descending keeps those furthest from edges)
+                sorted_valid_indices = valid_edge_indices[np.argsort(edge_scores)[::-1]]
+
+                # Keep only the expected number of traces from the remaining valid traces.
+                keep_indices = np.sort(sorted_valid_indices[:expected_count])
+
+            # Now filter the trace arrays using the final indices.
+            self.traces = self.traces[keep_indices]
+            self.tracearr = self.tracearr[keep_indices]
+            self.xtracefit = self.xtracefit[keep_indices]
+            self.nfibers = len(self.traces)
+            print(f"Filtered to {self.nfibers} traces for {self.benchside} after edge trimming.")
+                 
 
         except Exception as e:
+            tb = traceback.extract_tb(e.__traceback__)
+            last_call = tb[-1] if tb else None
+            if last_call:
+                error_line = f"Error in file '{last_call.filename}', line {last_call.lineno}"
+            else:
+                error_line = "No traceback available"
+            print(error_line)
             traceback.print_exc()
-            result = {"status": "failed", "error":str(e), 'channel': {self.channel}, 'bench': {self.bench}, 'side': {self.side}}
+            result = {"status": "failed", "error": f"{str(e)} -- {error_line}", 'channel': self.channel, 'bench': self.bench, 'side': self.side}
             logger.warning(result)
             return result
-            
+
         result = {"status": "success"}
         return result
     
