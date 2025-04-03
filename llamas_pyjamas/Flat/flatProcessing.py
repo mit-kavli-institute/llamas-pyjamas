@@ -19,6 +19,7 @@ from typing import List, Tuple
 from astropy.io import fits
 import numpy as np
 
+from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS
 
 def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
@@ -112,17 +113,12 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, cus
     :type tracedir: str, optional
     """
 
-    #isoltation the extensions by colour
-    red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
-    green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
-    blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
-
     # Reduce the red flat field image
-    reduce_flat(red_flat, red_idxs, tracedir=tracedir, channel='red')
+    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red')
     # Reduce the green flat field image
-    reduce_flat(green_flat, green_idxs, tracedir=tracedir, channel='green')
+    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green')
     # Reduce the blue flat field image
-    reduce_flat(blue_flat, blue_idxs, tracedir=tracedir, channel='blue')
+    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue')
     
     print('Flat field extractions complete.')
 
@@ -229,18 +225,18 @@ if __name__ == '__main__':
             parser.error("For a single file extraction, you must supply --channel or --all.")
         if args.channel:
             if args.channel == 'red':
-                idxs = [1, 4, 7, 10, 13, 16, 19, 22]
+                idxs = RED_IDXS
             elif args.channel == 'green':
-                idxs = [2, 5, 8, 11, 14, 17, 20, 23]
+                idxs = GREEN_IDXS
             elif args.channel == 'blue':
-                idxs = [3, 6, 9, 12, 15, 18, 21, 24]
+                idxs = BLUE_IDXS
             reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel)
         elif args.all:
             # Process all channels for the single file.
-            red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
-            green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
-            blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
-            reduce_flat(args.filenames[0], red_idxs, tracedir=args.outpath, channel='red')
-            reduce_flat(args.filenames[0], green_idxs, tracedir=args.outpath, channel='green')
-            reduce_flat(args.filenames[0], blue_idxs, tracedir=args.outpath, channel='blue')
+            if len(args.filenames) != 1:
+                parser.error("When using --all, only one file should be provided.")
+            print("Processing all channels for the single file...")
+            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red')
+            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green')
+            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue')
 
