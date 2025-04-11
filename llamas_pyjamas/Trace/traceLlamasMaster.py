@@ -508,7 +508,7 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 0.7):
+                    if (np.abs(pk_centroid-pk_guess) < 1.5):
                         tracearr[ifiber,mid_index+itrace] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index+itrace] = pk_guess
@@ -542,7 +542,7 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 0.7):
+                    if (np.abs(pk_centroid-pk_guess) < 1.5):
                         tracearr[ifiber,mid_index-itrace-1] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index-itrace-1] = pk_guess
