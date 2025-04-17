@@ -132,7 +132,7 @@ def process_trace(hdu_data, header, trace_file):
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias, header)
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float), header)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")

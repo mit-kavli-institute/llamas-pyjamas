@@ -9,13 +9,17 @@ import logging
 # from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
-
+from llamas_pyjamas.Image.WhiteLight import WhiteLightFits
 
 from llamas_pyjamas.GUI.guiExtract import process_trace, make_writable
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 from llamas_pyjamas.GUI.guiExtract import match_hdu_to_traces
+import pickle
+from typing import List, Tuple
+from astropy.io import fits
+import numpy as np
 
-
+from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS
 
 def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
@@ -96,7 +100,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     return 
 
 
-def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None) -> None:
+def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, custom=None) -> Tuple[List, List]:
     """Produce flat field extractions for each color channel.
 
     :param red_flat: file to use for red channel flat field extraction
@@ -109,22 +113,75 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None) -> 
     :type tracedir: str, optional
     """
 
-    #isoltation the extensions by colour
-    red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
-    green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
-    blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
-
     # Reduce the red flat field image
-    reduce_flat(red_flat, red_idxs, tracedir=tracedir, channel='red')
+    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red')
     # Reduce the green flat field image
-    reduce_flat(green_flat, green_idxs, tracedir=tracedir, channel='green')
+    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green')
     # Reduce the blue flat field image
-    reduce_flat(blue_flat, blue_idxs, tracedir=tracedir, channel='blue')
+    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue')
     
     print('Flat field extractions complete.')
-    
-    return
 
+
+    red_extraction, green_extraction, blue_extraction = None, None, None
+    if custom:
+        red_extraction = os.path.splitext(red_flat)[0] + '_extractions_flat.pkl'
+        green_extraction = os.path.splitext(green_flat)[0] + '_extractions_flat.pkl'
+        blue_extraction = os.path.splitext(blue_flat)[0] + '_extractions_flat.pkl'
+    else:
+        red_extraction = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
+        green_extraction = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
+        blue_extraction = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+
+    all_extractions = []
+    all_metadata = []
+    for fname in [red_extraction, green_extraction, blue_extraction]:
+        with open(fname, 'rb') as f:
+            data = pickle.load(f)
+        all_extractions.extend(data.get('extractions', []))
+        all_metadata.extend(data.get('metadata', []))
+    print("Total extractions:", len(all_extractions))
+    print("Total metadata entries:", len(all_metadata))
+    print(f"All metadata is {all_metadata}")
+
+    return all_extractions, all_metadata
+
+
+def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None, custom=None) -> None:
+
+
+    extraction_list, metadata = produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=tracedir, custom=custom)
+
+    outfile = 'flat_whitelight.fits'
+    white_light_file = WhiteLightFits(extraction_list, metadata, outfile=outfile)
+    print(f'white_light_file = {white_light_file}')
+
+    hdu = fits.open(os.path.join(OUTPUT_DIR, outfile), mode='update')
+    # Indices of HDUs containing image data to normalize
+    image_extensions = [1, 3, 5]
+    for index, item in enumerate(hdu):
+        if index == 0:
+            continue
+        elif index in image_extensions:
+            print(f'HDU {index}: {item}')
+            image = hdu[index].data
+            max_val = np.nanmax(image)
+            if np.isnan(image).all() or np.isnan(max_val):
+                logging.warning(f'All values are NaN for HDU {index}. Skipping normalization.')
+                normalized_image = image
+            elif max_val != 0:
+                normalized_image = image / max_val
+            else:
+                print(f'All values are zero for HDU {index}. Skipping normalization.')
+                normalized_image = image
+
+            hdu[index].data = normalized_image
+            print(f'Normalized image; new max value: {np.nanmax(normalized_image)}')
+    # Saving the normalised image
+    hdu.flush()  # ensure changes are written to disk
+    hdu.close()
+    
+    return None
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -160,25 +217,26 @@ if __name__ == '__main__':
     if len(args.filenames) > 1:
         if len(args.filenames) != 3:
             parser.error("When providing multiple files, exactly three files are required for red, green, and blue channels.")
-        produce_flat_extractions(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
+        #produce_flat_extractions(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
+        produce_normalised_whitelight(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
     else:
         # Single file provided. Must supply either --channel or --all.
         if not (args.channel or args.all):
             parser.error("For a single file extraction, you must supply --channel or --all.")
         if args.channel:
             if args.channel == 'red':
-                idxs = [1, 4, 7, 10, 13, 16, 19, 22]
+                idxs = RED_IDXS
             elif args.channel == 'green':
-                idxs = [2, 5, 8, 11, 14, 17, 20, 23]
+                idxs = GREEN_IDXS
             elif args.channel == 'blue':
-                idxs = [3, 6, 9, 12, 15, 18, 21, 24]
+                idxs = BLUE_IDXS
             reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel)
         elif args.all:
             # Process all channels for the single file.
-            red_idxs = [1, 4, 7, 10, 13, 16, 19, 22]
-            green_idxs = [2, 5, 8, 11, 14, 17, 20, 23]
-            blue_idxs = [3, 6, 9, 12, 15, 18, 21, 24]
-            reduce_flat(args.filenames[0], red_idxs, tracedir=args.outpath, channel='red')
-            reduce_flat(args.filenames[0], green_idxs, tracedir=args.outpath, channel='green')
-            reduce_flat(args.filenames[0], blue_idxs, tracedir=args.outpath, channel='blue')
+            if len(args.filenames) != 1:
+                parser.error("When using --all, only one file should be provided.")
+            print("Processing all channels for the single file...")
+            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red')
+            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green')
+            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue')
 
