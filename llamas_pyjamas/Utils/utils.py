@@ -447,3 +447,18 @@ def flip_blue_combs()-> None:
         json.dump(lut, f, indent=4)
     
     print("Blue combs successfully flipped and saved to LUT/traceLUT.json")
+    
+    
+def check_image_properties(hdu: fits.HDUList, start_idx: int = 1) -> None:
+    
+    for i in range(start_idx, len(hdu)):
+        color = hdu[i].header['COLOR']
+        bench = hdu[i].header['BENCh']
+        side = hdu[i].header['SIDE']
+        data = hdu[i].data
+        has_nan = np.isnan(data).any()
+        has_neg = np.any(data < 0)
+        print(f'color {color} bench {bench} side {side}')
+        print(f'Has NaN: {has_nan}')
+        print(f'Has negative value {has_neg}')
+    
