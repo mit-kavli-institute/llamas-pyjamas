@@ -15,4 +15,6 @@ Information regarding updates will be sent via email to those interested in usin
 To join the mailing list:
 https://mailman.mit.edu/mailman/listinfo/llamas-pipeline
 
-or send a blank email to llamas-pipeline@mit.edu
+or send a blank email to llamas-pipeline-join@mit.edu
+
+You will then receive an email asking you to confirm your subscription request. Once completed, you will be subscribed to our mailing list.
