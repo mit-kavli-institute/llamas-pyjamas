@@ -16,7 +16,8 @@ import pkg_resources
 from pathlib import Path
 
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
 from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
@@ -127,12 +128,28 @@ def process_trace(hdu_data, header, trace_file):
     """
     try:
         # Compute the bias from the current extension data.
-        bias = np.nanmedian(hdu_data.astype(float))
+        if 'COLOR' in header:
+            color = header['COLOR'].lower()
+            bench = header['BENCH']
+            side = header['SIDE']
+        else:
+            camname = header['CAM_NAME']
+            color = camname.split('_')[1].lower()
+            bench = camname.split('_')[0][0]
+            side = camname.split('_')[0][1]
+            
+        bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+        print(f'Bias file: {bias_file}')
+        #### fix the directory here!
+        bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
+        
+        bias_data = bias.data
+            
         # Load the trace object from the pickle file.
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float), header)
+        extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")
