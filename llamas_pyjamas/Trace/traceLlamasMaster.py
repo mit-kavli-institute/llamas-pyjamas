@@ -44,12 +44,13 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
 import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.constants import idx_lookup
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -58,6 +59,51 @@ logger.setLevel(logging.DEBUG)
 # Add timestamp to log filename
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 #logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
+
+
+LOG = []
+
+
+def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(CALIB_DIR, 'combined_bias.fits')) -> fits.ImageHDU:
+    """
+    Retrieves the appropriate bias HDU from a combined bias file.
+    
+    Args:
+        bench (str, optional): Bench identifier (e.g., '1', '2', '3', '4').
+        side (str, optional): Side identifier (e.g., 'A', 'B').
+        color (str, optional): Color channel (e.g., 'red', 'green', 'blue').
+        benchside (str, optional): Combined bench and side (e.g., '1A', '4B').
+        dir (str, optional): Path to the combined bias file.
+        
+    Returns:
+        fits.ImageHDU: The bias HDU for the specified parameters.
+        
+    Raises:
+        ValueError: If the combination of parameters is invalid or incomplete.
+    """
+    # Handle the case where benchside is provided instead of separate bench and side
+    if benchside and not (bench and side):
+        if len(benchside) != 2:
+            raise ValueError(f"Invalid benchside format: {benchside}. Expected format: 'NX' where N is bench number and X is side letter.")
+        bench = benchside[0]
+        side = benchside[1]
+    
+    # Validate inputs
+    if not (bench and side and color):
+        raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
+    
+    bias_hdus = process_fits_by_color(dir)
+    
+    try:
+        bias_idx = idx_lookup.get((color.lower(), str(bench), side.upper()))
+        print(f"Bias index: {bias_idx} for {bench}/{side}/{color}")
+    except:
+        raise ValueError(f"Invalid bench/side/color combination: {bench}/{side}/{color}")
+        
+    
+    bias_hdu = bias_hdus[bias_idx]
+    
+    return bias_hdu
 
 
 
@@ -179,7 +225,7 @@ class TraceLlamas:
         self.xmin     = 200
         self.fitspace = 10
         self.min_pkheight = 500
-        self.window = 5 #can update to 15
+        self.window = 12#5 #can update to 15
         self.offset_cutoff = 3
         
         with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
@@ -430,9 +476,15 @@ class TraceLlamas:
             ######New code to subtract background from the data
             n_rows = 12
             top_rows = self.data[-n_rows:, :]
-            background = np.median(top_rows)
+            #background = np.median(top_rows)
+            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            print(f'Bias file: {bias_file}')
+            #### fix the directory here!
+            bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
             
-            self.data = self.data - background
+            bias_data = bias.data
+            
+            self.data = self.data - bias_data
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
@@ -508,7 +560,7 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 0.7):
+                    if (np.abs(pk_centroid-pk_guess) < 1.5):
                         tracearr[ifiber,mid_index+itrace] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index+itrace] = pk_guess
@@ -542,7 +594,7 @@ class TraceLlamas:
                         / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
 
                     #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 0.7):
+                    if (np.abs(pk_centroid-pk_guess) < 1.5):
                         tracearr[ifiber,mid_index-itrace-1] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index-itrace-1] = pk_guess
@@ -554,12 +606,21 @@ class TraceLlamas:
             self.tracearr  = tracearr
             #defines the traces by fitting a spline along the x axis
             
-            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.5)
+            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.2)
             
             x2          = np.outer(np.ones(self.nfibers),np.arange(self.naxis1))
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
-            self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
+            self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
+            
+            # --- Point 2: Enforce monotonic ordering of traces ---
+            min_gap = 6  # minimum gap in pixels between adjacent fiber traces
+            for col in range(self.traces.shape[1]):
+                for i in range(1, self.nfibers):
+                    if self.traces[i, col] <= self.traces[i-1, col] + min_gap:
+                        LOG.append({f'self.traces[i, col] {self.traces[i, col]} is not within the miniumum gap'} )
+                        self.traces[i, col] = self.traces[i-1, col] + min_gap
+            
             
             
             # Filter traces to match expected fiber count
@@ -568,47 +629,6 @@ class TraceLlamas:
                 '2B': 297, '3A': 298, '3B': 300, '4A': 300, '4B':298
             }
             expected_count = fiber_list.get(self.benchside)
-
-           
-            # if expected_count and len(self.traces) > expected_count:
-            #     print(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
-                
-            #     # Calculate edge proximity scores for each trace
-            #     # Lower score = further from edge = better
-            #     edge_scores = np.zeros(len(self.traces))
-                
-            #     # Get the middle position of each trace (at center of detector)
-            #     mid_x = self.naxis1 // 2
-            #     mid_positions = self.traces[:, mid_x]
-                
-            #     # Calculate distance from edges
-            #     for i, pos in enumerate(mid_positions):
-            #         # Distance from top and bottom edges
-            #         dist_from_top = pos
-            #         dist_from_bottom = self.naxis2 - pos
-                    
-            #         # Use minimum distance to either edge as score
-            #         edge_scores[i] = min(dist_from_top, dist_from_bottom)
-            #         print(edge_scores[i], f" for trace {i}: pos={pos}, dist_from_top={dist_from_top}, dist_from_bottom={dist_from_bottom}")
-
-            #     # Sort traces by distance from edge (descending)
-            #     # This keeps traces furthest from edges
-            #     sorted_indices = np.argsort(edge_scores)[::-1]
-                
-            #     # Keep only the expected number of traces
-            #     keep_indices = sorted_indices[:expected_count]
-            #     keep_indices.sort()  # Sort back to original order
-                
-            #     # Filter the traces
-            #     self.traces = self.traces[keep_indices]
-                
-            #     # Update other related arrays to match
-            #     self.tracearr = self.tracearr[keep_indices]
-            #     self.xtracefit = self.xtracefit[keep_indices]
-            #     self.nfibers = len(self.traces)
-                
-            #     #logger.info(f"Filtered to {self.nfibers} traces for {self.benchside}")
-            #     print(f"Filtered to {self.nfibers} traces for {self.benchside}")
 
             # Define a minimum acceptable distance (in pixels) from the top and bottom edges.
             min_edge_distance = 30  # Adjust threshold as needed

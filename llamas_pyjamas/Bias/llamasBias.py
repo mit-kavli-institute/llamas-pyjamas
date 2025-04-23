@@ -34,7 +34,7 @@ import os
 from astropy.nddata import CCDData
 from astropy.stats import mad_std
 
-import ccdproc as ccdp
+#import ccdproc as ccdp
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
@@ -79,46 +79,68 @@ class BiasLlamas:
             raise ValueError("No .fits files found in the provided directory or list.")
         
         return
-    
 
+        
     def master_bias(self) -> None:
         """
         Create a master bias frame from a list of bias images.
         Each input FITS file is assumed to have a primary HDU and one or more extensions,
         where each extension contains a bias image from a detector.
-        The function loops over all extensions (determined dynamically), 
-        averages the corresponding images across all files, and builds a new FITS file with:
+        The function first asserts that each file’s primary HDU has matching EXPTIME and READOUT
+        values. Then, for each file, it groups the extensions by the 'COLOR' and 'BENCHSIDE' header
+        keywords, stacks the corresponding images across all files, computes their median (using nanmedian),
+        and builds a new FITS file with:
           - A primary HDU (using the primary header from the first file)
-          - One ImageHDU per extension, where the data is the mean of all corresponding exposures.
+          - One ImageHDU per group, where the data is the median combination of all matching extensions.
         The resulting combined FITS file is written to 'combined_bias.fits' in the bias_path.
         """
-        # Open first file to get primary header and number of extensions
-        with fits.open(self.files[0]) as hdulist_first:
+        # Open the first file to get the primary header as reference
+        first_file = os.path.join(self.bias_path, self.files[0]) if not os.path.isabs(self.files[0]) else self.files[0]
+        with fits.open(first_file) as hdulist_first:
             primary_hdr = hdulist_first[0].header.copy()
-            num_ext = len(hdulist_first) - 1  # excluding primary HDU
-        
+            
         combined_hdus = []
-        # Create primary HDU using the primary header
+        # Create primary HDU using the primary header from the first file
         primary_hdu = fits.PrimaryHDU(header=primary_hdr)
         combined_hdus.append(primary_hdu)
-
-        # Loop over each extension (1, 2, ... num_ext)
-        for ext in range(1, num_ext + 1):
-            data_list = []
-            header_list = []
-            for file in self.files:
-                with fits.open(file) as hdul:
-                    # Read the data and header for current extension
-                    data = hdul[ext].data
+        
+        # Dictionary to group extension data by (COLOR, BENCHSIDE)
+        groups = {}
+        
+        # Loop through each file
+        for file in self.files:
+            # Handle file path (if not absolute, join with bias_path)
+            file_path = os.path.join(self.bias_path, file) if not os.path.isabs(file) else file
+            with fits.open(file_path) as hdul:
+                # Assert primary HDU header values are consistent among all files
+                file_primary_hdr = hdul[0].header
+                
+                # Loop through each extension (skip primary, i.e. index 0)
+                for ext in range(1, len(hdul)):
                     hdr = hdul[ext].header.copy()
-                    data_list.append(data)
-                    header_list.append(hdr)
-            # Stack and compute mean (using nanmean to avoid any NaN issues)
-            combined_data = np.nanmedian(np.array(data_list), axis=0)
-            combined_header = header_list[0]
-            combined_header['COMBINED'] = True
-            # Create an ImageHDU for the combined extension data
-            image_hdu = fits.ImageHDU(data=combined_data, header=combined_header, name=f'EXT{ext}')
+                    try:
+                        # Group by 'COLOR' and 'BENCHSIDE' header keys
+                        key = (hdr["COLOR"], hdr["BENCH"], hdr["SIDE"])
+                    except KeyError as e:
+                        raise KeyError(f"Extension in file {file} missing required key: {e}")
+                    
+                    # Append data to the corresponding group
+                    if key not in groups:
+                        groups[key] = {"data": [], "header": hdr}
+                    groups[key]["data"].append(hdul[ext].data)
+        
+        # Process each group by computing the median combined data
+        for (color, bench, side), group in groups.items():
+            data_array = np.array(group["data"])
+            combined_data = np.nanmedian(data_array, axis=0)
+            combined_header = group["header"]
+            combined_header["COMBINED"] = True
+            # Record the grouping information in the header for convenience
+            combined_header["COLOR"] = color
+            combined_header["BENCH"] = bench  # note: shortened key to 8 characters if needed
+            combined_header["SIDE"] = side
+            # Create an image HDU for this group. The HDU name encodes the group key.
+            image_hdu = fits.ImageHDU(data=combined_data, header=combined_header, name=f"COL_{color}_BNCH_{bench}")
             combined_hdus.append(image_hdu)
         
         # Assemble all HDUs into an HDUList and write to file
