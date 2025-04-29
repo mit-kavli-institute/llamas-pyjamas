@@ -167,19 +167,19 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False):
 
         if (channel == 'red'):
             test_extension = 18
-            line_table = Table.read('red_peaks.csv')
+            line_table = Table.read(os.path.join(LUT_DIR, 'red_peaks.csv'))
         elif (channel == 'green'):
             test_extension = 19
-            line_table = Table.read('green_peaks.csv')
+            line_table = Table.read(os.path.join(LUT_DIR, 'green_peaks.csv'))
         elif (channel == 'blue'):
             test_extension = 20
-            line_table = Table.read('blue_peaks.csv')   
+            line_table = Table.read(os.path.join(LUT_DIR, 'blue_peaks.csv'))   
         metadata = arcdict['metadata'][test_extension]
         print(f"Processing {metadata['bench']}{metadata['side']} {metadata['channel']}")
         
         line_table = line_table[(line_table['Wavelength'] > 0)]
         initial_arcfit = robust_fit(line_table['Pixel'], (airtovac(line_table['Wavelength']*u.AA)).value, function='legendre', order=5, lower=5, upper=5, maxdev=5)
-
+        print(f'Inital arcfit {initial_arcfit}')
         arc_fitx = np.array([])
         arc_fitw = np.array([])
         arc_fity = np.array([])
