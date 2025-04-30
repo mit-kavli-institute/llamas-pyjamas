@@ -8,6 +8,8 @@ THIS IS AN IN-PROGRESS DEVELOPMENT PIPELINE.  IT IS MADE AVAILABLE TO THE PUBLIC
 FOR OBSERVATION PLANNING AND EXECUTION BUT NO WARRANY IS MADE REGARDING INSTALLATION OR 
 EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
+Users of this pipeline are requested to cite Hughes et al. (in prep).
+
 For instructions on installation, compilation, and runtime, please see files in the Tutorials directory.
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
