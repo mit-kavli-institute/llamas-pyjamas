@@ -27,3 +27,6 @@ You will then receive an email asking you to confirm your subscription request. 
 To currently run the pipeline, please download the mastercalib folder from this location and have the folder located within the llamas_pyjamas subfolder: https://mit-kavli.box.com/s/sbgfzlse3kjma0vakybhm2wbovi29klm
 
 You will also need to download the combined_bias.fits file and keep a copy within both llamas_pyjamas and the Bias subfolder to run the GUI.
+
+### Demo files
+To test run the pipelines on data, we have provided a standard star raw image, flat field images, and a bias image to create an extracted WhiteLight image. https://mit-kavli.box.com/s/k7s3bmwu98q3iljm4djpzidxj7qg26cl
