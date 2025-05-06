@@ -20,3 +20,10 @@ https://mailman.mit.edu/mailman/listinfo/llamas-pipeline
 or send a blank email to llamas-pipeline-join@mit.edu
 
 You will then receive an email asking you to confirm your subscription request. Once completed, you will be subscribed to our mailing list.
+
+
+### Auxillary Files
+
+To currently run the pipeline, please download the mastercalib folder from this location and have the folder located within the llamas_pyjamas subfolder: https://mit-kavli.box.com/s/sbgfzlse3kjma0vakybhm2wbovi29klm
+
+You will also need to download the combined_bias.fits file and keep a copy within both llamas_pyjamas and the Bias subfolder to run the GUI.
