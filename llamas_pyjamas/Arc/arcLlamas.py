@@ -257,7 +257,11 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False):
                 ax1.plot([pkwv,pkwv],[-200,0],color='b', alpha=0.1)
                 final_fitx = np.append(final_fitx, xmodel[pk])
                 final_fitwv = np.append(final_fitwv, thar_match['wave'])
-
+        plt.show()
+        print(f"Found {len(final_fitx)} lines in the ThAr linelist")
+        if (len(final_fitx) ==0):
+            print(f"No lines found in ThAr linelist for this channel {channel}")
+            continue
         final_arcfit = robust_fit(final_fitx, final_fitwv, function='legendre', order=5, lower=5, upper=5, maxdev=5)
 
         for thisline in final_fitwv:
