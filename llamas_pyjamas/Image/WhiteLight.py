@@ -31,6 +31,15 @@ import traceback
 from llamas_pyjamas.config import LUT_DIR
 from typing import Tuple
 
+import numpy as np
+from scipy.interpolate import LinearNDInterpolator
+
+
+
+
+
+
+
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
 
@@ -674,10 +683,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
         - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
         - flux (numpy.ndarray): The flux values for each fiber.
     """
-    import numpy as np
-    from scipy.interpolate import LinearNDInterpolator
-    from llamas_pyjamas.QA import plot_ds9
-    
+
     xdata = np.array([])
     ydata = np.array([])
     flux = np.array([])
@@ -734,3 +740,72 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
         plot_ds9(whitelight)
     
     return whitelight, xdata, ydata, flux
+
+def QuickWhiteLightCube(mastercalib: dict, ds9plot: bool = True, outfile: str = None) -> str:
+        """
+        Generates a cube FITS file with quick-look white light images for each color.
+        The function groups the mastercalib dictionary by color (keys: blue, green, red),
+        calls QuickWhiteLight for each color group, and creates an HDU for the image and an
+        associated binary table HDU with fiber positions and flux data.
+        
+        Parameters:
+            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key, 
+                the value should be a dict with the following entries:
+                    'traces'   - list of trace objects,
+                    'data'     - list of corresponding data arrays,
+                    'metadata' - (optional) list of metadata dictionaries.
+            ds9plot (bool, optional): If True, display each generated white light image using DS9.
+                                        Default is True.
+            outfile (str, optional): Output FITS file name. If None, a file name is generated
+                                     with the current timestamp.
+        
+        Returns:
+            str: The file path of the created quick-look white light cube FITS file.
+        """
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Create primary HDU and HDU list
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['COMMENT'] = "Quick White Light Cube created from mastercalib traces."
+        hdul = fits.HDUList([primary_hdu])
+        
+        # Process each color channel
+        for color in ['blue', 'green', 'red']:
+            if color not in mastercalib:
+                continue
+
+            # Unpack the calibration data for this channel
+            calib = mastercalib[color]
+            # Ensure metadata exists; if not, pass None to QuickWhiteLight
+            trace_list = calib.get('traces', [])
+            data_list = calib.get('data', [])
+            metadata = calib.get('metadata', None)
+            
+            if not trace_list or not data_list:
+                continue
+
+            # Generate the white light image and associated arrays.
+            whitelight, xdata, ydata, flux = QuickWhiteLight(trace_list, data_list, metadata, ds9plot=ds9plot)
+
+            # Create an image HDU for this channel.
+            image_hdu = fits.ImageHDU(data=whitelight.astype(np.float32), name=color.upper())
+            hdul.append(image_hdu)
+
+            # Create a binary table HDU with the x, y, and flux data.
+            col1 = fits.Column(name='XDATA', format='E', array=np.array(xdata, dtype=np.float32))
+            col2 = fits.Column(name='YDATA', format='E', array=np.array(ydata, dtype=np.float32))
+            col3 = fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
+            tab_hdu = fits.BinTableHDU.from_columns([col1, col2, col3], name=f'{color.upper()}_TAB')
+            hdul.append(tab_hdu)
+        
+        # Determine output file name
+        if outfile is None:
+            outfile = f'quickwhitecube_{timestamp}.fits'
+        
+        # Write the FITS file to disk.
+        outpath = os.path.join(OUTPUT_DIR, outfile)
+        hdul.writeto(outpath, overwrite=True)
+        
+        print(f'Quick white light cube saved to {outpath}')
+        return outpath
