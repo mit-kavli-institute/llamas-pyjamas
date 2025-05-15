@@ -16,7 +16,7 @@ import pkg_resources
 from pathlib import Path
 
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
@@ -138,7 +138,7 @@ def process_trace(hdu_data, header, trace_file):
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
             
-        bias_file = os.path.join(CALIB_DIR, 'combined_bias.fits')
+        bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
         print(f'Bias file: {bias_file}')
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
@@ -254,7 +254,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
-        masterbiasfile = os.path.join(CALIB_DIR, 'combined_bias.fits')
+        masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
 
         #Debug statements
         print(f'basefile = {basefile}')
