@@ -29,7 +29,7 @@ import logging
 from datetime import datetime
 import numpy as np
 from astropy.io import fits
-from llamas_pyjamas.config import CALIB_DIR
+from llamas_pyjamas.config import CALIB_DIR, LUT_DIR
 import json
 import matplotlib.pyplot as plt
 import traceback
@@ -267,6 +267,53 @@ def dump_LUT(channel: str, hdu, trace_obj: 'TraceLlamas')-> None:
         json.dump(master_lut, f, indent=4)
     
     return
+
+
+def trace_dump_LUT(trace_obj: 'TraceLlamas')-> None:
+    """
+    Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.
+    Parameters:
+    channel (str): The channel name to be processed.
+    hdu (astropy.io.fits.HDUList): The HDU list containing the FITS file data.
+    trace_obj (TraceObject): An object that processes HDU data and extracts LUT information.
+    Returns:
+    None
+    Raises:
+    FileNotFoundError: If the 'traceLUT.json' file is not found when attempting to load the master LUT.
+    Notes:
+    - The function initializes or loads a master LUT from 'traceLUT.json'.
+    - It processes each relevant HDU to extract LUT information and updates the master LUT.
+    - The updated master LUT is saved back to 'traceLUT.json'.
+    """
+
+    # Initialize or load master LUT
+    try:
+        print(os.path.join(LUT_DIR, "traceLUT.json"))
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+            master_lut = json.load(f)
+    except FileNotFoundError:
+        print(f'No LUT file found, for {os.path.join(LUT_DIR, "traceLUT.json")}')
+        master_lut = {channel: {}}
+
+    benchside = trace_obj.benchside
+    channel = trace_obj.channel
+    comb = trace_obj.orig_comb
+    peaks = trace_obj.first_peaks
+    # Convert numpy array to regular Python types
+    peaks_dict = create_peak_lookups(peaks, benchside=benchside)
+    
+    master_lut["combs"][channel][benchside] = trace_obj.orig_comb.tolist()
+    # Add to master LUT
+    master_lut["fib_pos"][channel][benchside] = peaks_dict
+    print(f"Added {channel} {benchside} peaks to LUT")
+
+    # Save updated master LUT 
+    with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'w') as f:
+        json.dump(master_lut, f, indent=4)
+    
+    return
+
+
 
 
 
