@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
 from astropy.io import fits
 from astropy.table import Table
 import os
@@ -34,7 +34,7 @@ from typing import Tuple
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
-
+from llamas_pyjamas.File.llamasIO import process_fits_by_color
 
 
 
@@ -741,7 +741,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
     return whitelight, xdata, ydata, flux
 
-def QuickWhiteLightCube(mastercalib: dict, ds9plot: bool = True, outfile: str = None) -> str:
+def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -764,47 +764,118 @@ def QuickWhiteLightCube(mastercalib: dict, ds9plot: bool = True, outfile: str = 
         """
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+
+
+
+
+        # Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR
         
-        # Create primary HDU and HDU list
+
+        trace_objs = []
+
+        # Open the science FITS file and create the output HDU list
+        science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
+
+        bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+
         primary_hdu = fits.PrimaryHDU()
-        primary_hdu.header['COMMENT'] = "Quick White Light Cube created from mastercalib traces."
+        primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
         hdul = fits.HDUList([primary_hdu])
+
+        blue_traces = []
+        green_traces = []
+        red_green = []
         
-        # Process each color channel
-        for color in ['blue', 'green', 'red']:
-            if color not in mastercalib:
-                continue
+        blue_data = []
+        green_data = []
+        red_data = []
 
-            # Unpack the calibration data for this channel
-            calib = mastercalib[color]
-            # Ensure metadata exists; if not, pass None to QuickWhiteLight
-            trace_list = calib.get('traces', [])
-            data_list = calib.get('data', [])
-            metadata = calib.get('metadata', None)
+        blue_meta = []
+        green_meta = []
+        red_meta = []
+
+        # Loop over each extension (skip primary) to process data
+        for i, ext in enumerate(science_hdul[1:], start=1):
+            bias_data = bias_hdul[i].data
+            data = ext.data - bias_data
+            header = ext.header
+            color = header.get('COLOR', '').lower()
+            bench = header.get('BENCH', '')
+            side = header.get('SIDE', '')
+            benchside = f'{bench}{side}'
             
-            if not trace_list or not data_list:
+            # Determine the corresponding trace file based on benchside and color
+            #LLAMAS_master_blue_1_A_traces.pkl
+            trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
+            trace_filepath = os.path.join(CALIB_DIR, trace_filename)
+            if not os.path.exists(trace_filepath):
+                logger.info(f"Trace file {trace_filepath} not found for {benchside} {color}. Skipping extension.")
                 continue
+            
+            with open(trace_filepath, "rb") as f:
+                trace_obj = pickle.load(f)
+            
+            # Build trace and data lists for QuickWhiteLight processing
+            
+            
+            metadata = {'channel': color, 'bench': bench, 'side': side}
+            if color == 'blue':
+                blue_traces.append(trace_obj)
+                blue_data.append(data)
+                blue_meta.append(metadata)
+            elif color == 'green':
+                green_traces.append(trace_obj)
+                green_data.append(data)
+                green_meta.append(metadata)
+            elif color == 'red':
+                red_green.append(trace_obj)
+                red_data.append(data)
+                red_meta.append(metadata)
+            
+            # After processing all science_hdul extensions, generate white light images for each color
 
-            # Generate the white light image and associated arrays.
-            whitelight, xdata, ydata, flux = QuickWhiteLight(trace_list, data_list, metadata, ds9plot=ds9plot)
+        whitelight_results = {}
+        for col, traces_list, data_list, meta_list in [
+            ('blue', blue_traces, blue_data, blue_meta),
+            ('green', green_traces, green_data, green_meta),
+            ('red', red_green, red_data, red_meta)
+        ]:
+            if traces_list and data_list:
+                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot)
+                whitelight_results[col] = (wl, xdata, ydata, flux)
+            else:
+                logger.info(f"No data found for {col} color.")
+                whitelight_results[col] = (None, None, None, None)
 
-            # Create an image HDU for this channel.
-            image_hdu = fits.ImageHDU(data=whitelight.astype(np.float32), name=color.upper())
+        for color in ['blue', 'green', 'red']:
+            wl, xdata, ydata, flux = whitelight_results[color]
+            if wl is None:
+                continue
+            # Create an image HDU for the white light image
+            image_hdu = fits.ImageHDU(data=wl.astype(np.float32), name=color.upper())
             hdul.append(image_hdu)
-
-            # Create a binary table HDU with the x, y, and flux data.
-            col1 = fits.Column(name='XDATA', format='E', array=np.array(xdata, dtype=np.float32))
-            col2 = fits.Column(name='YDATA', format='E', array=np.array(ydata, dtype=np.float32))
-            col3 = fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
-            tab_hdu = fits.BinTableHDU.from_columns([col1, col2, col3], name=f'{color.upper()}_TAB')
+            
+            # Create a binary table HDU with the fiber x, y positions and flux data
+            tab_hdu = fits.BinTableHDU.from_columns([
+                fits.Column(name='XDATA', format='E', array=np.array(xdata, dtype=np.float32)),
+                fits.Column(name='YDATA', format='E', array=np.array(ydata, dtype=np.float32)),
+                fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
+            ], name=f'{color.upper()}_TAB')
             hdul.append(tab_hdu)
+         
+        
+        science_hdul.close()
+
         
         # Determine output file name
         if outfile is None:
-            outfile = f'quickwhitecube_{timestamp}.fits'
+            fitsfilebase = science_file.split('/')[-1]
+            white_light_file = fitsfilebase.replace('.fits', '_quickwhitelight.fits')
+            
         
         # Write the FITS file to disk.
-        outpath = os.path.join(OUTPUT_DIR, outfile)
+        outpath = os.path.join(OUTPUT_DIR, white_light_file)
         hdul.writeto(outpath, overwrite=True)
         
         print(f'Quick white light cube saved to {outpath}')
