@@ -61,7 +61,9 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     
     
     _extractions = []
+    print(f'Processing {filename} with indices {idxs}')
     _hdus = process_fits_by_color(filename)
+    print(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     
     masterfile = 'LLAMAS_master'
@@ -261,7 +263,7 @@ if __name__ == '__main__':
     )
     
     args = parser.parse_args()
-    
+    print(f'args.filenames {args.filenames}')
     # Multiple files provided: use produce_flat_extractions if exactly three files given.
     if len(args.filenames) > 1:
         if len(args.filenames) != 3:
