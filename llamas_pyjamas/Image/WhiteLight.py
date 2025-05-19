@@ -880,3 +880,215 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
         
         print(f'Quick white light cube saved to {outpath}')
         return outpath
+
+
+def WhiteLightHex(extraction_list, metadata=None, ds9plot=False, median=False, mask=None, 
+                 zscale=True, scale_min=None, scale_max=None, colorbar=True, 
+                 colormap='viridis', fig=None, ax=None, **kwargs):
+    """
+    Create a hexagonal grid white light image without interpolation between fibers.
+    Each fiber is represented as a discrete hexagon with its measured value.
+    
+    Parameters
+    ----------
+    extraction_list : list
+        List of ExtractLlamas objects
+    metadata : list, optional
+        Metadata for each extraction object, by default None
+    ds9plot : bool, optional
+        If True, display the image with DS9, by default False
+    median : bool, optional
+        If True, use median instead of mean for combining extractions, by default False
+    mask : ndarray, optional
+        Mask to apply to the data, by default None
+    zscale : bool, optional
+        If True, use zscale for display, by default True
+    scale_min : float, optional
+        Minimum value for display scaling, by default None
+    scale_max : float, optional
+        Maximum value for display scaling, by default None
+    colorbar : bool, optional
+        If True, display colorbar, by default True
+    colormap : str, optional
+        Colormap to use, by default 'viridis'
+    fig : matplotlib.figure.Figure, optional
+        Figure to plot on, by default None
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on, by default None
+        
+    Returns
+    -------
+    ndarray
+        2D hexagonal grid image
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import RegularPolygon
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+    
+    # Initialize data structures
+    xdata = np.array([])
+    ydata = np.array([])
+    flux = np.array([])
+    bench_sides = np.array([])
+    
+    # Process extraction list
+    for i, extraction_obj in enumerate(extraction_list):
+        meta = metadata[i] if metadata else None
+        
+        if isinstance(extraction_obj, str):
+            extraction, _ = ExtractLlamas.loadExtraction(extraction_obj)
+            logger.info(f'Loaded extraction object {extraction.bench}{extraction.side}')
+        elif isinstance(extraction_obj, ExtractLlamas):
+            extraction = extraction_obj
+        else:
+            raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
+        
+        channel = meta['channel'] if meta else extraction.channel
+        side = meta['side'] if meta else extraction.side
+        counts = extraction.counts
+        
+        nfib, naxis1 = np.shape(counts)
+        
+        for ifib in range(nfib):
+            benchside = f'{extraction.bench}{extraction.side}'
+            
+            try:
+                x, y = FiberMap_LUT(benchside, ifib)
+                if x == -1 and y == -1:
+                    continue  # Skip if fiber mapping not found
+            except Exception as e:
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
+                continue
+            
+            # Get fiber value
+            thisflux = np.nansum(counts[ifib])
+            if mask is not None and len(mask) > 0:
+                thisflux = thisflux * (1 - mask[ifib])
+                
+            # Store data
+            flux = np.append(flux, thisflux)
+            xdata = np.append(xdata, x)
+            ydata = np.append(ydata, y)
+            bench_sides = np.append(bench_sides, benchside)
+    
+    # Create figure if not provided
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Determine colormap scaling
+    if zscale:
+        from astropy.visualization import ZScaleInterval
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(flux)
+    else:
+        vmin = scale_min if scale_min is not None else np.nanmin(flux)
+        vmax = scale_max if scale_max is not None else np.nanmax(flux)
+    
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    cmap = cm.get_cmap(colormap)
+    
+    # Compute hexagon size based on fiber spacing (using median distance between adjacent fibers)
+    x_sorted = np.sort(np.unique(xdata))
+    if len(x_sorted) > 1:
+        x_diffs = np.diff(x_sorted)
+        hex_size = np.nanmedian(x_diffs) / 1.5  # Adjust to prevent overlap
+    else:
+        hex_size = 0.5  # Default if we can't compute
+    
+    # Create a grid to store hexagonal values for DS9 display
+    x_range = (np.max(xdata) - np.min(xdata)) + 2*hex_size
+    y_range = (np.max(ydata) - np.min(ydata)) + 2*hex_size
+    x_min, y_min = np.min(xdata) - hex_size, np.min(ydata) - hex_size
+    
+    # Create grid with higher resolution for DS9
+    grid_scale = 5  # Higher resolution for better hexagon approximation
+    hex_grid = np.full(
+        (int(y_range * grid_scale) + 1, int(x_range * grid_scale) + 1),
+        np.nan
+    )
+    
+    # Plot hexagons for each fiber
+    for i in range(len(xdata)):
+        x, y = xdata[i], ydata[i]
+        value = flux[i]
+        
+        if np.isnan(value):
+            continue
+            
+        color = cmap(norm(value))
+        
+        # Create hexagon patch for matplotlib
+        hex_patch = RegularPolygon(
+            (x, y), 
+            numVertices=6, 
+            radius=hex_size,
+            orientation=np.pi/6,  # 30 degrees rotation
+            facecolor=color, 
+            edgecolor='black', 
+            linewidth=0.5,
+            alpha=1.0
+        )
+        ax.add_patch(hex_patch)
+        
+        # Fill corresponding area in hex_grid for DS9
+        # Convert hexagon vertices to grid coordinates
+        for phi in np.linspace(0, 2*np.pi, 60):  # 60 points around hexagon
+            hx = x + hex_size * np.cos(phi)
+            hy = y + hex_size * np.sin(phi)
+            
+            # Convert to grid indices
+            ix = int((hx - x_min) * grid_scale)
+            iy = int((hy - y_min) * grid_scale)
+            
+            # Check bounds and set value
+            if (0 <= ix < hex_grid.shape[1] and 0 <= iy < hex_grid.shape[0]):
+                hex_grid[iy, ix] = value
+    
+    # Fill in the interior of hexagons in grid (simple flood fill)
+    from scipy import ndimage
+    # Create a binary mask of valid points
+    mask = ~np.isnan(hex_grid)
+    # Label connected regions
+    labels, num = ndimage.label(mask)
+    # Fill holes in each labeled region
+    for i in range(1, num+1):
+        region = labels == i
+        values = hex_grid[region]
+        if len(values) > 0:
+            median_value = np.nanmedian(values)
+            # Fill entire region with median value
+            hex_grid[region] = median_value
+    
+    # Set axis limits
+    ax.set_xlim(np.min(xdata) - 2*hex_size, np.max(xdata) + 2*hex_size)
+    ax.set_ylim(np.min(ydata) - 2*hex_size, np.max(ydata) + 2*hex_size)
+    ax.set_aspect('equal')
+    
+    # Add colorbar if requested
+    if colorbar:
+        cbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
+        cbar.set_label('Flux')
+    
+    # Set labels and title
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title('Hexagonal Fiber Grid (No Interpolation)')
+    
+    # Show the plot
+    if ds9plot:
+        # Display in DS9
+        try:
+            from llamas_pyjamas.QA import plot_ds9
+            plot_ds9(hex_grid, samp=True)
+        except Exception as e:
+            logger.error(f"Error displaying in DS9: {e}")
+            plt.tight_layout()
+            plt.show()
+    else:
+        plt.tight_layout()
+        plt.show()
+    
+    return hex_grid
