@@ -884,7 +884,7 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
         return outpath
 
 
-def WhiteLightHex(extraction_list, metadata=None, ds9plot=False, median=False, mask=None, 
+def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None, 
                  zscale=True, scale_min=None, scale_max=None, colorbar=True, 
                  colormap='viridis', fig=None, ax=None, **kwargs):
     """
@@ -931,27 +931,35 @@ def WhiteLightHex(extraction_list, metadata=None, ds9plot=False, median=False, m
     ydata = np.array([])
     flux = np.array([])
     bench_sides = np.array([])
+
+
+    if isinstance(extraction_file, str):
+        print(f'Type is str-> loading file {extraction_file}')
+        extraction, _ = ExtractLlamas.loadExtraction(extraction_file)
+        logger.info(f'Loaded extraction object from file: {extraction_file}')
+    elif isinstance(extraction_obj, ExtractLlamas):
+        print(f'Type is ExtractLlamas-> using object')
+        extraction = extraction_obj
+    else:
+        raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
+    
+
+    extract_obj = ExtractLlamas.loadExtraction(extraction_file)
+    extraction_list = extract_obj['extractions']
+    metadata = extract_obj['metadata'] if 'metadata' in extract_obj else None
     
     # Process extraction list
     for i, extraction_obj in enumerate(extraction_list):
         meta = metadata[i] if metadata else None
         
-        if isinstance(extraction_obj, str):
-            extraction, _ = ExtractLlamas.loadExtraction(extraction_obj)
-            logger.info(f'Loaded extraction object {extraction.bench}{extraction.side}')
-        elif isinstance(extraction_obj, ExtractLlamas):
-            extraction = extraction_obj
-        else:
-            raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
-        
-        channel = meta['channel'] if meta else extraction.channel
-        side = meta['side'] if meta else extraction.side
-        counts = extraction.counts
+        channel = extraction_obj.channel
+        side = extraction_obj.side
+        counts = extraction_obj.counts
         
         nfib, naxis1 = np.shape(counts)
         
         for ifib in range(nfib):
-            benchside = f'{extraction.bench}{extraction.side}'
+            benchside = f'{extraction_obj.bench}{extraction_obj.side}'
             
             try:
                 x, y = FiberMap_LUT(benchside, ifib)
