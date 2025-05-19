@@ -466,3 +466,307 @@ def plot_fiber_masks_on_image(traceobj, data, zscale=False):
     plt.tight_layout()
     plt.show()
     
+
+
+def plot_fiber_trace(hdu_data, trace, ifiber, figsize=(15, 10)):
+    """
+    Plot a single fiber trace to check how well it masks the data.
+    
+    Parameters:
+    -----------
+    hdu_data : np.ndarray
+        The raw 2D spectral data
+    trace : TraceLlamas
+        The trace object containing profile information
+    ifiber : int
+        Fiber index to visualize
+    figsize : tuple
+        Figure size for the plot
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LogNorm
+    
+    # Create the mask for this fiber
+    inprofile = trace.fiberimg == ifiber
+    
+    # Get profile weights (what's used in optimal extraction)
+    profile_weights = trace.profimg[inprofile]
+    
+    fig, axs = plt.subplots(2, 2, figsize=figsize)
+    
+    # Plot 1: Raw data with fiber region outlined
+    im1 = axs[0, 0].imshow(hdu_data, origin='lower', norm=LogNorm(), aspect='auto')
+    axs[0, 0].set_title(f'Raw Data (log scale)')
+    plt.colorbar(im1, ax=axs[0, 0])
+    
+    # Plot 2: Fiber mask
+    mask_img = np.zeros_like(hdu_data)
+    mask_img[inprofile] = 1
+    im2 = axs[0, 1].imshow(mask_img, origin='lower', aspect='auto', cmap='binary')
+    axs[0, 1].set_title(f'Fiber {ifiber} Mask')
+    
+    # Plot 3: Raw data × mask (what's actually extracted)
+    masked_data = np.zeros_like(hdu_data)
+    masked_data[inprofile] = hdu_data[inprofile]
+    im3 = axs[1, 0].imshow(masked_data, origin='lower', norm=LogNorm(), aspect='auto')
+    axs[1, 0].set_title(f'Masked Data for Fiber {ifiber}')
+    plt.colorbar(im3, ax=axs[1, 0])
+    
+    # Plot 4: Cross-section at the middle of the spectrum
+    midpoint = hdu_data.shape[1] // 2
+    axs[1, 1].plot(hdu_data[:, midpoint], label='Raw Data')
+    
+    # Create a version of the mask for this column
+    col_mask = mask_img[:, midpoint] > 0
+    masked_midpoint = np.zeros_like(hdu_data[:, midpoint])
+    masked_midpoint[col_mask] = hdu_data[:, midpoint][col_mask]
+    axs[1, 1].plot(masked_midpoint, 'r', label='Masked Data')
+    
+    axs[1, 1].set_title(f'Cross-section at column {midpoint}')
+    axs[1, 1].legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return fig
+
+def plot_fiber_trace_with_residuals(hdu_data, trace, ifiber, figsize=(15, 15)):
+    """
+    Plot a single fiber trace with residuals to check how well it masks the data.
+    
+    Parameters:
+    -----------
+    hdu_data : np.ndarray
+        The raw 2D spectral data
+    trace : TraceLlamas
+        The trace object containing profile information
+    ifiber : int
+        Fiber index to visualize
+    figsize : tuple
+        Figure size for the plot
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LogNorm
+    
+    # Create the mask for this fiber
+    inprofile = trace.fiberimg == ifiber
+    
+    # Get profile weights (what's used in optimal extraction)
+    profile_weights = trace.profimg[inprofile]
+    
+    fig, axs = plt.subplots(3, 2, figsize=figsize)
+    
+    # Plot 1: Raw data with fiber region outlined
+    im1 = axs[0, 0].imshow(hdu_data, origin='lower', norm=LogNorm(), aspect='auto')
+    axs[0, 0].set_title(f'Raw Data (log scale)')
+    plt.colorbar(im1, ax=axs[0, 0])
+    
+    # Plot 2: Fiber mask
+    mask_img = np.zeros_like(hdu_data)
+    mask_img[inprofile] = 1
+    im2 = axs[0, 1].imshow(mask_img, origin='lower', aspect='auto', cmap='binary')
+    axs[0, 1].set_title(f'Fiber {ifiber} Mask')
+    
+    # Plot 3: Raw data × mask (what's actually extracted)
+    masked_data = np.zeros_like(hdu_data)
+    masked_data[inprofile] = hdu_data[inprofile]
+    im3 = axs[1, 0].imshow(masked_data, origin='lower', norm=LogNorm(), aspect='auto')
+    axs[1, 0].set_title(f'Masked Data for Fiber {ifiber}')
+    plt.colorbar(im3, ax=axs[1, 0])
+    
+    # Plot 4: Residuals (what's NOT being extracted)
+    residual_data = np.copy(hdu_data)
+    residual_data[inprofile] = 0  # Zero out what's already being extracted
+    im4 = axs[1, 1].imshow(residual_data, origin='lower', norm=LogNorm(), aspect='auto')
+    axs[1, 1].set_title(f'Residual Data (Not Extracted)')
+    plt.colorbar(im4, ax=axs[1, 1])
+    
+    # Plot 5: Cross-section at the middle of the spectrum
+    midpoint = hdu_data.shape[1] // 2
+    axs[2, 0].plot(hdu_data[:, midpoint], label='Raw Data')
+    
+    # Create a version of the mask for this column
+    col_mask = mask_img[:, midpoint] > 0
+    masked_midpoint = np.zeros_like(hdu_data[:, midpoint])
+    masked_midpoint[col_mask] = hdu_data[:, midpoint][col_mask]
+    axs[2, 0].plot(masked_midpoint, 'r', label='Masked Data')
+    
+    # Add vertical lines showing mask boundaries
+    if np.any(col_mask):
+        mask_indices = np.where(col_mask)[0]
+        axs[2, 0].axvline(mask_indices.min(), color='green', linestyle='--', label='Mask Boundary')
+        axs[2, 0].axvline(mask_indices.max(), color='green', linestyle='--')
+    
+    axs[2, 0].set_title(f'Cross-section at column {midpoint}')
+    axs[2, 0].legend()
+    
+    # Plot 6: Residual cross-section
+    residual_midpoint = hdu_data[:, midpoint].copy()
+    residual_midpoint[col_mask] = 0
+    axs[2, 1].plot(residual_midpoint, 'g', label='Residuals (Not Extracted)')
+    
+    # Add profile shape if optimal extraction
+    if not np.all(profile_weights == 1):
+        # Get profile values along this column
+        prof_vals = np.zeros_like(hdu_data[:, midpoint])
+        prof_vals[col_mask] = trace.profimg[col_mask, midpoint]
+        
+        # Normalize for plotting
+        if np.max(prof_vals) > 0:
+            scaled_prof = prof_vals * (np.max(hdu_data[:, midpoint]) / np.max(prof_vals)) * 0.8
+            axs[2, 1].plot(scaled_prof, 'b--', label='Extraction Profile (scaled)')
+    
+    axs[2, 1].set_title(f'Residuals at column {midpoint}')
+    axs[2, 1].legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return fig
+
+def analyze_psf_width(hdu_data, trace, ifiber, n_samples=5, figsize=(12, 10)):
+    """
+    Analyze the PSF width (FWHM) of a fiber and compare to extraction mask width.
+    
+    Parameters:
+    -----------
+    hdu_data : np.ndarray
+        The raw 2D spectral data
+    trace : TraceLlamas
+        The trace object containing profile information
+    ifiber : int
+        Fiber index to analyze
+    n_samples : int
+        Number of spectral positions to sample across the detector
+    figsize : tuple
+        Figure size for the plot
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing FWHM measurements and mask widths
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.optimize import curve_fit
+    
+    # Create mask for this fiber
+    inprofile = trace.fiberimg == ifiber
+    mask_img = np.zeros_like(hdu_data)
+    mask_img[inprofile] = 1
+    
+    # Define Gaussian function for fitting
+    def gaussian(x, amp, cen, sigma, offset):
+        return amp * np.exp(-(x - cen)**2 / (2 * sigma**2)) + offset
+    
+    # Sample positions across detector
+    sample_positions = np.linspace(0, hdu_data.shape[1]-1, n_samples).astype(int)
+    
+    # Initialize results
+    results = {
+        'positions': sample_positions,
+        'fwhm': [],
+        'mask_width': [],
+        'amp': [],
+        'center': [],
+        'sigma': [],
+        'offset': []
+    }
+    
+    # Create figure
+    fig, axs = plt.subplots(n_samples, 2, figsize=figsize)
+    if n_samples == 1:
+        axs = np.array([axs])
+    
+    # For each sample position
+    for i, pos in enumerate(sample_positions):
+        # Extract cross-section
+        cross_section = hdu_data[:, pos]
+        
+        # Get mask at this position
+        col_mask = mask_img[:, pos] > 0
+        if not np.any(col_mask):
+            continue
+            
+        # Find mask boundaries
+        mask_indices = np.where(col_mask)[0]
+        mask_width = mask_indices.max() - mask_indices.min() + 1
+        results['mask_width'].append(mask_width)
+        
+        # Get y-range for fitting (with padding)
+        y_center = trace.traces[ifiber][pos]
+        padding = max(10, int(mask_width * 1.5))
+        y_min = max(0, int(y_center - padding))
+        y_max = min(hdu_data.shape[0]-1, int(y_center + padding))
+        y_range = np.arange(y_min, y_max+1)
+        
+        # Data to fit
+        data_to_fit = cross_section[y_range]
+        
+        # Initial guess for Gaussian parameters
+        max_val = np.max(data_to_fit)
+        min_val = np.min(data_to_fit)
+        p0 = [max_val - min_val, y_center, mask_width/2.355, min_val]  # Initial guess
+        
+        try:
+            # Fit Gaussian
+            popt, _ = curve_fit(gaussian, y_range, data_to_fit, p0=p0)
+            amp, cen, sigma, offset = popt
+            
+            # Calculate FWHM (2.355 * sigma for Gaussian)
+            fwhm = 2.355 * sigma
+            
+            # Store results
+            results['fwhm'].append(fwhm)
+            results['amp'].append(amp)
+            results['center'].append(cen)
+            results['sigma'].append(sigma)
+            results['offset'].append(offset)
+            
+            # Plot cross-section and fit
+            ax = axs[i, 0] if n_samples > 1 else axs[0]
+            ax.plot(y_range, data_to_fit, 'ko', label='Data')
+            ax.plot(y_range, gaussian(y_range, *popt), 'r-', label='Fit')
+            
+            # Plot FWHM
+            half_max = offset + amp/2
+            ax.axhline(half_max, color='green', linestyle='--', alpha=0.5)
+            
+            # Plot mask boundaries
+            ax.axvline(mask_indices.min(), color='blue', linestyle='--', label='Mask Boundary')
+            ax.axvline(mask_indices.max(), color='blue', linestyle='--')
+            
+            ax.set_title(f'Position {pos}: FWHM={fwhm:.2f}, Mask Width={mask_width}')
+            ax.legend(loc='upper right')
+            
+            # Plot 2D region 
+            ax2 = axs[i, 1] if n_samples > 1 else axs[1]
+            region_half_width = padding
+            region = hdu_data[y_min:y_max+1, 
+                             max(0, pos-region_half_width):min(hdu_data.shape[1], pos+region_half_width+1)]
+            ax2.imshow(region, origin='lower', aspect='auto')
+            ax2.axvline(region_half_width, color='red', linestyle='--')
+            ax2.set_title(f'Region at position {pos}')
+            
+        except Exception as e:
+            print(f"Fitting failed at position {pos}: {e}")
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Final plot showing FWHM vs mask width across detector
+    plt.figure(figsize=(10, 6))
+    plt.plot(sample_positions, results['fwhm'], 'ro-', label='FWHM')
+    plt.plot(sample_positions, results['mask_width'], 'bo-', label='Mask Width')
+    plt.axhline(np.mean(results['fwhm']), color='r', linestyle='--', 
+                label=f'Mean FWHM: {np.mean(results["fwhm"]):.2f}')
+    plt.axhline(np.mean(results['mask_width']), color='b', linestyle='--', 
+                label=f'Mean Mask Width: {np.mean(results["mask_width"]):.2f}')
+    plt.xlabel('Detector Position')
+    plt.ylabel('Width (pixels)')
+    plt.title(f'PSF FWHM vs Extraction Mask Width for Fiber {ifiber}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    
+    return results
