@@ -709,7 +709,7 @@ class TraceLlamas:
             if (i != 12):
                 data_work[i,:] = self.data[i,:] - ref
 
-        fiberimg = np.zeros(self.data.shape,dtype=int)   # Lists the fiber # of each pixel
+        fiberimg = np.full(self.data.shape, -1, dtype=int)   # Lists the fiber # of each pixel
         profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
         bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
         
@@ -742,7 +742,7 @@ class TraceLlamas:
             badmask[np.where(data_work > 20)] = False
             badmask[np.where(data_work < -5)] = False
             ##this is where we ajust the width of the profile mask in pixels
-            profmask[np.where(np.abs(yy) < 2)] = True
+            profmask[np.where(np.abs(yy) < 4)] = True #originally this was 4
 
             inprof = np.where(infmask & profmask & NaNmask & badmask)
 
