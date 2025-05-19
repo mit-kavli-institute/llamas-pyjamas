@@ -36,7 +36,9 @@ from scipy.interpolate import LinearNDInterpolator
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 
-
+from matplotlib.patches import RegularPolygon
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 
 
 
@@ -921,11 +923,8 @@ def WhiteLightHex(extraction_list, metadata=None, ds9plot=False, median=False, m
     ndarray
         2D hexagonal grid image
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import RegularPolygon
-    import matplotlib.cm as cm
-    from matplotlib.colors import Normalize
+
+
     
     # Initialize data structures
     xdata = np.array([])
