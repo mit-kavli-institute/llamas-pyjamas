@@ -218,12 +218,12 @@ def apply_flat_field(science_file, flat_file, output_file):
                 # Avoid division by zero by placing NaN where flat field is zero.
                 with np.errstate(divide='ignore', invalid='ignore'):
                     #corrected_data = np.where(flat_data != 0, sci_data / flat_data, np.nan)
-                    corrected_data = np.divide(sci_data, flat_data, out=np.zeros_like(sci_data), where=flat_data != 0)
+                    corrected_data = np.multiply(sci_data, flat_data, out=np.zeros_like(sci_data), where=flat_data != 0)
+                    #corrected_data = np.divide(sci_data, flat_data, out=np.zeros_like(sci_data), where=flat_data != 0)
                 # Use the science header (or you can update it accordingly)
                 new_hdu = fits.ImageHDU(data=corrected_data, header=sci_hdus[idx].header)
             else:
-                # For HDUs without image data, simply copy the original
-                new_hdu = sci_hdus[idx]
+                print(f'warning: HDU {idx} in science or flat file is None. Skipping this HDU.')
             new_hdus.append(new_hdu)
         # Add the primary header HDU to the beginning of the list
         new_hdus.insert(0, new_primary)
