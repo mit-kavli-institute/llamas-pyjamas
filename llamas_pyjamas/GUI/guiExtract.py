@@ -234,6 +234,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None)
                 "**/*.zip/**",
                 "**/*.tar.gz/**",
                 "**/mastercalib*/**",
+                "**/*.zip",
                 
             ]
         }
