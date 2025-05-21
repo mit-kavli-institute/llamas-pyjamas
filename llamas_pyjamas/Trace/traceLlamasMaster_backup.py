@@ -44,13 +44,11 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR
 import pkg_resources
 from pathlib import Path
 import rpdb
 
-from llamas_pyjamas.File.llamasIO import process_fits_by_color
-from llamas_pyjamas.constants import idx_lookup
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -59,92 +57,6 @@ logger.setLevel(logging.DEBUG)
 # Add timestamp to log filename
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 #logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
-
-
-LOG = []
-
-
-def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(CALIB_DIR, 'combined_bias.fits')) -> fits.ImageHDU:
-    """
-    Retrieves the appropriate bias HDU from a combined bias file.
-    
-    Args:
-        bench (str, optional): Bench identifier (e.g., '1', '2', '3', '4').
-        side (str, optional): Side identifier (e.g., 'A', 'B').
-        color (str, optional): Color channel (e.g., 'red', 'green', 'blue').
-        benchside (str, optional): Combined bench and side (e.g., '1A', '4B').
-        dir (str, optional): Path to the combined bias file.
-        
-    Returns:
-        fits.ImageHDU: The bias HDU for the specified parameters.
-        
-    Raises:
-        ValueError: If the combination of parameters is invalid or incomplete.
-    """
-    # Handle the case where benchside is provided instead of separate bench and side
-    if benchside and not (bench and side):
-        if len(benchside) != 2:
-            raise ValueError(f"Invalid benchside format: {benchside}. Expected format: 'NX' where N is bench number and X is side letter.")
-        bench = benchside[0]
-        side = benchside[1]
-    
-    # Validate inputs
-    if not (bench and side and color):
-        raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
-    
-    bias_hdus = process_fits_by_color(dir)
-    
-    try:
-        bias_idx = idx_lookup.get((color.lower(), str(bench), side.upper()))
-        print(f"Bias index: {bias_idx} for {bench}/{side}/{color}")
-    except:
-        raise ValueError(f"Invalid bench/side/color combination: {bench}/{side}/{color}")
-        
-    
-    bias_hdu = bias_hdus[bias_idx]
-    
-    return bias_hdu
-
-
-
-def check_fibre_number(fibre_number: int, benchside: str) -> bool:
-    """
-    Check if the given fibre number is within the valid range.
-    Args:
-        fibre_number (int): The fibre number to check.
-    Returns:
-        bool: True if the fibre number is valid, False otherwise.
-    """
-
-    # 1A    298 (Green) / 298 Blue
-    # 1B    300 (Green) / 300 Blue
-    # 2A    299 (Green) / 299 Blue - potentially 2 lost fibers (only found one in comb)
-    # 2B    297 (Green) / 297 Blue - 1 dead fiber
-    # 3A    298 (Green) / 298 Blue
-    # 3B    300 (Green) / 300 Blue
-    # 4A    300 (Green) / 300 Blue
-
-    allowed = True
-
-    fibre_list = {
-        '1A': 298,
-        '1B': 300,
-        '2A': 299,
-        '2B': 297,
-        '3A': 298,
-        '3B': 300,
-        '4A': 300,
-
-    }
-
-
-    N_allowed = fibre_list.get(benchside, 0)
-    if fibre_number > N_allowed:
-        logger.warning(f'Fibre number {fibre_number} is out of range for benchside {benchside}.')
-        allowed = False
-    
-    return allowed
-
 
 
 def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
@@ -225,14 +137,8 @@ class TraceLlamas:
         self.xmin     = 200
         self.fitspace = 10
         self.min_pkheight = 500
-        self.window = 12#5 #can update to 15
+        self.window = 11 #can update to 15
         self.offset_cutoff = 3
-        
-        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
-                LUT = json.load(f)
-                self.LUT = LUT
-        
-        self.dead_fibres = LUT['dead_fibers']
         
 
         # 1A    298 (Green) / 298 Blue
@@ -291,7 +197,7 @@ class TraceLlamas:
         """
 
 
-        tmp            = detect_peaks(tslice,mpd=5,threshold=10,show=False,valley=True)
+        tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
         
         if len(tmp) == 0:
             logger.info("No valleys detected - check threshold")
@@ -350,7 +256,7 @@ class TraceLlamas:
         #defining a new yslice for a given xwindow point
         ytrace = np.median(self.data[:,xtmp.astype(int)-self.window:xtmp.astype(int)+self.window],axis=1)
         #detect the valleys along this new slice
-        valleys = detect_peaks(ytrace,mpd=5,show=False,valley=True)
+        valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
         
         nvalley = len(valleys)
 
@@ -388,7 +294,7 @@ class TraceLlamas:
         rownum = int(rownum)
 
         #straight up to _+ 15 pixels on either side
-        tslice = np.median(self.data[:,rownum-3:rownum+2],axis=1).astype(float)
+        tslice = np.median(self.data[:,rownum-8:rownum+7],axis=1).astype(float)
         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
         
         self.x_model = np.arange(self.naxis2).astype(float)
@@ -402,12 +308,12 @@ class TraceLlamas:
         
         self.min_pkheight = 10000    
         if self.channel.lower() == 'blue':
-            self.min_pkheight = 5000
+            self.min_pkheight = 1000
         
 
         self.comb = tslice - self.y_model
         
-        self.peaks, self.peak_properties = find_peaks(self.comb,distance=5,height=100,threshold=None, prominence=500)
+        self.peaks, self.peak_properties = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
         self.pkht = self.peak_properties['peak_heights']
         
         return self.comb
@@ -474,17 +380,11 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            n_rows = 12
-            top_rows = self.data[-n_rows:, :]
-            #background = np.median(top_rows)
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-            print(f'Bias file: {bias_file}')
-            #### fix the directory here!
-            bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+            # n_rows = 12
+            # top_rows = self.data[-n_rows:, :]
+            # background = np.median(top_rows)
             
-            bias_data = bias.data
-            
-            self.data = self.data - bias_data
+            # self.data = self.data - background
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             self.orig_comb = self.comb
@@ -542,10 +442,8 @@ class TraceLlamas:
                     peaks = tracearr[:,mid_index+itrace-1].astype(int)
 
                 for ifiber, pk_guess in enumerate(peaks):
-    
-                    
                     if ifiber >= self.nfibers:
-                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}")
+                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
                         continue
                     
                     #if the guess is too close to the edge, skip
@@ -564,8 +462,6 @@ class TraceLlamas:
                         tracearr[ifiber,mid_index+itrace] = pk_centroid
                     else:
                         tracearr[ifiber,mid_index+itrace] = pk_guess
-
-                    
 
 
             ######### Now go back and fit from the midpoint backward ######
@@ -606,84 +502,20 @@ class TraceLlamas:
             self.tracearr  = tracearr
             #defines the traces by fitting a spline along the x axis
             
-            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.3)
+            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.5)
             
             x2          = np.outer(np.ones(self.nfibers),np.arange(self.naxis1))
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
-            self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
-            
-            # --- Point 2: Enforce monotonic ordering of traces ---
-            min_gap = 6  # minimum gap in pixels between adjacent fiber traces £was prev 6
-            add_gap = 2
-            for col in range(self.traces.shape[1]):
-                for i in range(1, self.nfibers):
-                    if self.traces[i, col] <= self.traces[i-1, col] + min_gap:
-                        LOG.append({f'self.traces[i, col] {self.traces[i, col]} is not within the miniumum gap'} )
-                        self.traces[i, col] = self.traces[i-1, col] + min_gap
-            
-            
-            
-            # Filter traces to match expected fiber count
-            fiber_list = {
-                '1A': 298, '1B': 300, '2A': 298, 
-                '2B': 297, '3A': 298, '3B': 300, '4A': 300, '4B':298
-            }
-            expected_count = fiber_list.get(self.benchside)
+            self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
 
-            # Define a minimum acceptable distance (in pixels) from the top and bottom edges.
-            min_edge_distance = 30  # Adjust threshold as needed
-
-            # Get the middle position of each trace (at center of detector)
-            mid_x = self.naxis1 // 2
-            mid_positions = self.traces[:, mid_x]
-
-            # Convert None to np.nan so the comparisons work
-            safe_mid_positions = np.array([np.nan if pos is None else pos for pos in mid_positions])
-
-            # Filter out any traces that fall too close to the top or bottom
-            valid_edge_indices = np.where((safe_mid_positions >= min_edge_distance) & 
-                                          (safe_mid_positions <= (self.naxis2 - min_edge_distance)))[0]
-
-            if len(valid_edge_indices) < expected_count:
-                print(f"Only {len(valid_edge_indices)} traces pass the edge criteria for {self.benchside}")
-                # Decide how to handle this situation. For example, you might use all valid edges:
-                keep_indices = valid_edge_indices
-            else:
-                # Now, for the traces that remain, calculate edge proximity scores.
-                valid_traces = self.traces[valid_edge_indices]
-                valid_mid_positions = mid_positions[valid_edge_indices]
-                edge_scores = np.array([
-                    min(pos, self.naxis2 - pos) for pos in valid_mid_positions
-                ])
-
-                # Sort traces by their edge scores (descending keeps those furthest from edges)
-                sorted_valid_indices = valid_edge_indices[np.argsort(edge_scores)[::-1]]
-
-                # Keep only the expected number of traces from the remaining valid traces.
-                keep_indices = np.sort(sorted_valid_indices[:expected_count])
-
-            # Now filter the trace arrays using the final indices.
-            self.traces = self.traces[keep_indices]
-            self.tracearr = self.tracearr[keep_indices]
-            self.xtracefit = self.xtracefit[keep_indices]
-            self.nfibers = len(self.traces)
-            print(f"Filtered to {self.nfibers} traces for {self.benchside} after edge trimming.")
-                 
 
         except Exception as e:
-            tb = traceback.extract_tb(e.__traceback__)
-            last_call = tb[-1] if tb else None
-            if last_call:
-                error_line = f"Error in file '{last_call.filename}', line {last_call.lineno}"
-            else:
-                error_line = "No traceback available"
-            print(error_line)
             traceback.print_exc()
-            result = {"status": "failed", "error": f"{str(e)} -- {error_line}", 'channel': self.channel, 'bench': self.bench, 'side': self.side}
+            result = {"status": "failed", "error":str(e), 'channel': {self.channel}, 'bench': {self.bench}, 'side': {self.side}}
             logger.warning(result)
             return result
-
+            
         result = {"status": "success"}
         return result
     
@@ -709,7 +541,7 @@ class TraceLlamas:
             if (i != 12):
                 data_work[i,:] = self.data[i,:] - ref
 
-        fiberimg = np.full(self.data.shape, -1, dtype=int)   # Lists the fiber # of each pixel
+        fiberimg = np.zeros(self.data.shape,dtype=int)   # Lists the fiber # of each pixel
         profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
         bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
         
@@ -742,7 +574,7 @@ class TraceLlamas:
             badmask[np.where(data_work > 20)] = False
             badmask[np.where(data_work < -5)] = False
             ##this is where we ajust the width of the profile mask in pixels
-            profmask[np.where(np.abs(yy) < 4)] = True #originally this was 4
+            profmask[np.where(np.abs(yy) < 2)] = True
 
             inprof = np.where(infmask & profmask & NaNmask & badmask)
 
@@ -764,17 +596,9 @@ class TraceLlamas:
         
         return (fiberimg, profimg, bpmask)
     
-    def saveTraces(self, outfile='LLAMASTrace.pkl', newpath=None)-> None:
-        
-        
-        if newpath:
-            print(f'Making directory newpath: {newpath}')   
-            path = os.path.dirname(newpath)
-            os.makedirs(path, exist_ok=True)
-            outpath = outpath = os.path.join(newpath, outfile)
-        else:
-            os.makedirs(CALIB_DIR, exist_ok=True)
-            outpath = os.path.join(CALIB_DIR, outfile)
+    def saveTraces(self, outfile='LLAMASTrace.pkl')-> None:
+        os.makedirs(CALIB_DIR, exist_ok=True)
+        outpath = os.path.join(CALIB_DIR, outfile)
         
             
         print(f'outpath: {outpath}')
@@ -818,7 +642,7 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath=None) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict) -> dict:
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header)
@@ -829,19 +653,9 @@ class TraceRay(TraceLlamas):
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
         print(f'color: {color}')
-        
-        filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
-        
-        if outpath:
-            os.makedirs(outpath, exist_ok=True)
-            super().saveTraces(filename, newpath=outpath)
-        else:
-            super().saveTraces(filename)
-        
-        
-        
-        
-            
+        self.outfile = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+        print(f'outfile: {self.outfile}')
+        super().saveTraces(self.outfile)
         
         elapsed_time = time.time() - start_time
         return 
@@ -862,13 +676,13 @@ def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
     futures = []
     results = []    
     
-    hdul = process_fits_by_color(fitsfile)
-    if channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
-    elif channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
-    else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+    with fits.open(fitsfile) as hdul:
+        if channel is not None and 'COLOR' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        elif channel is not None and 'CAM_NAME' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+        else:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -912,7 +726,6 @@ if __name__ == "__main__":
     parser.add_argument('filename', type=str, help='Path to input FITS file')
     parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
-    parser.add_argument('--outpath', type=str, help='Path to save output files')
     args = parser.parse_args()
       
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
@@ -928,13 +741,13 @@ if __name__ == "__main__":
     
     fitsfile = args.filename
     
-    hdul = process_fits_by_color(fitsfile)
-    if args.channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
-    elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
-    else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
+    with fits.open(fitsfile) as hdul:
+        if args.channel is not None and 'COLOR' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
+        elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
+        else:
+            hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
@@ -943,7 +756,7 @@ if __name__ == "__main__":
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
         futures.append(future)
     
     # Monitor processing

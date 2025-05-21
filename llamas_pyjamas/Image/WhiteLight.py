@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
 from astropy.io import fits
 from astropy.table import Table
 import os
@@ -30,6 +30,17 @@ from datetime import datetime
 import traceback
 from llamas_pyjamas.config import LUT_DIR
 from typing import Tuple
+
+import numpy as np
+from scipy.interpolate import LinearNDInterpolator
+
+from llamas_pyjamas.File.llamasIO import process_fits_by_color
+
+from matplotlib.patches import RegularPolygon
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+
+
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
@@ -645,3 +656,446 @@ def rerun():
     
 
     WhiteLight([extraction1a, extraction2a, extraction3a, extraction4a, extraction1b, extraction2b, extraction3b, extraction4b])
+
+
+
+######### Testing qucik whitelight
+
+def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
+    """
+    Generate a white light image by directly summing unmasked fiber values without extraction.
+    
+    Parameters:
+    -----------
+    trace_list : list
+        A list of TraceLlamas objects containing the fiber trace information.
+    data_list : list
+        A list of data arrays corresponding to each trace object.
+    metadata : list, optional
+        Optional metadata for each trace/data pair.
+    ds9plot : bool, optional
+        If True, display the resulting white light image using DS9. Default is False.
+    
+    Returns:
+    --------
+    tuple
+        A tuple containing:
+        - whitelight (numpy.ndarray): The interpolated white light image.
+        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
+        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
+        - flux (numpy.ndarray): The flux values for each fiber.
+    """
+
+    xdata = np.array([])
+    ydata = np.array([])
+    flux = np.array([])
+    
+    for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
+        # Get bench and side information
+        bench = trace_obj.bench
+        side = trace_obj.side
+        channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
+        
+        # Process each fiber
+        for ifib in range(trace_obj.nfibers):
+            # Get fiber mask from the trace object
+            fiber_mask = trace_obj.fiberimg == ifib
+            
+            if not np.any(fiber_mask):
+                continue  # Skip if no pixels for this fiber
+            
+            # Get bench-side identifier
+            benchside = f'{bench}{side}'
+            
+            try:
+                # Map fiber to physical coordinates
+                x, y = FiberMap_LUT(benchside, ifib)
+                if x == -1 and y == -1:
+                    continue  # Skip if fiber mapping not found
+            except Exception as e:
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
+                continue
+            
+            # Sum the flux directly from masked values in the data
+            thisflux = np.nansum(data[fiber_mask])
+            
+            # Record the position and flux
+            flux = np.append(flux, thisflux)
+            xdata = np.append(xdata, x)
+            ydata = np.append(ydata, y)
+    
+    # Create interpolated image
+    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
+    
+    # Define grid for interpolation
+    subsample = 1.5
+    xx = 1.0/subsample * np.arange(53*subsample)
+    yy = 1.0/subsample * np.arange(53*subsample)
+    x_grid, y_grid = np.meshgrid(xx, yy)
+    
+    # Generate white light image
+    whitelight = flux_interpolator(x_grid, y_grid)
+    
+    # Optional DS9 plot
+    if ds9plot:
+        plot_ds9(whitelight)
+    
+    return whitelight, xdata, ydata, flux
+
+def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None) -> str:
+        """
+        Generates a cube FITS file with quick-look white light images for each color.
+        The function groups the mastercalib dictionary by color (keys: blue, green, red),
+        calls QuickWhiteLight for each color group, and creates an HDU for the image and an
+        associated binary table HDU with fiber positions and flux data.
+        
+        Parameters:
+            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key, 
+                the value should be a dict with the following entries:
+                    'traces'   - list of trace objects,
+                    'data'     - list of corresponding data arrays,
+                    'metadata' - (optional) list of metadata dictionaries.
+            ds9plot (bool, optional): If True, display each generated white light image using DS9.
+                                        Default is True.
+            outfile (str, optional): Output FITS file name. If None, a file name is generated
+                                     with the current timestamp.
+        
+        Returns:
+            str: The file path of the created quick-look white light cube FITS file.
+        """
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+
+
+
+
+        # Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR
+        
+
+        trace_objs = []
+
+        # Open the science FITS file and create the output HDU list
+        science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
+
+        bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
+        hdul = fits.HDUList([primary_hdu])
+
+        blue_traces = []
+        green_traces = []
+        red_green = []
+        
+        blue_data = []
+        green_data = []
+        red_data = []
+
+        blue_meta = []
+        green_meta = []
+        red_meta = []
+
+        # Loop over each extension (skip primary) to process data
+        for i, ext in enumerate(science_hdul[1:], start=1):
+            bias_data = bias_hdul[i].data
+            data = ext.data - bias_data
+            header = ext.header
+            color = header.get('COLOR', '').lower()
+            bench = header.get('BENCH', '')
+            side = header.get('SIDE', '')
+            benchside = f'{bench}{side}'
+            
+            # Determine the corresponding trace file based on benchside and color
+            #LLAMAS_master_blue_1_A_traces.pkl
+            trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
+            trace_filepath = os.path.join(CALIB_DIR, trace_filename)
+            if not os.path.exists(trace_filepath):
+                logger.info(f"Trace file {trace_filepath} not found for {benchside} {color}. Skipping extension.")
+                continue
+            
+            with open(trace_filepath, "rb") as f:
+                trace_obj = pickle.load(f)
+            
+            # Build trace and data lists for QuickWhiteLight processing
+            
+            
+            metadata = {'channel': color, 'bench': bench, 'side': side}
+            if color == 'blue':
+                blue_traces.append(trace_obj)
+                blue_data.append(data)
+                blue_meta.append(metadata)
+            elif color == 'green':
+                green_traces.append(trace_obj)
+                green_data.append(data)
+                green_meta.append(metadata)
+            elif color == 'red':
+                red_green.append(trace_obj)
+                red_data.append(data)
+                red_meta.append(metadata)
+            
+            # After processing all science_hdul extensions, generate white light images for each color
+
+        whitelight_results = {}
+        for col, traces_list, data_list, meta_list in [
+            ('blue', blue_traces, blue_data, blue_meta),
+            ('green', green_traces, green_data, green_meta),
+            ('red', red_green, red_data, red_meta)
+        ]:
+            if traces_list and data_list:
+                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot)
+                whitelight_results[col] = (wl, xdata, ydata, flux)
+            else:
+                logger.info(f"No data found for {col} color.")
+                whitelight_results[col] = (None, None, None, None)
+
+        for color in ['blue', 'green', 'red']:
+            wl, xdata, ydata, flux = whitelight_results[color]
+            if wl is None:
+                continue
+            # Create an image HDU for the white light image
+            image_hdu = fits.ImageHDU(data=wl.astype(np.float32), name=color.upper())
+            hdul.append(image_hdu)
+            
+            # Create a binary table HDU with the fiber x, y positions and flux data
+            tab_hdu = fits.BinTableHDU.from_columns([
+                fits.Column(name='XDATA', format='E', array=np.array(xdata, dtype=np.float32)),
+                fits.Column(name='YDATA', format='E', array=np.array(ydata, dtype=np.float32)),
+                fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
+            ], name=f'{color.upper()}_TAB')
+            hdul.append(tab_hdu)
+         
+        
+        science_hdul.close()
+
+        
+        # Determine output file name
+        if outfile is None:
+            fitsfilebase = science_file.split('/')[-1]
+            white_light_file = fitsfilebase.replace('.fits', '_quickwhitelight.fits')
+            
+        
+        # Write the FITS file to disk.
+        outpath = os.path.join(OUTPUT_DIR, white_light_file)
+        hdul.writeto(outpath, overwrite=True)
+        
+        print(f'Quick white light cube saved to {outpath}')
+        return outpath
+
+
+def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None, 
+                 zscale=True, scale_min=None, scale_max=None, colorbar=True, 
+                 colormap='viridis', fig=None, ax=None, **kwargs):
+    """
+    Create a hexagonal grid white light image without interpolation between fibers.
+    Each fiber is represented as a discrete hexagon with its measured value.
+    
+    Parameters
+    ----------
+    extraction_list : list
+        List of ExtractLlamas objects
+    metadata : list, optional
+        Metadata for each extraction object, by default None
+    ds9plot : bool, optional
+        If True, display the image with DS9, by default False
+    median : bool, optional
+        If True, use median instead of mean for combining extractions, by default False
+    mask : ndarray, optional
+        Mask to apply to the data, by default None
+    zscale : bool, optional
+        If True, use zscale for display, by default True
+    scale_min : float, optional
+        Minimum value for display scaling, by default None
+    scale_max : float, optional
+        Maximum value for display scaling, by default None
+    colorbar : bool, optional
+        If True, display colorbar, by default True
+    colormap : str, optional
+        Colormap to use, by default 'viridis'
+    fig : matplotlib.figure.Figure, optional
+        Figure to plot on, by default None
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on, by default None
+        
+    Returns
+    -------
+    ndarray
+        2D hexagonal grid image
+    """
+
+
+    
+    # Initialize data structures
+    xdata = np.array([])
+    ydata = np.array([])
+    flux = np.array([])
+    bench_sides = np.array([])
+
+
+    if isinstance(extraction_file, str):
+        print(f'Type is str-> loading file {extraction_file}')
+        extraction, _ = ExtractLlamas.loadExtraction(extraction_file)
+        logger.info(f'Loaded extraction object from file: {extraction_file}')
+    elif isinstance(extraction_obj, ExtractLlamas):
+        print(f'Type is ExtractLlamas-> using object')
+        extraction = extraction_obj
+    else:
+        raise TypeError(f"Unexpected type: {type(extraction_obj)}. Must be string or ExtractLlamas object")
+    
+
+    extract_obj = ExtractLlamas.loadExtraction(extraction_file)
+    extraction_list = extract_obj['extractions']
+    metadata = extract_obj['metadata'] if 'metadata' in extract_obj else None
+    
+    # Process extraction list
+    for i, extraction_obj in enumerate(extraction_list):
+        meta = metadata[i] if metadata else None
+        
+        channel = extraction_obj.channel
+        side = extraction_obj.side
+        counts = extraction_obj.counts
+        
+        nfib, naxis1 = np.shape(counts)
+        
+        for ifib in range(nfib):
+            benchside = f'{extraction_obj.bench}{extraction_obj.side}'
+            
+            try:
+                x, y = FiberMap_LUT(benchside, ifib)
+                if x == -1 and y == -1:
+                    continue  # Skip if fiber mapping not found
+            except Exception as e:
+                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.error(traceback.format_exc())
+                continue
+            
+            # Get fiber value
+            thisflux = np.nansum(counts[ifib])
+            if mask is not None and len(mask) > 0:
+                thisflux = thisflux * (1 - mask[ifib])
+                
+            # Store data
+            flux = np.append(flux, thisflux)
+            xdata = np.append(xdata, x)
+            ydata = np.append(ydata, y)
+            bench_sides = np.append(bench_sides, benchside)
+    
+    # Create figure if not provided
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Determine colormap scaling
+    if zscale:
+        from astropy.visualization import ZScaleInterval
+        interval = ZScaleInterval()
+        vmin, vmax = interval.get_limits(flux)
+    else:
+        vmin = scale_min if scale_min is not None else np.nanmin(flux)
+        vmax = scale_max if scale_max is not None else np.nanmax(flux)
+    
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    cmap = cm.get_cmap(colormap)
+    
+    # Compute hexagon size based on fiber spacing (using median distance between adjacent fibers)
+    x_sorted = np.sort(np.unique(xdata))
+    if len(x_sorted) > 1:
+        x_diffs = np.diff(x_sorted)
+        hex_size = np.nanmedian(x_diffs) / 1.5  # Adjust to prevent overlap
+    else:
+        hex_size = 0.5  # Default if we can't compute
+    
+    # Create a grid to store hexagonal values for DS9 display
+    x_range = (np.max(xdata) - np.min(xdata)) + 2*hex_size
+    y_range = (np.max(ydata) - np.min(ydata)) + 2*hex_size
+    x_min, y_min = np.min(xdata) - hex_size, np.min(ydata) - hex_size
+    
+    # Create grid with higher resolution for DS9
+    grid_scale = 5  # Higher resolution for better hexagon approximation
+    hex_grid = np.full(
+        (int(y_range * grid_scale) + 1, int(x_range * grid_scale) + 1),
+        np.nan
+    )
+    
+    # Plot hexagons for each fiber
+    for i in range(len(xdata)):
+        x, y = xdata[i], ydata[i]
+        value = flux[i]
+        
+        if np.isnan(value):
+            continue
+            
+        color = cmap(norm(value))
+        
+        # Create hexagon patch for matplotlib
+        hex_patch = RegularPolygon(
+            (x, y), 
+            numVertices=6, 
+            radius=hex_size,
+            orientation=np.pi/6,  # 30 degrees rotation
+            facecolor=color, 
+            edgecolor='black', 
+            linewidth=0.5,
+            alpha=1.0
+        )
+        ax.add_patch(hex_patch)
+        
+        # Fill corresponding area in hex_grid for DS9
+        # Convert hexagon vertices to grid coordinates
+        for phi in np.linspace(0, 2*np.pi, 60):  # 60 points around hexagon
+            hx = x + hex_size * np.cos(phi)
+            hy = y + hex_size * np.sin(phi)
+            
+            # Convert to grid indices
+            ix = int((hx - x_min) * grid_scale)
+            iy = int((hy - y_min) * grid_scale)
+            
+            # Check bounds and set value
+            if (0 <= ix < hex_grid.shape[1] and 0 <= iy < hex_grid.shape[0]):
+                hex_grid[iy, ix] = value
+    
+    # Fill in the interior of hexagons in grid (simple flood fill)
+    from scipy import ndimage
+    # Create a binary mask of valid points
+    mask = ~np.isnan(hex_grid)
+    # Label connected regions
+    labels, num = ndimage.label(mask)
+    # Fill holes in each labeled region
+    for i in range(1, num+1):
+        region = labels == i
+        values = hex_grid[region]
+        if len(values) > 0:
+            median_value = np.nanmedian(values)
+            # Fill entire region with median value
+            hex_grid[region] = median_value
+    
+    # Set axis limits
+    ax.set_xlim(np.min(xdata) - 2*hex_size, np.max(xdata) + 2*hex_size)
+    ax.set_ylim(np.min(ydata) - 2*hex_size, np.max(ydata) + 2*hex_size)
+    ax.set_aspect('equal')
+    
+    # Add colorbar if requested
+    if colorbar:
+        cbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
+        cbar.set_label('Flux')
+    
+    # Set labels and title
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title('Hexagonal Fiber Grid (No Interpolation)')
+    
+    # Show the plot
+    if ds9plot:
+        # Display in DS9
+        try:
+            from llamas_pyjamas.QA import plot_ds9
+            plot_ds9(hex_grid, samp=True)
+        except Exception as e:
+            logger.error(f"Error displaying in DS9: {e}")
+            plt.tight_layout()
+            plt.show()
+    else:
+        plt.tight_layout()
+        plt.show()
+    
+    return hex_grid

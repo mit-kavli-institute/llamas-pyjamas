@@ -167,19 +167,19 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False):
 
         if (channel == 'red'):
             test_extension = 18
-            line_table = Table.read('red_peaks.csv')
+            line_table = Table.read(os.path.join(LUT_DIR, 'red_peaks.csv'))
         elif (channel == 'green'):
             test_extension = 19
-            line_table = Table.read('green_peaks.csv')
+            line_table = Table.read(os.path.join(LUT_DIR, 'green_peaks.csv'))
         elif (channel == 'blue'):
             test_extension = 20
-            line_table = Table.read('blue_peaks.csv')   
+            line_table = Table.read(os.path.join(LUT_DIR, 'blue_peaks.csv'))   
         metadata = arcdict['metadata'][test_extension]
         print(f"Processing {metadata['bench']}{metadata['side']} {metadata['channel']}")
         
         line_table = line_table[(line_table['Wavelength'] > 0)]
         initial_arcfit = robust_fit(line_table['Pixel'], (airtovac(line_table['Wavelength']*u.AA)).value, function='legendre', order=5, lower=5, upper=5, maxdev=5)
-
+        print(f'Inital arcfit {initial_arcfit}')
         arc_fitx = np.array([])
         arc_fitw = np.array([])
         arc_fity = np.array([])
@@ -257,7 +257,11 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False):
                 ax1.plot([pkwv,pkwv],[-200,0],color='b', alpha=0.1)
                 final_fitx = np.append(final_fitx, xmodel[pk])
                 final_fitwv = np.append(final_fitwv, thar_match['wave'])
-
+        plt.show()
+        print(f"Found {len(final_fitx)} lines in the ThAr linelist")
+        if (len(final_fitx) ==0):
+            print(f"No lines found in ThAr linelist for this channel {channel}")
+            continue
         final_arcfit = robust_fit(final_fitx, final_fitwv, function='legendre', order=5, lower=5, upper=5, maxdev=5)
 
         for thisline in final_fitwv:

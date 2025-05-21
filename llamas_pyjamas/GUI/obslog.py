@@ -31,6 +31,17 @@ from astropy.io import fits
 from astropy.samp import SAMPIntegratedClient
 import logging
 
+import subprocess
+import time
+
+# In the deployExtraction method, before running extraction:
+try:
+    # Try to stop any running Ray instances
+    subprocess.run(["ray", "stop"], check=False)
+    time.sleep(1)  # Give it time to clean up
+except:
+    pass
+
 
 class HeaderWindow(QWidget):
     def __init__(self):
