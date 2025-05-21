@@ -150,7 +150,7 @@ class TraceLlamas:
         self.fitspace = 10
         self.min_pkheight = 500
         self.window = 11 #can update to 15
-        self.offset_cutoff = 3
+        self.offset_cutoff = 10#3
         
 
         # 1A    298 (Green) / 298 Blue
@@ -489,7 +489,7 @@ class TraceLlamas:
                 #offset=0
                 #return 1
             # Apply insert_dead_fibers to updated_peaks
-            self.updated_peaks = self.insert_dead_fibers(self.LUT, self.benchside, np.array(self.updated_peaks))
+            #self.updated_peaks = self.insert_dead_fibers(self.LUT, self.benchside, np.array(self.updated_peaks))
 
             #self.min_pkheight = 0.3 * np.median(pkht)
             
