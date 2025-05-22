@@ -801,12 +801,29 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
         for i, ext in enumerate(science_hdul[1:], start=1):
             bias_data = bias_hdul[i].data
             data = ext.data - bias_data
-            header = ext.header
-            color = header.get('COLOR', '').lower()
-            bench = header.get('BENCH', '')
-            side = header.get('SIDE', '')
-            benchside = f'{bench}{side}'
             
+            
+            if 'COLOR' in ext.header:
+                header = ext.header
+                color = header.get('COLOR', '').lower()
+                bench = header.get('BENCH', '')
+                side = header.get('SIDE', '')
+                benchside = f'{bench}{side}'
+            else:
+                header = ext.header
+                # Parse the CAM_NAME to determine color, bench, and side
+                cam_name = header.get('CAM_NAME', '')
+                if cam_name:
+                    # Example format: '1A_Red' -> bench='1', side='A', color='red'
+                    parts = cam_name.split('_')
+                    if len(parts) >= 2:
+                        benchside = parts[0]
+                        color = parts[1].lower()  # Convert 'Red' to 'red'
+                        if len(benchside) >= 2:
+                            bench = benchside[0]
+                            side = benchside[1]
+
+            print(f'Processing extension {i}: {benchside} {color}')
             # Determine the corresponding trace file based on benchside and color
             #LLAMAS_master_blue_1_A_traces.pkl
             trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
