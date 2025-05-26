@@ -1,17 +1,19 @@
-"""
-This module provides functions for processing and analyzing white light images from the LLAMAS instrument.
-It includes functions for isolating color channels, creating FITS files, and mapping fibers.
+"""Module for processing and analyzing white light images from LLAMAS.
+
+This module provides functions for processing white light images from the LLAMAS 
+instrument, including color channel isolation, FITS file creation, and fiber mapping.
+
 Functions:
-    color_isolation(extractions): Isolates blue, green, and red channels from a list of extraction objects.
-    WhiteLightFits(extraction_array, outfile=None): Creates a FITS file from an array of extraction objects.
-    WhiteLight(extraction_array, ds9plot=True): Generates a white light image from an array of extraction objects.
-    WhiteLightQuickLook(tracefile, data): Generates a quick look white light image from a trace file and data.
-    WhiteLightHex(extraction_array, ds9plot=True): Placeholder for hexagonal grid inclusion.
-    FiberMap(bench, infiber): Maps a fiber to its x and y coordinates based on the bench and fiber number.
-    FiberMap_LUT(bench, fiber): Looks up the x and y coordinates of a fiber using a lookup table.
-    plot_fibermap(): Plots the fiber map for the LLAMAS instrument.
-    fibermap_table(): Generates a table of fiber mappings and writes it to a file.
-    rerun(): Reruns the white light generation process for a set of extraction objects.
+    color_isolation: Isolates blue, green, and red channels from extraction objects.
+    WhiteLightFits: Creates a FITS file from extraction objects.
+    WhiteLight: Generates a white light image from extraction objects.
+    WhiteLightQuickLook: Generates a quick look white light image.
+    WhiteLightHex: Creates hexagonal grid white light images.
+    FiberMap: Maps a fiber to its x and y coordinates.
+    FiberMap_LUT: Looks up fiber coordinates using a lookup table.
+    plot_fibermap: Plots the fiber map for the LLAMAS instrument.
+    fibermap_table: Generates a table of fiber mappings.
+    rerun: Reruns the white light generation process.
 """
 
 import numpy as np
@@ -52,10 +54,23 @@ fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 
 def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]:
-    """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
+    """Isolate blue, green, and red channels from extraction objects.
+
+    This function separates extraction objects by their color channels and returns 
+    both the extraction objects and their corresponding metadata.
 
     Args:
-        extractions (list): A list of extraction objects loaded from ExtractLlamas
+        extractions (list): A list of extraction objects loaded from ExtractLlamas.
+        metadata (dict): Dictionary containing metadata for each extraction.
+
+    Returns:
+        tuple: A tuple containing six lists:
+            - blue_extractions (list): Blue channel extraction objects.
+            - green_extractions (list): Green channel extraction objects.
+            - red_extractions (list): Red channel extraction objects.
+            - blue_meta (list): Metadata for blue channel extractions.
+            - green_meta (list): Metadata for green channel extractions.
+            - red_meta (list): Metadata for red channel extractions.
     """
 
     blue_extractions = [ext for ext in extractions if ext.channel.lower() == 'blue']
@@ -71,19 +86,26 @@ def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]
 
 
 def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
-    """
-    Process an array of extracted color data to create a white light FITS file.
-    Parameters:
-    extraction_array (list): A list of extracted color data arrays.
-    outfile (str, optional): The output file path for the white light FITS file. 
-                             If None, the output file name is generated based on the input file name.
+    """Process extraction data to create a white light FITS file.
+
+    This function takes an array of extracted color data and creates a FITS file 
+    containing white light images for each bench/side/channel combination.
+
+    Args:
+        extraction_array (list): A list of extracted color data arrays.
+        metadata (dict): Dictionary containing metadata for each extraction.
+        outfile (str, optional): The output file path for the white light FITS file. 
+            If None, the output file name is generated based on the input file name. 
+            Defaults to None.
+
     Returns:
-    str: The file path of the created white light FITS file.
-    Notes:
-    - The function assumes that all extraction objects came from the same original file.
-    - The function processes blue, green, and red data if they exist in the extraction array.
-    - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.
-    - The function writes the created HDU list to a FITS file in the specified output directory.
+        str: The file path of the created white light FITS file.
+
+    Note:
+        - The function assumes that all extraction objects came from the same original file.
+        - The function processes blue, green, and red data if they exist in the extraction array.
+        - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.
+        - The function writes the created HDU list to a FITS file in the specified output directory.
     """
 
     

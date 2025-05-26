@@ -5,21 +5,35 @@ import numpy as np
 from astropy.io import fits
 
 class LlamasFlatFielding():
-    """
+    """Class for handling flat field processing in LLAMAS observations.
+
+    This class provides functionality for creating normalized flat field images
+    and applying flat field corrections to white light images.
     """
     
     def __init__(self)->None:
+        """Initialize the LlamasFlatFielding object.
+
+        Returns:
+            None
+        """
         pass
     
     
     def flatcube(self, extraction_list: list = None, outputname: str = None)-> str:
-        """A function to produce a normalised flat field image, using the WhiteLightFits class.
+        """Produce a normalized flat field image using the WhiteLightFits class.
+
+        This method creates a normalized flat field cube by processing extracted 
+        fiber data and normalizing each HDU by its maximum value.
 
         Args:
-            extraction_list (list): list of extracted fibres from a flat field image
+            extraction_list (list, optional): List of extracted fibers from a flat 
+                field image. Defaults to None.
+            outputname (str, optional): Name for the output FITS file. If None, 
+                defaults to 'normalized_flat.fits'. Defaults to None.
 
         Returns:
-            str: output filename
+            str: Output filename of the saved normalized flat field.
         """
         
         hdul = WhiteLightFits(extraction_list, outfile=-1)
@@ -39,15 +53,20 @@ class LlamasFlatFielding():
         
     
     def flatFieldImage(self, whitelight_fits: str, flatcube_fits: str, outputname: str = None)-> str:
-        """A function to divide a white light image by a flat field image.
+        """Apply flat field correction by dividing white light image by flat field.
+
+        This method performs flat field correction by dividing a white light image 
+        by a corresponding flat field image, handling matching of bench sides and 
+        colors, and protecting against division by zero.
 
         Args:
-            whitelight_fits (str): path to the white light image
-            flatcube_fits (str): path to the flat field image
-            outputname (str, optional): normalised output image filename. Defaults to None.
+            whitelight_fits (str): Path to the white light FITS image.
+            flatcube_fits (str): Path to the flat field FITS image.
+            outputname (str, optional): Filename for the normalized output image. 
+                If None, defaults to 'normalized_whitelight.fits'. Defaults to None.
 
         Returns:
-            str: _description_
+            str: Path to the saved flat-fielded image.
         """
         # Open the white light and flat field FITS files
         white_hdul = fits.open(whitelight_fits)

@@ -20,6 +20,19 @@ import warnings
 ###############################################################################3
 
 def reidentifyArc(shifted_arc, reference_linelist=os.path.join(CALIB_DIR,'llamas_ThAr_ref_arclines.fits')):
+    """Re-identify arc lines using cross-correlation with reference spectrum.
+
+    This function takes a shifted arc spectrum and re-identifies arc lines by 
+    cross-correlating with a reference spectrum.
+
+    Args:
+        shifted_arc: Path to the shifted arc extraction pickle file.
+        reference_linelist (str, optional): Path to the reference line list FITS file. 
+            Defaults to the LLAMAS ThAr reference line list.
+
+    Returns:
+        tuple: A tuple containing the x and y arrays of the processed arc spectrum.
+    """
 
     arcdict = extract.ExtractLlamas.loadExtraction(shifted_arc)
     arcspec = arcdict['extractions']
@@ -73,6 +86,19 @@ def reidentifyArc(shifted_arc, reference_linelist=os.path.join(CALIB_DIR,'llamas
 # center of the IFU.  
 
 def shiftArcX(arc_extraction_pickle):
+    """Calculate shift and stretch for each fiber relative to reference fiber.
+
+    This is a critical step to calculate the shift and stretch of each fiber
+    relative to a reference fiber (fiber #150 in spectrograph 4A, near the 
+    center of the IFU).
+
+    Args:
+        arc_extraction_pickle (str): Path to the arc extraction pickle file.
+
+    Returns:
+        None: The function modifies the arc extraction object and saves it with 
+            '_shifted.pkl' suffix.
+    """
 
     warnings.filterwarnings("ignore", category=UserWarning, module="astropy.stats.sigma_clipping")
     arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_pickle)
@@ -114,14 +140,46 @@ def shiftArcX(arc_extraction_pickle):
     extract.save_extractions(arcspec, savefile=sv)
 
 def nan_median_filter(input_spectrum):
+    """Filter function to compute median while ignoring NaN values.
+
+    Args:
+        input_spectrum (np.ndarray): Input spectrum array.
+
+    Returns:
+        float: Median value of non-NaN elements, or NaN if no valid values exist.
+    """
     values = input_spectrum[~np.isnan(input_spectrum)]  # Remove NaNs
     return np.median(values) if values.size else np.nan
 
 def interpolateNaNs(input_spectrum):
+    """Interpolate NaN values in spectrum using median filter.
+
+    This function replaces NaN values in the input spectrum by applying a 
+    median filter that ignores NaN values.
+
+    Args:
+        input_spectrum (np.ndarray): Input spectrum array that may contain NaN values.
+
+    Returns:
+        np.ndarray: Filtered spectrum with NaN values interpolated.
+    """
     array_filtered = generic_filter(input_spectrum, nan_median_filter, size=3)
     return(array_filtered)
 
 def fiberRelativeThroughput(flat_extraction_pickle, arc_extraction_pickle):
+    """Calculate relative fiber throughput from flat field observations.
+
+    This function calculates the relative throughput of each fiber compared to 
+    a reference fiber using flat field observations.
+
+    Args:
+        flat_extraction_pickle (str): Path to the flat field extraction pickle file.
+        arc_extraction_pickle (str): Path to the arc extraction pickle file.
+
+    Returns:
+        None: The function modifies the arc extraction object and saves it with 
+            '_shifted_tp.pkl' suffix.
+    """
 
     flatdict = extract.ExtractLlamas.loadExtraction(flat_extraction_pickle)
     flatspec = flatdict['extractions']
@@ -157,6 +215,19 @@ def fiberRelativeThroughput(flat_extraction_pickle, arc_extraction_pickle):
 
 
 def arcSolve(arc_extraction_shifted_pickle, autoid=False):
+    """Solve wavelength calibration from ThAr arc spectra.
+
+    This function fits wavelength solutions to ThAr arc spectra by identifying 
+    arc lines and fitting polynomial wavelength solutions.
+
+    Args:
+        arc_extraction_shifted_pickle (str): Path to the shifted arc extraction pickle file.
+        autoid (bool, optional): Whether to use automatic line identification. 
+            Defaults to False.
+
+    Returns:
+        None: The function saves the wavelength solution to 'LLAMAS_reference_arc.pkl'.
+    """
     
     print("Loading arc extraction")
     arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_shifted_pickle)
@@ -292,6 +363,18 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False):
     return()
 
 def arcTransfer(scidict, arcdict):
+    """Transfer wavelength calibration from arc to science spectra.
+
+    This function transfers the wavelength solution, x-shift information, and 
+    relative throughput data from arc calibration spectra to science spectra.
+
+    Args:
+        scidict (dict): Dictionary containing science extraction data.
+        arcdict (dict): Dictionary containing arc extraction data with wavelength solution.
+
+    Returns:
+        dict: Updated science dictionary with transferred calibration data.
+    """
 
     scispec = scidict['extractions']
     arcspec = arcdict['extractions']
