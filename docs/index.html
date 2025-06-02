@@ -1,0 +1,376 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to LLAMAS Pyjamas documentation! &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="#" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Welcome to LLAMAS Pyjamas documentation!</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="welcome-to-llamas-pyjamas-documentation">
+<h1>Welcome to LLAMAS Pyjamas documentation!<a class="headerlink" href="#welcome-to-llamas-pyjamas-documentation" title="Link to this heading"></a></h1>
+<p>LLAMAS Pyjamas is a comprehensive Python package for processing and analyzing data from the
+LLAMAS (Large Lens Array Multi-Object Spectrograph) instrument. This package provides a
+complete pipeline for spectroscopic data reduction, including tracing, extraction,
+wavelength calibration, and analysis tools.</p>
+<section id="features">
+<h2>Features<a class="headerlink" href="#features" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>Complete Data Reduction Pipeline</strong>: From raw CCD images to science-ready spectra</p></li>
+<li><p><strong>Multi-Channel Support</strong>: Handles blue, green, and red spectrograph channels</p></li>
+<li><p><strong>Optimal Extraction</strong>: Advanced fiber extraction algorithms for maximum signal-to-noise</p></li>
+<li><p><strong>Wavelength Calibration</strong>: Thorium-Argon arc line identification and wavelength solutions</p></li>
+<li><p><strong>White Light Imaging</strong>: Generate white light images and fiber maps from extracted spectra</p></li>
+<li><p><strong>Quality Assurance</strong>: Comprehensive QA tools and visualizations</p></li>
+<li><p><strong>Parallel Processing</strong>: Ray-based parallel processing for improved performance</p></li>
+</ul>
+</section>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<section id="installation">
+<h3>Installation<a class="headerlink" href="#installation" title="Link to this heading"></a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Clone the repository</span>
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/your-org/llamas-pyjamas.git
+<span class="nb">cd</span><span class="w"> </span>llamas-pyjamas
+
+<span class="c1"># Install dependencies</span>
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+</section>
+<section id="basic-usage">
+<h3>Basic Usage<a class="headerlink" href="#basic-usage" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace</span><span class="w"> </span><span class="kn">import</span> <span class="n">traceLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Arc</span><span class="w"> </span><span class="kn">import</span> <span class="n">arcLlamas</span>
+
+<span class="c1"># Trace fiber positions</span>
+<span class="n">trace</span> <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">TraceLlamas</span><span class="p">()</span>
+<span class="n">trace</span><span class="o">.</span><span class="n">traceSingleCamera</span><span class="p">(</span><span class="n">data_object</span><span class="p">)</span>
+
+<span class="c1"># Extract spectra</span>
+<span class="n">extractor</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">trace</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+
+<span class="c1"># Wavelength calibration</span>
+<span class="n">arcLlamas</span><span class="o">.</span><span class="n">arcSolve</span><span class="p">(</span><span class="n">arc_extraction_file</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="package-overview">
+<h2>Package Overview<a class="headerlink" href="#package-overview" title="Link to this heading"></a></h2>
+<p>The LLAMAS Pyjamas package is organized into several modules:</p>
+<section id="core-processing-modules">
+<h3>Core Processing Modules<a class="headerlink" href="#core-processing-modules" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="llamas_pyjamas.Trace.html"><span class="doc">llamas_pyjamas.Trace</span></a> - Fiber tracing and profile fitting</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Extract.html"><span class="doc">llamas_pyjamas.Extract</span></a> - Spectral extraction algorithms</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Arc.html"><span class="doc">llamas_pyjamas.Arc</span></a> - Wavelength calibration and arc line identification</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Flat.html"><span class="doc">llamas_pyjamas.Flat</span></a> - Flat field processing and correction</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Bias.html"><span class="doc">llamas_pyjamas.Bias</span></a> - Bias subtraction and dark current correction</p></li>
+</ul>
+</section>
+<section id="data-handling-and-i-o">
+<h3>Data Handling and I/O<a class="headerlink" href="#data-handling-and-i-o" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="llamas_pyjamas.File.html"><span class="doc">llamas_pyjamas.File</span></a> - FITS file I/O and data handling</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Image.html"><span class="doc">llamas_pyjamas.Image</span></a> - White light image generation and processing</p></li>
+</ul>
+</section>
+<section id="analysis-and-visualization">
+<h3>Analysis and Visualization<a class="headerlink" href="#analysis-and-visualization" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="llamas_pyjamas.QA.html"><span class="doc">llamas_pyjamas.QA</span></a> - Quality assurance and diagnostic tools</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Flux.html"><span class="doc">llamas_pyjamas.Flux</span></a> - Flux calibration and throughput analysis</p></li>
+<li><p><a class="reference internal" href="llamas_pyjamas.Utils.html"><span class="doc">llamas_pyjamas.Utils</span></a> - Utility functions and helpers</p></li>
+</ul>
+</section>
+<section id="post-processing">
+<h3>Post-Processing<a class="headerlink" href="#post-processing" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="llamas_pyjamas.Postprocessing.html"><span class="doc">llamas_pyjamas.Postprocessing</span></a> - Advanced data products</p></li>
+</ul>
+</section>
+<section id="user-interface">
+<h3>User Interface<a class="headerlink" href="#user-interface" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="llamas_pyjamas.GUI.html"><span class="doc">llamas_pyjamas.GUI</span></a> - Graphical user interface components</p></li>
+</ul>
+</section>
+</section>
+<section id="contents">
+<h2>Contents<a class="headerlink" href="#contents" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-methods">Installation Methods</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#development-installation">Development Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#basic-pipeline-overview">Basic Pipeline Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#step-by-step-example">Step-by-Step Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#complete-processing-script">Complete Processing Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#basic-tutorials">Basic Tutorials</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-1-basic-data-reduction">Tutorial 1: Basic Data Reduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-2-advanced-extraction-techniques">Tutorial 2: Advanced Extraction Techniques</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-3-wavelength-calibration">Tutorial 3: Wavelength Calibration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-4-white-light-image-generation">Tutorial 4: White Light Image Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#advanced-topics">Advanced Topics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-5-custom-reduction-scripts">Tutorial 5: Custom Reduction Scripts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-6-parallel-processing">Tutorial 6: Parallel Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-7-quality-assurance-analysis">Tutorial 7: Quality Assurance Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#tutorial-8-advanced-data-products">Tutorial 8: Advanced Data Products</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#interactive-notebooks">Interactive Notebooks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#sample-data">Sample Data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-1-basic-spectral-extraction">Example 1: Basic Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-2-batch-processing-multiple-files">Example 2: Batch Processing Multiple Files</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-3-custom-fiber-selection">Example 3: Custom Fiber Selection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-4-white-light-image-with-custom-colormap">Example 4: White Light Image with Custom Colormap</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-5-quality-assessment-pipeline">Example 5: Quality Assessment Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-6-wavelength-calibration-quality-check">Example 6: Wavelength Calibration Quality Check</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-7-parallel-processing-large-dataset">Example 7: Parallel Processing Large Dataset</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#example-8-creating-master-calibrations">Example 8: Creating Master Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#running-the-examples">Running the Examples</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Trace.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Trace.html#module-llamas_pyjamas.Trace.traceLlamas">llamas_pyjamas.Trace.traceLlamas module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Trace.html#module-llamas_pyjamas.Trace.traceLlamasMaster">llamas_pyjamas.Trace.traceLlamasMaster module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Trace.html#module-llamas_pyjamas.Trace.traceLlamasMulti">llamas_pyjamas.Trace.traceLlamasMulti module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.ExtractLlamas"><code class="docutils literal notranslate"><span class="pre">ExtractLlamas</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Extract.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Extract.html#module-llamas_pyjamas.Extract.extractLlamas">llamas_pyjamas.Extract.extractLlamas module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Arc.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Arc.html#module-llamas_pyjamas.Arc.arcLlamas">llamas_pyjamas.Arc.arcLlamas module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Arc.html#llamas-pyjamas-arc-arcreidentify-module">llamas_pyjamas.Arc.arcReidentify module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Arc.html#llamas-pyjamas-arc-nistarc-module">llamas_pyjamas.Arc.nistArc module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flat.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flat.html#module-llamas_pyjamas.Flat.flatLlamas">llamas_pyjamas.Flat.flatLlamas module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flat.html#module-llamas_pyjamas.Flat.flatProcessing">llamas_pyjamas.Flat.flatProcessing module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flat.html#module-llamas_pyjamas.Flat.scattered2dLlamas">llamas_pyjamas.Flat.scattered2dLlamas module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Bias.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Bias.html#module-llamas_pyjamas.Bias.llamasBias">llamas_pyjamas.Bias.llamasBias module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.File.html">llamas_pyjamas.File package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.File.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.File.html#module-llamas_pyjamas.File.llamasIO">llamas_pyjamas.File.llamasIO module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Image.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Image.html#module-llamas_pyjamas.Image.WhiteLight">llamas_pyjamas.Image.WhiteLight module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Image.html#module-llamas_pyjamas.Image.processWhiteLight">llamas_pyjamas.Image.processWhiteLight module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.QA.html#llamas_pyjamas.QA.plot_ds9"><code class="docutils literal notranslate"><span class="pre">plot_ds9()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.QA.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.QA.html#module-llamas_pyjamas.QA.llamasQA">llamas_pyjamas.QA.llamasQA module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flux.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Flux.html#module-llamas_pyjamas.Flux.calcThroughput">llamas_pyjamas.Flux.calcThroughput module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Utils.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Utils.html#module-llamas_pyjamas.Utils.utils">llamas_pyjamas.Utils.utils module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html#module-llamas_pyjamas.Postprocessing.binary_whightlight">llamas_pyjamas.Postprocessing.binary_whightlight module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html#module-llamas_pyjamas.Postprocessing.sub_mef">llamas_pyjamas.Postprocessing.sub_mef module</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.GUI.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.GUI.html#module-llamas_pyjamas.GUI.guiExtract">llamas_pyjamas.GUI.guiExtract module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.GUI.html#module-llamas_pyjamas.GUI.header_qt">llamas_pyjamas.GUI.header_qt module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.GUI.html#llamas-pyjamas-gui-obslog-module">llamas_pyjamas.GUI.obslog module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llamas_pyjamas.GUI.html#module-llamas_pyjamas.GUI.obslog_qt">llamas_pyjamas.GUI.obslog_qt module</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+</div>
+</section>
+</section>
+<section id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h1>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</section>
+<section id="about-llamas">
+<h1>About LLAMAS<a class="headerlink" href="#about-llamas" title="Link to this heading"></a></h1>
+<p>The Large Lens Array Multi-Object Spectrograph (LLAMAS) is an innovative instrument designed
+for efficient multi-object spectroscopy. This Python package provides the complete data
+reduction pipeline for LLAMAS observations, enabling astronomers to extract high-quality
+scientific spectra from raw CCD images.</p>
+<p>For more information about the LLAMAS instrument and its scientific applications, please
+refer to the instrument documentation and published papers.</p>
+</section>
+<section id="support">
+<h1>Support<a class="headerlink" href="#support" title="Link to this heading"></a></h1>
+<p>If you encounter any issues or have questions about using LLAMAS Pyjamas, please:</p>
+<ul class="simple">
+<li><p>Check the documentation and examples</p></li>
+<li><p>Search existing issues on GitHub</p></li>
+<li><p>Create a new issue with detailed information about your problem</p></li>
+</ul>
+</section>
+<section id="license">
+<h1>License<a class="headerlink" href="#license" title="Link to this heading"></a></h1>
+<p>LLAMAS Pyjamas is distributed under the MIT License. See the LICENSE file for more details.</p>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-right" title="Installation" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
