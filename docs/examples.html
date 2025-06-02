@@ -1,0 +1,472 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Examples &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="llamas_pyjamas.Trace package" href="llamas_pyjamas.Trace.html" />
+    <link rel="prev" title="Tutorials" href="tutorials.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#example-1-basic-spectral-extraction">Example 1: Basic Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-2-batch-processing-multiple-files">Example 2: Batch Processing Multiple Files</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-3-custom-fiber-selection">Example 3: Custom Fiber Selection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-4-white-light-image-with-custom-colormap">Example 4: White Light Image with Custom Colormap</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-5-quality-assessment-pipeline">Example 5: Quality Assessment Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-6-wavelength-calibration-quality-check">Example 6: Wavelength Calibration Quality Check</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-7-parallel-processing-large-dataset">Example 7: Parallel Processing Large Dataset</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-8-creating-master-calibrations">Example 8: Creating Master Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#running-the-examples">Running the Examples</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Examples</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/examples.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="examples">
+<h1>Examples<a class="headerlink" href="#examples" title="Link to this heading"></a></h1>
+<p>This section provides practical examples of using LLAMAS Pyjamas for common data reduction tasks.</p>
+<section id="example-1-basic-spectral-extraction">
+<h2>Example 1: Basic Spectral Extraction<a class="headerlink" href="#example-1-basic-spectral-extraction" title="Link to this heading"></a></h2>
+<p>Extract spectra from a single observation:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace</span><span class="w"> </span><span class="kn">import</span> <span class="n">traceLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.File</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasIO</span>
+
+<span class="c1"># Load trace information</span>
+<span class="n">trace</span> <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">loadTraces</span><span class="p">(</span><span class="s1">&#39;master_trace.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Load science data</span>
+<span class="n">data_loader</span> <span class="o">=</span> <span class="n">llamasIO</span><span class="o">.</span><span class="n">llamasOneCamera</span><span class="p">()</span>
+<span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span> <span class="o">=</span> <span class="n">data_loader</span><span class="o">.</span><span class="n">load_single_extension</span><span class="p">(</span><span class="s1">&#39;science.fits&#39;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<span class="c1"># Perform extraction</span>
+<span class="n">extractor</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">trace</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">optimal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Save results</span>
+<span class="n">extractor</span><span class="o">.</span><span class="n">saveExtraction</span><span class="p">(</span><span class="s1">&#39;output/&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="example-2-batch-processing-multiple-files">
+<h2>Example 2: Batch Processing Multiple Files<a class="headerlink" href="#example-2-batch-processing-multiple-files" title="Link to this heading"></a></h2>
+<p>Process multiple science files with the same calibrations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+
+<span class="c1"># Get list of science files</span>
+<span class="n">science_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;data/science/*.fits&#39;</span><span class="p">)</span>
+
+<span class="c1"># Load master calibrations</span>
+<span class="n">trace</span> <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">loadTraces</span><span class="p">(</span><span class="s1">&#39;calibrations/master_trace.pkl&#39;</span><span class="p">)</span>
+<span class="n">arc_dict</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">load_extractions</span><span class="p">(</span><span class="s1">&#39;calibrations/arc_solution.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Process each file</span>
+<span class="k">for</span> <span class="n">science_file</span> <span class="ow">in</span> <span class="n">science_files</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">science_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Load data</span>
+    <span class="n">data_loader</span> <span class="o">=</span> <span class="n">llamasIO</span><span class="o">.</span><span class="n">llamasOneCamera</span><span class="p">()</span>
+    <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span> <span class="o">=</span> <span class="n">data_loader</span><span class="o">.</span><span class="n">load_single_extension</span><span class="p">(</span><span class="n">science_file</span><span class="p">)</span>
+
+    <span class="c1"># Extract</span>
+    <span class="n">extractor</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">trace</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">optimal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Apply wavelength calibration</span>
+    <span class="n">science_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;extractions&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">extractor</span><span class="p">],</span> <span class="s1">&#39;metadata&#39;</span><span class="p">:</span> <span class="p">[{</span><span class="s1">&#39;channel&#39;</span><span class="p">:</span> <span class="s1">&#39;red&#39;</span><span class="p">}]}</span>
+    <span class="n">calibrated</span> <span class="o">=</span> <span class="n">arcLlamas</span><span class="o">.</span><span class="n">arcTransfer</span><span class="p">(</span><span class="n">science_dict</span><span class="p">,</span> <span class="n">arc_dict</span><span class="p">)</span>
+
+    <span class="c1"># Save</span>
+    <span class="n">output_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;extracted_</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">science_file</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;.pkl&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">extractLlamas</span><span class="o">.</span><span class="n">save_extractions</span><span class="p">(</span><span class="n">calibrated</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">],</span> <span class="n">savefile</span><span class="o">=</span><span class="n">output_name</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="example-3-custom-fiber-selection">
+<h2>Example 3: Custom Fiber Selection<a class="headerlink" href="#example-3-custom-fiber-selection" title="Link to this heading"></a></h2>
+<p>Extract only specific fibers of interest:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+
+<span class="c1"># Load full extraction</span>
+<span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">load_extractions</span><span class="p">(</span><span class="s1">&#39;full_extraction.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Define fibers of interest (e.g., central region)</span>
+<span class="n">fibers_of_interest</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>  <span class="c1"># Fibers 100-199</span>
+
+<span class="c1"># Extract subset</span>
+<span class="k">for</span> <span class="n">ext</span> <span class="ow">in</span> <span class="n">extractions</span><span class="p">:</span>
+    <span class="c1"># Create mask for selected fibers</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">ext</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+    <span class="n">mask</span><span class="p">[</span><span class="n">fibers_of_interest</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1"># Apply selection</span>
+    <span class="n">ext</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+    <span class="n">ext</span><span class="o">.</span><span class="n">wave</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+    <span class="n">ext</span><span class="o">.</span><span class="n">relative_throughput</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+
+<span class="c1"># Save subset</span>
+<span class="n">extractLlamas</span><span class="o">.</span><span class="n">save_extractions</span><span class="p">(</span><span class="n">extractions</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="s1">&#39;subset_extraction.pkl&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="example-4-white-light-image-with-custom-colormap">
+<h2>Example 4: White Light Image with Custom Colormap<a class="headerlink" href="#example-4-white-light-image-with-custom-colormap" title="Link to this heading"></a></h2>
+<p>Create a white light image with custom visualization:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Image</span><span class="w"> </span><span class="kn">import</span> <span class="n">WhiteLight</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+
+<span class="c1"># Load extracted data</span>
+<span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">load_extractions</span><span class="p">(</span><span class="s1">&#39;science_extraction.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Create white light FITS file</span>
+<span class="n">whitelight_file</span> <span class="o">=</span> <span class="n">WhiteLight</span><span class="o">.</span><span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span><span class="p">,</span> <span class="s1">&#39;custom_whitelight.fits&#39;</span><span class="p">)</span>
+
+<span class="c1"># Load the created image for custom plotting</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="k">with</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s1">&#39;custom_whitelight.fits&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">hdul</span><span class="p">:</span>
+    <span class="n">image_data</span> <span class="o">=</span> <span class="n">hdul</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+
+<span class="c1"># Create custom visualization</span>
+<span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">ax1</span><span class="p">,</span> <span class="n">ax2</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+<span class="c1"># Standard visualization</span>
+<span class="n">im1</span> <span class="o">=</span> <span class="n">ax1</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">image_data</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="s1">&#39;lower&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Standard White Light Image&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;X Position&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Y Position&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im1</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax1</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Flux (ADU)&#39;</span><span class="p">)</span>
+
+<span class="c1"># Log scale visualization</span>
+<span class="n">log_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">image_data</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Add 1 to handle zeros</span>
+<span class="n">im2</span> <span class="o">=</span> <span class="n">ax2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">log_data</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;plasma&#39;</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="s1">&#39;lower&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Log Scale White Light Image&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;X Position&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Y Position&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im2</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Log10(Flux + 1)&#39;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;custom_whitelight_comparison.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="example-5-quality-assessment-pipeline">
+<h2>Example 5: Quality Assessment Pipeline<a class="headerlink" href="#example-5-quality-assessment-pipeline" title="Link to this heading"></a></h2>
+<p>Comprehensive quality assessment of extraction results:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.QA</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasQA</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+
+<span class="c1"># Load extraction results</span>
+<span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">load_extractions</span><span class="p">(</span><span class="s1">&#39;science_extraction.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Create QA plots</span>
+<span class="n">qa</span> <span class="o">=</span> <span class="n">llamasQA</span><span class="o">.</span><span class="n">LlamasQA</span><span class="p">()</span>
+
+<span class="c1"># Plot fiber throughput</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ext</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">extractions</span><span class="p">):</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">fiber_numbers</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ext</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">))</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fiber_numbers</span><span class="p">,</span> <span class="n">ext</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">,</span> <span class="s1">&#39;o-&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Fiber Number&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Relative Throughput&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">title</span><span class="p">()</span><span class="si">}</span><span class="s2"> Channel&quot;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;fiber_throughput_qa.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+<span class="c1"># Generate extraction profile plots</span>
+<span class="n">qa</span><span class="o">.</span><span class="n">plot_extraction_profiles</span><span class="p">(</span><span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span><span class="p">,</span> <span class="n">save_plots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Create summary statistics</span>
+<span class="n">qa</span><span class="o">.</span><span class="n">generate_qa_report</span><span class="p">(</span><span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span><span class="p">,</span> <span class="n">output_file</span><span class="o">=</span><span class="s1">&#39;qa_report.txt&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="example-6-wavelength-calibration-quality-check">
+<h2>Example 6: Wavelength Calibration Quality Check<a class="headerlink" href="#example-6-wavelength-calibration-quality-check" title="Link to this heading"></a></h2>
+<p>Assess the quality of wavelength calibrations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Arc</span><span class="w"> </span><span class="kn">import</span> <span class="n">arcLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+
+<span class="c1"># Load arc extraction with wavelength solution</span>
+<span class="n">arc_extractions</span><span class="p">,</span> <span class="n">arc_metadata</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">load_extractions</span><span class="p">(</span><span class="s1">&#39;arc_calibrated.pkl&#39;</span><span class="p">)</span>
+
+<span class="c1"># Check wavelength coverage and resolution</span>
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ext</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">arc_extractions</span><span class="p">):</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="n">arc_metadata</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+    <span class="c1"># Plot example spectra from different fibers</span>
+    <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">50</span><span class="p">,</span> <span class="mi">150</span><span class="p">,</span> <span class="mi">250</span><span class="p">]:</span>  <span class="c1"># Sample fibers</span>
+        <span class="k">if</span> <span class="n">fiber</span> <span class="o">&lt;</span> <span class="n">ext</span><span class="o">.</span><span class="n">wave</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">wavelength</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span>
+            <span class="n">flux</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span>
+
+            <span class="c1"># Only plot where wavelength solution exists</span>
+            <span class="n">valid</span> <span class="o">=</span> <span class="n">wavelength</span> <span class="o">&gt;</span> <span class="mi">0</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">wavelength</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">flux</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span>
+                    <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;Fiber </span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Wavelength (Å)&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Flux (ADU)&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">channel</span><span class="o">.</span><span class="n">title</span><span class="p">()</span><span class="si">}</span><span class="s1"> Channel - Wavelength Calibration Check&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+    <span class="c1"># Calculate and display wavelength statistics</span>
+    <span class="n">all_waves</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">ext</span><span class="o">.</span><span class="n">wave</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="n">wave_min</span><span class="p">,</span> <span class="n">wave_max</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">all_waves</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">all_waves</span><span class="p">)</span>
+    <span class="n">wave_range</span> <span class="o">=</span> <span class="n">wave_max</span> <span class="o">-</span> <span class="n">wave_min</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">0.02</span><span class="p">,</span> <span class="mf">0.98</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;Range: </span><span class="si">{</span><span class="n">wave_min</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> - </span><span class="si">{</span><span class="n">wave_max</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> Å</span><span class="se">\n</span><span class="s1">&#39;</span>
+                         <span class="sa">f</span><span class="s1">&#39;Coverage: </span><span class="si">{</span><span class="n">wave_range</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> Å&#39;</span><span class="p">,</span>
+             <span class="n">transform</span><span class="o">=</span><span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span><span class="o">.</span><span class="n">transAxes</span><span class="p">,</span> <span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;top&#39;</span><span class="p">,</span>
+             <span class="n">bbox</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">boxstyle</span><span class="o">=</span><span class="s1">&#39;round&#39;</span><span class="p">,</span> <span class="n">facecolor</span><span class="o">=</span><span class="s1">&#39;white&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">))</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;wavelength_calibration_</span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s1">.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="example-7-parallel-processing-large-dataset">
+<h2>Example 7: Parallel Processing Large Dataset<a class="headerlink" href="#example-7-parallel-processing-large-dataset" title="Link to this heading"></a></h2>
+<p>Use Ray for parallel processing of large datasets:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">ray</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+
+<span class="c1"># Initialize Ray</span>
+<span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+
+<span class="c1"># Get list of all science files</span>
+<span class="n">science_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;large_dataset/*.fits&#39;</span><span class="p">)</span>
+
+<span class="c1"># Create Ray remote extraction workers</span>
+<span class="nd">@ray</span><span class="o">.</span><span class="n">remote</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">process_file</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">trace_file</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Process a single file with Ray.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Load trace</span>
+        <span class="n">trace</span> <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">loadTraces</span><span class="p">(</span><span class="n">trace_file</span><span class="p">)</span>
+
+        <span class="c1"># Load science data</span>
+        <span class="n">data_loader</span> <span class="o">=</span> <span class="n">llamasIO</span><span class="o">.</span><span class="n">llamasOneCamera</span><span class="p">()</span>
+        <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span> <span class="o">=</span> <span class="n">data_loader</span><span class="o">.</span><span class="n">load_single_extension</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+
+        <span class="c1"># Extract</span>
+        <span class="n">extractor</span> <span class="o">=</span> <span class="n">extractLlamas</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">trace</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">optimal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Save</span>
+        <span class="n">output_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;extracted_</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span><span class="si">}</span><span class="s2">.pkl&quot;</span><span class="p">)</span>
+        <span class="n">extractor</span><span class="o">.</span><span class="n">saveExtraction</span><span class="p">(</span><span class="n">output_name</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Successfully processed </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&quot;</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Error processing </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Submit all jobs</span>
+<span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">science_file</span> <span class="ow">in</span> <span class="n">science_files</span><span class="p">:</span>
+    <span class="n">future</span> <span class="o">=</span> <span class="n">process_file</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">science_file</span><span class="p">,</span> <span class="s1">&#39;master_trace.pkl&#39;</span><span class="p">,</span> <span class="s1">&#39;parallel_output/&#39;</span><span class="p">)</span>
+    <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">future</span><span class="p">)</span>
+
+<span class="c1"># Collect results</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+
+<span class="c1"># Print summary</span>
+<span class="n">successful</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">if</span> <span class="s2">&quot;Successfully&quot;</span> <span class="ow">in</span> <span class="n">r</span><span class="p">)</span>
+<span class="n">failed</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">-</span> <span class="n">successful</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing complete: </span><span class="si">{</span><span class="n">successful</span><span class="si">}</span><span class="s2"> successful, </span><span class="si">{</span><span class="n">failed</span><span class="si">}</span><span class="s2"> failed&quot;</span><span class="p">)</span>
+
+<span class="c1"># Shutdown Ray</span>
+<span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="example-8-creating-master-calibrations">
+<h2>Example 8: Creating Master Calibrations<a class="headerlink" href="#example-8-creating-master-calibrations" title="Link to this heading"></a></h2>
+<p>Create master calibration files for a observing run:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Bias</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasBias</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Flat</span><span class="w"> </span><span class="kn">import</span> <span class="n">flatLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace</span><span class="w"> </span><span class="kn">import</span> <span class="n">traceLlamas</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">create_master_calibrations</span><span class="p">(</span><span class="n">bias_dir</span><span class="p">,</span> <span class="n">flat_dir</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create master calibration files.&quot;&quot;&quot;</span>
+
+    <span class="c1"># 1. Master Bias</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Creating master bias...&quot;</span><span class="p">)</span>
+    <span class="n">bias_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bias_dir</span><span class="si">}</span><span class="s2">/*.fits&quot;</span><span class="p">)</span>
+    <span class="n">bias_processor</span> <span class="o">=</span> <span class="n">llamasBias</span><span class="o">.</span><span class="n">BiasLlamas</span><span class="p">()</span>
+    <span class="n">master_bias</span> <span class="o">=</span> <span class="n">bias_processor</span><span class="o">.</span><span class="n">master_bias</span><span class="p">(</span><span class="n">bias_files</span><span class="p">)</span>
+
+    <span class="c1"># Save master bias</span>
+    <span class="n">fits</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">output_dir</span><span class="si">}</span><span class="s2">/master_bias.fits&quot;</span><span class="p">,</span> <span class="n">master_bias</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># 2. Master Flat and Trace</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Processing flat fields and creating traces...&quot;</span><span class="p">)</span>
+    <span class="n">flat_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">flat_dir</span><span class="si">}</span><span class="s2">/*.fits&quot;</span><span class="p">)</span>
+
+    <span class="n">all_traces</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">flat_file</span> <span class="ow">in</span> <span class="n">flat_files</span><span class="p">:</span>
+        <span class="c1"># Load and bias-subtract flat</span>
+        <span class="n">flat_data</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">getdata</span><span class="p">(</span><span class="n">flat_file</span><span class="p">)</span>
+        <span class="n">flat_corrected</span> <span class="o">=</span> <span class="n">flat_data</span> <span class="o">-</span> <span class="n">master_bias</span>
+
+        <span class="c1"># Trace fibers</span>
+        <span class="n">tracer</span> <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">TraceLlamas</span><span class="p">()</span>
+        <span class="n">tracer</span><span class="o">.</span><span class="n">traceSingleCamera</span><span class="p">(</span><span class="n">flat_corrected</span><span class="p">)</span>
+        <span class="n">all_traces</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tracer</span><span class="p">)</span>
+
+    <span class="c1"># Save master trace</span>
+    <span class="n">traceLlamas</span><span class="o">.</span><span class="n">saveTraces</span><span class="p">(</span><span class="n">all_traces</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">output_dir</span><span class="si">}</span><span class="s2">/master_traces.pkl&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 3. Create normalized flat field</span>
+    <span class="n">flat_processor</span> <span class="o">=</span> <span class="n">flatLlamas</span><span class="o">.</span><span class="n">LlamasFlatFielding</span><span class="p">()</span>
+    <span class="c1"># Extract flat field spectra first, then create normalized flat</span>
+    <span class="c1"># (This would require the full extraction pipeline)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Master calibrations saved to </span><span class="si">{</span><span class="n">output_dir</span><span class="si">}</span><span class="s2">/&quot;</span><span class="p">)</span>
+
+<span class="c1"># Usage</span>
+<span class="n">create_master_calibrations</span><span class="p">(</span><span class="s1">&#39;calibrations/bias/&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;calibrations/flats/&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;master_calibrations/&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="running-the-examples">
+<h2>Running the Examples<a class="headerlink" href="#running-the-examples" title="Link to this heading"></a></h2>
+<p>To run these examples:</p>
+<ol class="arabic simple">
+<li><p><strong>Download sample data</strong> from the LLAMAS data repository</p></li>
+<li><p><strong>Modify file paths</strong> to match your data location</p></li>
+<li><p><strong>Install dependencies</strong> as described in the installation guide</p></li>
+<li><p><strong>Run examples in order</strong> - some depend on outputs from previous examples</p></li>
+</ol>
+<p>Each example includes error handling and can be adapted for your specific data and requirements.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="tutorials.html" class="btn btn-neutral float-left" title="Tutorials" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="llamas_pyjamas.Trace.html" class="btn btn-neutral float-right" title="llamas_pyjamas.Trace package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
