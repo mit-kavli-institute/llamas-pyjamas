@@ -13,10 +13,10 @@ def main():
     )
 
     parser.add_argument(
-        "plot",
-        type=bool,
-        default=False,
-        help="Whether to plot the results in ds9 (default: False)")
+        "--plot",
+        action="store_true",
+        help="Whether to plot the results in ds9 (default: True)"
+    )
 
     args = parser.parse_args()
 
