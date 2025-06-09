@@ -765,7 +765,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
     return whitelight, xdata, ydata, flux
 
-def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None) -> str:
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -789,19 +789,25 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-
-
-
-
         # Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR
-        
 
         trace_objs = []
 
         # Open the science FITS file and create the output HDU list
         science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
 
-        bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+        if not bias:
+            bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+        else:
+            try:
+                bias_hdul = process_fits_by_color(bias)
+            except Exception as e:
+                logger.error(f"Error processing bias file {bias}: {e}")
+                raise ValueError(f"Could not process bias file {bias}. Ensure it is a valid FITS file.")
+            
+        if len(science_hdul) != len(bias_hdul):
+            logger.error(f"Science file has {len(science_hdul)} extensions while bias file has {len(bias_hdul)} extensions.")
+            raise ValueError("Science and bias FITS files must have the same number of extensions. Please use compatible files.")
 
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
@@ -821,7 +827,8 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
-            bias_data = bias_hdul[i].data
+            bias = bias_hdul[i].data
+            bias_data = np.median(bias[20:50])
             data = ext.data - bias_data
             
             
@@ -911,8 +918,11 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
         
         # Determine output file name
         if outfile is None:
-            fitsfilebase = science_file.split('/')[-1]
-            white_light_file = fitsfilebase.replace('.fits', '_quickwhitelight.fits')
+            filename = os.path.basename(science_file)
+            name, ext = os.path.splitext(filename)
+            white_light_file = f"{name}_quickwhitelight.fits"
+        else:
+            white_light_file = outfile
             
         
         # Write the FITS file to disk.
