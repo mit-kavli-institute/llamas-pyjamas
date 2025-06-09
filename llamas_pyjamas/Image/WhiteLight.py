@@ -743,7 +743,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
     return whitelight, xdata, ydata, flux
 
-def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = True, outfile: str = None) -> str:
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -895,8 +895,11 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = True, ou
         
         # Determine output file name
         if outfile is None:
-            fitsfilebase = science_file.split('/')[-1]
-            white_light_file = fitsfilebase.replace('.fits', '_quickwhitelight.fits')
+            filename = os.path.basename(science_file)
+            name, ext = os.path.splitext(filename)
+            white_light_file = f"{name}_quickwhitelight.fits"
+        else:
+            white_light_file = outfile
             
         
         # Write the FITS file to disk.
