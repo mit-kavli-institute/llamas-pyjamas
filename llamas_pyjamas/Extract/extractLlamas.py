@@ -1,23 +1,26 @@
 
-"""
-Module: extractLlamas
-This module provides functionality for extracting data from LLAMAS (Large Lens Array Multi-Object Spectrograph) 
-observations. It includes classes and functions for performing optimal and boxcar extractions, saving and loading 
-extraction results, and parallel processing using Ray.
+"""Module for extracting data from LLAMAS observations.
+
+This module provides functionality for extracting data from LLAMAS (Large Lens Array 
+Multi-Object Spectrograph) observations. It includes classes and functions for performing 
+optimal and boxcar extractions, saving and loading extraction results, and parallel 
+processing using Ray.
+
 Classes:
-    ExtractLlamas: 
-        A class for extracting data from LLAMAS observations using optimal or boxcar methods.
-    ExtractLlamasRay: 
-        A Ray remote class for parallel processing of LLAMAS extractions.
+    ExtractLlamas: A class for extracting data from LLAMAS observations using optimal 
+        or boxcar methods.
+    ExtractLlamasRay: A Ray remote class for parallel processing of LLAMAS extractions.
+
 Functions:
-    save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch'):
-        Save multiple extraction objects to a single file.
-    load_extractions(infile):
-        Load a batch of extraction objects from a file.
-    parse_args():
-        Parse command-line arguments for input pkl files.
-Usage:
-    This module can be run as a script to process LLAMAS pkl files using parallel processing with Ray.
+    save_extractions: Save multiple extraction objects to a single file.
+    load_extractions: Load a batch of extraction objects from a file.
+    parse_args: Parse command-line arguments for input pkl files.
+
+Example:
+    This module can be run as a script to process LLAMAS pkl files using parallel 
+    processing with Ray::
+
+        python extractLlamas.py *.pkl
 """
 from   astropy.io import fits
 import scipy
@@ -49,47 +52,41 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 class ExtractLlamas:
-    """
-    A class used to extract data from Llamas.
-    Attributes
-    ----------
-    trace : TraceLlamas
-        An instance of the TraceLlamas class containing trace information.
-    bench : str
-        The bench identifier from the trace.
-    side : str
-        The side identifier from the trace.
-    channel : str
-        The channel identifier from the trace.
-    fitsfile : str
-        The FITS file associated with the trace.
-    counts : np.ndarray
-        An array to store the extracted counts.
-    hdr : dict
-        Header information from the FITS file.
-    frame : np.ndarray
-        The data frame from the FITS file.
-    x : np.ndarray
-        An array representing the x-axis.
-    xshift : np.ndarray
-        An array to store x-axis shifts.
-    wave : np.ndarray
-        An array to store wavelength information.
-    ximage : np.ndarray
-        An array representing the x-axis image.
-    Methods
-    -------
-    __init__(trace: "TraceLlamas", hdu_data: np.ndarray, hdr: dict, optimal=True) -> None
-        Initializes the ExtractLlamas object with trace, hdu_data, hdr, and optimal extraction flag.
-    isolateProfile(ifiber, boxcar=False)
-        Isolates the profile for a given fiber and returns the x_spec, f_spec, and weights.
-    saveExtraction(save_dir)
-        Saves the extracted data to a specified directory.
-    loadExtraction(infile)
-        Loads the extracted data from a specified file.
+    """A class used to extract data from LLAMAS observations.
+
+    This class handles the extraction of spectral data from LLAMAS observations using 
+    either optimal or boxcar extraction methods.
+
+    Attributes:
+        trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
+        bench (str): The bench identifier from the trace.
+        side (str): The side identifier from the trace.
+        channel (str): The channel identifier from the trace.
+        fitsfile (str): The FITS file associated with the trace.
+        counts (np.ndarray): An array to store the extracted counts.
+        hdr (dict): Header information from the FITS file.
+        frame (np.ndarray): The data frame from the FITS file.
+        x (np.ndarray): An array representing the x-axis.
+        xshift (np.ndarray): An array to store x-axis shifts.
+        wave (np.ndarray): An array to store wavelength information.
+        ximage (np.ndarray): An array representing the x-axis image.
+        relative_throughput (np.ndarray): Array storing relative throughput for each fiber.
+        fiberid (np.ndarray): Array storing fiber IDs.
     """
 
     def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True) -> None:
+        """Initialize the ExtractLlamas object.
+
+        Args:
+            trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
+            hdu_data (np.ndarray): The HDU data array from the FITS file.
+            hdr (dict): Header information from the FITS file.
+            optimal (bool, optional): If True, use optimal extraction. If False, use boxcar extraction. 
+                Defaults to True.
+
+        Returns:
+            None
+        """
 
         if (trace is None or hdu_data is None or hdr is None):
             # Instantiate a blank object that can be used for a deep copy
@@ -235,25 +232,23 @@ class ExtractLlamas:
                     
 
     def isolateProfile(self,ifiber, boxcar=False)-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Isolate the profile for a given fiber.
-        Parameters:
-        -----------
-        ifiber : int
-            The fiber index to isolate the profile for.
-        boxcar : bool, optional
-            If True, use boxcar extraction. If False, use profile extraction. Default is False.
+        """Isolate the profile for a given fiber.
+
+        Args:
+            ifiber (int): The fiber index to isolate the profile for.
+            boxcar (bool, optional): If True, use boxcar extraction. If False, use profile 
+                extraction. Defaults to False.
+
         Returns:
-        --------
-        x_spec : numpy.ndarray or None
-            The x-coordinates of the spectrum for the given fiber.
-        f_spec : numpy.ndarray or None
-            The flux values of the spectrum for the given fiber.
-        weights : numpy.ndarray or None
-            The weights for the spectrum extraction, either boxcar or profile-based.
-        Notes:
-        ------
-        If no profile is found for the given fiber, the function will return (None, None, None) and log a warning.
+            tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+                - x_spec (np.ndarray or None): The x-coordinates of the spectrum for the given fiber.
+                - f_spec (np.ndarray or None): The flux values of the spectrum for the given fiber.
+                - weights (np.ndarray or None): The weights for the spectrum extraction, either 
+                  boxcar or profile-based.
+
+        Note:
+            If no profile is found for the given fiber, the function will return (None, None, None) 
+            and log a warning.
         """
 
         #profile  = self.trace.profimg[ifiber]
@@ -277,15 +272,16 @@ class ExtractLlamas:
 
 
     def saveExtraction(self, save_dir: str)-> None:
-        """
-        Save the current extraction object to a file in the specified directory.
+        """Save the current extraction object to a file in the specified directory.
+
         This method constructs the output file path using the object's attributes
         (channel, side, bench) and saves the object using cloudpickle.
+
         Args:
             save_dir (str): The directory where the extraction file will be saved.
-                    Note that this argument is overridden and the file is
-                    always saved in the 'output' directory relative to the
-                    script's location.
+                Note that this argument is overridden and the file is always saved 
+                in the 'output' directory relative to the script's location.
+
         Returns:
             None
         """
@@ -299,10 +295,11 @@ class ExtractLlamas:
         return
 
     def loadExtraction(infile: str)-> object:
-        """
-        Load an object from a pickle file.
+        """Load an object from a pickle file.
+
         Args:
             infile (str): The path to the input file containing the pickled object.
+
         Returns:
             object: The object loaded from the pickle file.
         """
@@ -313,7 +310,20 @@ class ExtractLlamas:
 
 
 def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch')-> str:
-    """Save multiple extraction objects to single file"""
+    """Save multiple extraction objects to single file.
+
+    Args:
+        extraction_list (list): List of extraction objects to save.
+        savefile (str, optional): Specific filename to use. If None, a timestamped 
+            filename will be generated. Defaults to None.
+        save_dir (str, optional): Directory to save the file. If None, uses the 
+            default output directory. Defaults to None.
+        prefix (str, optional): Prefix for the filename when savefile is None. 
+            Defaults to 'LLAMASExtract_batch'.
+
+    Returns:
+        str: Path to the saved file.
+    """
     if save_dir is None:
         save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
     os.makedirs(save_dir, exist_ok=True)
@@ -344,7 +354,16 @@ def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAM
 
 @staticmethod
 def load_extractions(infile: str)-> Tuple[list, list]:
-    """Load batch of extraction objects"""
+    """Load batch of extraction objects.
+
+    Args:
+        infile (str): Path to the file containing the batch extraction data.
+
+    Returns:
+        tuple[list, list]: A tuple containing:
+            - extractions (list): List of extraction objects.
+            - metadata (list): List of metadata dictionaries for each extraction.
+    """
     with open(infile, 'rb') as fp:
         batch_data = cloudpickle.load(fp)
     
@@ -353,28 +372,35 @@ def load_extractions(infile: str)-> Tuple[list, list]:
 
 @ray.remote
 class ExtractLlamasRay(ExtractLlamas):
-    """
-    ExtractLlamasRay is a subclass of ExtractLlamas that handles the extraction process for llama data using Ray.
+    """Ray remote class for parallel processing of LLAMAS extractions.
+
+    ExtractLlamasRay is a subclass of ExtractLlamas that handles the extraction 
+    process for LLAMAS data using Ray for parallel processing.
+
     Attributes:
         files (list): A list of files to be processed.
-    Methods:
-        __init__(files):
-            Initializes the ExtractLlamasRay instance with the provided files.
-        process_extractions(tracepkl: "TraceLlamas") -> None:
-            Processes the extractions from the given TraceLlamas pickle file.
     """
 
     
     def __init__(self, files) -> None:
+        """Initialize the ExtractLlamasRay instance.
+
+        Args:
+            files (list): A list of files to be processed.
+
+        Returns:
+            None
+        """
         self.files = files
         pass
         
    
     def process_extractions(self, tracepkl: "TraceLlamas") -> None:
-        """
-        Processes the extraction of llama traces from a given pickle file.
+        """Process the extraction of LLAMAS traces from a given pickle file.
+
         Args:
-            tracepkl (TraceLlamas): The path to the pickle file containing the llama trace data.
+            tracepkl (TraceLlamas): The path to the pickle file containing the LLAMAS trace data.
+
         Returns:
             None
         """
@@ -387,13 +413,15 @@ class ExtractLlamasRay(ExtractLlamas):
         return
 
 def parse_args()-> list:
-    """
-    Parse command-line arguments to process LLAMAS pkl files.
+    """Parse command-line arguments to process LLAMAS pkl files.
+
     This function sets up an argument parser to accept one or more file paths
     (with support for wildcards like *.pkl), expands the wildcards, validates
     the files, and returns a list of valid .pkl files.
+
     Returns:
         list: A list of valid .pkl file paths.
+
     Raises:
         ValueError: If no .pkl files are found.
     """

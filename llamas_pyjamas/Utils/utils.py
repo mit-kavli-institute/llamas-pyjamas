@@ -41,11 +41,18 @@ import glob
 import pickle
 
 def setup_logger(name, log_filename=None)-> logging.Logger:
-    """
-    Setup logger with file and console handlers
+    """Setup logger with file and console handlers.
+
+    Creates a logger with both file and console output, automatically creating
+    a logs directory if it doesn't exist.
+
     Args:
-        name: Logger name (usually __name__)
-        log_filename: Optional custom log filename
+        name (str): Logger name (usually __name__).
+        log_filename (str, optional): Custom log filename. If None, a default 
+            filename will be used. Defaults to None.
+
+    Returns:
+        logging.Logger: Configured logger instance.
     """
     # Create logs directory
     log_dir = os.path.join(os.path.dirname(__file__), 'logs')
@@ -80,18 +87,29 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     return logger
 
 def create_peak_lookup(peaks: list) -> dict:
-    """Create lookup table mapping peak index to y position"""
+    """Create lookup table mapping peak index to y position.
+
+    Args:
+        peaks (list): List of peak y-positions.
+
+    Returns:
+        dict: Dictionary mapping peak index to y position.
+    """
     peak_pos = {idx: y_pos for idx, y_pos in enumerate(peaks)}
     
     return peak_pos
 
 def save_combs_to_fits(comb_dict: dict, outfile: str = 'comb_profiles.fits') -> None:
-    """
-    Save dictionary of comb profiles to multi-extension FITS file
-    
+    """Save dictionary of comb profiles to multi-extension FITS file.
+
+    Creates a FITS file with each comb profile as a separate extension.
+
     Args:
-        comb_dict (dict): Dictionary of comb profiles {'label': comb_array}
-        outfile (str): Output filename
+        comb_dict (dict): Dictionary of comb profiles with format {'label': comb_array}.
+        outfile (str, optional): Output filename. Defaults to 'comb_profiles.fits'.
+
+    Returns:
+        None
     """
     # Create HDU list with empty primary
     hdul = fits.HDUList([fits.PrimaryHDU()])
@@ -116,15 +134,18 @@ def save_combs_to_fits(comb_dict: dict, outfile: str = 'comb_profiles.fits') -> 
 
 
 def grab_peak_pos_from_LUT(file: str, channel: str, benchside: str, fiber=None) -> Union[list, int]:
-    """
-    Retrieve peak positions from a Look-Up Table (LUT) file.
+    """Retrieve peak positions from a Look-Up Table (LUT) file.
+
     Args:
         file (str): Path to the LUT file in JSON format.
         channel (str): The channel to retrieve data for.
         benchside (str): The benchside to retrieve data for.
-        fiber (int, optional): Specific fiber to retrieve the peak position for. Defaults to None.
+        fiber (int, optional): Specific fiber to retrieve the peak position for. 
+            If None, returns all peak positions. Defaults to None.
+
     Returns:
-        list or int: A list of peak positions if fiber is not specified, otherwise the peak position for the specified fiber.
+        Union[list, int]: A list of peak positions if fiber is not specified, 
+            otherwise the peak position for the specified fiber.
     """
 
     with open(file, 'r') as f:
@@ -137,36 +158,31 @@ def grab_peak_pos_from_LUT(file: str, channel: str, benchside: str, fiber=None) 
 
 
 def create_peak_lookups(peaks: np.ndarray, benchside=None)-> dict:
-    """
-    Create a lookup dictionary for peak positions with special handling for missing fibers in specific benchsides.
-    This function processes an array of peak positions and inserts additional peaks at specific indices based on the 
-    provided benchside. The function handles two benchsides, '2A' and '2B', each with its own specific logic for 
-    inserting new peaks. The resulting peaks are then converted into a lookup dictionary where the keys are the 
-    indices (as strings) and the values are the peak positions (as integers).
-    Parameters:
-    -----------
-    peaks : numpy.ndarray
-        An array of peak positions.
-    benchside : str, optional
-        The benchside identifier, either '2A' or '2B'. If None, no special handling is applied.
+    """Create a lookup dictionary for peak positions with special handling for missing fibers.
+
+    This function processes an array of peak positions and inserts additional peaks 
+    at specific indices based on the provided benchside. It handles special cases 
+    for benchsides '2A' and '2B' where fibers may be missing.
+
+    Args:
+        peaks (np.ndarray): An array of peak positions.
+        benchside (str, optional): The benchside identifier, either '2A' or '2B'. 
+            If None, no special handling is applied. Defaults to None.
+
     Returns:
-    --------
-    dict
-        A dictionary where the keys are the indices of the peaks (as strings) and the values are the peak positions 
-        (as integers).
-    Benchside '2A' Handling:
-    ------------------------
-    - Calculates the average spacing between peaks.
-    - Inserts a new peak at index 269 and 298 based on the average spacing.
-    Benchside '2B' Handling:
-    ------------------------
-    - Calculates the average spacing between peaks.
-    - Inserts a new peak at index 48 based on the average spacing.
+        dict: A dictionary where the keys are the indices of the peaks (as strings) 
+            and the values are the peak positions (as integers).
+
+    Note:
+        - **Benchside '2A' Handling**: Calculates average spacing and inserts new 
+          peaks at indices 269 and 298.
+        - **Benchside '2B' Handling**: Calculates average spacing and inserts new 
+          peak at index 48.
+
     Example:
-    --------
-    peaks = np.array([100, 200, 300, 400])
-    create_peak_lookups(peaks, benchside='2A')
-    {'0': 100, '1': 200, '2': 300, '3': 400, '4': 250, '5': 450}
+        >>> peaks = np.array([100, 200, 300, 400])
+        >>> create_peak_lookups(peaks, benchside='2A')
+        {'0': 100, '1': 200, '2': 300, '3': 400, '269': 250, '298': 450}
     """
     
     if benchside == '2A':
