@@ -805,7 +805,8 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
-            bias_data = bias_hdul[i].data
+            bias = bias_hdul[i].data
+            bias_data = np.median(bias[20:50])
             data = ext.data - bias_data
             
             
