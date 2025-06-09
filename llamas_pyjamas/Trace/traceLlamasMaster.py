@@ -173,6 +173,9 @@ def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
 
 
 class TraceLlamas:
+
+    _EXCLUDED_FROM_PICKLE = ['hdr', 'dead_fibres', 'LUT', 'mph', 'first_peaks', 'first_pkht', 'xmax', 'xmin', 'benchside', 'peak_properties']
+
     """
     A class used to trace and process fiber data from FITS files.
     Attributes
@@ -244,6 +247,36 @@ class TraceLlamas:
         # 4A    300 (Green) / 300 Blue
 
         return
+    
+    def __getstate__(self): 
+        """
+        Return the state of the object for serialization.
+        This method is called by the pickle module to retrieve the current state of the object.
+        Override this method to control what data is saved when the object is pickled.
+        Returns:
+            dict: A dictionary representing the object's state. By default, no state is captured.
+        """
+
+        state = self.__dict__.copy()
+
+        for attr in self._EXCLUDED_FROM_PICKLE:
+            if attr in state:
+                state.pop(attr)
+
+        return state
+    
+    def __setstate__(self, state):
+        """
+        Set the state of the object after deserialization.
+        This method is called by the pickle module to restore the object's state.
+        Override this method to control how the object's state is set when unpickled.
+        Args:
+            state (dict): A dictionary representing the object's state.
+        """
+        
+        self.__dict__.update(state)
+        
+
     
     def insert_dead_fibers(self, LUT: dict, benchside: str, pkhts: list) -> list:
         """
@@ -487,7 +520,7 @@ class TraceLlamas:
             self.data = self.data - bias_data
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
-            self.orig_comb = self.comb
+            
             
             self.first_peaks = self.peaks
             self.first_pkht = self.pkht
