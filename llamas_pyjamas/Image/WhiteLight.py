@@ -1,17 +1,19 @@
-"""
-This module provides functions for processing and analyzing white light images from the LLAMAS instrument.
-It includes functions for isolating color channels, creating FITS files, and mapping fibers.
+"""Module for processing and analyzing white light images from LLAMAS.
+
+This module provides functions for processing white light images from the LLAMAS 
+instrument, including color channel isolation, FITS file creation, and fiber mapping.
+
 Functions:
-    color_isolation(extractions): Isolates blue, green, and red channels from a list of extraction objects.
-    WhiteLightFits(extraction_array, outfile=None): Creates a FITS file from an array of extraction objects.
-    WhiteLight(extraction_array, ds9plot=True): Generates a white light image from an array of extraction objects.
-    WhiteLightQuickLook(tracefile, data): Generates a quick look white light image from a trace file and data.
-    WhiteLightHex(extraction_array, ds9plot=True): Placeholder for hexagonal grid inclusion.
-    FiberMap(bench, infiber): Maps a fiber to its x and y coordinates based on the bench and fiber number.
-    FiberMap_LUT(bench, fiber): Looks up the x and y coordinates of a fiber using a lookup table.
-    plot_fibermap(): Plots the fiber map for the LLAMAS instrument.
-    fibermap_table(): Generates a table of fiber mappings and writes it to a file.
-    rerun(): Reruns the white light generation process for a set of extraction objects.
+    color_isolation: Isolates blue, green, and red channels from extraction objects.
+    WhiteLightFits: Creates a FITS file from extraction objects.
+    WhiteLight: Generates a white light image from extraction objects.
+    WhiteLightQuickLook: Generates a quick look white light image.
+    WhiteLightHex: Creates hexagonal grid white light images.
+    FiberMap: Maps a fiber to its x and y coordinates.
+    FiberMap_LUT: Looks up fiber coordinates using a lookup table.
+    plot_fibermap: Plots the fiber map for the LLAMAS instrument.
+    fibermap_table: Generates a table of fiber mappings.
+    rerun: Reruns the white light generation process.
 """
 
 import numpy as np
@@ -52,10 +54,23 @@ fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 
 def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]:
-    """A function that takes in a list of extraction objects and isolates the blue, green, and red channels
+    """Isolate blue, green, and red channels from extraction objects.
+
+    This function separates extraction objects by their color channels and returns 
+    both the extraction objects and their corresponding metadata.
 
     Args:
-        extractions (list): A list of extraction objects loaded from ExtractLlamas
+        extractions (list): A list of extraction objects loaded from ExtractLlamas.
+        metadata (dict): Dictionary containing metadata for each extraction.
+
+    Returns:
+        tuple: A tuple containing six lists:
+            - blue_extractions (list): Blue channel extraction objects.
+            - green_extractions (list): Green channel extraction objects.
+            - red_extractions (list): Red channel extraction objects.
+            - blue_meta (list): Metadata for blue channel extractions.
+            - green_meta (list): Metadata for green channel extractions.
+            - red_meta (list): Metadata for red channel extractions.
     """
 
     blue_extractions = [ext for ext in extractions if ext.channel.lower() == 'blue']
@@ -71,19 +86,26 @@ def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]
 
 
 def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
-    """
-    Process an array of extracted color data to create a white light FITS file.
-    Parameters:
-    extraction_array (list): A list of extracted color data arrays.
-    outfile (str, optional): The output file path for the white light FITS file. 
-                             If None, the output file name is generated based on the input file name.
+    """Process extraction data to create a white light FITS file.
+
+    This function takes an array of extracted color data and creates a FITS file 
+    containing white light images for each bench/side/channel combination.
+
+    Args:
+        extraction_array (list): A list of extracted color data arrays.
+        metadata (dict): Dictionary containing metadata for each extraction.
+        outfile (str, optional): The output file path for the white light FITS file. 
+            If None, the output file name is generated based on the input file name. 
+            Defaults to None.
+
     Returns:
-    str: The file path of the created white light FITS file.
-    Notes:
-    - The function assumes that all extraction objects came from the same original file.
-    - The function processes blue, green, and red data if they exist in the extraction array.
-    - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.
-    - The function writes the created HDU list to a FITS file in the specified output directory.
+        str: The file path of the created white light FITS file.
+
+    Note:
+        - The function assumes that all extraction objects came from the same original file.
+        - The function processes blue, green, and red data if they exist in the extraction array.
+        - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.
+        - The function writes the created HDU list to a FITS file in the specified output directory.
     """
 
     
@@ -743,7 +765,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
     return whitelight, xdata, ydata, flux
 
-def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None) -> str:
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -767,19 +789,25 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-
-
-
-
         # Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR
-        
 
         trace_objs = []
 
         # Open the science FITS file and create the output HDU list
         science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
 
-        bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+        if not bias:
+            bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+        else:
+            try:
+                bias_hdul = process_fits_by_color(bias)
+            except Exception as e:
+                logger.error(f"Error processing bias file {bias}: {e}")
+                raise ValueError(f"Could not process bias file {bias}. Ensure it is a valid FITS file.")
+            
+        if len(science_hdul) != len(bias_hdul):
+            logger.error(f"Science file has {len(science_hdul)} extensions while bias file has {len(bias_hdul)} extensions.")
+            raise ValueError("Science and bias FITS files must have the same number of extensions. Please use compatible files.")
 
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
@@ -799,14 +827,32 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
-            bias_data = bias_hdul[i].data
+            bias = bias_hdul[i].data
+            bias_data = np.median(bias[20:50])
             data = ext.data - bias_data
-            header = ext.header
-            color = header.get('COLOR', '').lower()
-            bench = header.get('BENCH', '')
-            side = header.get('SIDE', '')
-            benchside = f'{bench}{side}'
             
+            
+            if 'COLOR' in ext.header:
+                header = ext.header
+                color = header.get('COLOR', '').lower()
+                bench = header.get('BENCH', '')
+                side = header.get('SIDE', '')
+                benchside = f'{bench}{side}'
+            else:
+                header = ext.header
+                # Parse the CAM_NAME to determine color, bench, and side
+                cam_name = header.get('CAM_NAME', '')
+                if cam_name:
+                    # Example format: '1A_Red' -> bench='1', side='A', color='red'
+                    parts = cam_name.split('_')
+                    if len(parts) >= 2:
+                        benchside = parts[0]
+                        color = parts[1].lower()  # Convert 'Red' to 'red'
+                        if len(benchside) >= 2:
+                            bench = benchside[0]
+                            side = benchside[1]
+
+            print(f'Processing extension {i}: {benchside} {color}')
             # Determine the corresponding trace file based on benchside and color
             #LLAMAS_master_blue_1_A_traces.pkl
             trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
@@ -872,8 +918,11 @@ def QuickWhiteLightCube(science_file, ds9plot: bool = True, outfile: str = None)
         
         # Determine output file name
         if outfile is None:
-            fitsfilebase = science_file.split('/')[-1]
-            white_light_file = fitsfilebase.replace('.fits', '_quickwhitelight.fits')
+            filename = os.path.basename(science_file)
+            name, ext = os.path.splitext(filename)
+            white_light_file = f"{name}_quickwhitelight.fits"
+        else:
+            white_light_file = outfile
             
         
         # Write the FITS file to disk.
