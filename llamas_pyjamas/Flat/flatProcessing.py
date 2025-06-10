@@ -61,7 +61,9 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     
     
     _extractions = []
+    print(f'Processing {filename} with indices {idxs}')
     _hdus = process_fits_by_color(filename)
+    print(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     
     masterfile = 'LLAMAS_master'
@@ -217,11 +219,11 @@ def apply_flat_field(science_file, flat_file, output_file):
                 with np.errstate(divide='ignore', invalid='ignore'):
                     #corrected_data = np.where(flat_data != 0, sci_data / flat_data, np.nan)
                     corrected_data = np.divide(sci_data, flat_data, out=np.zeros_like(sci_data), where=flat_data != 0)
+                    
                 # Use the science header (or you can update it accordingly)
                 new_hdu = fits.ImageHDU(data=corrected_data, header=sci_hdus[idx].header)
             else:
-                # For HDUs without image data, simply copy the original
-                new_hdu = sci_hdus[idx]
+                print(f'warning: HDU {idx} in science or flat file is None. Skipping this HDU.')
             new_hdus.append(new_hdu)
         # Add the primary header HDU to the beginning of the list
         new_hdus.insert(0, new_primary)
@@ -261,7 +263,7 @@ if __name__ == '__main__':
     )
     
     args = parser.parse_args()
-    
+    print(f'args.filenames {args.filenames}')
     # Multiple files provided: use produce_flat_extractions if exactly three files given.
     if len(args.filenames) > 1:
         if len(args.filenames) != 3:

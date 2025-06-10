@@ -13,8 +13,40 @@ import pickle, h5py
 ###############################################################################3
 
 class TraceLlamas:
+    """Class for tracing fiber positions in LLAMAS observations.
+
+    This class handles the tracing of fiber positions and profile fitting for 
+    LLAMAS spectrograph data.
+
+    Attributes:
+        data (np.ndarray): The image data array.
+        naxis1 (int): The x-axis dimension of the data.
+        naxis2 (int): The y-axis dimension of the data.
+        bench (str): The bench identifier.
+        side (str): The side identifier. 
+        channel (str): The channel identifier (red, green, blue).
+        nfibers (int): Number of fibers detected.
+        xmin (int): Minimum x position for trace fitting.
+        xmax (int): Maximum x position for trace fitting.
+        fitspace (int): Spacing between trace fitting points.
+        traces (np.ndarray): Array containing the traced fiber positions.
+        bspline_ssets (list): List of B-spline sets for profile fitting.
+    """
 
     def __init__(self, data=0, naxis1=0, naxis2=0, bench='', side='', channel=''):
+        """Initialize the TraceLlamas object.
+
+        Args:
+            data (np.ndarray, optional): The image data array. Defaults to 0.
+            naxis1 (int, optional): The x-axis dimension of the data. Defaults to 0.
+            naxis2 (int, optional): The y-axis dimension of the data. Defaults to 0.
+            bench (str, optional): The bench identifier. Defaults to ''.
+            side (str, optional): The side identifier. Defaults to ''.
+            channel (str, optional): The channel identifier. Defaults to ''.
+
+        Returns:
+            None
+        """
         self.data = data
         self.naxis1 = naxis1
         self.naxis2 = naxis2
@@ -23,6 +55,20 @@ class TraceLlamas:
         self.channel = channel
 
     def traceSingleCamera(self, dataobj, mph=None):
+        """Trace fiber positions for a single camera.
+
+        This method traces the fiber positions across the detector for a single camera
+        by detecting peaks in vertical slices and fitting trace functions.
+
+        Args:
+            dataobj: Data object containing header and image data.
+            mph (float, optional): Minimum peak height for peak detection. If None, 
+                an automatic threshold will be calculated. Defaults to None.
+
+        Returns:
+            int: Returns 0 if the channel is red (saturated flats), otherwise traces 
+                are stored in the object attributes.
+        """
 
         hdr = dataobj.header
         raw = dataobj.data
@@ -185,6 +231,17 @@ class TraceLlamas:
         print("")
         
     def profileFit(self):
+        """Fit spatial profiles for each fiber.
+
+        This method fits B-spline profiles to each fiber, normalizing out spectral 
+        variations and generating profile weight images for optimal extraction.
+
+        Returns:
+            tuple: A tuple containing:
+                - fiberimg (np.ndarray): Image where each pixel contains the fiber number.
+                - profimg (np.ndarray): Profile weight image for optimal extraction.
+                - bpmask (np.ndarray): Bad pixel mask.
+        """
         
         ref = self.data[12,:]
 
@@ -264,6 +321,17 @@ class TraceLlamas:
     #
     
     def fiberProfileImg(self,fiber_index):
+        """Generate a profile image for a single fiber.
+
+        This method creates a profile weight image for a specific fiber using 
+        the previously fitted B-spline profile.
+
+        Args:
+            fiber_index (int): The index of the fiber to generate the profile for.
+
+        Returns:
+            np.ndarray: 2D profile image with weights for the specified fiber.
+        """
 
         profimg  = np.zeros((self.naxis2,self.naxis1),dtype=float)
         ytrace = self.traces[fiber_index,:]
@@ -282,6 +350,17 @@ class TraceLlamas:
 
 
 def saveTraces(objlist, outfile='LLAMASTrace.h5'):
+    """Save a list of TraceLlamas objects to file.
+
+    This function saves TraceLlamas objects to either pickle (.pkl) or HDF5 (.h5) format.
+
+    Args:
+        objlist (list): List of TraceLlamas objects to save.
+        outfile (str, optional): Output filename. Defaults to 'LLAMASTrace.h5'.
+
+    Returns:
+        None
+    """
 
     if ('.pkl' in outfile):
         with open(outfile,'wb') as fp:
@@ -301,6 +380,17 @@ def saveTraces(objlist, outfile='LLAMASTrace.h5'):
 
 
 def loadTraces(infile):
+    """Load TraceLlamas objects from file.
+
+    This function loads TraceLlamas objects from either pickle (.pkl) or HDF5 (.h5) format.
+
+    Args:
+        infile (str): Input filename to load from.
+
+    Returns:
+        list or object: List of TraceLlamas objects (for .h5 files) or the loaded 
+            object (for .pkl files).
+    """
 
     if ('pkl' in infile):
         with open(infile,'rb') as fp:
@@ -321,6 +411,16 @@ def loadTraces(infile):
         return(loaded_llama_traces)
 
 def traceAllCameras(dataobj_all):
+    """Trace fibers for all cameras in a dataset.
+
+    This function traces fibers for all camera extensions in the provided data object.
+
+    Args:
+        dataobj_all: Data object containing multiple camera extensions.
+
+    Returns:
+        list: List of TraceLlamas objects, one for each camera extension.
+    """
 
     all_traces = []
 
