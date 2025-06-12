@@ -44,12 +44,13 @@ import argparse
 import cloudpickle
 from scipy.signal import find_peaks
 from llamas_pyjamas.Utils.utils import setup_logger
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
 import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 # Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ logger.setLevel(logging.DEBUG)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 #logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
+LOG = []
 
 def get_fiber_position(channel:str, benchside: str, fiber: str) -> int: 
     """
@@ -149,8 +151,14 @@ class TraceLlamas:
         self.xmin     = 200
         self.fitspace = 10
         self.min_pkheight = 500
-        self.window = 11 #can update to 15
+        self.window = 12 #can update to 15
         self.offset_cutoff = 10#3
+
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+                LUT = json.load(f)
+                self.LUT = LUT
+        
+        self.dead_fibres = LUT['dead_fibers']
         
 
         # 1A    298 (Green) / 298 Blue
@@ -176,21 +184,27 @@ class TraceLlamas:
         # Get dead fibers list for this benchside
         dead_fibers = LUT.get('dead_fibers', {}).get(benchside, [])
         
-        if not dead_fibers:
-            return pkhts  # Return original array if no dead fibers
+        # if not dead_fibers:
+        #     return pkhts  # Return original array if no dead fibers
         
         # Convert to list for easier insertion
         pkhts_list = pkhts.tolist()
+
+        pkhts = pkhts.tolist()
         
-        # Sort dead fibers in descending order to maintain correct insertion positions
-        # (inserting from right to left preserves indices for earlier insertions)
-        for fiber in sorted(dead_fibers, reverse=True):
-            if 0 <= fiber <= len(pkhts_list):
-                pkhts_list.insert(fiber, 0)
-            else:
-                logger.warning(f"Dead fiber index {fiber} out of bounds for array of length {len(pkhts_list)}")
+        for fiber in dead_fibers:
+            pkhts.insert(fiber, 0)
         
-        return np.array(pkhts_list)
+        return pkhts
+        
+        
+        # for fiber in sorted(dead_fibers, reverse=True):
+        #     if 0 <= fiber <= len(pkhts_list):
+        #         pkhts_list.insert(fiber, 0)
+        #     else:
+        #         logger.warning(f"Dead fiber index {fiber} out of bounds for array of length {len(pkhts_list)}")
+        
+        # return np.array(pkhts_list)
     
     
             
@@ -209,7 +223,7 @@ class TraceLlamas:
         """
 
 
-        tmp            = detect_peaks(tslice,mpd=2,threshold=10,show=False,valley=True)
+        tmp            = detect_peaks(tslice,mpd=5,threshold=10,show=False,valley=True) #was 2 for mpd but changed to match master gen
         valley_indices = np.ndarray(len(tmp))
         valley_depths  = np.ndarray(len(tmp))
         
@@ -264,7 +278,7 @@ class TraceLlamas:
         #defining a new yslice for a given xwindow point
         ytrace = np.median(self.data[:,xtmp.astype(int)-self.window:xtmp.astype(int)+self.window],axis=1)
         #detect the valleys along this new slice
-        valleys = detect_peaks(ytrace,mpd=2,show=False,valley=True)
+        valleys = detect_peaks(ytrace,mpd=5,show=False,valley=True)
         
         nvalley = len(valleys)
 
@@ -326,60 +340,8 @@ class TraceLlamas:
         
         return self.comb
     
-    
-    # def find_comb(self, rownum=None)-> np.ndarray:
-    #     """
-    #     Finds and returns the comb for a given row number in the data.
-    #     Parameters:
-    #     rownum (int, optional): The row number to process. If None, defaults to the middle row.
-    #     Returns:
-    #     numpy.ndarray: The computed comb for the specified row.
-    #     Notes:
-    #     - If `rownum` is not provided, it defaults to the middle row of the data.
-    #     - The method extracts a slice of the data around the specified row and computes the valleys.
-    #     - A B-spline is fitted to the valley depths, and the comb is calculated by subtracting the fitted model from the slice.
-    #     - If an exception occurs, a default minimum peak height and master comb are used.
-    #     """
-
-    #     try:
-    #         # When in doubt, extract in the middle
-    #         if (rownum == None):
-    #             rownum = int(self.naxis1/2)
-
-    #         rownum = int(rownum)
-
-    #         #straight up to _+ 15 pixels on either side
-    #         tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)
-    #         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)
-
-    #         self.x_model = np.arange(self.naxis2).astype(float)
-
-
-    #         sset = bspline(valley_indices,everyn=2, nord=2)
-    #         res, yfit = sset.fit(valley_indices, valley_depths, invvar)
-
-    #         #x_model = np.arange(self.naxis2).astype(float)
-    #         y_model = sset.value(self.x_model)[0]
-
-
-    #         self.min_pkheight = 10000
-    #         if self.channel.lower() == 'blue':
-    #             logger.info(f"Setting min peak height to 1000 for blue channel")
-    #             self.min_pkheight = 1000
-
-    #         self.comb = tslice - y_model
-        
-    #         #self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)
-    #     except:
-    #         self.min_pkheight = 1000
-    #         self.comb = self.master_comb
-            
-            
-        
-    #     return self.comb
-    
          
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, use_bias: str = None) -> dict:
         """
         Processes data from a specific HDU (Header Data Unit) array.
         Parameters:
@@ -419,6 +381,9 @@ class TraceLlamas:
 
             self.hdr = hdu_header
             self.data = hdu_data.astype(float)
+
+            
+
             #case sensitive when concerted into a dict for ray processing
             
             if not 'COLOR' in self.hdr:
@@ -435,6 +400,25 @@ class TraceLlamas:
             self.naxis2 = self.hdr['NAXIS2']
             
             self.benchside = f'{self.bench}{self.side}'
+
+
+            #Adding in bias subraction here
+            if use_bias:
+                if os.path.isfile(use_bias):
+                    bias_file = use_bias
+                else:
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            else:
+                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                
+            print(f'Bias file: {bias_file}')
+            #### fix the directory here!
+            bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+            
+            bias_data = bias.data
+            
+            self.data = self.data - bias_data
             
             #code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers
             with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
@@ -489,7 +473,7 @@ class TraceLlamas:
                 #offset=0
                 #return 1
             # Apply insert_dead_fibers to updated_peaks
-            #self.updated_peaks = self.insert_dead_fibers(self.LUT, self.benchside, np.array(self.updated_peaks))
+            self.updated_peaks = self.insert_dead_fibers(self.LUT, self.benchside, np.array(self.updated_peaks))
 
             #self.min_pkheight = 0.3 * np.median(pkht)
             
@@ -584,7 +568,16 @@ class TraceLlamas:
             x2          = np.outer(np.ones(self.nfibers),np.arange(self.naxis1))
             #interpolates the traces to give an x,y position for each fiber along the naxis
             
-            self.traces = pydl.traceset2xy(self.tset,xpos=x2)[1]
+            self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
+
+            # --- Point 2: Enforce monotonic ordering of traces ---
+            min_gap = 6  # minimum gap in pixels between adjacent fiber traces £was prev 6
+            add_gap = 2
+            for col in range(self.traces.shape[1]):
+                for i in range(1, self.nfibers):
+                    if self.traces[i, col] <= self.traces[i-1, col] + min_gap:
+                        LOG.append({f'self.traces[i, col] {self.traces[i, col]} is not within the miniumum gap'} )
+                        self.traces[i, col] = self.traces[i-1, col] + min_gap
             
             # Filter traces to match expected fiber count
             fiber_list = {
@@ -592,34 +585,68 @@ class TraceLlamas:
                 '2B': 297, '3A': 298, '3B': 300, '4A': 300
             }
             expected_count = fiber_list.get(self.benchside)
-            
-            if expected_count and len(self.traces) > expected_count:
-                logger.info(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
-                
-                # Calculate edge proximity scores for each trace
-                # Lower score = further from edge = better
-                edge_scores = np.zeros(len(self.traces))
-                
-                # Get the middle position of each trace (at center of detector)
-                mid_x = self.naxis1 // 2
-                mid_positions = self.traces[:, mid_x]
-                
-                # Calculate distance from edges
-                for i, pos in enumerate(mid_positions):
-                    # Distance from top and bottom edges
-                    dist_from_top = pos
-                    dist_from_bottom = self.naxis2 - pos
-                    
-                    # Use minimum distance to either edge as score
-                    edge_scores[i] = min(dist_from_top, dist_from_bottom)
 
-                # Sort traces by distance from edge (descending)
-                # This keeps traces furthest from edges
-                sorted_indices = np.argsort(edge_scores)[::-1]
+            # Define a minimum acceptable distance (in pixels) from the top and bottom edges.
+            min_edge_distance = 30  # Adjust threshold as needed
+
+            # Get the middle position of each trace (at center of detector)
+            mid_x = self.naxis1 // 2
+            mid_positions = self.traces[:, mid_x]
+
+            # Convert None to np.nan so the comparisons work
+            safe_mid_positions = np.array([np.nan if pos is None else pos for pos in mid_positions])
+
+            # Filter out any traces that fall too close to the top or bottom
+            valid_edge_indices = np.where((safe_mid_positions >= min_edge_distance) & 
+                                          (safe_mid_positions <= (self.naxis2 - min_edge_distance)))[0]
+
+            if len(valid_edge_indices) < expected_count:
+                print(f"Only {len(valid_edge_indices)} traces pass the edge criteria for {self.benchside}")
+                # Decide how to handle this situation. For example, you might use all valid edges:
+                keep_indices = valid_edge_indices
+            else:
+                # Now, for the traces that remain, calculate edge proximity scores.
+                valid_traces = self.traces[valid_edge_indices]
+                valid_mid_positions = mid_positions[valid_edge_indices]
+                edge_scores = np.array([
+                    min(pos, self.naxis2 - pos) for pos in valid_mid_positions
+                ])
+
+                # Sort traces by their edge scores (descending keeps those furthest from edges)
+                sorted_valid_indices = valid_edge_indices[np.argsort(edge_scores)[::-1]]
+
+                # Keep only the expected number of traces from the remaining valid traces.
+                keep_indices = np.sort(sorted_valid_indices[:expected_count])
+
+            ######### previous code -> keep for now
+            
+            # if expected_count and len(self.traces) > expected_count:
+            #     logger.info(f"Found {len(self.traces)} traces, limiting to expected {expected_count} for {self.benchside}")
                 
-                # Keep only the expected number of traces
-                keep_indices = sorted_indices[:expected_count]
-                keep_indices.sort()  # Sort back to original order
+            #     # Calculate edge proximity scores for each trace
+            #     # Lower score = further from edge = better
+            #     edge_scores = np.zeros(len(self.traces))
+                
+            #     # Get the middle position of each trace (at center of detector)
+            #     mid_x = self.naxis1 // 2
+            #     mid_positions = self.traces[:, mid_x]
+                
+            #     # Calculate distance from edges
+            #     for i, pos in enumerate(mid_positions):
+            #         # Distance from top and bottom edges
+            #         dist_from_top = pos
+            #         dist_from_bottom = self.naxis2 - pos
+                    
+            #         # Use minimum distance to either edge as score
+            #         edge_scores[i] = min(dist_from_top, dist_from_bottom)
+
+            #     # Sort traces by distance from edge (descending)
+            #     # This keeps traces furthest from edges
+            #     sorted_indices = np.argsort(edge_scores)[::-1]
+                
+            #     # Keep only the expected number of traces
+            #     keep_indices = sorted_indices[:expected_count]
+            #     keep_indices.sort()  # Sort back to original order
                 
                 # Filter the traces
                 self.traces = self.traces[keep_indices]
@@ -628,6 +655,7 @@ class TraceLlamas:
                 self.tracearr = self.tracearr[keep_indices]
                 self.xtracefit = self.xtracefit[keep_indices]
                 self.nfibers = len(self.traces)
+
                 
                 logger.info(f"Filtered to {self.nfibers} traces for {self.benchside}")
                 
@@ -791,7 +819,7 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath=None) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None) -> dict:
         """
         Processes HDU (Header Data Unit) data and performs profile fitting.
         Parameters:
@@ -813,7 +841,7 @@ class TraceRay(TraceLlamas):
 
         start_time = time.time()
         
-        result = super().process_hdu_data(hdu_data, hdu_header)
+        result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)
 
     
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
@@ -837,7 +865,7 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> None:
     """
     Perform ray tracing on a FITS file using parallel processing with Ray.
     This function initializes Ray with the number of available CPU cores, processes
@@ -864,15 +892,21 @@ def run_ray_tracing(fitsfile: str) -> None:
     
     # with fits.open(fitsfile) as hdul:
     hdul = process_fits_by_color(fitsfile)
-    hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul[1:] if hdu.data.astype(float) is not None]
-        
+    
+    if channel is not None and 'COLOR' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+    elif channel is not None and 'CAM_NAME' in hdul[1].header:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+    else:
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+    
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
         
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, use_bias=bias)
         futures.append(future)
     
     # Monitor processing
@@ -910,6 +944,7 @@ if __name__ == "__main__":
     parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
     parser.add_argument('--outpath', type=str, help='Path to save output files')
+    parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
     args = parser.parse_args()
       
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
@@ -946,7 +981,7 @@ if __name__ == "__main__":
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath, use_bias=args.bias)
         futures.append(future)
     
     # Monitor processing

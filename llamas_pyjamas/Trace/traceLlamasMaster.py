@@ -229,7 +229,6 @@ class TraceLlamas:
         self.fitspace = 10
         self.min_pkheight = 500
         self.window = 12#5 #can update to 15
-        self.offset_cutoff = 3
         
         with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
                 LUT = json.load(f)
@@ -446,7 +445,7 @@ class TraceLlamas:
         return self.comb
     
          
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, use_bias: str = None) -> dict:
         """
         Processes data from a specific HDU (Header Data Unit) array.
         Parameters:
@@ -507,15 +506,20 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            n_rows = 12
-            top_rows = self.data[-n_rows:, :]
-            #background = np.median(top_rows)
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            if use_bias:
+                if os.path.isfile(use_bias):
+                    bias_file = use_bias
+                else:
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            else:
+                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
             print(f'Bias file: {bias_file}')
             #### fix the directory here!
             bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
             
-            bias_data = bias.data
+            #should we be using the whole bias or just an overscan region?
+            bias_data = np.median(bias.data[20:50])
             
             self.data = self.data - bias_data
 
@@ -529,23 +533,7 @@ class TraceLlamas:
             #make sure peaks aren't too close to the edge
             self.updated_peaks = self.first_peaks[np.logical_and(self.first_peaks > 20, self.first_peaks < 2020)]
             pkhts = self.first_pkht[np.logical_and(self.first_peaks > 20, self.first_peaks < 2020)]
-            
-            
-            # #code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers
-            # with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
-            #     LUT = json.load(f)
-            #     self.LUT = LUT    
-        
-            # self.master_comb = np.array(LUT['combs'][self.channel.lower()][self.benchside])
-            # masterpeaks_dict = LUT["fib_pos"][self.channel.lower()][self.benchside]
-            
-            # self.master_peaks = [int(pos) for pos in masterpeaks_dict.values()]
-            
-            #these quantities are for debugging the tracing process to generate QA plots, might not be needed later on
-            # self.pkht = self.insert_dead_fibers(LUT, self.benchside, pkhts)
-            # self.orig_pkht = self.pkht
 
-            #self.min_pkheight = 0.3 * np.median(pkht)
             
             self.nfibers  = len(self.updated_peaks)
             self.xmax     = self.naxis1-100
@@ -654,7 +642,6 @@ class TraceLlamas:
                     if self.traces[i, col] <= self.traces[i-1, col] + min_gap:
                         LOG.append({f'self.traces[i, col] {self.traces[i, col]} is not within the miniumum gap'} )
                         self.traces[i, col] = self.traces[i-1, col] + min_gap
-            
             
             
             # Filter traces to match expected fiber count
@@ -851,10 +838,10 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath=None) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None) -> dict:
         start_time = time.time()
         
-        result = super().process_hdu_data(hdu_data, hdu_header)
+        result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)
 
                
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
@@ -881,7 +868,7 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> None:
 
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
@@ -909,7 +896,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None) -> None:
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, use_bias=bias)
         futures.append(future)
     
     # Monitor processing
@@ -946,6 +933,7 @@ if __name__ == "__main__":
     parser.add_argument('--mastercalib', action='store_true', help='Use master calibration')
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
     parser.add_argument('--outpath', type=str, help='Path to save output files')
+    parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
     args = parser.parse_args()
       
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
@@ -976,7 +964,7 @@ if __name__ == "__main__":
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath, use_bias=args.bias)
         futures.append(future)
     
     # Monitor processing
