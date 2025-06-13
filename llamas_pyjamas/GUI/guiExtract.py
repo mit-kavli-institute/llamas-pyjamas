@@ -320,7 +320,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             if os.path.exists(output_dir):        
                 filename = save_extractions(extraction_list, savefile=extraction_file, savedir=output_dir)
         else:
-            filename = save_extractions(extraction_list, savefile=extraction_file, savedir=OUTPUT_DIR)
+            filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
         #print(f'extraction saved filename = {filename}')
         print(f'extraction saved filename = {extraction_file}')
         # if output_dir:
