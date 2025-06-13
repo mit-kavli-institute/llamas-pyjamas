@@ -15,6 +15,12 @@ import llamas_pyjamas.Arc.arcLlamas as arc
 
 _linefile = os.path.join(LUT_DIR, '')
 
+#### To do:
+# - make a directory within base to hold the extractions temporarily
+# - test a single run through, then work on adaptiing to lists of science files
+
+
+
 ### This needs to be edited to handle a trace file per channel
 def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
     

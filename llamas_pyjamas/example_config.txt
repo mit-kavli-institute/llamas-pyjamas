@@ -1,0 +1,13 @@
+#### This is a template configuration file to run the LLAMAS pipeline
+#Its main purpose is to allow users to point to the files and directories that they
+#wish to use for their data reduction
+#The paths must be given as complete paths to ensure they can be found
+#if files cannot be found or processed then the pipeline defaults to the master calibration files
+
+bias_file = 'path_to_bias.fits'
+#example of a list of bias files to combine into a median master bias
+#bias_file = 'file1.fits', 'file2.fits', 'file3.fits'
+flat_file = 'path_to_flat.fits'
+science_file = 'path_to_science_file' ##will make this a list later for stacking jobs
+output_dir = 'path_to_output_dir'
+
