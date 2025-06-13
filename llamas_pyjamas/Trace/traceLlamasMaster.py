@@ -868,7 +868,7 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, bias: str = None) -> None:
 
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
@@ -896,7 +896,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, use_bias=bias)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=bias)
         futures.append(future)
     
     # Monitor processing
