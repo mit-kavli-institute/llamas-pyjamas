@@ -203,7 +203,7 @@ def make_writable(extraction_obj):
 
 ##Main function currently used by the Quicklook for full extraction
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, trace_dir=None) -> None:
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -277,8 +277,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         print(f'masterfile = {masterfile}')
         print(f'Bias file is {masterbiasfile}')
 
-        
-        trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        if not trace_dir:
+            trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        else:
+            trace_files = glob.glob(os.path.join(trace_dir, f'{masterfile}*traces.pkl'))
         print(f'Using master traces {trace_files}')
         
         #Running the extract routine
@@ -318,7 +320,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         print(f'Extraction list = {extraction_list}')
         if output_dir:
             if os.path.exists(output_dir):        
-                filename = save_extractions(extraction_list, savefile=extraction_file, savedir=output_dir)
+                filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=output_dir)
         else:
             filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
         #print(f'extraction saved filename = {filename}')
@@ -328,8 +330,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 
         
         # else:
-        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
-
+        if output_dir:
+            obj, metadata = load_extractions(os.path.join(output_dir, extraction_file))
+        else:
+            obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile+'_whitelight.fits'
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
