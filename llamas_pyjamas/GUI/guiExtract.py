@@ -20,7 +20,7 @@ from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIA
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
-from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
+from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, WhiteLightQuickLook
 import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
