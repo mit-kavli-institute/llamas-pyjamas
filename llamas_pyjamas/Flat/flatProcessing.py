@@ -9,7 +9,7 @@ import logging
 # from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
-from llamas_pyjamas.Image.WhiteLight import WhiteLightFits
+from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 
 from llamas_pyjamas.GUI.guiExtract import process_trace, make_writable
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
