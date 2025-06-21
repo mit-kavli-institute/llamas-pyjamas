@@ -169,20 +169,20 @@ class ExtractLlamas:
                 elif optimal == False:
                     # Boxcar Extraction - fast!
                     logger.info("..Boxcar extracting fiber #{}".format(ifiber))
-                    # x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
+                    x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
                     
-                    #if x_spec is None:
-                    #    continue
+                    if x_spec is None:
+                        continue
                 
                     extracted = np.zeros(self.trace.naxis1)
                     tracey = self.trace.traces[ifiber,:]
                     for i in range(self.trace.naxis1):
-                        # thisx = (x_spec == i)   
-                        #if np.nansum(thisx) > 0:
-                        #    extracted[i] = np.nansum(f_spec[thisx])
+                        thisx = (x_spec == i)   
+                        if np.nansum(thisx) > 0:
+                            extracted[i] = np.nansum(f_spec[thisx])
                         #handles case where there are no elements
-                        #else:
-                        #    extracted[i] = 0.0
+                        else:
+                            extracted[i] = 0.0
                         extracted[i] = np.nansum(self.frame[round(tracey[i])-4:round(tracey[i])+5,i])
 
                     self.counts[ifiber,:] = extracted
@@ -264,8 +264,8 @@ class ExtractLlamas:
         x_spec = self.ximage[inprofile]
         f_spec = self.frame[inprofile]
         if boxcar == True:
-            # weights = np.where(inprofile, 1, 0)[inprofile]#[weights]
-            weights = np.ones_like(f_spec)
+            weights = np.where(inprofile, 1, 0)[inprofile]#[weights]
+            # weights = np.ones_like(f_spec)
 
         elif boxcar == False:
             weights = self.trace.profimg[inprofile]#self.trace.profimg[inprofile]
