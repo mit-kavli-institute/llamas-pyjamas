@@ -194,13 +194,13 @@ def main(config_path):
         
         print("Correcting wavelengths in the extracted file...")
         correction_path = os.path.join(extraction_path, extracted_file)
-        #corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+        corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
         
-        # extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch'
-        #print('Saving corrected extractions...')
-        #print(f'corr_extractions: {corr_extractions}')
-        #save_extractions(corr_extractions, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
-                         #save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
+        corr_extraction_list = corr_extractions['extractions']
+
+        print('Saving corrected extractions...')
+        save_extractions(corr_extraction_list, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
+                         save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
         
         
         
