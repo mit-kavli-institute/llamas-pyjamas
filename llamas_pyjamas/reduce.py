@@ -6,7 +6,7 @@ import traceback
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR
-from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 import llamas_pyjamas.Arc.arcLlamas as arc
@@ -101,7 +101,12 @@ def correct_wavelengths(science_extraction_file, soln=None):
     
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
     extractions, metadata = _science['extractions'], _science['metadata']
+    print(f'extractions: {extractions}')
+    print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
+    
+    print(f'std_wvcal: {std_wvcal}')
+    print(f'std_wvcal metadata: {std_wvcal.get('metadata', {})}')
     
     return std_wvcal
 
@@ -189,7 +194,16 @@ def main(config_path):
         
         print("Correcting wavelengths in the extracted file...")
         correction_path = os.path.join(extraction_path, extracted_file)
-        correct_wavelengths(correction_path, soln=config.get('arcdict'))
+        #corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+        
+        # extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch'
+        #print('Saving corrected extractions...')
+        #print(f'corr_extractions: {corr_extractions}')
+        #save_extractions(corr_extractions, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
+                         #save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
+        
+        
+        
         construct_cube()
     except Exception as e:
         traceback.print_exc()
