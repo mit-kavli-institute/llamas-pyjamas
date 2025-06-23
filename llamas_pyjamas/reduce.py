@@ -163,9 +163,7 @@ def main(config_path):
         
         
     
-    # Process science files by color if they're provided as a list
-    if 'science_files' not in config:
-        raise ValueError("No science files provided in the configuration.")
+    
     
     # Set default for trace_output_dir if not present
     if 'trace_output_dir' not in config:
@@ -189,18 +187,51 @@ def main(config_path):
                        config.get('trace_output_dir'), bias=config.get('bias_file'))
 
         
-        extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'),)
-        print(f"Extraction completed. Output file: {extracted_file}")
+       # Process science files by color if they're provided as a list
+        if 'science_files' not in config:
+            raise ValueError("No science files provided in the configuration.")
+    
+        if isinstance(config['science_files'], list):
+            print(f'Found {len(config["science_files"])} science files to process.')
         
-        print("Correcting wavelengths in the extracted file...")
-        correction_path = os.path.join(extraction_path, extracted_file)
-        corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            for i, science_file in enumerate(config['science_files']):
+                print(f"Processing science file {i+1}/{len(config['science_files'])}: {science_file}")
+                if not os.path.exists(science_file):
+                    raise FileNotFoundError(f"Science file {science_file} does not exist.")
+                # Process each science file by color
+                extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'))
+                print(f"Extraction completed for {science_file}. Output file: {extracted_file}")
+        else:
+            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'))
+            print(f"Extraction completed. Output file: {extracted_file}")
         
-        corr_extraction_list = corr_extractions['extractions']
+        # print("Correcting wavelengths in the extracted file...")
+        # correction_path = os.path.join(extraction_path, extracted_file)
+        pkl_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('.pkl') and 'corrected' not in f]
+        
+        for index, file in enumerate(pkl_files):
+            print(f"Processing extraction file {index+1}/{len(pkl_files)}: {file}")
+            correction_path = file
+            if not os.path.exists(correction_path):
+                raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
+            
+            # Correct wavelengths for each extraction file
+            corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            
+            corr_extraction_list = corr_extractions['extractions']
+            
+            # Save the corrected extractions using the current file's base name
+            base_name = os.path.splitext(os.path.basename(file))[0]
+            savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
+            save_extractions(corr_extraction_list, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
+        
+        # corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+        
+        # corr_extraction_list = corr_extractions['extractions']
 
-        print('Saving corrected extractions...')
-        save_extractions(corr_extraction_list, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
-                         save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
+        # print('Saving corrected extractions...')
+        # save_extractions(corr_extraction_list, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
+        #                  save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
         
         
         
