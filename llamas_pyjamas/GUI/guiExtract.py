@@ -121,11 +121,8 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote
-<<<<<<< HEAD
-def process_trace(hdu_data, header, trace_file, use_bias=None):
-=======
-def process_trace(hdu_data, header, trace_file, method='optimal'):
->>>>>>> origin/main
+
+def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
     Returns the extraction object or None if there is an error.
@@ -210,11 +207,9 @@ def make_writable(extraction_obj):
 
 ##Main function currently used by the Quicklook for full extraction
 
-<<<<<<< HEAD
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, trace_dir=None) -> None:
-=======
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None, method='optimal') -> None:
->>>>>>> origin/main
+
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None) -> None:
+
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -313,14 +308,11 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
             # Get the data and header from the current extension.
             
             hdr = hdu[hdu_index].header
-<<<<<<< HEAD
-            future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
-=======
+            #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal')
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar')
->>>>>>> origin/main
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar', use_bias=use_bias)
             futures.append(future)
         
         # Wait for all remote tasks to complete.
