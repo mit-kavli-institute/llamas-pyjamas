@@ -48,7 +48,7 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
 
 orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
-fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev02.dat')
+fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
 print(f'Fibre map path: {fibre_map_path}')
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
@@ -256,7 +256,7 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
         xx = 1.0/subsample * np.arange(53*subsample)
         yy = 1.0/subsample * np.arange(53*subsample)
 
-    x_grid, y_grid = np.meshgrid(xx, yy)
+    x_grid, y_grid = np.meshgrid(xx/subsample, yy/subsample)
     
     whitelight = flux_interpolator(x_grid, y_grid)
     # whitelight = np.fliplr(whitelight)
@@ -350,6 +350,7 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
 
     n_right    = 23
     n_left     = 23
+    ncols = n_left + n_right
     n_vertical = 51
     dy         = 0.8660254037 # == np.sin(60), but hardwire the factor for time saving
     dx         = 1.0
@@ -408,27 +409,32 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
         y_value  = (y0 + y_rownum) * dy
 
         # Account for the fact that the fibers snake back and forth within the two
-        # sides of the IFU. Even rows go right to left, off rows go left to right
+        # sides of the IFU. Even rows go right to left, odd rows go left to right
 
         x_index = np.floor_divide(((fiber+wrap) % (n_left+n_right)),2)
 
-        if ((y_rownum % 2) == 0):
-            if ((fiber % 2) == 0):
-                x_fiber = (n_left+n_right) - x_index
-            else:
-                x_fiber = n_left - x_index
+        if ((bench == '1A') or (bench == '2A')):
+            offset = 1
         else:
-            if ((fiber % 2) == 0):
+            offset = 0
+
+        if (((y_rownum+y0+offset) % 2) == 0):
+            if ((fiber % 2) == 1):
+                x_fiber = (n_left+n_right) - x_index - 1
+            else:
+                x_fiber = n_left - x_index - 1
+        else:
+            if ((fiber % 2) == 1):
                 x_fiber = n_left + 0.5 + x_index
             else:
                 x_fiber = 0.5 + x_index
 
         x_value = x_fiber - 0.5
+        x_fiber = ncols - x_fiber
         y_value = n_vertical*dy-y_value
 
     elif ('B' in bench):
 
-        ncols = n_left + n_right
         y_rownum = np.floor_divide((fiber+wrap), ncols)
         y_value  = (y0 + y_rownum) * dy
 
@@ -437,32 +443,52 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
 
         x_index = np.floor_divide(((fiber+wrap) % (n_left+n_right)),2)
 
-        if ((y_rownum % 2) == 0):
+        if ((bench == '2B') or (bench == '1B')):
+            offset = 1
+        else:
+            offset = 0
+
+        if (((y_rownum+y0+offset) % 2) == 0):
             if ((fiber % 2) == 0):
+                # Even fiber number
                 x_fiber = (n_left+n_right) - x_index
             else:
+                # Odd fiber numbers
                 x_fiber = n_left - x_index
-            x_fiber -= 0.5
-            x_value = x_fiber - 0.5
 
-            if (bench=='2B'):
-                x_fiber+=0.5
+            x_fiber -= 0.5
+            # x_value = x_fiber - 0.5
+
+            #if (bench=='2B'):
+            #    x_fiber+=0.5
             
         else:
             if ((fiber % 2) == 0):
                 x_fiber = n_left + 0.5 + x_index
             else:
                 x_fiber = 0.5 + x_index
+
             x_fiber += 0.5
 
-            if (bench=='2B'):
-                x_fiber-=0.5
+            #if (bench=='2B'):
+            #    x_fiber-=0.5
             
 
         y_value = n_vertical*dy-y_value
         
     # return(x_value,y_value)
-    return(x_fiber,n_vertical-int(y0+y_rownum))
+
+    y_final = n_vertical-int(y0+y_rownum)
+    x_final = x_fiber
+
+    if ((bench == '1B') or (bench == '2B') or (bench == '3A') or (bench == '4A')):
+        if (y_final % 2 == 0):
+            x_final += 0.5
+        else:
+            x_final -= 0.5   
+
+    # return(x_fiber,n_vertical-int(y0+y_rownum))
+    return(x_final, y_final)
 
 def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
 
@@ -506,32 +532,33 @@ def plot_fibermap()-> None:
     fibernum_a = np.arange(298)
     fibernum_b = np.arange(300)
 
+    fs = 4
     for fiber in fibernum_a:
         x, y = FiberMap_LUT('1A', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='k')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='k')
 
         x, y = FiberMap_LUT('3A', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='r')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='r')
 
         x, y = FiberMap_LUT('4B', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='k')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='k')
 
         x, y = FiberMap_LUT('2B', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='r')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='r')
         
         
     for fiber in fibernum_b:
         x, y = FiberMap_LUT('2A', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='b')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='b')
 
         x, y = FiberMap_LUT('4A', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='g')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='g')
 
         x, y = FiberMap_LUT('3B', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='b')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='b')
 
         x, y = FiberMap_LUT('1B', int(fiber))
-        ax.text(x, y, f'{fiber}', fontsize=2, horizontalalignment='center',verticalalignment='center', color='g')
+        ax.text(x, y, f'{fiber}', fontsize=fs, horizontalalignment='center',verticalalignment='center', color='g')
         
         
     ax.set_xlim(-2,75)
@@ -547,37 +574,39 @@ def plot_fibermap()-> None:
     ax.text(49,34.5,"2A")
     ax.text(49,39.5,"1A")
 
-    ax.text(52.25, 40.5, "R-1", fontsize=7)
-    ax.text(52.25, 39.5, "G-2", fontsize=7)
-    ax.text(52.25, 38.5, "B-3", fontsize=7)
+    fs = 8
 
-    ax.text(52.25, 35.5, "R-7", fontsize=7)
-    ax.text(52.25, 34.5, "G-8", fontsize=7)
-    ax.text(52.25, 33.5, "B-9", fontsize=7)
+    ax.text(52.25, 40.5, "R-1", fontsize=fs)
+    ax.text(52.25, 39.5, "G-2", fontsize=fs)
+    ax.text(52.25, 38.5, "B-3", fontsize=fs)
 
-    ax.text(52.25, 30.5, "R-13", fontsize=7)
-    ax.text(52.25, 29.5, "G-14", fontsize=7)
-    ax.text(52.25, 28.5, "B-15", fontsize=7)
+    ax.text(52.25, 35.5, "R-7", fontsize=fs)
+    ax.text(52.25, 34.5, "G-8", fontsize=fs)
+    ax.text(52.25, 33.5, "B-9", fontsize=fs)
 
-    ax.text(52.25, 25.5, "R-19", fontsize=7)
-    ax.text(52.25, 24.5, "G-20", fontsize=7)
-    ax.text(52.25, 23.5, "B-21", fontsize=7)
+    ax.text(52.25, 30.5, "R-13", fontsize=fs)
+    ax.text(52.25, 29.5, "G-14", fontsize=fs)
+    ax.text(52.25, 28.5, "B-15", fontsize=fs)
 
-    ax.text(52.25, 3.5, "R-4", fontsize=7)
-    ax.text(52.25, 2.5, "G-5", fontsize=7)
-    ax.text(52.25, 1.5, "B-6", fontsize=7)
+    ax.text(52.25, 25.5, "R-19", fontsize=fs)
+    ax.text(52.25, 24.5, "G-20", fontsize=fs)
+    ax.text(52.25, 23.5, "B-21", fontsize=fs)
 
-    ax.text(52.25, 8.5, "R-10", fontsize=7)
-    ax.text(52.25, 7.5, "G-11", fontsize=7)
-    ax.text(52.25, 6.5, "B-12", fontsize=7)
+    ax.text(52.25, 3.5, "R-4", fontsize=fs)
+    ax.text(52.25, 2.5, "G-5", fontsize=fs)
+    ax.text(52.25, 1.5, "B-6", fontsize=fs)
 
-    ax.text(52.25, 13.5, "R-16", fontsize=7)
-    ax.text(52.25, 12.5, "G-17", fontsize=7)
-    ax.text(52.25, 11.5, "B-18", fontsize=7)
+    ax.text(52.25, 8.5, "R-10", fontsize=fs)
+    ax.text(52.25, 7.5, "G-11", fontsize=fs)
+    ax.text(52.25, 6.5, "B-12", fontsize=fs)
 
-    ax.text(52.25, 18.5, "R-22", fontsize=7)
-    ax.text(52.25, 17.5, "G-23", fontsize=7)
-    ax.text(52.25, 16.5, "B-24", fontsize=7)
+    ax.text(52.25, 13.5, "R-16", fontsize=fs)
+    ax.text(52.25, 12.5, "G-17", fontsize=fs)
+    ax.text(52.25, 11.5, "B-18", fontsize=fs)
+
+    ax.text(52.25, 18.5, "R-22", fontsize=fs)
+    ax.text(52.25, 17.5, "G-23", fontsize=fs)
+    ax.text(52.25, 16.5, "B-24", fontsize=fs)
 
     ax.annotate('', xy=(73,20), xytext=(60,20),
             arrowprops=dict(facecolor='blue', edgecolor='blue', arrowstyle='->', lw=2))
@@ -587,10 +616,10 @@ def plot_fibermap()-> None:
     ax.text(71, 15.5, "N", fontsize=12)
     ax.text(60, 27, "E", fontsize=12)
 
-    plt.title("LLAMAS IFU Fiber to slit / FITS extension mapping (Rev 02)")
+    plt.title("LLAMAS IFU Fiber to slit / FITS extension mapping (Rev 04)")
 
     plt.tight_layout()
-    fig.savefig("/Users/simcoe/fiber.png", dpi=600)
+    fig.savefig("/Users/simcoe/Desktop/fiber_revA.png", dpi=600)
     plt.show()
 
 
@@ -645,7 +674,7 @@ def fibermap_table()-> Table:
         ix, iy = FiberMap('4B',ifib)
         fiber_table.add_row(['4B',int(297-ifib),ix,iy,ix,iy*np.sin(60*np.pi/180)])
 
-    fiber_table.write('LLAMAS_FiberMap_rev02_updated.dat', format='ascii.fixed_width', overwrite=True)
+    fiber_table.write('LLAMAS_FiberMap_rev03.dat', format='ascii.fixed_width', overwrite=True)
         
     return(fiber_table)
     
