@@ -1,6 +1,6 @@
 
 from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
-from llamas_pyjamas.Image.WhiteLight import WhiteLightFits
+from Image.WhiteLightModule import WhiteLightFits
 import numpy as np
 from astropy.io import fits
 
