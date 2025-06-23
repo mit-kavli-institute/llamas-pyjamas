@@ -20,7 +20,7 @@ from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIA
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
-from llamas_pyjamas.Image.WhiteLight import WhiteLight, WhiteLightFits, WhiteLightQuickLook
+from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, WhiteLightQuickLook
 import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
@@ -121,7 +121,11 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote
+<<<<<<< HEAD
 def process_trace(hdu_data, header, trace_file, use_bias=None):
+=======
+def process_trace(hdu_data, header, trace_file, method='optimal'):
+>>>>>>> origin/main
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
     Returns the extraction object or None if there is an error.
@@ -158,7 +162,10 @@ def process_trace(hdu_data, header, trace_file, use_bias=None):
         with open(trace_file, mode='rb') as f:
             tracer = pickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
-        extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header)
+        if (method == 'optimal'):
+            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
+        elif (method == 'boxcar'):
+            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
         return extraction
     except Exception as e:
         print(f"Error extracting trace from {trace_file}")
@@ -203,7 +210,11 @@ def make_writable(extraction_obj):
 
 ##Main function currently used by the Quicklook for full extraction
 
+<<<<<<< HEAD
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, trace_dir=None) -> None:
+=======
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None, method='optimal') -> None:
+>>>>>>> origin/main
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -302,7 +313,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             # Get the data and header from the current extension.
             
             hdr = hdu[hdu_index].header
+<<<<<<< HEAD
             future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
+=======
+            if (method == 'optimal'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal')
+            elif (method == 'boxcar'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar')
+>>>>>>> origin/main
             futures.append(future)
         
         # Wait for all remote tasks to complete.

@@ -1,1 +1,1 @@
-from .WhiteLight import *
+from .WhiteLightModule import *
