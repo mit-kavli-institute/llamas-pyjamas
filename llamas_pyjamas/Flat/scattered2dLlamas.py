@@ -17,7 +17,7 @@ Functions:
 """
 # from   ..Trace import traceLlamas
 from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
-from llamas_pyjamas.Image.WhiteLight import WhiteLightFits
+from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 import numpy as np
 #import pyds9
 from   matplotlib import pyplot as plt
