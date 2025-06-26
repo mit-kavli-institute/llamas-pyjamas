@@ -262,7 +262,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         #opening the fitsfile
         hdu = process_fits_by_color(file)
 
-        
+        primary_hdr = hdu[0].header
 
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
@@ -330,9 +330,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         print(f'Extraction list = {extraction_list}')
         if output_dir:
             if os.path.exists(output_dir):        
-                filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=output_dir)
+                filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=output_dir)
         else:
-            filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+            filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=OUTPUT_DIR)
         #print(f'extraction saved filename = {filename}')
         print(f'extraction saved filename = {extraction_file}')
         # if output_dir:
