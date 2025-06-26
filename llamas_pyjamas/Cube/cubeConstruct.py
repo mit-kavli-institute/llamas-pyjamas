@@ -31,7 +31,7 @@ import logging
 
 # Import LLAMAS modules
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
-from llamas_pyjamas.Image.WhiteLight import FiberMap_LUT
+from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
 from llamas_pyjamas.Image.processWhiteLight import quartile_bias, remove_striping
 from llamas_pyjamas.config import OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.Utils.utils import setup_logger
