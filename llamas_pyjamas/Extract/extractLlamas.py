@@ -311,7 +311,7 @@ class ExtractLlamas:
         return(object)
 
 
-def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch')-> str:
+def save_extractions(extraction_list, primary_header=None, savefile=None, save_dir=None, prefix='LLAMASExtract_batch')-> str:
     """Save multiple extraction objects to single file.
 
     Args:
@@ -332,6 +332,7 @@ def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAM
     
     # Create metadata for each extraction
     batch_data = {
+        'primary_header': primary_header,
         'extractions': extraction_list,
         'metadata': [{
             'channel': ext.channel,
