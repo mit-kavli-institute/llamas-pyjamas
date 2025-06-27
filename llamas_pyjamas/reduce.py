@@ -10,7 +10,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 import llamas_pyjamas.Arc.arcLlamas as arc
-
+from llamas_pyjamas.File.llamasRSS import RSSgeneration
 
 
 _linefile = os.path.join(LUT_DIR, '')
@@ -100,7 +100,7 @@ def correct_wavelengths(science_extraction_file, soln=None):
         arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
     
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
-    extractions, metadata = _science['extractions'], _science['metadata']
+    extractions, metadata, primary_hdr = _science['extractions'], _science['metadata'], _science['primary_header']
     print(f'extractions: {extractions}')
     print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
@@ -108,7 +108,7 @@ def correct_wavelengths(science_extraction_file, soln=None):
     print(f'std_wvcal: {std_wvcal}')
     print(f'std_wvcal metadata: {std_wvcal.get('metadata', {})}')
     
-    return std_wvcal
+    return std_wvcal, primary_hdr
 
 
 
@@ -216,24 +216,22 @@ def main(config_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
             
             # Correct wavelengths for each extraction file
-            corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            corr_extractions, primary_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict'))
             
             corr_extraction_list = corr_extractions['extractions']
             
             # Save the corrected extractions using the current file's base name
             base_name = os.path.splitext(os.path.basename(file))[0]
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
-            save_extractions(corr_extraction_list, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
-        
-        # corr_extractions = correct_wavelengths(correction_path, soln=config.get('arcdict'))
-        
-        # corr_extraction_list = corr_extractions['extractions']
+            save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
-        # print('Saving corrected extractions...')
-        # save_extractions(corr_extraction_list, savefile=os.path.join(extraction_path, 'corrected_extractions.pkl'), 
-        #                  save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
+            #RSS generation
+            rss_gen = RSSgeneration()
+            rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
+            rss_gen.generate_rss(savefile, rss_output_file)
+            print(f"RSS file generated: {rss_output_file}")
         
-        
+                
         
         construct_cube()
     except Exception as e:
