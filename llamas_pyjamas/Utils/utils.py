@@ -447,18 +447,37 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
-def count_trace_fibres(mastercalib_dir: str = CALIB_DIR)-> None:
+def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
+    """
+    Checks if all trace files have the correct number of fibers for their benchside.
+    
+    Args:
+        mastercalib_dir (str): Directory containing the trace calibration pickle files.
+            Defaults to CALIB_DIR from config.
+    
+    Returns:
+        bool: True if all trace files have the correct fiber count, False otherwise.
+    """
     N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
     files = glob.glob(mastercalib_dir+'/*.pkl')
     assert type(files) == list, 'File extraction did not return as list'
+    
+    all_match = True
+    
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
             traceobj = pickle.load(file)
         shape = traceobj.traces.shape[0]
         channel = traceobj.channel
-        benchside = traceobj.benchside
+        benchside = f"{traceobj.bench}{traceobj.side}"
         req = N_fib[benchside]
+        
+        if shape != req:
+            all_match = False
+            
         print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
+    
+    return all_match
         
         
 def flip_blue_combs()-> None:
