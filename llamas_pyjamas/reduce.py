@@ -11,6 +11,7 @@ import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
+from llamas_pyjamas.Utils.utils import count_trace_fibres
 
 
 _linefile = os.path.join(LUT_DIR, '')
@@ -53,7 +54,7 @@ def extract_flat_field(flat_file_dir, output_dir, use_bias=None):
     return
 
 
-def run_extraction(science_file, output_dir, use_bias=None):
+def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -61,10 +62,10 @@ def run_extraction(science_file, output_dir, use_bias=None):
     if type(science_file) is list:
         for file in science_file:
             assert os.path.exists(file), f"Science file {file} does not exist."
-            extraction_file_path = ge.GUI_extract(file, output_dir=output_dir, use_bias=use_bias)
+            extraction_file_path = ge.GUI_extract(file, output_dir=output_dir, use_bias=use_bias, trace_dir=trace_dir)
     else:
         assert os.path.exists(science_file), "Science file does not exist."
-        extraction_file_path, _ = ge.GUI_extract(science_file, output_dir=output_dir, use_bias=use_bias)
+        extraction_file_path, _ = ge.GUI_extract(science_file, output_dir=output_dir, use_bias=use_bias, trace_dir=trace_dir)
 
     return  extraction_file_path
 
@@ -185,7 +186,15 @@ def main(config_path):
         
         generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
                        config.get('trace_output_dir'), bias=config.get('bias_file'))
-
+        
+        # Check if the generated traces have the correct number of fibers
+        print("Checking fiber counts in generated traces...")
+        if not count_trace_fibres(config.get('trace_output_dir')):
+            print("Generated traces have incorrect fiber counts. Using traces from CALIB_DIR instead.")
+            config['trace_output_dir'] = CALIB_DIR
+        else:
+            print("Generated traces have correct fiber counts. Proceeding with new traces.")
+        
         
        # Process science files by color if they're provided as a list
         if 'science_files' not in config:
@@ -199,12 +208,12 @@ def main(config_path):
                 if not os.path.exists(science_file):
                     raise FileNotFoundError(f"Science file {science_file} does not exist.")
                 # Process each science file by color
-                extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'))
+                extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
                 print(f"Extraction completed for {science_file}. Output file: {extracted_file}")
         else:
-            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'))
-            print(f"Extraction completed. Output file: {extracted_file}")
-        
+            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
+            print(f"Extraction completed. Used traces {config.get('trace_output_dir')} Output file: {extracted_file}")
+
         # print("Correcting wavelengths in the extracted file...")
         # correction_path = os.path.join(extraction_path, extracted_file)
         pkl_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('.pkl') and 'corrected' not in f]
