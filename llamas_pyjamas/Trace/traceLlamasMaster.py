@@ -868,7 +868,7 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None) -> None:
 
     NUMBER_OF_CORES = multiprocessing.cpu_count() 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
@@ -884,11 +884,11 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
     
     hdul = process_fits_by_color(fitsfile)
     if channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == channel.lower()]
     elif channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
     else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None]
+        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
         
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
@@ -896,7 +896,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, use_bias=bias)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias)
         futures.append(future)
     
     # Monitor processing

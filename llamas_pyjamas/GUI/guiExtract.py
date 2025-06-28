@@ -121,7 +121,8 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote
-def process_trace(hdu_data, header, trace_file, method='optimal'):
+
+def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
     Returns the extraction object or None if there is an error.
@@ -137,13 +138,22 @@ def process_trace(hdu_data, header, trace_file, method='optimal'):
             color = camname.split('_')[1].lower()
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
-            
-        bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+
+        if use_bias is None:    
+            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+
+        elif use_bias is str:
+            if os.path.isfile(use_bias):
+                bias_file = use_bias
+        else:
+            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+
+
         print(f'Bias file: {bias_file}')
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
         
-        bias_data = bias.data
+        bias_data = np.median(bias.data[20:50])
             
         # Load the trace object from the pickle file.
         with open(trace_file, mode='rb') as f:
@@ -197,7 +207,9 @@ def make_writable(extraction_obj):
 
 ##Main function currently used by the Quicklook for full extraction
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None, method='optimal') -> None:
+
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None) -> None:
+
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
     Parameters:
@@ -250,7 +262,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
         #opening the fitsfile
         hdu = process_fits_by_color(file)
 
-        
+        primary_hdr = hdu[0].header
 
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
@@ -258,24 +270,23 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
         #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
-        masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
+        if use_bias is not None:
+            if os.path.isfile(use_bias):
+                masterbiasfile = use_bias
+            else:
+                raise ValueError(f"Bias file {use_bias} does not exist.")
+        else:
+            masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
 
         #Debug statements
         print(f'basefile = {basefile}')
         print(f'masterfile = {masterfile}')
         print(f'Bias file is {masterbiasfile}')
 
-
-        bias_hdu = None
-        #if bias == None:
-            #opening the masterbias
-
-            ##not implementing this yet
-            #bias_hdu = fits.open(masterbiasfile)
-            #assert len(hdu) == len(bias_hdu), 'Number of extensions in the bias and fits file do not match'
-
-        
-        trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        if not trace_dir:
+            trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        else:
+            trace_files = glob.glob(os.path.join(trace_dir, f'{masterfile}*traces.pkl'))
         print(f'Using master traces {trace_files}')
         
         #Running the extract routine
@@ -297,10 +308,11 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
             # Get the data and header from the current extension.
             
             hdr = hdu[hdu_index].header
+            #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal')
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar')
+                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar', use_bias=use_bias)
             futures.append(future)
         
         # Wait for all remote tasks to complete.
@@ -315,13 +327,23 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
                 extraction_list.append(writable_ex)
 
 
-        print(f'Extraction list = {extraction_list}')        
-        filename = save_extractions(extraction_list, savefile=extraction_file)
+        print(f'Extraction list = {extraction_list}')
+        if output_dir:
+            if os.path.exists(output_dir):        
+                filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=output_dir)
+        else:
+            filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=OUTPUT_DIR)
         #print(f'extraction saved filename = {filename}')
         print(f'extraction saved filename = {extraction_file}')
-
-        # obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))
-        obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
+        # if output_dir:
+        #     if os.path.exists(output_dir):
+                
+        
+        # else:
+        if output_dir:
+            obj, metadata = load_extractions(os.path.join(output_dir, extraction_file))
+        else:
+            obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile+'_whitelight.fits'
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
@@ -336,7 +358,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, bias: str = None,
     # Log or print out the elapsed time
     print(f"Full GUI extraction process completed in {elapsed:.2f} seconds.")
 
-    return 
+    return extraction_file, white_light_file
 
 def make_ifuimage(extraction_file, flat=False):
     obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
