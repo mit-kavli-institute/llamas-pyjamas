@@ -41,6 +41,29 @@ class RSSgeneration:
                 data_hdu.header['CHANNEL'] = meta.get('channel', '')
                 data_hdu.header['NFIBERS'] = meta.get('nfibers', counts.shape[0])
                 data_hdu.header['EXTNUM'] = i
+                
+                # Add wavelength calibration info if available
+                if hasattr(obj, 'wavelength') and obj.wavelength is not None:
+                    wavelength = obj.wavelength
+                    if wavelength.ndim > 1:
+                        # Use first fiber's wavelength as representative
+                        wavelength = wavelength[0]
+                    
+                    # Add WCS keywords for wavelength
+                    data_hdu.header['CRPIX1'] = 1.0
+                    data_hdu.header['CRVAL1'] = float(wavelength[0])
+                    data_hdu.header['CDELT1'] = float(np.median(np.diff(wavelength)))
+                    data_hdu.header['CTYPE1'] = 'AWAV'
+                    data_hdu.header['CUNIT1'] = 'Angstrom'
+                else:
+                    # Default wavelength calibration
+                    data_hdu.header['CRPIX1'] = 1.0
+                    data_hdu.header['CRVAL1'] = 4000.0
+                    data_hdu.header['CDELT1'] = 1.0
+                    data_hdu.header['CTYPE1'] = 'AWAV'
+                    data_hdu.header['CUNIT1'] = 'Angstrom'
+                    data_hdu.header['COMMENT'] = 'Default wavelength calibration - not calibrated'
+                
                 hdul.append(data_hdu)
                 
                 # ERR extension for this extraction (initialize with zeros for now)
