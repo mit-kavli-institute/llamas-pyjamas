@@ -66,7 +66,7 @@ class CubeConstructor:
         """
         # Set up fiber mapping
         if fiber_map_path is None:
-            self.fiber_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev02.dat')
+            self.fiber_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
         else:
             self.fiber_map_path = fiber_map_path
             
@@ -124,6 +124,74 @@ class CubeConstructor:
             self.logger.error(f'Failed to load extraction data: {e}')
             raise
     
+    def load_rss_data(self, rss_file: str) -> List[Dict]:
+        """
+        Load extraction data from RSS FITS file format.
+        
+        Parameters:
+            rss_file (str): Path to RSS FITS file
+            
+        Returns:
+            List[Dict]: List of extraction data dictionaries
+        """
+        self.logger.info(f'Loading RSS data from {rss_file}')
+        
+        with fits.open(rss_file) as hdul:
+            extractions = []
+            
+            # Find all IMAGE extensions
+            image_extensions = [i for i in range(len(hdul)) if hdul[i].name.startswith('IMAGE_')]
+            
+            self.logger.info(f'Found {len(image_extensions)} IMAGE extensions')
+            
+            for ext_idx in image_extensions:
+                image_hdu = hdul[ext_idx]
+                ext_num = image_hdu.header.get('EXTNUM', 0)
+                
+                # Get corresponding ERR and FITSTABLE extensions
+                err_name = f'ERR_{ext_num:02d}'
+                table_name = f'FITSTABLE_{ext_num:02d}'
+                
+                err_hdu = None
+                table_hdu = None
+                
+                # Find corresponding extensions
+                for i, hdu in enumerate(hdul):
+                    if hdu.name == err_name:
+                        err_hdu = hdu
+                    elif hdu.name == table_name:
+                        table_hdu = hdu
+                
+                # Extract wavelength if available (assume linear for now)
+                counts = image_hdu.data
+                n_fibers, n_pixels = counts.shape
+                
+                # Create wavelength array (placeholder - would need actual wavelength calibration)
+                # This assumes the wavelength info is in the header or needs to be reconstructed
+                crval1 = image_hdu.header.get('CRVAL1', 4000.0)  # Starting wavelength
+                cdelt1 = image_hdu.header.get('CDELT1', 1.0)     # Dispersion
+                wavelength = np.arange(n_pixels) * cdelt1 + crval1
+                
+                # Create extraction data structure
+                extraction_data = {
+                    'counts': counts,
+                    'wavelength': wavelength,
+                    'errors': err_hdu.data if err_hdu is not None else None,
+                    'bench': image_hdu.header.get('BENCH', ''),
+                    'side': image_hdu.header.get('SIDE', ''),
+                    'channel': image_hdu.header.get('CHANNEL', ''),
+                    'nfibers': n_fibers,
+                    'ext_num': ext_num,
+                    'fiber_table': table_hdu.data if table_hdu is not None else None
+                }
+                
+                extractions.append(extraction_data)
+                
+                self.logger.debug(f'Loaded extraction {ext_num}: {counts.shape}, '
+                                f'{extraction_data["channel"]} {extraction_data["bench"]}{extraction_data["side"]}')
+        
+        return extractions
+
     def get_fiber_coordinates(self, benchside: str, fiber_num: int) -> Tuple[float, float]:
         """
         Get the physical x,y coordinates for a given fiber.
@@ -434,6 +502,60 @@ class CubeConstructor:
         self.logger.info("Cube construction completed")
         return self.cube_data
     
+    def construct_cube_from_rss(self, rss_file: str, wavelength_range: Optional[Tuple[float, float]] = None,
+                               dispersion: float = 1.0, spatial_sampling: float = 1.0,
+                               reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+        """
+        Construct IFU cube from RSS FITS file.
+        
+        Parameters:
+            rss_file (str): Path to RSS FITS file
+            wavelength_range (tuple): (min_wave, max_wave) in Angstroms
+            dispersion (float): Wavelength dispersion in Angstroms per pixel
+            spatial_sampling (float): Spatial sampling in units per pixel
+            reference_coord (tuple): Reference (RA, Dec) for WCS
+            
+        Returns:
+            np.ndarray: 3D cube data
+        """
+        # Load RSS data
+        extractions = self.load_rss_data(rss_file)
+        
+        if not extractions:
+            raise ValueError("No extraction data found in RSS file")
+        
+        # Create wavelength grid
+        if wavelength_range is None:
+            # Determine wavelength range from data
+            all_wavelengths = []
+            for ext in extractions:
+                if ext['wavelength'] is not None:
+                    all_wavelengths.extend([ext['wavelength'].min(), ext['wavelength'].max()])
+            
+            if all_wavelengths:
+                wavelength_range = (min(all_wavelengths), max(all_wavelengths))
+            else:
+                wavelength_range = (4000, 8000)  # Default range
+        
+        self.create_wavelength_grid(wavelength_range, dispersion)
+        
+        # Create spatial grid
+        self.create_spatial_grid(spatial_sampling)
+        
+        # Initialize cube
+        self.cube_data = np.full((len(self.wavelength_grid), 
+                                 len(self.spatial_grid_y), 
+                                 len(self.spatial_grid_x)), np.nan)
+        
+        self.logger.info(f'Initialized cube with shape: {self.cube_data.shape}')
+        
+        # Process each extraction
+        for extraction_data in extractions:
+            self._process_rss_extraction(extraction_data)
+        
+        self.logger.info('Cube construction completed')
+        return self.cube_data
+        
     def _process_extraction(self, extraction: ExtractLlamas, metadata: Dict):
         """
         Process a single extraction object and add to the cube.
@@ -495,6 +617,70 @@ class CubeConstructor:
             self.cube_data[mask_nan, y_idx, x_idx] = interpolated_spectrum[mask_nan]
             
             # For non-NaN locations, average with existing values
+            mask_valid = ~mask_nan & np.isfinite(interpolated_spectrum)
+            if np.any(mask_valid):
+                self.cube_data[mask_valid, y_idx, x_idx] = (
+                    self.cube_data[mask_valid, y_idx, x_idx] + interpolated_spectrum[mask_valid]) / 2
+    
+    def _process_rss_extraction(self, extraction_data: Dict):
+        """
+        Process a single RSS extraction and add to cube.
+        
+        Parameters:
+            extraction_data (Dict): Extraction data dictionary from RSS file
+        """
+        bench = extraction_data['bench']
+        side = extraction_data['side']
+        channel = extraction_data['channel']
+        benchside = f'{bench}{side}'
+        
+        counts = extraction_data['counts']
+        wavelength = extraction_data['wavelength']
+        errors = extraction_data.get('errors')
+        
+        self.logger.debug(f'Processing RSS extraction: {channel} {benchside}, shape: {counts.shape}')
+        
+        n_fibers, n_pixels = counts.shape
+        
+        for fiber_num in range(n_fibers):
+            # Get fiber coordinates
+            x, y = self.get_fiber_coordinates(benchside, fiber_num)
+            if x == -1 or y == -1:
+                continue
+            
+            # Get fiber spectrum
+            fiber_spectrum = counts[fiber_num]
+            fiber_errors = errors[fiber_num] if errors is not None else None
+            
+            # Interpolate spectrum onto common wavelength grid
+            if wavelength is not None:
+                interpolated_spectrum = self.interpolate_spectrum(
+                    wavelength, fiber_spectrum, self.wavelength_grid)
+                
+                if fiber_errors is not None:
+                    interpolated_errors = self.interpolate_spectrum(
+                        wavelength, fiber_errors, self.wavelength_grid)
+                else:
+                    interpolated_errors = None
+            else:
+                # No wavelength calibration - use index-based interpolation
+                interpolated_spectrum = np.interp(
+                    np.linspace(0, len(fiber_spectrum)-1, len(self.wavelength_grid)),
+                    np.arange(len(fiber_spectrum)), fiber_spectrum)
+                interpolated_errors = None
+            
+            # Find nearest spatial grid points
+            x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
+            y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
+            
+            # Add to cube
+            current_values = self.cube_data[:, y_idx, x_idx]
+            mask_nan = np.isnan(current_values)
+            
+            # For NaN locations, replace with new values
+            self.cube_data[mask_nan, y_idx, x_idx] = interpolated_spectrum[mask_nan]
+            
+            # For non-NaN locations, average (could implement weighted averaging here)
             mask_valid = ~mask_nan & np.isfinite(interpolated_spectrum)
             if np.any(mask_valid):
                 self.cube_data[mask_valid, y_idx, x_idx] = (
