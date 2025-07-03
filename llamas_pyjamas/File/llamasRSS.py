@@ -12,7 +12,6 @@ class RSSgeneration:
         
         with open(extraction_file, 'rb') as f:
             _data = pickle.load(f)
-        
         primary_hdr = _data['primary_header']    
         extraction_objects = _data['extractions']
         _metadata = _data['metadata']
@@ -23,8 +22,8 @@ class RSSgeneration:
         # Primary HDU with the primary header from the extraction file
         primary_hdu = fits.PrimaryHDU(header=primary_hdr)
         hdul.append(primary_hdu)
-
-        # Create separate IMAGE, ERR, and FITSTABLE extensions for each extraction object
+        
+        # Create separate SCI, ERR, and DQ extensions for each extraction object
         if extraction_objects:
             print(f"Creating {len(extraction_objects)} sets of extensions")
             
@@ -32,69 +31,35 @@ class RSSgeneration:
                 counts = obj.counts
                 print(f"Processing extraction {i}: {counts.shape}")
                 
-                # IMAGE extension for this extraction
-                image_name = f'IMAGE_{i:02d}'
-                data_hdu = fits.ImageHDU(data=counts.astype(np.float32), name=image_name)
-                # Add metadata to header
-                data_hdu.header['BENCH'] = meta.get('bench', '')
-                data_hdu.header['SIDE'] = meta.get('side', '')
-                data_hdu.header['CHANNEL'] = meta.get('channel', '')
-                data_hdu.header['NFIBERS'] = meta.get('nfibers', counts.shape[0])
-                data_hdu.header['EXTNUM'] = i
+                # SCI extension for this extraction
+                sci_hdu = fits.ImageHDU(data=counts.astype(np.float32), name='SCI')
+                for k, v in meta.items():
+                    sci_hdu.header[k.upper()] = v
+                sci_hdu.header['EXTNAME'] = 'SCI'
+                sci_hdu.header['EXTVER'] = i+1
+                hdul.append(sci_hdu)
                 
-                # Add wavelength calibration info if available
-                if hasattr(obj, 'wavelength') and obj.wavelength is not None:
-                    wavelength = obj.wavelength
-                    if wavelength.ndim > 1:
-                        # Use first fiber's wavelength as representative
-                        wavelength = wavelength[0]
-                    
-                    # Add WCS keywords for wavelength
-                    data_hdu.header['CRPIX1'] = 1.0
-                    data_hdu.header['CRVAL1'] = float(wavelength[0])
-                    data_hdu.header['CDELT1'] = float(np.median(np.diff(wavelength)))
-                    data_hdu.header['CTYPE1'] = 'AWAV'
-                    data_hdu.header['CUNIT1'] = 'Angstrom'
-                else:
-                    # Default wavelength calibration
-                    data_hdu.header['CRPIX1'] = 1.0
-                    data_hdu.header['CRVAL1'] = 4000.0
-                    data_hdu.header['CDELT1'] = 1.0
-                    data_hdu.header['CTYPE1'] = 'AWAV'
-                    data_hdu.header['CUNIT1'] = 'Angstrom'
-                    data_hdu.header['COMMENT'] = 'Default wavelength calibration - not calibrated'
-                
-                hdul.append(data_hdu)
-                
-                # ERR extension for this extraction (initialize with zeros for now)
-                err_name = f'ERR_{i:02d}'
-                err_hdu = fits.ImageHDU(data=np.zeros_like(counts, dtype=np.float32), name=err_name)
-                err_hdu.header['BENCH'] = meta.get('bench', '')
-                err_hdu.header['SIDE'] = meta.get('side', '')
-                err_hdu.header['CHANNEL'] = meta.get('channel', '')
-                err_hdu.header['NFIBERS'] = meta.get('nfibers', counts.shape[0])
-                err_hdu.header['EXTNUM'] = i
+                # ERR extension for this extraction
+                errors = getattr(obj, 'errors', None)
+                if errors is None or errors.shape != counts.shape:
+                    errors = np.zeros_like(counts, dtype=np.float32)
+                err_hdu = fits.ImageHDU(data=errors.astype(np.float32), name='ERR')
+                for k, v in meta.items():
+                    err_hdu.header[k.upper()] = v
+                err_hdu.header['EXTNAME'] = 'ERR'
+                err_hdu.header['EXTVER'] = i+1
                 hdul.append(err_hdu)
                 
-                # FITSTABLE extension for this extraction
-                table_name = f'FITSTABLE_{i:02d}'
-                n_fibers = counts.shape[0]
-                
-                # Create columns for fiber information
-                cols = []
-                cols.append(fits.Column(name='FIBER', format='K', array=np.arange(n_fibers)))
-                cols.append(fits.Column(name='BENCH', format='A10', array=[meta.get('bench', '')] * n_fibers))
-                cols.append(fits.Column(name='SIDE', format='A10', array=[meta.get('side', '')] * n_fibers))
-                cols.append(fits.Column(name='CHANNEL', format='A10', array=[meta.get('channel', '')] * n_fibers))
-                cols.append(fits.Column(name='EXTNUM', format='K', array=[i] * n_fibers))
-                
-                table_hdu = fits.BinTableHDU.from_columns(cols, name=table_name)
-                table_hdu.header['BENCH'] = meta.get('bench', '')
-                table_hdu.header['SIDE'] = meta.get('side', '')
-                table_hdu.header['CHANNEL'] = meta.get('channel', '')
-                table_hdu.header['NFIBERS'] = n_fibers
-                table_hdu.header['EXTNUM'] = i
-                hdul.append(table_hdu)
+                # DQ extension for this extraction
+                dq = getattr(obj, 'dq', None)
+                if dq is None or dq.shape != counts.shape:
+                    dq = np.zeros_like(counts, dtype=np.int16)
+                dq_hdu = fits.ImageHDU(data=dq.astype(np.int16), name='DQ')
+                for k, v in meta.items():
+                    dq_hdu.header[k.upper()] = v
+                dq_hdu.header['EXTNAME'] = 'DQ'
+                dq_hdu.header['EXTVER'] = i+1
+                hdul.append(dq_hdu)
 
         # Write to output file
         hdul.writeto(output_file, overwrite=True)
