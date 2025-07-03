@@ -200,6 +200,8 @@ def main(config_path):
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
+    else:
+        output_dir = config.get('output_dir')
     os.makedirs(output_dir, exist_ok=True)
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
@@ -290,21 +292,21 @@ def main(config_path):
         print("Constructing cubes from RSS files...")
         rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('_RSS.fits')]
         
-        # if rss_files:
-        #     cube_output_dir = os.path.join(output_dir, 'cubes')
-        #     cube_files = construct_cube(
-        #         rss_files, 
-        #         cube_output_dir,
-        #         wavelength_range=config.get('wavelength_range'),
-        #         dispersion=config.get('dispersion', 1.0),
-        #         spatial_sampling=config.get('spatial_sampling', 1.0)
-        #     )
-        #     print(f"Cubes constructed: {cube_files}")
-        # else:
-        #     print("No RSS files found for cube construction")
+        if rss_files:
+            cube_output_dir = os.path.join(output_dir, 'cubes')
+            cube_files = construct_cube(
+                rss_files, 
+                cube_output_dir,
+                wavelength_range=config.get('wavelength_range'),
+                dispersion=config.get('dispersion', 1.0),
+                spatial_sampling=config.get('spatial_sampling', 1.0)
+            )
+            print(f"Cubes constructed: {cube_files}")
+        else:
+            print("No RSS files found for cube construction")
                 
         
-        # construct_cube()
+        
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
