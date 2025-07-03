@@ -1,5 +1,5 @@
 import argparse
-from llamas_pyjamas.Image.WhiteLight import QuickWhiteLightCube
+from llamas_pyjamas.Image.WhiteLightModule import QuickWhiteLightCube
 
 
 def main():

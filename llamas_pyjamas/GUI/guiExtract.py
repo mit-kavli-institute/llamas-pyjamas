@@ -153,7 +153,7 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
         
-        bias_data = np.median(bias.data[20:50])
+        bias_data = bias.data #np.median(bias.data[20:50])
             
         # Load the trace object from the pickle file.
         with open(trace_file, mode='rb') as f:
