@@ -16,52 +16,72 @@ class RSSgeneration:
         extraction_objects = _data['extractions']
         _metadata = _data['metadata']
         
-        # Create a new HDU list for the RSS FITS file
+        # Group by channel
+        channel_groups = {}
+        meta_groups = {}
+        for obj, meta in zip(extraction_objects, _metadata):
+            channel = meta.get('channel', 'UNKNOWN')
+            if channel not in channel_groups:
+                channel_groups[channel] = []
+                meta_groups[channel] = []
+            channel_groups[channel].append(obj)
+            meta_groups[channel].append(meta)
+        
         hdul = fits.HDUList()
-
-        # Primary HDU with the primary header from the extraction file
         primary_hdu = fits.PrimaryHDU(header=primary_hdr)
         hdul.append(primary_hdu)
         
-        # Create separate SCI, ERR, and DQ extensions for each extraction object
-        if extraction_objects:
-            print(f"Creating {len(extraction_objects)} sets of extensions")
-            
-            for i, (obj, meta) in enumerate(zip(extraction_objects, _metadata)):
+        for channel, obj_list in channel_groups.items():
+            meta_list = meta_groups[channel]
+            # Stack all counts, errors, dq for this channel
+            flux_list = []
+            err_list = []
+            dq_list = []
+            fiber_ids = []
+            benchs = []
+            sides = []
+            channels = []
+            extnums = []
+            for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
                 counts = obj.counts
-                print(f"Processing extraction {i}: {counts.shape}")
-                
-                # SCI extension for this extraction
-                sci_hdu = fits.ImageHDU(data=counts.astype(np.float32), name='SCI')
-                for k, v in meta.items():
-                    sci_hdu.header[k.upper()] = v
-                sci_hdu.header['EXTNAME'] = 'SCI'
-                sci_hdu.header['EXTVER'] = i+1
-                hdul.append(sci_hdu)
-                
-                # ERR extension for this extraction
                 errors = getattr(obj, 'errors', None)
                 if errors is None or errors.shape != counts.shape:
                     errors = np.zeros_like(counts, dtype=np.float32)
-                err_hdu = fits.ImageHDU(data=errors.astype(np.float32), name='ERR')
-                for k, v in meta.items():
-                    err_hdu.header[k.upper()] = v
-                err_hdu.header['EXTNAME'] = 'ERR'
-                err_hdu.header['EXTVER'] = i+1
-                hdul.append(err_hdu)
-                
-                # DQ extension for this extraction
                 dq = getattr(obj, 'dq', None)
                 if dq is None or dq.shape != counts.shape:
                     dq = np.zeros_like(counts, dtype=np.int16)
-                dq_hdu = fits.ImageHDU(data=dq.astype(np.int16), name='DQ')
-                for k, v in meta.items():
-                    dq_hdu.header[k.upper()] = v
-                dq_hdu.header['EXTNAME'] = 'DQ'
-                dq_hdu.header['EXTVER'] = i+1
-                hdul.append(dq_hdu)
-
-        # Write to output file
+                flux_list.append(counts)
+                err_list.append(errors)
+                dq_list.append(dq)
+                n_fibers = counts.shape[0]
+                fiber_ids.extend(np.arange(n_fibers))
+                benchs.extend([meta.get('bench', '')]*n_fibers)
+                sides.extend([meta.get('side', '')]*n_fibers)
+                channels.extend([meta.get('channel', '')]*n_fibers)
+                extnums.extend([i]*n_fibers)
+            # Stack along fiber axis
+            flux_stack = np.vstack(flux_list)
+            err_stack = np.vstack(err_list)
+            dq_stack = np.vstack(dq_list)
+            # SCI extension
+            sci_hdu = fits.ImageHDU(data=flux_stack.astype(np.float32), name=f'SCI_{channel}')
+            sci_hdu.header['EXTNAME'] = f'SCI_{channel}'
+            hdul.append(sci_hdu)
+            # ERR extension
+            err_hdu = fits.ImageHDU(data=err_stack.astype(np.float32), name=f'ERR_{channel}')
+            err_hdu.header['EXTNAME'] = f'ERR_{channel}'
+            hdul.append(err_hdu)
+            # FITS table extension
+            cols = [
+                fits.Column(name='FIBER', format='K', array=np.array(fiber_ids)),
+                fits.Column(name='BENCH', format='A10', array=np.array(benchs)),
+                fits.Column(name='SIDE', format='A10', array=np.array(sides)),
+                fits.Column(name='CHANNEL', format='A10', array=np.array(channels)),
+                fits.Column(name='EXTNUM', format='K', array=np.array(extnums)),
+            ]
+            table_hdu = fits.BinTableHDU.from_columns(cols, name=f'TABLE_{channel}')
+            table_hdu.header['EXTNAME'] = f'TABLE_{channel}'
+            hdul.append(table_hdu)
         hdul.writeto(output_file, overwrite=True)
         print(f"RSS file written to: {output_file}")
         

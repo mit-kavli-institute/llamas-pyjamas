@@ -374,86 +374,230 @@ class CubeConstructor:
         return flux_out
     
     def construct_cube_from_rss(self, rss_file: str, wavelength_range: Optional[Tuple[float, float]] = None,
-                               dispersion: float = 1.0, spatial_sampling: float = 1.0,
-                               reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+                               dispersion: float = 1.0, spatial_sampling: float = 0.75,
+                               reference_coord: Optional[Tuple[float, float]] = None) -> Dict[str, np.ndarray]:
         """
-        Construct IFU cube from RSS FITS file.
+        Construct IFU cubes from all channels in an RSS FITS file.
+        
+        This method loads all channels from the RSS file and creates one cube per channel.
+        It uses the fiber map to position each spectrum in the 3D cube based on
+        its x,y spatial coordinates.
         
         Parameters:
             rss_file (str): Path to RSS FITS file
-            wavelength_range (tuple): (min_wave, max_wave) in Angstroms
-            dispersion (float): Wavelength dispersion in Angstroms per pixel
-            spatial_sampling (float): Spatial sampling in units per pixel
-            reference_coord (tuple): Reference (RA, Dec) for WCS
-        
+            wavelength_range (tuple, optional): Min/max wavelength range
+            dispersion (float): Wavelength dispersion in Angstroms/pixel
+            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
+            reference_coord (tuple, optional): Reference RA/Dec for WCS
+            
         Returns:
-            np.ndarray: 3D cube data
+            Dict[str, np.ndarray]: Dictionary of channel cubes {channel: cube_data}
         """
-        # Load RSS data
-        extractions, metadata = self.load_rss_data(rss_file)
-        if not extractions:
-            self.logger.error("No extractions found in RSS file.")
+        # Load all channels from the RSS file
+        channels_data = self.load_rss_channels(rss_file)
+        if not channels_data:
+            self.logger.error("No channels found in RSS file")
             return None
-        # Create wavelength grid
-        self.wavelength_grid = self.create_wavelength_grid(extractions, wavelength_range, dispersion)
-        # Create spatial grid
-        self.spatial_grid_x, self.spatial_grid_y = self.create_spatial_grid(
-            extractions, metadata, spatial_sampling
-        )
-        # Initialize cube
-        self.cube_data = np.full((len(self.wavelength_grid), 
-                                 len(self.spatial_grid_y), 
-                                 len(self.spatial_grid_x)), np.nan)
-        self.logger.info(f'Initialized cube with shape: {self.cube_data.shape}')
-        # Process each extraction
-        for extraction_data in extractions:
-            self._process_rss_extraction(extraction_data)
-        self.logger.info('Cube construction completed')
-        return self.cube_data
+            
+        self.logger.info(f"Found channels: {list(channels_data.keys())}")
         
-    def _process_rss_extraction(self, extraction_data: Dict):
+        # Construct a cube for each channel
+        channel_cubes = {}
+        for channel in channels_data.keys():
+            self.logger.info(f"Constructing cube for channel: {channel}")
+            cube = self.construct_cube_from_rss_channel(
+                rss_file=rss_file,
+                channel=channel,
+                wavelength_range=wavelength_range,
+                dispersion=dispersion,
+                spatial_sampling=spatial_sampling,
+                reference_coord=reference_coord
+            )
+            if cube is not None:
+                channel_cubes[channel] = cube
+        
+        if not channel_cubes:
+            self.logger.error("Failed to construct any channel cubes")
+            return None
+            
+        self.logger.info(f"Successfully constructed cubes for channels: {list(channel_cubes.keys())}")
+        return channel_cubes
+    
+    def load_rss_channels(self, rss_file: str) -> Dict[str, Dict[str, any]]:
         """
-        Process a single RSS extraction and add to cube.
+        Load all channel data from an RSS FITS file.
+        Returns a dict: {channel: {'flux':..., 'err':..., 'table':...}}
+        
+        Each channel has a single SCI, ERR, and TABLE extension with all fibers stacked
+        into a 2D array with shape (n_fibers, n_pixels).
+        """
+        self.logger.info(f'Loading channels from RSS file: {rss_file}')
+        channels = {}
+        with fits.open(rss_file) as hdul:
+            for hdu in hdul[1:]:
+                extname = hdu.header.get('EXTNAME', '').upper()
+                if extname.startswith('SCI_'):
+                    channel = extname[4:]
+                    channels.setdefault(channel, {})['flux'] = hdu.data.copy() if hdu.data is not None else None
+                elif extname.startswith('ERR_'):
+                    channel = extname[4:]
+                    channels.setdefault(channel, {})['err'] = hdu.data.copy() if hdu.data is not None else None
+                elif extname.startswith('TABLE_'):
+                    channel = extname[6:]
+                    # Make sure to copy the data while the file is open
+                    if hdu.data is not None:
+                        # Handle conversion from memoryview to structured array
+                        try:
+                            table_data = np.array(hdu.data)
+                        except TypeError:
+                            # For memoryview issues, try a different approach
+                            column_names = hdu.columns.names
+                            table_data = {}
+                            for col in column_names:
+                                table_data[col] = np.array(hdu.data[col])
+                    else:
+                        table_data = None
+                    channels.setdefault(channel, {})['table'] = table_data
+        return channels
+
+    def construct_cube_from_rss_channel(self, rss_file: str, channel: str, wavelength_range: Optional[Tuple[float, float]] = None,
+                                        dispersion: float = 1.0, spatial_sampling: float = 0.75,
+                                        reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+        """
+        Construct IFU cube from a single channel in an RSS FITS file.
+        
+        Each fiber spectrum in the stacked RSS file is placed at its correct spatial position
+        in the output cube, based on the fiber map. Each spaxel has a fixed size of 0.75 arcseconds
+        by default.
         
         Parameters:
-            extraction_data (Dict): Extraction data dictionary from RSS file
+            rss_file (str): Path to RSS FITS file
+            channel (str): Channel identifier (e.g., 'RED', 'GREEN', 'BLUE')
+            wavelength_range (tuple, optional): Min/max wavelength range
+            dispersion (float): Wavelength dispersion in Angstroms/pixel
+            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
+            reference_coord (tuple, optional): Reference RA/Dec for WCS
+            
+        Returns:
+            np.ndarray: 3D cube data with shape [wavelength, y, x]
         """
-        bench = extraction_data['bench']
-        side = extraction_data['side']
-        channel = extraction_data['channel']
-        benchside = f'{bench}{side}'
-        flux = extraction_data['flux']
-        wavelength = extraction_data.get('wavelength')
-        errors = extraction_data.get('error')
-        n_fibers, n_pixels = flux.shape
-        for fiber_num in range(n_fibers):
-            x, y = self.get_fiber_coordinates(benchside, fiber_num)
-            if x == -1 or y == -1:
-                continue
-            fiber_spectrum = flux[fiber_num]
-            fiber_errors = errors[fiber_num] if errors is not None else None
-            if wavelength is not None:
-                interpolated_spectrum = self.interpolate_spectrum(
-                    wavelength, fiber_spectrum, self.wavelength_grid)
-                if fiber_errors is not None:
-                    interpolated_errors = self.interpolate_spectrum(
-                        wavelength, fiber_errors, self.wavelength_grid)
+        # Load the channel data from RSS file
+        channels = self.load_rss_channels(rss_file)
+        if channel not in channels:
+            self.logger.error(f"Channel {channel} not found in RSS file.")
+            return None
+            
+        # Get the flux data and table data for this channel
+        flux_data = channels[channel]['flux']
+        table_data = channels[channel].get('table')
+        
+        if flux_data is None:
+            self.logger.error(f"No flux data found for channel {channel}")
+            return None
+            
+        n_fibers, n_pixels = flux_data.shape
+        self.logger.info(f"Channel {channel} data shape: {flux_data.shape} ({n_fibers} fibers)")
+        
+        # Create wavelength grid based on number of pixels
+        if wavelength_range is None:
+            # Default to pixel indices if no wavelength range specified
+            self.wavelength_grid = np.arange(n_pixels) * dispersion
+        else:
+            min_wave, max_wave = wavelength_range
+            self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
+        
+        # Get spatial coordinates for all fibers
+        fiber_positions = []
+        
+        if table_data is not None:
+            # Use table data to get fiber information
+            for i in range(n_fibers):
+                # Access table columns - handle different table formats
+                if isinstance(table_data, dict):
+                    # Dictionary of arrays
+                    bench = table_data.get('BENCH', [''])[i].strip() if 'BENCH' in table_data else ''
+                    side = table_data.get('SIDE', [''])[i].strip() if 'SIDE' in table_data else ''
+                    fiber_num = table_data.get('FIBER', [i])[i] if 'FIBER' in table_data else i
                 else:
-                    interpolated_errors = None
+                    # Structured array
+                    try:
+                        bench = table_data[i]['BENCH'].strip() if 'BENCH' in table_data.dtype.names else ''
+                        side = table_data[i]['SIDE'].strip() if 'SIDE' in table_data.dtype.names else ''
+                        fiber_num = table_data[i]['FIBER'] if 'FIBER' in table_data.dtype.names else i
+                    except (AttributeError, IndexError, TypeError):
+                        bench = ''
+                        side = ''
+                        fiber_num = i
+                
+                benchside = f"{bench}{side}"
+                
+                # Get fiber position from fiber map
+                x, y = self.get_fiber_coordinates(benchside, fiber_num)
+                if x != -1 and y != -1:
+                    fiber_positions.append((i, x, y))
+                else:
+                    self.logger.warning(f"Could not find coordinates for fiber {fiber_num} in {benchside}")
+        else:
+            # No table data - try to infer from channel name
+            parts = channel.split('_')
+            if len(parts) > 1:
+                benchside = parts[1]
+                if len(benchside) >= 2:
+                    bench = benchside[0]
+                    side = benchside[1]
+                    for i in range(n_fibers):
+                        x, y = self.get_fiber_coordinates(benchside, i)
+                        if x != -1 and y != -1:
+                            fiber_positions.append((i, x, y))
+                        else:
+                            self.logger.warning(f"Could not find coordinates for fiber {i} in {benchside}")
             else:
-                interpolated_spectrum = np.interp(
-                    np.linspace(0, len(fiber_spectrum)-1, len(self.wavelength_grid)),
-                    np.arange(len(fiber_spectrum)), fiber_spectrum)
-                interpolated_errors = None
+                # Use sequential fiber indices as a fallback
+                for i in range(n_fibers):
+                    fiber_positions.append((i, i % 50, i // 50))  # Default grid positioning
+        
+        if not fiber_positions:
+            self.logger.error(f"No valid fiber positions found for channel {channel}")
+            return None
+        
+        # Determine spatial extent from fiber positions
+        x_coords = [pos[1] for pos in fiber_positions]
+        y_coords = [pos[2] for pos in fiber_positions]
+        
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+        
+        # Add buffer around edges
+        buffer = spatial_sampling
+        x_min -= buffer
+        x_max += buffer
+        y_min -= buffer
+        y_max += buffer
+        
+        # Create spatial grid with fixed spaxel size
+        n_x = int((x_max - x_min) / spatial_sampling) + 1
+        n_y = int((y_max - y_min) / spatial_sampling) + 1
+        
+        self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
+        self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
+        
+        # Initialize cube with NaNs
+        cube_shape = (len(self.wavelength_grid), len(self.spatial_grid_y), len(self.spatial_grid_x))
+        self.cube_data = np.full(cube_shape, np.nan)
+        
+        self.logger.info(f"Initialized cube for channel {channel} with shape: {self.cube_data.shape}")
+        
+        # Populate the cube with fiber spectra at their correct positions
+        for fiber_idx, x, y in fiber_positions:
+            # Find the closest grid points
             x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
             y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
-            current_values = self.cube_data[:, y_idx, x_idx]
-            mask_nan = np.isnan(current_values)
-            self.cube_data[mask_nan, y_idx, x_idx] = interpolated_spectrum[mask_nan]
-            mask_valid = ~mask_nan & np.isfinite(interpolated_spectrum)
-            if np.any(mask_valid):
-                self.cube_data[mask_valid, y_idx, x_idx] = (
-                    self.cube_data[mask_valid, y_idx, x_idx] + interpolated_spectrum[mask_valid]) / 2
+            
+            # Place the spectrum in the cube
+            self.cube_data[:, y_idx, x_idx] = flux_data[fiber_idx]
+        
+        self.logger.info(f"Cube for channel {channel} constructed successfully")
+        return self.cube_data
     
     def create_wcs(self, reference_coord: Optional[Tuple[float, float]] = None) -> WCS:
         """
@@ -649,3 +793,46 @@ class CubeConstructor:
         }
         
         return info
+    
+    def save_channel_cubes(self, channel_cubes: Dict[str, np.ndarray], output_prefix: str, 
+                         reference_coord: Optional[Tuple[float, float]] = None,
+                         header_info: Optional[Dict] = None) -> Dict[str, str]:
+        """
+        Save multiple channel cubes to FITS files.
+        
+        Parameters:
+            channel_cubes (Dict[str, np.ndarray]): Dictionary of channel cubes {channel: cube_data}
+            output_prefix (str): Prefix for output file paths (channel name will be appended)
+            reference_coord (tuple, optional): (RA, Dec) reference coordinates
+            header_info (dict, optional): Additional header information
+            
+        Returns:
+            Dict[str, str]: Dictionary of saved file paths {channel: file_path}
+        """
+        if not channel_cubes:
+            raise ValueError("No channel cubes to save.")
+        
+        saved_paths = {}
+        for channel, cube_data in channel_cubes.items():
+            # Store the cube data temporarily
+            original_cube_data = self.cube_data
+            self.cube_data = cube_data
+            
+            # Create output path with channel name
+            output_path = f"{output_prefix}_{channel}.fits"
+            
+            # Add channel info to header
+            channel_header = {}
+            if header_info:
+                channel_header.update(header_info)
+            channel_header['CHANNEL'] = channel
+            
+            # Save the cube
+            file_path = self.save_cube(output_path, reference_coord, channel_header)
+            saved_paths[channel] = file_path
+            
+            # Restore original cube data
+            self.cube_data = original_cube_data
+        
+        self.logger.info(f"Saved {len(saved_paths)} channel cubes with prefix: {output_prefix}")
+        return saved_paths
