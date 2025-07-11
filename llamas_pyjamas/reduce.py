@@ -10,6 +10,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 import llamas_pyjamas.Arc.arcLlamas as arc
+from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 
 
 
@@ -117,7 +118,25 @@ def construct_cube():
     return
 
 def main(config_path):
-    print("This is a placeholder for the reduce module.")
+    """
+    Main entry point for the data reduction pipeline.
+    This function reads a configuration file containing key-value pairs and processes the parameters to drive a series of data reduction operations. The configuration file is expected to include various settings such as file paths for flat-fields, science files, bias files, and other optional parameters. It sets up the necessary output directories (like the reduced data directory, traces, and extractions), performs trace generation, handles science file extractions, corrects wavelengths, and finally constructs a data cube.
+    The configuration file format:
+        - Each non-empty line should contain a key and a value separated by '='.
+        - Lines starting with '#' are treated as comments and skipped.
+        - Values may not be quoted, but can be comma-separated lists.
+    Args:
+        config_path (str): The file path to the configuration file.
+    Raises:
+        ValueError: If required configuration keys (e.g., 'arc_file' or 'science_files') are missing.
+        FileNotFoundError: If specified science or extraction files do not exist.
+        Exception: Propagates any other exceptions that occur during processing, with a traceback printed for debugging purposes.
+    Examples:
+        >>> main("/path/to/config.cfg")
+        Loaded configuration from /path/to/config.cfg
+        Configuration: {...}
+    """
+    print(f"Loading configuration from {config_path}")
     # You can add functionality here as needed.
     with open(config_path, 'r') as f:
         config = {}
@@ -145,8 +164,52 @@ def main(config_path):
                     
                 config[key] = value
         
-        print(f"Loaded configuration from {config_path}")
+        
     print("Configuration:", config)
+
+    #code to handle bias file input
+    if 'bias_file' not in config:
+        raise ValueError("No bias file provided in the configuration.")
+    
+    if isinstance(config['bias_file'], str):
+        bias_file = config['bias_file']
+        if 'bias_dir' in config:
+            # If bias_file is just a basename, join with bias_dir
+            if bias_file == os.path.basename(bias_file):
+                bias_file = os.path.join(config['bias_dir'], bias_file)
+            bias = BiasLlamas(bias_file)
+        else:
+            # bias_dir not provided; ensure bias_file is an absolute path
+            if not os.path.isabs(bias_file):
+                raise ValueError("Bias file is provided as a relative path and 'bias_dir' is missing in configuration.")
+            bias = BiasLlamas(bias_file)
+
+    elif isinstance(config['bias_file'], list):
+        
+        bias_list = config['bias_file']
+        print(f"Using a list of bias files {bias_list}")
+        if 'bias_dir' in config:
+            bias_dir = config['bias_dir']
+            updated_bias_list = []
+            for b in bias_list:
+                # If each bias file is provided as a basename, join with bias_dir
+                if b == os.path.basename(b):
+                    updated_bias_list.append(os.path.join(bias_dir, b))
+                else:
+                    updated_bias_list.append(b)
+            bias_list = updated_bias_list
+        else:
+            # Ensure all bias file paths in the list are absolute
+            for b in bias_list:
+                if not os.path.isabs(b):
+                    raise ValueError("One or more bias files are provided as relative paths and 'bias_dir' is missing in configuration.")
+        
+        
+        bias = BiasLlamas(bias_list)
+    bias_file = bias.master_bias()
+
+
+
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
@@ -154,11 +217,11 @@ def main(config_path):
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
-        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=config.get('bias_file'))
+        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
         relative_throughput(config.get('shift_picklename'), config.get('flat_picklename'))
-        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=config.get('bias_file'))
+        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=bias_file)
         config['arcdict'] = arcdict
         
         
@@ -184,7 +247,7 @@ def main(config_path):
     try:
         
         generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
-                       config.get('trace_output_dir'), bias=config.get('bias_file'))
+                       config.get('trace_output_dir'), bias=bias_file)
 
         
        # Process science files by color if they're provided as a list
@@ -199,10 +262,10 @@ def main(config_path):
                 if not os.path.exists(science_file):
                     raise FileNotFoundError(f"Science file {science_file} does not exist.")
                 # Process each science file by color
-                extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'))
+                extracted_file = run_extraction(science_file, extraction_path, use_bias=bias_file)
                 print(f"Extraction completed for {science_file}. Output file: {extracted_file}")
         else:
-            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'))
+            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=bias_file)
             print(f"Extraction completed. Output file: {extracted_file}")
         
         # print("Correcting wavelengths in the extracted file...")
