@@ -102,6 +102,7 @@ class ExtractLlamas:
             self.xshift = None
             self.wave   = None
             self.counts = None
+            self.errors = None
             self.ximage = None
             self.relative_throughput = None
 
@@ -123,6 +124,10 @@ class ExtractLlamas:
             self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
             self.relative_throughput = np.zeros(shape=(trace.nfibers))
             self.fiberid = np.zeros(shape=(trace.nfibers))
+            
+            # Get detector properties from header if available
+            # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
+            # self.readnoise = hdr.get('RDNOISE', 3.0) 
 
             print(f'Optimal {optimal}')
             print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
@@ -311,7 +316,7 @@ class ExtractLlamas:
         return(object)
 
 
-def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAMASExtract_batch')-> str:
+def save_extractions(extraction_list, primary_header=None, savefile=None, save_dir=None, prefix='LLAMASExtract_batch')-> str:
     """Save multiple extraction objects to single file.
 
     Args:
@@ -332,6 +337,7 @@ def save_extractions(extraction_list, savefile=None, save_dir=None, prefix='LLAM
     
     # Create metadata for each extraction
     batch_data = {
+        'primary_header': primary_header,
         'extractions': extraction_list,
         'metadata': [{
             'channel': ext.channel,

@@ -153,7 +153,7 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
         
-        bias_data = np.median(bias.data[20:50])
+        bias_data = bias.data #np.median(bias.data[20:50])
             
         # Load the trace object from the pickle file.
         with open(trace_file, mode='rb') as f:
@@ -262,7 +262,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         #opening the fitsfile
         hdu = process_fits_by_color(file)
 
-        
+        primary_hdr = hdu[0].header
 
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
@@ -330,9 +330,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         print(f'Extraction list = {extraction_list}')
         if output_dir:
             if os.path.exists(output_dir):        
-                filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=output_dir)
+                filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=output_dir)
         else:
-            filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+            filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=OUTPUT_DIR)
         #print(f'extraction saved filename = {filename}')
         print(f'extraction saved filename = {extraction_file}')
         # if output_dir:
