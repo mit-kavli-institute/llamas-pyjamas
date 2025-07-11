@@ -13,6 +13,7 @@ import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
+from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 
 
 _linefile = os.path.join(LUT_DIR, '')
