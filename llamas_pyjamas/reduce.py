@@ -8,6 +8,7 @@ from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIA
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres
@@ -160,7 +161,8 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             saved_paths = constructor.save_channel_cubes(
                 channel_cubes,
                 output_prefix=os.path.join(output_dir, f"{base_name}"),
-                header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling}
+                header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+                spatial_sampling=spatial_sampling
             )
             
             # Add saved paths to the list
@@ -294,6 +296,9 @@ def main(config_path):
             rss_gen.generate_rss(savefile, rss_output_file)
             print(f"RSS file generated: {rss_output_file}")
         
+        # £Updating RA and Dec in RSS files
+        update_ra_dec_in_fits(rss_output_file)
+
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
         rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('_RSS.fits')]
@@ -306,13 +311,12 @@ def main(config_path):
 
 
         if rss_files:
-            cube_output_dir = os.path.join(output_dir, 'cubes')
             cube_files = construct_cube(
                 rss_files, 
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
-                spatial_sampling=config.get('spatial_sampling', 1.0)
+                spatial_sampling=config.get('spatial_sampling', 0.75)
             )
             print(f"Cubes constructed: {cube_files}")
         else:
