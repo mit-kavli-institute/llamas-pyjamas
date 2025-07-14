@@ -590,18 +590,19 @@ class CubeConstructor:
                 fiber_num = table_data['FIBER'][i]
                 
                 x, y = self.get_fiber_coordinates(benchside, fiber_num)
-                if x != -1 and y != -1:
+                # if x != -1 and y != -1:
                     # Convert to sky coordinates if reference coordinate is provided
-                    if reference_coord is not None:
-                        ra, dec = self.map_fiber_to_sky(benchside, fiber_num, reference_coord)
-                        if not (np.isnan(ra) or np.isnan(dec)):
-                            # Convert back to angular offset from reference for spatial grid
-                            ra_ref, dec_ref = reference_coord
-                            x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
-                            y_sky = (dec - dec_ref) * 3600.0
-                            fiber_positions.append((i, x_sky, y_sky))
-                    else:
-                        fiber_positions.append((i, x, y))
+                if reference_coord is not None:
+                    ra, dec = self.map_fiber_to_sky(benchside, fiber_num, reference_coord)
+                    if not (np.isnan(ra) or np.isnan(dec)):
+                        # Convert back to angular offset from reference for spatial grid
+                        ra_ref, dec_ref = reference_coord
+                        x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
+                        y_sky = (dec - dec_ref) * 3600.0
+                        fiber_positions.append((i, x_sky, y_sky))
+                else:
+                    fiber_positions.append((i, x, y))
+        print(f"fiber_positions: {fiber_positions}")  # Debug output
         
         if not fiber_positions:
             self.logger.error(f"No valid fiber positions found for channel {channel}")
@@ -634,16 +635,53 @@ class CubeConstructor:
         
         self.logger.info(f"Initialized cube for channel {channel} with shape: {self.cube_data.shape}")
         
-        # Populate the cube with fiber spectra at their correct positions
-        for fiber_idx, x, y in fiber_positions:
-            # Find the closest grid points
-            x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
-            y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
+        # Process each wavelength slice separately for spatial interpolation
+        for w_idx in range(len(self.wavelength_grid)):
+            # Extract data for this wavelength from all fibers
+            fiber_x = []
+            fiber_y = []
+            fiber_values = []
             
-            # Place the spectrum in the cube
-            self.cube_data[:, y_idx, x_idx] = flux_data[fiber_idx]
+            # Collect valid data points for this wavelength
+            for fiber_idx, x, y in fiber_positions:
+                value = flux_data[fiber_idx, w_idx]
+                if np.isfinite(value):  # Only use finite values
+                    fiber_x.append(x)
+                    fiber_y.append(y)
+                    fiber_values.append(value)
+            
+            # Skip empty slices
+            if not fiber_values:
+                continue
+                
+            # Create grid for interpolation
+            xi, yi = np.meshgrid(self.spatial_grid_x, self.spatial_grid_y)
+            
+            try:
+                # Perform interpolation (using nearest neighbor to preserve data values)
+                from scipy.interpolate import griddata
+                grid_z = griddata(
+                    (fiber_x, fiber_y),     # Points where we know values
+                    fiber_values,           # Known values
+                    (xi, yi),               # Points to interpolate
+                    method='nearest',       # Use nearest neighbor interpolation
+                    rescale=True            # Rescale to avoid precision issues
+                )
+                
+                # Put interpolated data into cube
+                self.cube_data[w_idx, :, :] = grid_z
+            except Exception as e:
+                self.logger.warning(f"Interpolation failed for wavelength {self.wavelength_grid[w_idx]}: {e}")
+                # Fall back to nearest grid point method for this slice
+                for fiber_idx, x, y in fiber_positions:
+                    # Find the closest grid points
+                    x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
+                    y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
+                    
+                    # Place the spectrum point in the cube
+                    self.cube_data[w_idx, y_idx, x_idx] = flux_data[fiber_idx, w_idx]
         
-        self.logger.info(f"Cube for channel {channel} constructed successfully")
+        self.logger.info(f"Cube for channel {channel} constructed successfully with spatial interpolation")
         return self.cube_data
     
     def create_wcs(self, reference_coord: Optional[Tuple[float, float]] = None, spatial_sampling: float = 0.75) -> WCS:
