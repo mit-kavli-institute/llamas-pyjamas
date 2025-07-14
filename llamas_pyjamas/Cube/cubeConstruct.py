@@ -183,63 +183,63 @@ class CubeConstructor:
                 return -1.0, -1.0
     
     def map_pixel_to_sky(self, benchside: str, fiber_num: int, pixel_x: int, pixel_y: int, 
-                        wavelength: float) -> Tuple[float, float]:
+                         wavelength: float) -> Tuple[float, float]:
         """
         Map detector pixel coordinates to sky coordinates.
         
-        This is a placeholder function for future implementation of pixel-level
-        spatial mapping that accounts for:
-        - Fiber trace spatial profiles across the detector
-        - Wavelength-dependent fiber positions  
-        - Detector distortion corrections
-        - Astrometric calibration to sky coordinates
+        This implementation uses the fact that each fiber corresponds to 0.75" on the sky.
+        It uses the fiber’s nominal position (from the fiber map) as a base, adds an offset computed
+        from the input detector pixel coordinates scaled by 0.75" per pixel, and then translates
+        the result into sky coordinates using the RA and DEC from the primary header (stored in the WCS).
         
         Parameters:
             benchside (str): Bench and side identifier (e.g., '1A', '2B')
             fiber_num (int): Fiber number
-            pixel_x (int): Detector pixel X coordinate
-            pixel_y (int): Detector pixel Y coordinate
-            wavelength (float): Wavelength in Angstroms
+            pixel_x (int): Detector pixel X offset (in pixels) from the fiber center
+            pixel_y (int): Detector pixel Y offset (in pixels) from the fiber center
+            wavelength (float): Wavelength in Angstroms (currently not used in the mapping)
             
         Returns:
             tuple: (ra, dec) sky coordinates in degrees
-            
-        TODO: Implement pixel-to-sky mapping with:
-            1. Load fiber trace information from trace files
-            2. Calculate sub-fiber spatial offset from pixel position
-            3. Apply wavelength-dependent corrections
-            4. Transform IFU focal plane coordinates to sky coordinates
-            5. Account for detector distortions and optical effects
         """
-        # PLACEHOLDER IMPLEMENTATION
-        # Currently returns fiber center position - needs full implementation
-        self.logger.warning("map_pixel_to_sky is not fully implemented - returning fiber center")
-        
-        # Get fiber center coordinates (in IFU focal plane units)
+        # Get the nominal fiber center (in IFU focal plane arcsec)
         fiber_x, fiber_y = self.get_fiber_coordinates(benchside, fiber_num)
-        # print(f"mapping sky using pos: {fiber_x}, {fiber_y}")  # Debug output
         if fiber_x == -1 or fiber_y == -1:
+            self.logger.warning(f"Invalid fiber coordinates for {benchside} fiber {fiber_num}")
             return np.nan, np.nan
-            
-        # TODO: Replace with proper implementation
-        # For now, just return fiber center as placeholder sky coordinates
-        # This should be replaced with:
-        # 1. spatial_offset = calculate_spatial_offset_from_pixel(pixel_x, pixel_y, fiber_traces)
-        # 2. wavelength_correction = apply_wavelength_dependent_corrections(wavelength)
-        # 3. focal_plane_coords = fiber_coords + spatial_offset + wavelength_correction
-        # 4. ra, dec = transform_to_sky_coordinates(focal_plane_coords, astrometric_solution)
-        
-        placeholder_ra = fiber_x / 3600.0   # Convert to rough degree equivalent
-        placeholder_dec = fiber_y / 3600.0  # Convert to rough degree equivalent
-        
-        return placeholder_ra, placeholder_dec
+
+        # Retrieve reference (RA, DEC) from the primary header via the WCS
+        if self.wcs is not None and hasattr(self.wcs, 'wcs'):
+            ra_ref = self.wcs.wcs.crval[0]
+            dec_ref = self.wcs.wcs.crval[1]
+        else:
+            self.logger.warning("WCS is not available; defaulting to (0.0, 0.0) for reference coordinates")
+            ra_ref, dec_ref = 0.0, 0.0
+
+        # Convert the detector pixel offset to arcseconds using the 0.75" scale
+        delta_x_arcsec = pixel_x * 0.75
+        delta_y_arcsec = pixel_y * 0.75
+
+        # Compute the effective position in the IFU focal plane (arcsec)
+        effective_x = fiber_x + delta_x_arcsec
+        effective_y = fiber_y + delta_y_arcsec
+
+        # Convert the effective offset (arcsec) to degrees
+        ra_offset_deg = effective_x / 3600.0 / np.cos(np.radians(dec_ref))
+        dec_offset_deg = effective_y / 3600.0
+
+        ra = ra_ref + ra_offset_deg
+        dec = dec_ref + dec_offset_deg
+
+        return ra, dec
     
     def map_fiber_to_sky(self, benchside: str, fiber_num: int, reference_coord: Optional[Tuple[float, float]] = None) -> Tuple[float, float]:
         """
         Map fiber center coordinates to sky coordinates.
 
         This provides fiber-level sky mapping using proper astrometric calibration
-        with the reference RA/DEC from the primary header.
+        with the reference RA/DEC from the primary header. Each fiber represents 
+        0.75 arcseconds on the sky.
 
         Parameters:
             benchside (str): Bench and side identifier (e.g., '1A', '2B')
@@ -249,11 +249,11 @@ class CubeConstructor:
         Returns:
             tuple: (ra, dec) sky coordinates in degrees for fiber center
         """
-        # Get fiber coordinates in IFU focal plane (arcseconds)
+        # Get fiber coordinates in IFU focal plane coordinates
         fiber_x, fiber_y = self.get_fiber_coordinates(benchside, fiber_num)
 
         if fiber_x == -1 or fiber_y == -1:
-            print(f"Invalid fiber coordinates for {benchside} fiber {fiber_num}: ({fiber_x}, {fiber_y})")
+            self.logger.warning(f"Invalid fiber coordinates for {benchside} fiber {fiber_num}")
             return np.nan, np.nan
 
         # Apply proper astrometric transformation using reference coordinates
@@ -266,10 +266,16 @@ class CubeConstructor:
                 return np.nan, np.nan
 
             try:
-                # Convert fiber coordinates from arcseconds to degrees
-                # and apply offset from reference position
-                ra = ra_ref + (fiber_x / 3600.0) / np.cos(np.radians(dec_ref))
-                dec = dec_ref + (fiber_y / 3600.0)
+                # Scale the fiber coordinates by 0.75" (the fiber size on sky)
+                # The fiber map coordinates are in unit-less values, so we need to convert
+                # them to actual angular offsets by scaling by 0.75" per fiber
+                x_arcsec = fiber_x * 0.75
+                y_arcsec = fiber_y * 0.75
+                
+                # Convert arcseconds to degrees and apply offset from reference position
+                # Use cos(dec) correction for RA to account for spherical projection
+                ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                dec = dec_ref + (y_arcsec / 3600.0)
             except (TypeError, ValueError) as e:
                 self.logger.error(f"Error in sky coordinate conversion: {e}")
                 self.logger.error(f"Reference coords: RA={ra_ref} ({type(ra_ref)}), DEC={dec_ref} ({type(dec_ref)})")
@@ -277,8 +283,9 @@ class CubeConstructor:
                 return np.nan, np.nan
         else:
             # Fallback to simple conversion if no reference provided
-            ra = fiber_x / 3600.0
-            dec = fiber_y / 3600.0
+            # Still apply the 0.75" scaling
+            ra = (fiber_x * 0.75) / 3600.0
+            dec = (fiber_y * 0.75) / 3600.0
 
         return ra, dec
     
@@ -453,26 +460,88 @@ class CubeConstructor:
             # Check if RA and DEC are valid
             if ra_ref is None or dec_ref is None or (isinstance(ra_ref, str) and not ra_ref.strip()) or (isinstance(dec_ref, str) and not dec_ref.strip()):
                 self.logger.warning("No valid RA/DEC found in primary header, using local coordinates")
-                ref_coords = None
+                # Try to use HIERARCH TEL RA/DEC as fallback if available
+                tel_ra = primary_header.get('HIERARCH TEL RA')
+                tel_dec = primary_header.get('HIERARCH TEL DEC')
+
+                if tel_ra is not None and tel_dec is not None:
+                    # Convert telescope coordinates if they're in string format
+                    from astropy.coordinates import SkyCoord
+                    from astropy import units as u
+                    try:
+                        c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.deg, u.deg))
+                        ra_ref = c.ra.deg
+                        dec_ref = c.dec.deg
+                        self.logger.info(f"Using telescope coordinates: RA={ra_ref}, DEC={dec_ref}")
+                        ref_coords = (ra_ref, dec_ref)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to convert telescope coordinates: {e}")
+                        ref_coords = None
+                else:
+                    ref_coords = None
             else:
                 # Convert to float if they're strings
                 if isinstance(ra_ref, str):
-                    ra_ref = float(ra_ref)
-                if isinstance(dec_ref, str):
-                    dec_ref = float(dec_ref)
+                    try:
+                        ra_ref = float(ra_ref)
+                    except ValueError:
+                        self.logger.warning(f"Could not convert RA value '{ra_ref}' to float")
+                        ra_ref = None
 
-                self.logger.info(f"Using header reference coordinates: RA={ra_ref}, DEC={dec_ref}")
-                ref_coords = (ra_ref, dec_ref)
+                if isinstance(dec_ref, str):
+                    try:
+                        dec_ref = float(dec_ref)
+                    except ValueError:
+                        self.logger.warning(f"Could not convert DEC value '{dec_ref}' to float")
+                        dec_ref = None
+
+                if ra_ref is not None and dec_ref is not None:
+                    self.logger.info(f"Using header reference coordinates: RA={ra_ref}, DEC={dec_ref}")
+                    ref_coords = (ra_ref, dec_ref)
+                else:
+                    ref_coords = None
 
         # Override with provided reference_coord if given
         if reference_coord is not None:
             ref_coords = reference_coord
             self.logger.info(f"Using provided reference coordinates: RA={ref_coords[0]}, DEC={ref_coords[1]}")
 
+        # Initialize the WCS with the reference coordinates
+        if ref_coords is not None:
+            # We're setting a preliminary WCS here, which will be updated for each channel
+            wcs = WCS(naxis=3)
+            ra_ref, dec_ref = ref_coords
+
+            # Set the pixel scale based on the 0.75" fiber size on sky
+            pixel_scale_deg = spatial_sampling / 3600.0  # Convert arcsec to degrees
+
+            # Set up the WCS parameters
+            wcs.wcs.crval = [ra_ref, dec_ref, 0.0]  # Wavelength will be updated later
+            wcs.wcs.cdelt = [-pixel_scale_deg, pixel_scale_deg, dispersion]  # Negative for RA per convention
+            wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
+            wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
+
+            self.wcs = wcs  # Store the WCS with proper RA/DEC
+            self.logger.info(f"Initialized WCS with reference RA={ra_ref}, DEC={dec_ref} and pixel scale={spatial_sampling} arcsec")
+
         # Construct a cube for each channel
         channel_cubes = {}
+        channel_wavelength_grids = {}  # NEW: Store wavelength grid for each channel
+        channel_wcs = {}  # NEW: Store WCS for each channel
+
+        # Save original attributes to restore later
+        original_wavelength_grid = self.wavelength_grid
+        original_wcs = self.wcs
+        original_cube_data = self.cube_data
+
+        # Process each channel
         for channel in channels_data.keys():
             self.logger.info(f"Constructing cube for channel: {channel}")
+
+            # Reset wavelength grid for this channel
+            self.wavelength_grid = None
+
+            # Construct cube for this channel
             cube = self.construct_cube_from_rss_channel(
                 rss_file=rss_file,
                 channel=channel,
@@ -481,8 +550,28 @@ class CubeConstructor:
                 spatial_sampling=spatial_sampling,
                 reference_coord=ref_coords
             )
+
             if cube is not None:
                 channel_cubes[channel] = cube
+
+                # Save the wavelength grid that was created for this channel
+                if self.wavelength_grid is not None:
+                    channel_wavelength_grids[channel] = self.wavelength_grid.copy()
+                    self.logger.info(f"Saved wavelength grid for channel {channel}: " 
+                                   f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
+
+                # Update the WCS for this channel with the proper wavelength grid
+                if ref_coords is not None and self.wavelength_grid is not None:
+                    channel_wcs[channel] = self.create_wcs(ref_coords, spatial_sampling)
+
+        # Store the channel-specific data for use when saving
+        self.channel_wavelength_grids = channel_wavelength_grids
+        self.channel_wcs = channel_wcs
+
+        # Restore original attributes
+        self.wavelength_grid = original_wavelength_grid
+        self.wcs = original_wcs
+        self.cube_data = original_cube_data
 
         if not channel_cubes:
             self.logger.error("Failed to construct any channel cubes")
@@ -529,15 +618,15 @@ class CubeConstructor:
         return channels
 
     def construct_cube_from_rss_channel(self, rss_file: str, channel: str, wavelength_range: Optional[Tuple[float, float]] = None,
-                                        dispersion: float = 1.0, spatial_sampling: float = 0.75,
-                                        reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+                                      dispersion: float = 1.0, spatial_sampling: float = 0.75,
+                                      reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
         """
         Construct IFU cube from a single channel in an RSS FITS file.
-        
+    
         Each fiber spectrum in the stacked RSS file is placed at its correct spatial position
         in the output cube, based on the fiber map. Each spaxel has a fixed size of 0.75 arcseconds
         by default.
-        
+    
         Parameters:
             rss_file (str): Path to RSS FITS file
             channel (str): Channel identifier (e.g., 'RED', 'GREEN', 'BLUE')
@@ -545,7 +634,7 @@ class CubeConstructor:
             dispersion (float): Wavelength dispersion in Angstroms/pixel
             spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
             reference_coord (tuple, optional): Reference RA/Dec for WCS
-            
+    
         Returns:
             np.ndarray: 3D cube data with shape [wavelength, y, x]
         """
@@ -554,94 +643,165 @@ class CubeConstructor:
         if channel not in channels:
             self.logger.error(f"Channel {channel} not found in RSS file.")
             return None
-            
+    
         # Get the flux data and table data for this channel
         flux_data = channels[channel]['flux']
         table_data = channels[channel].get('table')
-        
-        
+    
         if flux_data is None:
             self.logger.error(f"No flux data found for channel {channel}")
             return None
-            
+    
         n_fibers, n_pixels = flux_data.shape
-        
-        
-        # Create wavelength grid based on number of pixels
-        if wavelength_range is None:
-            # Default to pixel indices if no wavelength range specified
-            self.wavelength_grid = np.arange(n_pixels) * dispersion
-        else:
-            min_wave, max_wave = wavelength_range
-            self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
-        
+        self.logger.info(f"Channel {channel} data shape: {flux_data.shape} ({n_fibers} fibers)")
+    
+        # Determine wavelength information from the FITS file
+        with fits.open(rss_file) as hdul:
+            # First check if there's a WAVELENGTH extension that matches this channel
+            wave_found = False
+            for hdu in hdul:
+                extname = hdu.header.get('EXTNAME', '').upper()
+                if extname == f'WAVELENGTH_{channel}' and hdu.data is not None:
+                    self.wavelength_grid = hdu.data
+                    wave_found = True
+                    self.logger.info(f"Using wavelength grid from {extname} extension: " 
+                                   f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
+                    break
+                
+            # If no channel-specific wavelength extension, check for channel info in headers
+            if not wave_found:
+                # Try to find wavelength information in the SCI_{channel} header
+                for hdu in hdul:
+                    extname = hdu.header.get('EXTNAME', '').upper()
+                    if extname == f'SCI_{channel}':
+                        wl_start = hdu.header.get('CRVAL1')
+                        wl_step = hdu.header.get('CDELT1')
+                        if wl_start is not None and wl_step is not None:
+                            self.wavelength_grid = wl_start + wl_step * np.arange(n_pixels)
+                            wave_found = True
+                            self.logger.info(f"Created wavelength grid from {extname} header: "
+                                           f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
+                            break
+                        
+            # If no wavelength info found, use the manually provided range or determine based on channel
+            if not wave_found:
+                if wavelength_range is not None:
+                    # Use the manually provided range
+                    min_wave, max_wave = wavelength_range
+                    self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
+                    self.logger.info(f"Using provided wavelength range: {min_wave:.1f}-{max_wave:.1f} Å")
+                else:
+                    # Infer reasonable wavelength range based on channel
+                    channel_upper = channel.upper()
+                    if channel_upper == "RED":
+                        min_wave, max_wave = 6300.0, 9000.0
+                    elif channel_upper == "GREEN":
+                        min_wave, max_wave = 4800.0, 6600.0
+                    elif channel_upper == "BLUE":
+                        min_wave, max_wave = 3700.0, 5100.0
+                    else:
+                        # Default for unknown channels
+                        min_wave, max_wave = 3700.0, 9000.0
+                        
+                    self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
+                    self.logger.info(f"Inferred wavelength range for {channel} channel: {min_wave:.1f}-{max_wave:.1f} Å")
+                    self.logger.warning(f"No wavelength information found in RSS file for {channel} channel. "
+                                      f"Using inferred range. For accurate wavelengths, provide calibration.")
+    
         # Get spatial coordinates for all fibers
         fiber_positions = []
-        
+    
         if table_data is not None:
             # Use table data to get fiber information
             for i in range(n_fibers):
-                # benchside = table_data['BENCH'][i] + table_data['SIDE'][i]
+                # Use BENCHSIDE directly from the table
                 benchside = table_data['BENCHSIDE'][i]
+    
+                # Convert bytes to string if needed
                 if isinstance(benchside, bytes):
-                        benchside = benchside.decode('utf-8').strip()
-
-                
+                    benchside = benchside.decode('utf-8').strip()
+    
                 fiber_num = table_data['FIBER'][i]
-                
+    
+                # Get physical fiber coordinates in the IFU focal plane
+                # These are in arbitrary units in the fiber map
                 x, y = self.get_fiber_coordinates(benchside, fiber_num)
-                # if x != -1 and y != -1:
+    
+                if x != -1 and y != -1:
+                    # Apply the 0.75" scale to convert from fiber map units to arcseconds
+                    # This is the correct scale factor for LLAMAS fibers on sky
+                    x_arcsec = x * 0.75
+                    y_arcsec = y * 0.75
+    
                     # Convert to sky coordinates if reference coordinate is provided
-                if reference_coord is not None:
-                    ra, dec = self.map_fiber_to_sky(benchside, fiber_num, reference_coord)
-                    if not (np.isnan(ra) or np.isnan(dec)):
-                        # Convert back to angular offset from reference for spatial grid
+                    if reference_coord is not None:
                         ra_ref, dec_ref = reference_coord
+    
+                        # Convert arcsec offsets to degrees and apply spherical projection correction
+                        ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                        dec = dec_ref + (y_arcsec / 3600.0)
+    
+                        # Convert back to angular offset from reference for spatial grid
+                        # We need these in arcseconds for the spatial grid
                         x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
                         y_sky = (dec - dec_ref) * 3600.0
+    
                         fiber_positions.append((i, x_sky, y_sky))
-                else:
-                    fiber_positions.append((i, x, y))
-        print(f"fiber_positions: {fiber_positions}")  # Debug output
-        
+    
+                        # Debug information for the first few fibers
+                        if i < 5:
+                            self.logger.debug(f"Fiber {i}: benchside={benchside}, fiber={fiber_num}, "
+                                              f"x={x}, y={y}, x_arcsec={x_arcsec}, y_arcsec={y_arcsec}, "
+                                              f"ra={ra}, dec={dec}, x_sky={x_sky}, y_sky={y_sky}")
+                    else:
+                        # No reference coordinates, just use the arcsecond values directly
+                        fiber_positions.append((i, x_arcsec, y_arcsec))
+    
         if not fiber_positions:
             self.logger.error(f"No valid fiber positions found for channel {channel}")
             return None
-        
+    
         # Determine spatial extent from fiber positions
         x_coords = [pos[1] for pos in fiber_positions]
         y_coords = [pos[2] for pos in fiber_positions]
-        
+    
         x_min, x_max = min(x_coords), max(x_coords)
         y_min, y_max = min(y_coords), max(y_coords)
-        
+    
         # Add buffer around edges
         buffer = spatial_sampling
         x_min -= buffer
         x_max += buffer
         y_min -= buffer
         y_max += buffer
-        
-        # Create spatial grid with fixed spaxel size
+    
+        # Create spatial grid with fixed spaxel size (spatial_sampling is in arcsec/pixel)
         n_x = int((x_max - x_min) / spatial_sampling) + 1
         n_y = int((y_max - y_min) / spatial_sampling) + 1
-        
+    
         self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
         self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
-        
+    
         # Initialize cube with NaNs
         cube_shape = (len(self.wavelength_grid), len(self.spatial_grid_y), len(self.spatial_grid_x))
         self.cube_data = np.full(cube_shape, np.nan)
-        
+    
         self.logger.info(f"Initialized cube for channel {channel} with shape: {self.cube_data.shape}")
-        
+    
+        # Create a proper WCS for this cube with the RA/DEC reference and proper spatial scale
+        if reference_coord is not None:
+            wcs = self.create_wcs(reference_coord, spatial_sampling)
+            self.wcs = wcs
+            self.logger.info(f"Created WCS for channel {channel} with reference RA={reference_coord[0]}, "
+                           f"DEC={reference_coord[1]}, pixel scale={spatial_sampling} arcsec")
+    
         # Process each wavelength slice separately for spatial interpolation
         for w_idx in range(len(self.wavelength_grid)):
             # Extract data for this wavelength from all fibers
             fiber_x = []
             fiber_y = []
             fiber_values = []
-            
+    
             # Collect valid data points for this wavelength
             for fiber_idx, x, y in fiber_positions:
                 value = flux_data[fiber_idx, w_idx]
@@ -649,14 +809,14 @@ class CubeConstructor:
                     fiber_x.append(x)
                     fiber_y.append(y)
                     fiber_values.append(value)
-            
+    
             # Skip empty slices
             if not fiber_values:
                 continue
-                
+            
             # Create grid for interpolation
             xi, yi = np.meshgrid(self.spatial_grid_x, self.spatial_grid_y)
-            
+    
             try:
                 # Perform interpolation (using nearest neighbor to preserve data values)
                 from scipy.interpolate import griddata
@@ -667,7 +827,7 @@ class CubeConstructor:
                     method='nearest',       # Use nearest neighbor interpolation
                     rescale=True            # Rescale to avoid precision issues
                 )
-                
+    
                 # Put interpolated data into cube
                 self.cube_data[w_idx, :, :] = grid_z
             except Exception as e:
@@ -677,54 +837,77 @@ class CubeConstructor:
                     # Find the closest grid points
                     x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
                     y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
-                    
+    
                     # Place the spectrum point in the cube
                     self.cube_data[w_idx, y_idx, x_idx] = flux_data[fiber_idx, w_idx]
-        
+    
         self.logger.info(f"Cube for channel {channel} constructed successfully with spatial interpolation")
         return self.cube_data
     
     def create_wcs(self, reference_coord: Optional[Tuple[float, float]] = None, spatial_sampling: float = 0.75) -> WCS:
         """
-        Create a World Coordinate System for the cube.
-        
+        Create a World Coordinate System for the cube based on the RSS file's RA/DEC
+        and the 0.75" fiber scale.
+
         Parameters:
             reference_coord (tuple, optional): (RA, Dec) reference coordinates in degrees
             spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
-            
+
         Returns:
             WCS: World coordinate system object
         """
         wcs = WCS(naxis=3)
-        
-        # Spatial axes using proper spaxel size
+
+        # Use provided reference coordinates or defaults
         if reference_coord is not None:
             ra_ref, dec_ref = reference_coord
         else:
             ra_ref, dec_ref = 0.0, 0.0  # Placeholder
-        
+            self.logger.warning("No reference coordinates provided for WCS, using (0,0)")
+
         # Reference pixel at the center of the cube
-        wcs.wcs.crpix = [len(self.spatial_grid_x)//2 + 1, len(self.spatial_grid_y)//2 + 1, 1]
-        
-        # Pixel scale in degrees/pixel (spatial_sampling is in arcsec/pixel)
+        if self.spatial_grid_x is not None and self.spatial_grid_y is not None:
+            crpix1 = len(self.spatial_grid_x) // 2 + 1
+            crpix2 = len(self.spatial_grid_y) // 2 + 1
+        else:
+            crpix1, crpix2 = 1, 1
+            self.logger.warning("No spatial grid defined, using (1,1) as reference pixel")
+
+        wcs.wcs.crpix = [crpix1, crpix2, 1]
+
+        # Pixel scale in degrees/pixel based on 0.75" fiber scale
+        # spatial_sampling is in arcsec/pixel
         pixel_scale_deg = spatial_sampling / 3600.0
-        
+
+        # Set wavelength dispersion if available
+        if self.wavelength_grid is not None and len(self.wavelength_grid) > 1:
+            wave_dispersion = self.wavelength_grid[1] - self.wavelength_grid[0]
+            wave_ref = self.wavelength_grid[0]
+        else:
+            wave_dispersion = 1.0
+            wave_ref = 0.0
+            self.logger.warning("No wavelength grid defined, using defaults")
+
         wcs.wcs.cdelt = [
             -pixel_scale_deg,  # RA decreases with increasing pixel (standard convention)
             pixel_scale_deg,   # Dec increases with increasing pixel
-            self.wavelength_grid[1] - self.wavelength_grid[0]  # Wavelength dispersion
+            wave_dispersion    # Wavelength dispersion
         ]
-        
+
         # Reference coordinate values
-        wcs.wcs.crval = [ra_ref, dec_ref, self.wavelength_grid[0]]
-        
+        wcs.wcs.crval = [ra_ref, dec_ref, wave_ref]
+
         # Coordinate types
         wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
         wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
-        
+
+        self.logger.info(f"Created WCS with reference (RA,DEC)=({ra_ref},{dec_ref}), " 
+                        f"pixel scale={spatial_sampling} arcsec, "
+                        f"wavelength range={wave_ref}-{wave_ref+(len(self.wavelength_grid)-1)*wave_dispersion} Å")
+
         self.wcs = wcs
         return wcs
-    
+
     def save_cube(self, output_path: str, reference_coord: Optional[Tuple[float, float]] = None,
                   header_info: Optional[Dict] = None, spatial_sampling: float = 0.75) -> str:
         """
@@ -898,24 +1081,39 @@ class CubeConstructor:
                          header_info: Optional[Dict] = None, spatial_sampling: float = 0.75) -> Dict[str, str]:
         """
         Save multiple channel cubes to FITS files.
-        
-        Parameters:
-            channel_cubes (Dict[str, np.ndarray]): Dictionary of channel cubes {channel: cube_data}
-            output_prefix (str): Prefix for output file paths (channel name will be appended)
-            reference_coord (tuple, optional): (RA, Dec) reference coordinates
-            header_info (dict, optional): Additional header information
-            
-        Returns:
-            Dict[str, str]: Dictionary of saved file paths {channel: file_path}
         """
         if not channel_cubes:
             raise ValueError("No channel cubes to save.")
         
+        # Store original values to restore at the end
+        original_cube_data = self.cube_data
+        original_wavelength_grid = self.wavelength_grid
+        original_wcs = self.wcs
+        
+        # Now save each channel with its specific wavelength grid and WCS
         saved_paths = {}
         for channel, cube_data in channel_cubes.items():
-            # Store the cube data temporarily
-            original_cube_data = self.cube_data
+            # Set channel-specific values
             self.cube_data = cube_data
+            
+            # Use the channel-specific wavelength grid and WCS that were stored during construction
+            if hasattr(self, 'channel_wavelength_grids') and channel in self.channel_wavelength_grids:
+                self.wavelength_grid = self.channel_wavelength_grids[channel]
+                self.logger.info(f"Using stored wavelength grid for channel {channel}: "
+                              f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
+            
+            if hasattr(self, 'channel_wcs') and channel in self.channel_wcs:
+                self.wcs = self.channel_wcs[channel]
+            else:
+                # Create a new WCS if needed
+                if reference_coord is not None:
+                    self.wcs = self.create_wcs(reference_coord, spatial_sampling)
+            
+            # Get and log cube information
+            self.logger.info(f"Cube information for channel {channel}:")
+            cube_info = self.get_cube_info()
+            for key, value in cube_info.items():
+                self.logger.info(f"  {key}: {value}")
             
             # Create output path with channel name
             output_path = f"{output_prefix}_{channel}.fits"
@@ -929,9 +1127,11 @@ class CubeConstructor:
             # Save the cube
             file_path = self.save_cube(output_path, reference_coord, channel_header, spatial_sampling)
             saved_paths[channel] = file_path
-            
-            # Restore original cube data
-            self.cube_data = original_cube_data
+        
+        # Restore original values
+        self.cube_data = original_cube_data
+        self.wavelength_grid = original_wavelength_grid
+        self.wcs = original_wcs
         
         self.logger.info(f"Saved {len(saved_paths)} channel cubes with prefix: {output_prefix}")
         return saved_paths

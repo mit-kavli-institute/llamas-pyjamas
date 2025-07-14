@@ -3,6 +3,8 @@ import os
 from astropy.io import fits
 import numpy as np
 import re
+from astropy.coordinates import SkyCoord
+from astropy import units as u
 
 
 class RSSgeneration:
@@ -11,7 +13,7 @@ class RSSgeneration:
 
 
     def generate_rss(self, extraction_file, output_file):
-    
+
         with open(extraction_file, 'rb') as f:
             _data = pickle.load(f)
         primary_hdr = _data['primary_header']    
@@ -44,6 +46,13 @@ class RSSgeneration:
             extnums = []
             benchsides = []
 
+            # Get wavelength information for this channel
+            wavelength_data = None
+            for obj in obj_list:
+                if hasattr(obj, 'wave') and obj.wave is not None:
+                    wavelength_data = obj.wave
+                    break
+
             for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
                 counts = obj.counts
                 errors = getattr(obj, 'errors', None)
@@ -64,6 +73,10 @@ class RSSgeneration:
                 channels.extend([meta.get('channel', '')]*n_fibers)
                 extnums.extend([i]*n_fibers)
 
+                # Try to get wavelength from this object if we don't have it yet
+                if wavelength_data is None and hasattr(obj, 'wavelength') and obj.wavelength is not None:
+                    wavelength_data = obj.wavelength
+
             # Stack along fiber axis
             flux_stack = np.vstack(flux_list)
             err_stack = np.vstack(err_list)
@@ -72,12 +85,36 @@ class RSSgeneration:
             # SCI extension
             sci_hdu = fits.ImageHDU(data=flux_stack.astype(np.float32), name=f'SCI_{channel}')
             sci_hdu.header['EXTNAME'] = f'SCI_{channel}'
+
+            # Add wavelength information to SCI header if available
+            if wavelength_data is not None:
+                if isinstance(wavelength_data, np.ndarray) and wavelength_data.size > 1:
+                    # Set wavelength reference values in header
+                    sci_hdu.header['CRVAL1'] = float(wavelength_data[0])
+                    sci_hdu.header['CDELT1'] = float(wavelength_data[1] - wavelength_data[0])
+                    sci_hdu.header['CRPIX1'] = 1
+                    sci_hdu.header['CTYPE1'] = 'WAVE'
+                    sci_hdu.header['CUNIT1'] = 'Angstrom'
+
+                    # Add comment about wavelength calibration
+                    sci_hdu.header['COMMENT'] = f'Wavelength range: {wavelength_data[0]:.2f}-{wavelength_data[-1]:.2f} Angstroms'
+                    print(f"Added wavelength calibration to SCI_{channel} header: {wavelength_data[0]:.2f}-{wavelength_data[-1]:.2f} Å")
+
             hdul.append(sci_hdu)
 
             # ERR extension
             err_hdu = fits.ImageHDU(data=err_stack.astype(np.float32), name=f'ERR_{channel}')
             err_hdu.header['EXTNAME'] = f'ERR_{channel}'
             hdul.append(err_hdu)
+
+            # Add WAVELENGTH extension if data is available
+            if wavelength_data is not None:
+                if isinstance(wavelength_data, np.ndarray) and wavelength_data.size > 1:
+                    wave_hdu = fits.ImageHDU(data=wavelength_data.astype(np.float32), name=f'WAVELENGTH_{channel}')
+                    wave_hdu.header['EXTNAME'] = f'WAVELENGTH_{channel}'
+                    wave_hdu.header['BUNIT'] = 'Angstrom'
+                    hdul.append(wave_hdu)
+                    print(f"Added WAVELENGTH_{channel} extension with {len(wavelength_data)} points")
 
             # FITS table extension
             cols = [
@@ -96,51 +133,33 @@ class RSSgeneration:
         return
 
 
+
+
 #############
 def update_ra_dec_in_fits(fits_file):
-
-    def sexagesimal_to_decimal_ra(ra_str):
-        # Assume ra_str is in "HH MM SS" or "HH:MM:SS" format
-        parts = re.split('[: ]+', ra_str.strip())
-        if len(parts) != 3:
-            raise ValueError("RA string must have three parts: hours, minutes, seconds")
-        hours, minutes, seconds = map(float, parts)
-        # Convert hours to degrees (15 degrees per hour)
-        return 15 * (hours + minutes / 60 + seconds / 3600)
-
-    def sexagesimal_to_decimal_dec(dec_str):
-        # Assume dec_str is in "DD MM SS" or "DD:MM:SS" format, may have sign in the first part
-        parts = re.split('[: ]+', dec_str.strip())
-        if len(parts) != 3:
-            raise ValueError("DEC string must have three parts: degrees, minutes, seconds")
-        deg = float(parts[0])
-        minutes = float(parts[1])
-        seconds = float(parts[2])
-        sign = -1 if deg < 0 else 1
-        return sign * (abs(deg) + minutes / 60 + seconds / 3600)
-
     with fits.open(fits_file, mode='update') as hdul:
         primary_hdr = hdul[0].header
 
         ra = primary_hdr.get('RA')
         dec = primary_hdr.get('DEC')
 
-        # Check if RA and DEC are empty, None, or blank strings
-        if not ra or str(ra).strip() == "":
-            tel_ra = primary_hdr.get('HIERARCH TEL RA')
-            if tel_ra is None:
-                raise ValueError("Primary header missing HIERARCH TEL RA")
-            # Convert RA from sexagesimal to decimal degrees
-            dec_ra = sexagesimal_to_decimal_ra(str(tel_ra))
-            primary_hdr['RA'] = dec_ra
+        missing_ra = (ra is None or str(ra).strip() == "")
+        missing_dec = (dec is None or str(dec).strip() == "")
 
-        if not dec or str(dec).strip() == "":
+        if missing_ra or missing_dec:
+            tel_ra = primary_hdr.get('HIERARCH TEL RA')
             tel_dec = primary_hdr.get('HIERARCH TEL DEC')
-            if tel_dec is None:
-                raise ValueError("Primary header missing HIERARCH TEL DEC")
-            # Convert DEC from sexagesimal to decimal degrees
-            dec_dec = sexagesimal_to_decimal_dec(str(tel_dec))
-            primary_hdr['DEC'] = dec_dec
+
+            if tel_ra is None or tel_dec is None:
+                raise ValueError("Primary header missing HIERARCH TEL RA and/or HIERARCH TEL DEC")
+
+            # Convert telescope coordinates from sexagesimal to decimal assuming both are in degrees.
+            c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.deg, u.deg))
+
+            if missing_ra:
+                primary_hdr['RA'] = c.ra.deg
+            if missing_dec:
+                primary_hdr['DEC'] = c.dec.deg
 
         hdul.flush()
         print(f"Primary header updated in {fits_file}")
