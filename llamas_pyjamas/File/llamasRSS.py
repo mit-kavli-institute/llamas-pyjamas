@@ -51,6 +51,7 @@ class RSSgeneration:
             for obj in obj_list:
                 if hasattr(obj, 'wave') and obj.wave is not None:
                     wavelength_data = obj.wave
+                    print(f"wavelength_data found: {wavelength_data}")
                     break
 
             for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
@@ -74,8 +75,9 @@ class RSSgeneration:
                 extnums.extend([i]*n_fibers)
 
                 # Try to get wavelength from this object if we don't have it yet
-                if wavelength_data is None and hasattr(obj, 'wavelength') and obj.wavelength is not None:
-                    wavelength_data = obj.wavelength
+                if wavelength_data is None and hasattr(obj, 'wave') and obj.wave is not None:
+                    wavelength_data = obj.wave
+                    print(f"wavelength_data if not already found: {wavelength_data}")
 
             # Stack along fiber axis
             flux_stack = np.vstack(flux_list)
