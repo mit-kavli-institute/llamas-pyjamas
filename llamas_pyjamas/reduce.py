@@ -2,6 +2,7 @@ import os
 import argparse
 import pickle
 import traceback
+from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR
@@ -11,15 +12,13 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres
+from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 
 
 _linefile = os.path.join(LUT_DIR, '')
 
-#### To do:
-# - make a directory within base to hold the extractions temporarily
-# - test a single run through, then work on adaptiing to lists of science files
+
 
 
 
@@ -116,23 +115,18 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75):
     """
-    Construct IFU cubes from RSS FITS files.
-    For each RSS file, produce one cube per channel (RED, GREEN, BLUE).
-    Each channel's cube will map fibers to spaxels based on the fiber map.
+    Construct IFU data cubes from RSS files.
     
     Parameters:
-        rss_files (str or list): Path(s) to RSS FITS file(s)
+        rss_files (str or list): Path to RSS FITS file(s)
         output_dir (str): Directory to save output cubes
-        wavelength_range (tuple, optional): Min/max wavelength range
+        wavelength_range (tuple, optional): Min/max wavelength range for output cubes
         dispersion (float): Wavelength dispersion in Angstroms/pixel
-        spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
+        spatial_sampling (float): Spatial sampling in arcsec/pixel
         
     Returns:
-        list: Paths to generated cube files
+        list: Paths to constructed cube files
     """
-    import os
-    from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
-    
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -141,9 +135,17 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         
     cube_files = []
     
+    # Create a single logger for all cube construction
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+    logger.info(f"Starting cube construction for {len(rss_files)} RSS files")
+    
     for rss_file in rss_files:
+        logger.info(f"Constructing channel cubes from RSS file: {rss_file}")
         print(f"Constructing channel cubes from RSS file: {rss_file}")
-        constructor = CubeConstructor()
+        
+        # Pass the common logger to the constructor
+        constructor = CubeConstructor(logger=logger)
         
         # Get base name for output files
         base_name = os.path.splitext(os.path.basename(rss_file))[0]
@@ -157,6 +159,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         )
         
         if channel_cubes:
+            # Log which channels were found in this file
+            logger.info(f"Found channels in {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
+            
             # Save each channel cube
             saved_paths = constructor.save_channel_cubes(
                 channel_cubes,
