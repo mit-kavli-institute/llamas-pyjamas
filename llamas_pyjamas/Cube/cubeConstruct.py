@@ -583,38 +583,74 @@ class CubeConstructor:
     def load_rss_channels(self, rss_file: str) -> Dict[str, Dict[str, any]]:
         """
         Load all channel data from an RSS FITS file.
-        Returns a dict: {channel: {'flux':..., 'err':..., 'table':...}}
+        Returns a dict: {channel: {'flux':..., 'err':..., 'wave':..., 'table':...}}
         
-        Each channel has a single SCI, ERR, and TABLE extension with all fibers stacked
-        into a 2D array with shape (n_fibers, n_pixels).
+        Each channel is stored in a binary table extension (SPEC_{channel}) with columns:
+        - FIBER: Fiber ID number
+        - BENCHSIDE: Bench and side identifier
+        - EXTNUM: Original extraction object index
+        - FLUX: Flux array for each fiber
+        - ERROR: Error array for each fiber
+        - WAVELENGTH: Wavelength array for each fiber
+        - DQ: Data quality array for each fiber
         """
         self.logger.info(f'Loading channels from RSS file: {rss_file}')
         channels = {}
+        
         with fits.open(rss_file) as hdul:
             for hdu in hdul[1:]:
                 extname = hdu.header.get('EXTNAME', '').upper()
-                if extname.startswith('SCI_'):
-                    channel = extname[4:]
-                    channels.setdefault(channel, {})['flux'] = hdu.data.copy() if hdu.data is not None else None
-                elif extname.startswith('ERR_'):
-                    channel = extname[4:]
-                    channels.setdefault(channel, {})['err'] = hdu.data.copy() if hdu.data is not None else None
-                elif extname.startswith('TABLE_'):
-                    channel = extname[6:]
-                    # Make sure to copy the data while the file is open
-                    if hdu.data is not None:
-                        # Handle conversion from memoryview to structured array
-                        try:
-                            table_data = np.array(hdu.data)
-                        except TypeError:
-                            # For memoryview issues, try a different approach
-                            column_names = hdu.columns.names
-                            table_data = {}
-                            for col in column_names:
-                                table_data[col] = np.array(hdu.data[col])
-                    else:
-                        table_data = None
-                    channels.setdefault(channel, {})['table'] = table_data
+                
+                # The new format uses binary tables with SPEC_{CHANNEL} naming
+                if extname.startswith('SPEC_'):
+                    channel = extname[5:].lower()
+                    self.logger.info(f"Found SPEC_{channel} binary table extension")
+                    
+                    if not isinstance(hdu, fits.BinTableHDU):
+                        self.logger.warning(f"SPEC_{channel} is not a binary table. Skipping.")
+                        continue
+                    
+                    # Initialize the channel dictionary if it doesn't exist
+                    if channel not in channels:
+                        channels[channel] = {}
+                    
+                    # Extract data from the binary table
+                    try:
+                        # Get fiber and benchside information
+                        fiber_ids = np.array(hdu.data['FIBER'])
+                        benchsides = np.array(hdu.data['BENCHSIDE'])
+                        
+                        # Convert benchsides from bytes to strings if needed
+                        if benchsides.dtype.kind == 'S':
+                            benchsides = np.array([bs.decode('utf-8').strip() for bs in benchsides])
+                        
+                        # Get the flux, error, wavelength, and data quality arrays
+                        flux = np.array(hdu.data['FLUX'])
+                        error = np.array(hdu.data['ERROR'])
+                        wavelength = np.array(hdu.data['WAVELENGTH'])
+                        dq = np.array(hdu.data['DQ'])
+                        
+                        # Create a table dictionary for fiber metadata
+                        table_data = {
+                            'FIBER': fiber_ids,
+                            'BENCHSIDE': benchsides,
+                            'EXTNUM': np.array(hdu.data['EXTNUM'])
+                        }
+                        
+                        # Store all the extracted data in the channel dictionary
+                        channels[channel]['flux'] = flux
+                        channels[channel]['err'] = error
+                        channels[channel]['wave'] = wavelength
+                        channels[channel]['dq'] = dq
+                        channels[channel]['table'] = table_data
+                        
+                        self.logger.info(f"Loaded channel {channel} data with {len(fiber_ids)} fibers")
+                    except Exception as e:
+                        self.logger.error(f"Error loading data from SPEC_{channel}: {str(e)}")
+                
+        if not channels:
+            self.logger.warning("No channel data found in RSS file. Check if file format is correct.")
+            
         return channels
 
     def construct_cube_from_rss_channel(self, rss_file: str, channel: str, wavelength_range: Optional[Tuple[float, float]] = None,
@@ -625,7 +661,8 @@ class CubeConstructor:
     
         Each fiber spectrum in the stacked RSS file is placed at its correct spatial position
         in the output cube, based on the fiber map. Each spaxel has a fixed size of 0.75 arcseconds
-        by default.
+        by default. The wavelength information for each fiber is read directly from the WAVELENGTH
+        column in the binary table, allowing for proper wavelength calibration per fiber.
     
         Parameters:
             rss_file (str): Path to RSS FITS file
@@ -644,9 +681,12 @@ class CubeConstructor:
             self.logger.error(f"Channel {channel} not found in RSS file.")
             return None
     
-        # Get the flux data and table data for this channel
+        # Get the flux data and table
         flux_data = channels[channel]['flux']
         table_data = channels[channel].get('table')
+        
+        # Get the wavelength data for each fiber
+        fiber_wavelengths = channels[channel].get('wave')
     
         if flux_data is None:
             self.logger.error(f"No flux data found for channel {channel}")
@@ -655,58 +695,50 @@ class CubeConstructor:
         n_fibers, n_pixels = flux_data.shape
         self.logger.info(f"Channel {channel} data shape: {flux_data.shape} ({n_fibers} fibers)")
     
-        # Determine wavelength information from the FITS file
-        with fits.open(rss_file) as hdul:
-            # First check if there's a WAVELENGTH extension that matches this channel
-            wave_found = False
-            for hdu in hdul:
-                extname = hdu.header.get('EXTNAME', '').upper()
-                if extname == f'WAVELENGTH_{channel}' and hdu.data is not None:
-                    self.wavelength_grid = hdu.data
-                    wave_found = True
-                    self.logger.info(f"Using wavelength grid from {extname} extension: " 
-                                   f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
-                    break
-                
-            # If no channel-specific wavelength extension, check for channel info in headers
-            if not wave_found:
-                # Try to find wavelength information in the SCI_{channel} header
-                for hdu in hdul:
-                    extname = hdu.header.get('EXTNAME', '').upper()
-                    if extname == f'SCI_{channel}':
-                        wl_start = hdu.header.get('CRVAL1')
-                        wl_step = hdu.header.get('CDELT1')
-                        if wl_start is not None and wl_step is not None:
-                            self.wavelength_grid = wl_start + wl_step * np.arange(n_pixels)
-                            wave_found = True
-                            self.logger.info(f"Created wavelength grid from {extname} header: "
-                                           f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
-                            break
-                        
-            # If no wavelength info found, use the manually provided range or determine based on channel
-            if not wave_found:
-                if wavelength_range is not None:
-                    # Use the manually provided range
-                    min_wave, max_wave = wavelength_range
-                    self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
-                    self.logger.info(f"Using provided wavelength range: {min_wave:.1f}-{max_wave:.1f} Å")
-                else:
-                    # Infer reasonable wavelength range based on channel
-                    channel_upper = channel.upper()
-                    if channel_upper == "RED":
-                        min_wave, max_wave = 6300.0, 9000.0
-                    elif channel_upper == "GREEN":
-                        min_wave, max_wave = 4800.0, 6600.0
-                    elif channel_upper == "BLUE":
-                        min_wave, max_wave = 3700.0, 5100.0
-                    else:
-                        # Default for unknown channels
-                        min_wave, max_wave = 3700.0, 9000.0
-                        
-                    self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
-                    self.logger.info(f"Inferred wavelength range for {channel} channel: {min_wave:.1f}-{max_wave:.1f} Å")
-                    self.logger.warning(f"No wavelength information found in RSS file for {channel} channel. "
-                                      f"Using inferred range. For accurate wavelengths, provide calibration.")
+        # Determine the wavelength grid for the cube
+        # Check if we have per-fiber wavelengths
+        if fiber_wavelengths is not None and fiber_wavelengths.shape == flux_data.shape:
+            self.logger.info(f"Using per-fiber wavelength arrays for channel {channel}, shape: {fiber_wavelengths.shape}")
+            
+            # DEBUG: Add diagnostics to understand why only 1794 wavelengths are valid
+            total_wavelength_points = n_fibers * n_pixels
+            nan_count = np.sum(np.isnan(fiber_wavelengths))
+            nan_percentage = (nan_count / total_wavelength_points) * 100
+            self.logger.info(f"Wavelength diagnostics: {nan_count} NaN values out of {total_wavelength_points} points ({nan_percentage:.2f}%)")
+            
+            # Check how many wavelength values are valid per pixel position
+            valid_per_position = np.sum(~np.isnan(fiber_wavelengths), axis=0)
+            valid_positions = np.sum(valid_per_position > 0)
+            self.logger.info(f"Valid wavelength positions: {valid_positions} out of {n_pixels} ({(valid_positions/n_pixels)*100:.2f}%)")
+            
+            # Show distribution of valid wavelength points
+            min_valid = np.min(valid_per_position)
+            max_valid = np.max(valid_per_position)
+            mean_valid = np.mean(valid_per_position)
+            self.logger.info(f"Valid fibers per wavelength position: min={min_valid}, max={max_valid}, mean={mean_valid:.2f}")
+            
+            # Calculate average wavelength grid from all fibers (removing NaN values)
+            # First, find valid wavelength arrays (non-NaN)
+            valid_wavelengths = []
+            for i in range(n_fibers):
+                wave = fiber_wavelengths[i]
+                if not np.all(np.isnan(wave)):
+                    valid_wavelengths.append(wave)
+            
+            if valid_wavelengths:
+                # If we have valid wavelength arrays, use the median
+                valid_array = np.vstack(valid_wavelengths)
+                self.wavelength_grid = np.nanmedian(valid_array, axis=0)
+                self.logger.info(f"Created median wavelength grid from {len(valid_wavelengths)} valid fiber wavelengths: "
+                               f"{self.wavelength_grid[0]:.1f}-{self.wavelength_grid[-1]:.1f} Å")
+            else:
+                # If no valid wavelength arrays, use a default grid
+                self.logger.warning("No valid wavelength arrays found. Using default wavelength grid.")
+                self._create_default_wavelength_grid(channel, n_pixels, wavelength_range)
+        else:
+            # Fall back to default grid if per-fiber wavelengths aren't available
+            self.logger.warning("No per-fiber wavelength arrays found. Using default wavelength grid.")
+            self._create_default_wavelength_grid(channel, n_pixels, wavelength_range)
     
         # Get spatial coordinates for all fibers
         fiber_positions = []
@@ -714,22 +746,15 @@ class CubeConstructor:
         if table_data is not None:
             # Use table data to get fiber information
             for i in range(n_fibers):
-                # Use BENCHSIDE directly from the table
+                # Get benchside and fiber number
                 benchside = table_data['BENCHSIDE'][i]
-    
-                # Convert bytes to string if needed
-                if isinstance(benchside, bytes):
-                    benchside = benchside.decode('utf-8').strip()
-    
                 fiber_num = table_data['FIBER'][i]
     
                 # Get physical fiber coordinates in the IFU focal plane
-                # These are in arbitrary units in the fiber map
                 x, y = self.get_fiber_coordinates(benchside, fiber_num)
     
                 if x != -1 and y != -1:
                     # Apply the 0.75" scale to convert from fiber map units to arcseconds
-                    # This is the correct scale factor for LLAMAS fibers on sky
                     x_arcsec = x * 0.75
                     y_arcsec = y * 0.75
     
@@ -742,7 +767,6 @@ class CubeConstructor:
                         dec = dec_ref + (y_arcsec / 3600.0)
     
                         # Convert back to angular offset from reference for spatial grid
-                        # We need these in arcseconds for the spatial grid
                         x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
                         y_sky = (dec - dec_ref) * 3600.0
     
@@ -761,6 +785,7 @@ class CubeConstructor:
             self.logger.error(f"No valid fiber positions found for channel {channel}")
             return None
     
+        # Continue with rest of the method as before...
         # Determine spatial extent from fiber positions
         x_coords = [pos[1] for pos in fiber_positions]
         y_coords = [pos[2] for pos in fiber_positions]
@@ -802,9 +827,26 @@ class CubeConstructor:
             fiber_y = []
             fiber_values = []
     
+            # Target wavelength for this slice
+            target_wavelength = self.wavelength_grid[w_idx]
+    
             # Collect valid data points for this wavelength
             for fiber_idx, x, y in fiber_positions:
-                value = flux_data[fiber_idx, w_idx]
+                if fiber_wavelengths is not None and fiber_wavelengths.shape == flux_data.shape:
+                    # Use per-fiber wavelength calibration
+                    # Find the closest wavelength index in this fiber's wavelength array
+                    fiber_wave = fiber_wavelengths[fiber_idx]
+                    
+                    # Skip fibers with NaN wavelengths
+                    if np.all(np.isnan(fiber_wave)):
+                        continue
+                    
+                    closest_idx = np.argmin(np.abs(fiber_wave - target_wavelength))
+                    value = flux_data[fiber_idx, closest_idx]
+                else:
+                    # Use index directly if no per-fiber wavelengths
+                    value = flux_data[fiber_idx, w_idx]
+                
                 if np.isfinite(value):  # Only use finite values
                     fiber_x.append(x)
                     fiber_y.append(y)
@@ -838,76 +880,53 @@ class CubeConstructor:
                     x_idx = np.argmin(np.abs(self.spatial_grid_x - x))
                     y_idx = np.argmin(np.abs(self.spatial_grid_y - y))
     
+                    # Find the value based on per-fiber wavelength or fixed index
+                    if fiber_wavelengths is not None and fiber_wavelengths.shape == flux_data.shape:
+                        fiber_wave = fiber_wavelengths[fiber_idx]
+                        
+                        # Skip fibers with NaN wavelengths
+                        if np.all(np.isnan(fiber_wave)):
+                            continue
+                        
+                        closest_idx = np.argmin(np.abs(fiber_wave - target_wavelength))
+                        value = flux_data[fiber_idx, closest_idx]
+                    else:
+                        value = flux_data[fiber_idx, w_idx]
+
                     # Place the spectrum point in the cube
-                    self.cube_data[w_idx, y_idx, x_idx] = flux_data[fiber_idx, w_idx]
+                    self.cube_data[w_idx, y_idx, x_idx] = value
     
         self.logger.info(f"Cube for channel {channel} constructed successfully with spatial interpolation")
         return self.cube_data
-    
-    def create_wcs(self, reference_coord: Optional[Tuple[float, float]] = None, spatial_sampling: float = 0.75) -> WCS:
+        
+    def _create_default_wavelength_grid(self, channel: str, n_pixels: int, wavelength_range: Optional[Tuple[float, float]] = None):
         """
-        Create a World Coordinate System for the cube based on the RSS file's RA/DEC
-        and the 0.75" fiber scale.
-
+        Create a default wavelength grid for a channel when wavelength information is not available.
+        
         Parameters:
-            reference_coord (tuple, optional): (RA, Dec) reference coordinates in degrees
-            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
-
-        Returns:
-            WCS: World coordinate system object
+            channel (str): Channel identifier
+            n_pixels (int): Number of pixels in the wavelength dimension
+            wavelength_range (tuple, optional): User-provided wavelength range
         """
-        wcs = WCS(naxis=3)
-
-        # Use provided reference coordinates or defaults
-        if reference_coord is not None:
-            ra_ref, dec_ref = reference_coord
+        if wavelength_range is not None:
+            # Use the manually provided range
+            min_wave, max_wave = wavelength_range
         else:
-            ra_ref, dec_ref = 0.0, 0.0  # Placeholder
-            self.logger.warning("No reference coordinates provided for WCS, using (0,0)")
-
-        # Reference pixel at the center of the cube
-        if self.spatial_grid_x is not None and self.spatial_grid_y is not None:
-            crpix1 = len(self.spatial_grid_x) // 2 + 1
-            crpix2 = len(self.spatial_grid_y) // 2 + 1
-        else:
-            crpix1, crpix2 = 1, 1
-            self.logger.warning("No spatial grid defined, using (1,1) as reference pixel")
-
-        wcs.wcs.crpix = [crpix1, crpix2, 1]
-
-        # Pixel scale in degrees/pixel based on 0.75" fiber scale
-        # spatial_sampling is in arcsec/pixel
-        pixel_scale_deg = spatial_sampling / 3600.0
-
-        # Set wavelength dispersion if available
-        if self.wavelength_grid is not None and len(self.wavelength_grid) > 1:
-            wave_dispersion = self.wavelength_grid[1] - self.wavelength_grid[0]
-            wave_ref = self.wavelength_grid[0]
-        else:
-            wave_dispersion = 1.0
-            wave_ref = 0.0
-            self.logger.warning("No wavelength grid defined, using defaults")
-
-        wcs.wcs.cdelt = [
-            -pixel_scale_deg,  # RA decreases with increasing pixel (standard convention)
-            pixel_scale_deg,   # Dec increases with increasing pixel
-            wave_dispersion    # Wavelength dispersion
-        ]
-
-        # Reference coordinate values
-        wcs.wcs.crval = [ra_ref, dec_ref, wave_ref]
-
-        # Coordinate types
-        wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
-        wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
-
-        self.logger.info(f"Created WCS with reference (RA,DEC)=({ra_ref},{dec_ref}), " 
-                        f"pixel scale={spatial_sampling} arcsec, "
-                        f"wavelength range={wave_ref}-{wave_ref+(len(self.wavelength_grid)-1)*wave_dispersion} Å")
-
-        self.wcs = wcs
-        return wcs
-
+            # Infer reasonable wavelength range based on channel
+            channel_upper = channel.upper()
+            if channel_upper == "RED":
+                min_wave, max_wave = 6300.0, 9000.0
+            elif channel_upper == "GREEN":
+                min_wave, max_wave = 4800.0, 6600.0
+            elif channel_upper == "BLUE":
+                min_wave, max_wave = 3700.0, 5100.0
+            else:
+                # Default for unknown channels
+                min_wave, max_wave = 3700.0, 9000.0
+            
+        self.wavelength_grid = np.linspace(min_wave, max_wave, n_pixels)
+        self.logger.info(f"Created default wavelength grid for {channel} channel: {min_wave:.1f}-{max_wave:.1f} Å")
+    
     def save_cube(self, output_path: str, reference_coord: Optional[Tuple[float, float]] = None,
                   header_info: Optional[Dict] = None, spatial_sampling: float = 0.75) -> str:
         """
@@ -917,6 +936,7 @@ class CubeConstructor:
             output_path (str): Output file path
             reference_coord (tuple, optional): (RA, Dec) reference coordinates
             header_info (dict, optional): Additional header information
+            spatial_sampling (float): Spatial sampling in arcsec/pixel
             
         Returns:
             str: Path to saved file
@@ -942,13 +962,21 @@ class CubeConstructor:
         primary_hdu.header['NAXIS1'] = len(self.spatial_grid_x)
         primary_hdu.header['NAXIS2'] = len(self.spatial_grid_y) 
         primary_hdu.header['NAXIS3'] = len(self.wavelength_grid)
+        
+        # Add detailed wavelength calibration to primary header
         primary_hdu.header['CRVAL3'] = self.wavelength_grid[0]
-        primary_hdu.header['CDELT3'] = self.wavelength_grid[1] - self.wavelength_grid[0]
+        primary_hdu.header['CDELT3'] = (self.wavelength_grid[1] - self.wavelength_grid[0]) if len(self.wavelength_grid) > 1 else 1.0
+        primary_hdu.header['CRPIX3'] = 1
+        primary_hdu.header['CTYPE3'] = 'WAVE'
+        primary_hdu.header['CUNIT3'] = 'Angstrom'
+        
+        # Add spaxel information
         primary_hdu.header['SPAXELSC'] = spatial_sampling
         primary_hdu.header['COMMENT'] = 'LLAMAS IFU Data Cube [wavelength, y, x]'
         primary_hdu.header['COMMENT'] = f'Spaxel size: {spatial_sampling} arcsec'
         primary_hdu.header['COMMENT'] = 'Each slice can be summed to create whitelight image'
         primary_hdu.header['COMMENT'] = 'Each spaxel contains a full spectrum'
+        primary_hdu.header['COMMENT'] = f'Wavelength range: {self.wavelength_grid[0]:.2f}-{self.wavelength_grid[-1]:.2f} Angstroms'
         
         if header_info:
             for key, value in header_info.items():
@@ -958,14 +986,21 @@ class CubeConstructor:
         hdul = fits.HDUList([primary_hdu])
         
         # Add wavelength extension
-        wave_hdu = fits.ImageHDU(data=self.wavelength_grid, name='WAVELENGTH')
+        wave_hdu = fits.ImageHDU(data=self.wavelength_grid.astype(np.float32), name='WAVELENGTH')
+        wave_hdu.header['EXTNAME'] = 'WAVELENGTH'
         wave_hdu.header['BUNIT'] = 'Angstrom'
+        wave_hdu.header['COMMENT'] = 'Wavelength array for cube'
         hdul.append(wave_hdu)
         
         # Add spatial coordinate extensions
-        x_hdu = fits.ImageHDU(data=self.spatial_grid_x, name='XCOORD')
-        y_hdu = fits.ImageHDU(data=self.spatial_grid_y, name='YCOORD')
+        x_hdu = fits.ImageHDU(data=self.spatial_grid_x.astype(np.float32), name='XCOORD')
+        x_hdu.header['EXTNAME'] = 'XCOORD'
+        x_hdu.header['BUNIT'] = 'arcsec'
         hdul.append(x_hdu)
+        
+        y_hdu = fits.ImageHDU(data=self.spatial_grid_y.astype(np.float32), name='YCOORD')
+        y_hdu.header['EXTNAME'] = 'YCOORD'
+        y_hdu.header['BUNIT'] = 'arcsec'
         hdul.append(y_hdu)
         
         # Save to file
@@ -1135,3 +1170,68 @@ class CubeConstructor:
         
         self.logger.info(f"Saved {len(saved_paths)} channel cubes with prefix: {output_prefix}")
         return saved_paths
+    
+    def create_wcs(self, reference_coord: Optional[Tuple[float, float]] = None, spatial_sampling: float = 0.75) -> WCS:
+        """
+        Create a World Coordinate System for the cube based on the RSS file's RA/DEC
+        and the 0.75" fiber scale.
+
+        Parameters:
+            reference_coord (tuple, optional): (RA, Dec) reference coordinates in degrees
+            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
+
+        Returns:
+            WCS: World coordinate system object
+        """
+        wcs = WCS(naxis=3)
+
+        # Use provided reference coordinates or defaults
+        if reference_coord is not None:
+            ra_ref, dec_ref = reference_coord
+        else:
+            # Default to (0, 0) if no reference coordinates provided
+            ra_ref, dec_ref = 0.0, 0.0
+            self.logger.warning("No reference coordinates provided for WCS, using (0, 0)")
+
+        # Reference pixel at the center of the cube
+        if self.spatial_grid_x is not None and self.spatial_grid_y is not None:
+            crpix1 = len(self.spatial_grid_x) // 2
+            crpix2 = len(self.spatial_grid_y) // 2
+        else:
+            crpix1, crpix2 = 0, 0
+            self.logger.warning("No spatial grid defined for WCS, using (0, 0) for reference pixel")
+
+        wcs.wcs.crpix = [crpix1, crpix2, 1]
+
+        # Pixel scale in degrees/pixel based on 0.75" fiber scale
+        # spatial_sampling is in arcsec/pixel
+        pixel_scale_deg = spatial_sampling / 3600.0
+
+        # Set wavelength dispersion if available
+        if self.wavelength_grid is not None and len(self.wavelength_grid) > 1:
+            wave_ref = self.wavelength_grid[0]
+            wave_dispersion = self.wavelength_grid[1] - self.wavelength_grid[0]
+        else:
+            wave_ref = 5000.0  # Default wavelength reference
+            wave_dispersion = 1.0  # Default dispersion
+            self.logger.warning("No wavelength grid defined for WCS, using defaults")
+
+        wcs.wcs.cdelt = [
+            -pixel_scale_deg,  # Negative for RA per convention
+            pixel_scale_deg,
+            wave_dispersion
+        ]
+
+        # Reference coordinate values
+        wcs.wcs.crval = [ra_ref, dec_ref, wave_ref]
+
+        # Coordinate types
+        wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
+        wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
+
+        self.logger.info(f"Created WCS with reference (RA,DEC)=({ra_ref},{dec_ref}), " 
+                        f"pixel scale={spatial_sampling} arcsec, "
+                        f"wavelength range={wave_ref}-{wave_ref+(len(self.wavelength_grid)-1)*wave_dispersion} Å")
+
+        self.wcs = wcs
+        return wcs
