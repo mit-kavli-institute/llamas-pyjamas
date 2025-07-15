@@ -13,7 +13,17 @@ class RSSgeneration:
 
 
     def generate_rss(self, extraction_file, output_file):
-
+        """
+        Generate a row-stacked spectra (RSS) FITS file using binary tables to store the data.
+        Each fiber will have its own row in the table with columns for flux, error, wavelength, etc.
+        
+        Parameters:
+        -----------
+        extraction_file : str
+            Path to the extraction pickle file
+        output_file : str
+            Path to save the output RSS FITS file
+        """
         with open(extraction_file, 'rb') as f:
             _data = pickle.load(f)
         primary_hdr = _data['primary_header']    
@@ -31,107 +41,105 @@ class RSSgeneration:
             channel_groups[channel].append(obj)
             meta_groups[channel].append(meta)
 
+        # Create HDU list with primary header
         hdul = fits.HDUList()
         primary_hdu = fits.PrimaryHDU(header=primary_hdr)
         hdul.append(primary_hdu)
 
+        # Process each channel separately
         for channel, obj_list in channel_groups.items():
             meta_list = meta_groups[channel]
-            # Stack all counts, errors, dq for this channel
-            flux_list = []
-            err_list = []
-            dq_list = []
+            
+            # Collect data for all fibers in this channel
+            all_flux = []
+            all_errors = []
+            all_waves = []
+            all_dq = []
             fiber_ids = []
-            channels = []
-            extnums = []
             benchsides = []
-
-            # Get wavelength information for this channel
-            wavelength_data = None
-            for obj in obj_list:
-                if hasattr(obj, 'wave') and obj.wave is not None:
-                    wavelength_data = obj.wave
-                    print(f"wavelength_data found: {wavelength_data}")
-                    break
-
+            extnums = []
+            
+            # Process each extraction object
             for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
                 counts = obj.counts
+                n_fibers = counts.shape[0]
+                
+                # Get or create error arrays
                 errors = getattr(obj, 'errors', None)
                 if errors is None or errors.shape != counts.shape:
                     errors = np.zeros_like(counts, dtype=np.float32)
+                    
+                # Get or create data quality arrays
                 dq = getattr(obj, 'dq', None)
                 if dq is None or dq.shape != counts.shape:
                     dq = np.zeros_like(counts, dtype=np.int16)
-
-                n_fibers = counts.shape[0]
+                    
+                # Get wavelength arrays
+                waves = getattr(obj, 'wave', None)
+                if waves is None or waves.shape != counts.shape:
+                    # If no valid wavelength data, use NaN arrays
+                    print(f"Warning: No valid wavelength data for object {i}. Using NaN arrays.")
+                    waves = np.full(counts.shape, np.nan, dtype=np.float32)
+                
+                # Add data for each fiber
+                all_flux.append(counts)
+                all_errors.append(errors)
+                all_waves.append(waves)
+                all_dq.append(dq)
+                
+                # Add metadata
                 benchside_str = f"{meta.get('bench', '')}{meta.get('side', '')}"
                 benchsides.extend([benchside_str] * n_fibers)
-
-                flux_list.append(counts)
-                err_list.append(errors)
-                dq_list.append(dq)
                 fiber_ids.extend(np.arange(n_fibers))
-                channels.extend([meta.get('channel', '')]*n_fibers)
-                extnums.extend([i]*n_fibers)
-
-                # Try to get wavelength from this object if we don't have it yet
-                if wavelength_data is None and hasattr(obj, 'wave') and obj.wave is not None:
-                    wavelength_data = obj.wave
-                    print(f"wavelength_data if not already found: {wavelength_data}")
-
-            # Stack along fiber axis
-            flux_stack = np.vstack(flux_list)
-            err_stack = np.vstack(err_list)
-            dq_stack = np.vstack(dq_list)
-
-            # SCI extension
-            sci_hdu = fits.ImageHDU(data=flux_stack.astype(np.float32), name=f'SCI_{channel}')
-            sci_hdu.header['EXTNAME'] = f'SCI_{channel}'
-
-            # Add wavelength information to SCI header if available
-            if wavelength_data is not None:
-                if isinstance(wavelength_data, np.ndarray) and wavelength_data.size > 1:
-                    # Set wavelength reference values in header
-                    sci_hdu.header['CRVAL1'] = float(wavelength_data[0])
-                    sci_hdu.header['CDELT1'] = float(wavelength_data[1] - wavelength_data[0])
-                    sci_hdu.header['CRPIX1'] = 1
-                    sci_hdu.header['CTYPE1'] = 'WAVE'
-                    sci_hdu.header['CUNIT1'] = 'Angstrom'
-
-                    # Add comment about wavelength calibration
-                    sci_hdu.header['COMMENT'] = f'Wavelength range: {wavelength_data[0]:.2f}-{wavelength_data[-1]:.2f} Angstroms'
-                    print(f"Added wavelength calibration to SCI_{channel} header: {wavelength_data[0]:.2f}-{wavelength_data[-1]:.2f} Å")
-
-            hdul.append(sci_hdu)
-
-            # ERR extension
-            err_hdu = fits.ImageHDU(data=err_stack.astype(np.float32), name=f'ERR_{channel}')
-            err_hdu.header['EXTNAME'] = f'ERR_{channel}'
-            hdul.append(err_hdu)
-
-            # Add WAVELENGTH extension if data is available
-            if wavelength_data is not None:
-                if isinstance(wavelength_data, np.ndarray) and wavelength_data.size > 1:
-                    wave_hdu = fits.ImageHDU(data=wavelength_data.astype(np.float32), name=f'WAVELENGTH_{channel}')
-                    wave_hdu.header['EXTNAME'] = f'WAVELENGTH_{channel}'
-                    wave_hdu.header['BUNIT'] = 'Angstrom'
-                    hdul.append(wave_hdu)
-                    print(f"Added WAVELENGTH_{channel} extension with {len(wavelength_data)} points")
-
-            # FITS table extension
+                extnums.extend([i] * n_fibers)
+            
+            # Stack all arrays
+            flux_stack = np.vstack(all_flux)
+            error_stack = np.vstack(all_errors)
+            wave_stack = np.vstack(all_waves)
+            dq_stack = np.vstack(all_dq)
+            
+            # Get array dimensions
+            n_total_fibers, n_pixels = flux_stack.shape
+            
+            # Create columns for binary table
             cols = [
-                fits.Column(name='FIBER', format='K', array=np.array(fiber_ids)),
-                fits.Column(name='BENCHSIDE', format='A10', array=np.array(benchsides)),
-                fits.Column(name='CHANNEL', format='A10', array=np.array(channels)),
-                fits.Column(name='EXTNUM', format='K', array=np.array(extnums)),
+                fits.Column(name='FIBER', format='J', array=np.array(fiber_ids)),
+                fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
+                fits.Column(name='EXTNUM', format='J', array=np.array(extnums)),
+                fits.Column(name='FLUX', format=f'{n_pixels}E', array=flux_stack),
+                fits.Column(name='ERROR', format=f'{n_pixels}E', array=error_stack),
+                fits.Column(name='WAVELENGTH', format=f'{n_pixels}E', array=wave_stack),
+                fits.Column(name='DQ', format=f'{n_pixels}J', array=dq_stack)
             ]
-            table_hdu = fits.BinTableHDU.from_columns(cols, name=f'TABLE_{channel}')
-            table_hdu.header['EXTNAME'] = f'TABLE_{channel}'
+            
+            # Create binary table HDU
+            table_hdu = fits.BinTableHDU.from_columns(cols)
+            table_hdu.header['EXTNAME'] = f'SPEC_{channel}'
+            table_hdu.header['CHANNEL'] = channel
+            table_hdu.header['NFIBERS'] = n_total_fibers
+            table_hdu.header['NPIXELS'] = n_pixels
+            
+            # Add metadata about wavelength range if available
+            try:
+                valid_waves = wave_stack[~np.isnan(wave_stack)]
+                if len(valid_waves) > 0:
+                    min_wave = np.min(valid_waves)
+                    max_wave = np.max(valid_waves)
+                    table_hdu.header['WAVEMIN'] = min_wave
+                    table_hdu.header['WAVEMAX'] = max_wave
+                    table_hdu.header['COMMENT'] = f'Wavelength range: {min_wave:.2f}-{max_wave:.2f} Angstroms'
+            except Exception as e:
+                print(f"Warning: Could not determine wavelength range: {e}")
+            
+            # Add table to HDU list
             hdul.append(table_hdu)
-
+            print(f"Added SPEC_{channel} binary table with {n_total_fibers} fibers, {n_pixels} pixels each")
+        
+        # Write to file
         hdul.writeto(output_file, overwrite=True)
         print(f"RSS file written to: {output_file}")
-
+        
         return
 
 
