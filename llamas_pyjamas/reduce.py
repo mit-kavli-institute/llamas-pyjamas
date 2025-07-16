@@ -295,14 +295,20 @@ def main(config_path):
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
+            # Create a logger for RSS generation
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            rss_logger.info(f"Starting RSS generation for {base_name}")
+            
             #RSS generation
-            rss_gen = RSSgeneration()
+            rss_gen = RSSgeneration(logger=rss_logger)
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
             rss_gen.generate_rss(savefile, rss_output_file)
+            rss_logger.info(f"RSS file generated: {rss_output_file}")
             print(f"RSS file generated: {rss_output_file}")
         
-        # £Updating RA and Dec in RSS files
-        update_ra_dec_in_fits(rss_output_file)
+        # Updating RA and Dec in RSS files
+        update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
