@@ -86,9 +86,46 @@ class RSSgeneration:
                 
                 # Process each extraction object
                 for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
+
                     counts = obj.counts
                     n_fibers = counts.shape[0]
-                    
+
+                    dead_fibers = getattr(obj, 'dead_fibers', None)
+                    if dead_fibers is not None:
+                        self.logger.info(f"Object {i} has dead fibers: {dead_fibers}")
+                        # Validate each dead fiber
+                        valid_dead_fibers = []
+                        for dead_fiber in dead_fibers:
+                            # Verify that the dead fiber index is valid
+                            if 0 <= dead_fiber < n_fibers:
+                                # Check if all values in the row are zero (or close to zero)
+                                is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
+                                if is_zero_row:
+                                    valid_dead_fibers.append(dead_fiber)
+                                else:
+                                    self.logger.warning(f"Dead fiber {dead_fiber} in object {i} has non-zero values - not removing")
+                            else:
+                                self.logger.warning(f"Dead fiber index {dead_fiber} is out of range for object {i} with {n_fibers} fibers")
+                        
+                        # Remove the valid dead fibers
+                        if valid_dead_fibers:
+                            # Sort in descending order if there are multiple fibers to avoid index shifting
+                            if len(valid_dead_fibers) > 1:
+                                valid_dead_fibers.sort(reverse=True)
+                            
+                            self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from counts in object {i}")
+                            for dead_fiber in valid_dead_fibers:
+                                # Double check as a sanity check that the row is all zeros
+                                is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
+                                self.logger.info(f"Sanity check for fiber {dead_fiber}: all zeros = {is_zero_row}")
+                                if not is_zero_row:
+                                    self.logger.warning(f"Skipping removal of fiber {dead_fiber} as it contains non-zero values")
+                                    continue
+                                counts = np.delete(counts, dead_fiber, axis=0)
+                            # Log the final counts shape after all removals
+                            self.logger.info(f"New counts shape after removal: {counts.shape}")
+
+
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
                     if errors is None or errors.shape != counts.shape:
@@ -103,6 +140,7 @@ class RSSgeneration:
                         
                     # Get wavelength arrays
                     waves = getattr(obj, 'wave', None)
+                    self.logger.info(f"Object {i} wavelength shape: {waves.shape if waves is not None else 'None'}, counts shape: {counts.shape}")
                     if waves is None:
                         self.logger.warning(f"No wavelength attribute found for object {i}. Metadata: {meta}")
 
