@@ -123,7 +123,7 @@ class ExtractLlamas:
             self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
             self.relative_throughput = np.zeros(shape=(trace.nfibers))
-            self.fiberid = np.zeros(shape=(trace.nfibers))
+            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
             
             # Get detector properties from header if available
             # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
