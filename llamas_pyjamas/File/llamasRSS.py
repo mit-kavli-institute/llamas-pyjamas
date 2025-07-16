@@ -88,7 +88,25 @@ class RSSgeneration:
                 for i, (obj, meta) in enumerate(zip(obj_list, meta_list)):
 
                     counts = obj.counts
-                    n_fibers = counts.shape[0]
+                    
+
+                    # Get or create error arrays
+                    errors = getattr(obj, 'errors', None)
+                    if errors is None or errors.shape != counts.shape:
+                        self.logger.warning(f"No valid error data for object {i}. Creating zero array.")
+                        errors = np.zeros_like(counts, dtype=np.float32)
+                        
+                    # Get or create data quality arrays
+                    dq = getattr(obj, 'dq', None)
+                    if dq is None or dq.shape != counts.shape:
+                        self.logger.warning(f"No valid DQ data for object {i}. Creating zero array.")
+                        dq = np.zeros_like(counts, dtype=np.int16)
+                        
+                    # Get wavelength arrays
+                    waves = getattr(obj, 'wave', None)
+                    if waves is None or waves.shape != counts.shape:
+                        self.logger.warning(f"No valid wavelength data for object {i}. Using NaN arrays.")
+                        waves = np.full(counts.shape, np.nan, dtype=np.float32)
 
                     dead_fibers = getattr(obj, 'dead_fibers', None)
                     if dead_fibers is not None:
@@ -113,7 +131,7 @@ class RSSgeneration:
                             if len(valid_dead_fibers) > 1:
                                 valid_dead_fibers.sort(reverse=True)
                             
-                            self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from counts in object {i}")
+                            self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from object {i}")
                             for dead_fiber in valid_dead_fibers:
                                 # Double check as a sanity check that the row is all zeros
                                 is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
@@ -121,11 +139,17 @@ class RSSgeneration:
                                 if not is_zero_row:
                                     self.logger.warning(f"Skipping removal of fiber {dead_fiber} as it contains non-zero values")
                                     continue
+                                    
+                                # Remove the dead fiber from all arrays
                                 counts = np.delete(counts, dead_fiber, axis=0)
-                            # Log the final counts shape after all removals
-                            self.logger.info(f"New counts shape after removal: {counts.shape}")
+                                errors = np.delete(errors, dead_fiber, axis=0)
+                                waves = np.delete(waves, dead_fiber, axis=0)
+                                dq = np.delete(dq, dead_fiber, axis=0)
+                                
+                            # Log the final shape after all removals
+                            self.logger.info(f"New arrays shape after removal: {counts.shape}")
 
-
+                    n_fibers = counts.shape[0]
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
                     if errors is None or errors.shape != counts.shape:
@@ -177,7 +201,11 @@ class RSSgeneration:
                 # Get array dimensions
                 n_total_fibers, n_pixels = flux_stack.shape
                 self.logger.info(f"Channel {channel} stacked data shape: {flux_stack.shape} ({n_total_fibers} fibers, {n_pixels} pixels)")
-                
+                # Log wavelength stack information
+                self.logger.info(f"Channel {channel} wavelength stack shape: {wave_stack.shape}")
+                self.logger.info(f"Flux stack min/max: {np.nanmin(flux_stack):.4f} / {np.nanmax(flux_stack):.4f}")
+                self.logger.info(f"Wavelength stack min/max: {np.nanmin(wave_stack):.4f} / {np.nanmax(wave_stack):.4f}")
+                self.logger.info(f"Error stack min/max: {np.nanmin(error_stack):.4f} / {np.nanmax(error_stack):.4f}")
                 # Create columns for binary table
                 cols = [
                     fits.Column(name='FIBER', format='J', array=np.array(fiber_ids)),
