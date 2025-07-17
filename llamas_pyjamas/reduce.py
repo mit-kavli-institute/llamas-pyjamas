@@ -1,24 +1,24 @@
-
 import os
 import argparse
 import pickle
 import traceback
+from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres
+from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
+from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 
 
 _linefile = os.path.join(LUT_DIR, '')
 
-#### To do:
-# - make a directory within base to hold the extractions temporarily
-# - test a single run through, then work on adaptiing to lists of science files
+
 
 
 
@@ -113,9 +113,71 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 
-def construct_cube():
-    ###need to make a new class for this bit
-    return
+def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75):
+    """
+    Construct IFU data cubes from RSS files.
+    
+    Parameters:
+        rss_files (str or list): Path to RSS FITS file(s)
+        output_dir (str): Directory to save output cubes
+        wavelength_range (tuple, optional): Min/max wavelength range for output cubes
+        dispersion (float): Wavelength dispersion in Angstroms/pixel
+        spatial_sampling (float): Spatial sampling in arcsec/pixel
+        
+    Returns:
+        list: Paths to constructed cube files
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    if isinstance(rss_files, str):
+        rss_files = [rss_files]
+        
+    cube_files = []
+    
+    # Create a single logger for all cube construction
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+    logger.info(f"Starting cube construction for {len(rss_files)} RSS files")
+    
+    for rss_file in rss_files:
+        logger.info(f"Constructing channel cubes from RSS file: {rss_file}")
+        print(f"Constructing channel cubes from RSS file: {rss_file}")
+        
+        # Pass the common logger to the constructor
+        constructor = CubeConstructor(logger=logger)
+        
+        # Get base name for output files
+        base_name = os.path.splitext(os.path.basename(rss_file))[0]
+        
+        # Construct one cube per channel
+        channel_cubes = constructor.construct_cube_from_rss(
+            rss_file,
+            wavelength_range=wavelength_range,
+            dispersion=dispersion,
+            spatial_sampling=spatial_sampling
+        )
+        
+        if channel_cubes:
+            # Log which channels were found in this file
+            logger.info(f"Found channels in {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
+            
+            # Save each channel cube
+            saved_paths = constructor.save_channel_cubes(
+                channel_cubes,
+                output_prefix=os.path.join(output_dir, f"{base_name}"),
+                header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+                spatial_sampling=spatial_sampling
+            )
+            
+            # Add saved paths to the list
+            for channel, path in saved_paths.items():
+                print(f"  - Channel {channel} cube saved: {path}")
+                cube_files.append(path)
+        else:
+            print(f"  No valid channel cubes constructed for {rss_file}")
+    
+    return cube_files
 
 def main(config_path):
     print("This is a placeholder for the reduce module.")
@@ -151,6 +213,8 @@ def main(config_path):
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
+    else:
+        output_dir = config.get('output_dir')
     os.makedirs(output_dir, exist_ok=True)
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
@@ -162,9 +226,6 @@ def main(config_path):
         arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=config.get('bias_file'))
         config['arcdict'] = arcdict
         
-        
-    
-    
     
     # Set default for trace_output_dir if not present
     if 'trace_output_dir' not in config:
@@ -234,15 +295,46 @@ def main(config_path):
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
+            # Create a logger for RSS generation
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            rss_logger.info(f"Starting RSS generation for {base_name}")
+            
             #RSS generation
-            rss_gen = RSSgeneration()
+            rss_gen = RSSgeneration(logger=rss_logger)
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
             rss_gen.generate_rss(savefile, rss_output_file)
+            rss_logger.info(f"RSS file generated: {rss_output_file}")
             print(f"RSS file generated: {rss_output_file}")
         
+        # Updating RA and Dec in RSS files
+        update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+
+        # Cube construction from RSS files
+        print("Constructing cubes from RSS files...")
+        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('_RSS.fits')]
+
+        if 'cube_output_dir' not in config:
+            cube_output_dir = os.path.join(output_dir, 'cubes')
+        else:
+            cube_output_dir = config.get('cube_output_dir')
+        os.makedirs(cube_output_dir, exist_ok=True)
+
+
+        if rss_files:
+            cube_files = construct_cube(
+                rss_files, 
+                cube_output_dir,
+                wavelength_range=config.get('wavelength_range'),
+                dispersion=config.get('dispersion', 1.0),
+                spatial_sampling=config.get('spatial_sampling', 0.75)
+            )
+            print(f"Cubes constructed: {cube_files}")
+        else:
+            print("No RSS files found for cube construction")
                 
         
-        construct_cube()
+        
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
