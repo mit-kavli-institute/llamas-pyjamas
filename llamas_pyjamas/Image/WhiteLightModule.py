@@ -503,7 +503,7 @@ def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
     except:
         return(-1,-1)
 
-def plot_fibermap()-> None:
+def plot_fibermap(outpath: str)-> None:
     """
     Plots the fiber map for the LLAMAS IFU, showing the mapping of fibers to different configurations.
     This function generates a plot with the fiber numbers annotated at their respective positions for 
@@ -619,7 +619,7 @@ def plot_fibermap()-> None:
     plt.title("LLAMAS IFU Fiber to slit / FITS extension mapping (Rev 04)")
 
     plt.tight_layout()
-    fig.savefig("/Users/simcoe/Desktop/fiber_revA.png", dpi=600)
+    fig.savefig(outpath, dpi=600)
     plt.show()
 
 
@@ -1177,3 +1177,177 @@ def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None,
         plt.show()
     
     return hex_grid
+
+
+
+
+def plot_spaxelmap(outpath: str)-> None:
+    """
+    Plots the fiber map for the LLAMAS IFU in arcseconds, showing the hexagonal spaxel layout.
+    
+    This function generates a plot with hexagonal patches representing each fiber position for 
+    different configurations (1A, 2A, 3A, 4A, 1B, 2B, 3B, 4B). The positions are scaled by the 
+    spatial pitch of 0.75" to create a spaxel map with physical units. It also includes directional 
+    annotations (N for North, E for East) and saves the plot as an image file.
+    
+    Color coding:
+    - Fibers in configuration 1A are plotted in black
+    - Fibers in configuration 3A are plotted in red
+    - Fibers in configuration 4B are plotted in purple
+    - Fibers in configuration 2B are plotted in orange
+    - Fibers in configuration 2A are plotted in blue
+    - Fibers in configuration 4A are plotted in green
+    - Fibers in configuration 3B are plotted in cyan
+    - Fibers in configuration 1B are plotted in magenta
+    
+    The plot is saved as a high-resolution image in the specified path.
+    
+    Returns:
+        None
+    """
+    import matplotlib.patches as mpatches
+    
+    # Spatial pitch in arcseconds
+    SPAXEL_PITCH = 0.75
+    
+    # Size of hexagon (radius to vertex)
+    HEX_SIZE = 0.4 * SPAXEL_PITCH
+    
+    # Configuration colors
+    colors = {
+        '1A': 'black',
+        '3A': 'red',
+        '4B': 'purple',
+        '2B': 'orange',
+        '2A': 'blue',
+        '4A': 'green',
+        '3B': 'cyan',
+        '1B': 'magenta'
+    }
+    
+    # 1A - N=298
+    # 2A - N=300
+    # 3A - all fibers fine (N=298)
+    # 4A - all fibers fine (N=300)
+    # 4B - all fibers fine (N=298)
+    # 3B - all fibers fine (N=300)
+    # 2B - fiber 49 (zero index) is broken / dead (N=297 good + 1 dead)
+    # 1B - all fibers fine (N=300)
+    
+    fig, ax = plt.subplots(1, figsize=(12, 8))
+    fibernum_a = np.arange(298)
+    fibernum_b = np.arange(300)
+    
+    # Create legend handles
+    legend_handles = []
+    
+    # Plot fibers for configurations with 298 fibers
+    for config in ['1A', '3A', '4B', '2B']:
+        for fiber in fibernum_a:
+            x, y = FiberMap_LUT(config, int(fiber))
+            # Convert to arcseconds
+            x_arcsec, y_arcsec = x * SPAXEL_PITCH, y * SPAXEL_PITCH
+            
+            # Create and add hexagon patch
+            hex_patch = mpatches.RegularPolygon(
+                (x_arcsec, y_arcsec),  # center coordinates
+                numVertices=6,         # hexagon
+                radius=HEX_SIZE,       # size
+                orientation=0,         # flat top
+                facecolor='none',      # transparent fill
+                edgecolor=colors[config],
+                linewidth=0.5,
+                alpha=0.7
+            )
+            ax.add_patch(hex_patch)
+        
+        # Add to legend
+        legend_handles.append(mpatches.Patch(color=colors[config], label=config))
+    
+    # Plot fibers for configurations with 300 fibers
+    for config in ['2A', '4A', '3B', '1B']:
+        for fiber in fibernum_b:
+            x, y = FiberMap_LUT(config, int(fiber))
+            # Convert to arcseconds
+            x_arcsec, y_arcsec = x * SPAXEL_PITCH, y * SPAXEL_PITCH
+            
+            # Create and add hexagon patch
+            hex_patch = mpatches.RegularPolygon(
+                (x_arcsec, y_arcsec),  # center coordinates
+                numVertices=6,         # hexagon
+                radius=HEX_SIZE,       # size
+                orientation=0,         # flat top
+                facecolor='none',      # transparent fill
+                edgecolor=colors[config],
+                linewidth=0.5,
+                alpha=0.7
+            )
+            ax.add_patch(hex_patch)
+        
+        # Add to legend
+        legend_handles.append(mpatches.Patch(color=colors[config], label=config))
+    
+    # Adjust axis limits to reflect the new scale
+    ax.set_xlim(-2 * SPAXEL_PITCH, 75 * SPAXEL_PITCH)
+    ax.set_ylim(-2 * SPAXEL_PITCH, 47 * SPAXEL_PITCH)
+    ax.set_aspect('equal')
+    
+    # Add axis labels
+    ax.set_xlabel('Arcseconds')
+    ax.set_ylabel('Arcseconds')
+    
+    # Add legend
+    ax.legend(handles=legend_handles, loc='upper right', framealpha=0.7)
+    
+    # Extension labels - scale positions by spatial pitch
+    fs = 8
+    ax.text(52.25 * SPAXEL_PITCH, 40.5 * SPAXEL_PITCH, "R-1", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 39.5 * SPAXEL_PITCH, "G-2", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 38.5 * SPAXEL_PITCH, "B-3", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 35.5 * SPAXEL_PITCH, "R-7", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 34.5 * SPAXEL_PITCH, "G-8", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 33.5 * SPAXEL_PITCH, "B-9", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 30.5 * SPAXEL_PITCH, "R-13", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 29.5 * SPAXEL_PITCH, "G-14", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 28.5 * SPAXEL_PITCH, "B-15", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 25.5 * SPAXEL_PITCH, "R-19", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 24.5 * SPAXEL_PITCH, "G-20", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 23.5 * SPAXEL_PITCH, "B-21", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 3.5 * SPAXEL_PITCH, "R-4", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 2.5 * SPAXEL_PITCH, "G-5", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 1.5 * SPAXEL_PITCH, "B-6", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 8.5 * SPAXEL_PITCH, "R-10", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 7.5 * SPAXEL_PITCH, "G-11", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 6.5 * SPAXEL_PITCH, "B-12", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 13.5 * SPAXEL_PITCH, "R-16", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 12.5 * SPAXEL_PITCH, "G-17", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 11.5 * SPAXEL_PITCH, "B-18", fontsize=fs)
+
+    ax.text(52.25 * SPAXEL_PITCH, 18.5 * SPAXEL_PITCH, "R-22", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 17.5 * SPAXEL_PITCH, "G-23", fontsize=fs)
+    ax.text(52.25 * SPAXEL_PITCH, 16.5 * SPAXEL_PITCH, "B-24", fontsize=fs)
+
+    # Direction arrows - scale positions by spatial pitch
+    ax.annotate('', xy=(73 * SPAXEL_PITCH, 20 * SPAXEL_PITCH), 
+                xytext=(60 * SPAXEL_PITCH, 20 * SPAXEL_PITCH),
+                arrowprops=dict(facecolor='blue', edgecolor='blue', arrowstyle='->', lw=2))
+
+    ax.annotate('', xy=(60 * SPAXEL_PITCH, 25 * SPAXEL_PITCH), 
+                xytext=(60 * SPAXEL_PITCH, 20 * SPAXEL_PITCH),
+                arrowprops=dict(facecolor='blue', edgecolor='blue', arrowstyle='->', lw=2))
+    
+    ax.text(71 * SPAXEL_PITCH, 15.5 * SPAXEL_PITCH, "N", fontsize=12)
+    ax.text(60 * SPAXEL_PITCH, 27 * SPAXEL_PITCH, "E", fontsize=12)
+
+    # Update title to reflect physical units
+    plt.title("LLAMAS IFU Hexagonal Spaxel Map (0.75\"/spaxel)")
+
+    plt.tight_layout()
+    fig.savefig(outpath, dpi=600)
+    plt.show()
