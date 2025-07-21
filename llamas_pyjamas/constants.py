@@ -33,3 +33,29 @@ idx_lookup = {
    
 }
 
+gain_noise_lookup ={
+    ("red", "1", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "1", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "1", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "1", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "1", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "1", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "2", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "2", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "2", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "2", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "2", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "2", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "3", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "3", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "3", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "3", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "3", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "3", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "4", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "4", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "4", "A"): {'noise': 2.4, 'gain': 1.25},
+    ("red", "4", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("green", "4", "B"): {'noise': 2.4, 'gain': 1.25},
+    ("blue", "4", "B"): {'noise': 2.4, 'gain': 1.25}
+}
