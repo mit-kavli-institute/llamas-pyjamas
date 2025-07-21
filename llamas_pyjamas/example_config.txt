@@ -1,8 +1,7 @@
 #### This is a template configuration file to run the LLAMAS pipeline
-#Its main purpose is to allow users to point to the files and directories that they
-#wish to use for their data reduction
+#Its main purpose is to allow users to point to the files and directories that they wish to use for their data reduction
 #The paths must be given as complete paths to ensure they can be found
-#if files cannot be found or processed then the pipeline defaults to the master calibration files
+#if files cannot be found or processed correctly then the pipeline defaults to the master calibration files
 
 bias_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMAS_2025-05-22T23_00_33.152_mef.fits
 #example of a list of bias files to combine into a median master bias
@@ -12,12 +11,17 @@ bias_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMA
 red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_34_47.516_mef.fits
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 blue_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
-arc_file = 
 
 #science files to reduce
 science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMAS_2025-05-23T00_51_25.019_mef.fits
 
+#example of a list of science files to batch process
+#science_files = path/to/file1.fits, path/to/file2.fits, path/to/file3.fits
+
 #optional output directories for the trace generation and extraction files
+#If these directories do not already exist they will be created at the time of processing
+
 trace_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/traces
 extraction_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/extractions
+cube_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/cubes
 
