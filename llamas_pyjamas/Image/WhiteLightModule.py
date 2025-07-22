@@ -747,12 +747,16 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
         side = trace_obj.side
         channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
         
+        #attempt to handle dead fibers
+        dead_fibers = trace_obj.dead_fibers if hasattr(trace_obj, 'dead_fibers') else []
+
         # Process each fiber
         for ifib in range(trace_obj.nfibers):
             # Get fiber mask from the trace object
             fiber_mask = trace_obj.fiberimg == ifib
-            
-            if not np.any(fiber_mask):
+
+            if not np.any(fiber_mask) or ifib in dead_fibers:
+                logger.info(f'Skipping fiber {ifib} on bench {bench}{side}')
                 continue  # Skip if no pixels for this fiber
             
             # Get bench-side identifier
