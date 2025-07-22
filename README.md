@@ -31,7 +31,7 @@ Run the command `pip install -e .` to begin the installation process. **Some add
 
 ### Auxiliary Files
 
-To run the current pipeline, please download the mastercalib folder from this location and have the folder located within the llamas_pyjamas subfolder: https://mit-kavli.box.com/s/sbgfzlse3kjma0vakybhm2wbovi29klm
+To run the current pipeline, please download the mastercalib folder from this location and have the folder located within the llamas_pyjamas subfolder: https://mit-kavli.box.com/s/bath5hhtjqsn3m89l7579u1ev4rk2xjo
 
 You will also need to download the combined_bias.fits file and keep a copy within both llamas_pyjamas and the Bias subfolder to run the Quicklook GUI.
 
