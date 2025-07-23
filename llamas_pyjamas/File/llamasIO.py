@@ -264,3 +264,53 @@ def process_fits_by_color(fits_file):
     except Exception as e:
         print(f"Error processing FITS file: {e}")
         return None  
+    
+    
+    
+### Function to convert telescope RA and DEC into decimeral degrees for the FITS header
+def update_ra_dec_in_header(header, save_to_file=None) -> fits.Header:
+    """
+    Extract RA and DEC from HIERARCH TEL RA and HIERARCH TEL DEC in a FITS header,
+    convert them to decimal degrees, and update the header's RA and DEC keywords.
+    Only updates if RA and DEC are not already set.
+    
+    Parameters:
+    header (astropy.io.fits.Header): The FITS header to process
+    save_to_file (str, optional): Path to FITS file to update with the new header
+    
+    Returns:
+    astropy.io.fits.Header: The updated header
+    """
+    from astropy.coordinates import SkyCoord
+    
+    # Check if RA and DEC are already set
+    if 'RA' in header and 'DEC' in header:
+        # If RA and DEC values already exist, no change needed
+        return header
+    
+    # Check if the telescope coordinates exist in the header
+    if 'HIERARCH TEL RA' in header and 'HIERARCH TEL DEC' in header:
+        # Extract sexagesimal coordinates
+        ra_sex = header['HIERARCH TEL RA']
+        dec_sex = header['HIERARCH TEL DEC']
+        
+        # Convert to decimal degrees
+        coord = SkyCoord(ra_sex, dec_sex, unit=('hourangle', 'deg'))
+        ra_decimal = coord.ra.deg
+        dec_decimal = coord.dec.deg
+        
+        # Update the header with decimal values
+        header['RA'] = ra_decimal
+        header['DEC'] = dec_decimal
+        
+        # Add a comment to indicate the conversion
+        header.comments['RA'] = 'Decimal degrees, converted from HIERARCH TEL RA'
+        header.comments['DEC'] = 'Decimal degrees, converted from HIERARCH TEL DEC'
+    
+    # If a file path is provided, update the primary header in that file
+    if save_to_file:
+        with fits.open(save_to_file, mode='update') as hdul:
+            hdul[0].header = header
+            hdul.flush()
+    
+    return header
