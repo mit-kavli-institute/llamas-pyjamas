@@ -122,3 +122,49 @@ class LlamasFlatFielding():
 
         return outputname
         
+class Thresholding():
+
+    def __init__(self, file: str, channel: str) -> None:
+        self.file = file
+        self.channel = channel
+
+        return None
+    
+    def extract_flat_field(self):
+        
+        return
+    
+    def fit_bspline(self):
+        """Fit a B-spline to the flat field data."""
+        return self.fibre_bsplines
+    
+    
+    def calculate_pixel_thresholds(self):
+        """Calculate pixel thresholds for flat fielding.
+
+        This method calculates the pixel thresholds based on the flat field data
+        and returns the threshold values.
+
+        Returns:
+            list: List of threshold values for each pixel.
+        """
+        # Placeholder for actual threshold calculation logic
+        # This should be replaced with the actual implementation
+        return thresholds
+    
+    
+    def apply_thresholds(self, thresholds: list):
+        """Apply calculated thresholds to the flat field data.
+
+        This method applies the provided thresholds to the flat field data,
+        modifying the data in place or returning a new modified dataset.
+
+        Args:
+            thresholds (list): List of threshold values to apply.
+
+        Returns:
+            None: The method modifies the flat field data in place.
+        """
+        # Placeholder for actual threshold application logic
+        # This should be replaced with the actual implementation
+        pass
