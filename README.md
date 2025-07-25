@@ -39,6 +39,7 @@ Secondly, **download the wavelength solution file and place it in the LUT subfol
 
 The final structure of your repo should look like this to run both the reduction script and the Quick Look GUI:
 
+```
 llamas-pyjamas/
 └── llamas_pyjamas/
     │   └── combined_bias.fits
@@ -64,7 +65,7 @@ llamas-pyjamas/
     ├── Trace/
     ├── Tutorials/
     └── Utils/
-
+```
 ### Reduction script
 
 To perform an end-to-end reduction of your data, use the example_config.txt file as guidance to construct your own configuration file. 
