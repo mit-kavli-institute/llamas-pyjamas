@@ -38,12 +38,13 @@ You will also need to download the combined_bias.fits file and keep a copy withi
 Secondly, **download the wavelength solution file and place it in the LUT subfolder**, which can be downloaded from here: https://mit-kavli.box.com/s/v4kwlsx02nevnv5nw3p1i58lsxxoowe6
 
 The final structure of your repo should look like this to run both the reduction script and the Quick Look GUI:
+
 llamas-pyjamas/
 └── llamas_pyjamas/
-     │   └── combined_bias.fits
+    │   └── combined_bias.fits
     ├── Arc/
     ├── Bias/
-           │   └── combined_bias.fits
+    │   └── combined_bias.fits
     ├── Cube/
     ├── Docs/
     ├── Extract/
@@ -53,18 +54,16 @@ llamas-pyjamas/
     ├── GUI/
     ├── Image/
     ├── LUT/
-         │   └── LLAMAS_reference_arc.pkl
+    │   └── LLAMAS_reference_arc.pkl
     ├── mastercalib/
-       │   └── combined_bias.fits
-       │   └── LLAMAS*trace.pkl files
+    │   └── combined_bias.fits
+    │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
     ├── reduced/
     ├── Trace/
     ├── Tutorials/
-    ├── Utils/
-
-
+    └── Utils/
 
 ### Reduction script
 
