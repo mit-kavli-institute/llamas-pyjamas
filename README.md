@@ -61,7 +61,7 @@ llamas-pyjamas/
     │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
-    ├── reduced/
+    ├── example_config.txt
     ├── Trace/
     ├── Tutorials/
     └── Utils/
