@@ -31,9 +31,40 @@ Run the command `pip install -e .` to begin the installation process. **Some add
 
 ### Auxiliary Files
 
-To run the current pipeline, please download the mastercalib folder from this location and have the folder located within the llamas_pyjamas subfolder: https://mit-kavli.box.com/s/bath5hhtjqsn3m89l7579u1ev4rk2xjo
+To run the current pipeline, two steps are required. First, **please download the mastercalib files from this location and have them in a folder names 'mastercalib' located within the llamas_pyjamas subfolder**: https://mit-kavli.box.com/s/bath5hhtjqsn3m89l7579u1ev4rk2xjo
 
 You will also need to download the combined_bias.fits file and keep a copy within both llamas_pyjamas and the Bias subfolder to run the Quicklook GUI.
+
+Secondly, **download the wavelength solution file and place it in the LUT subfolder**, which can be downloaded from here: https://mit-kavli.box.com/s/v4kwlsx02nevnv5nw3p1i58lsxxoowe6
+
+The final structure of your repo should look like this to run both the reduction script and the Quick Look GUI:
+llamas-pyjamas/
+└── llamas_pyjamas/
+     │   └── combined_bias.fits
+    ├── Arc/
+    ├── Bias/
+           │   └── combined_bias.fits
+    ├── Cube/
+    ├── Docs/
+    ├── Extract/
+    ├── File/
+    ├── Flat/
+    ├── Flux/
+    ├── GUI/
+    ├── Image/
+    ├── LUT/
+         │   └── LLAMAS_reference_arc.pkl
+    ├── mastercalib/
+       │   └── combined_bias.fits
+       │   └── LLAMAS*trace.pkl files
+    ├── Postprocessing/
+    ├── QA/
+    ├── reduced/
+    ├── Trace/
+    ├── Tutorials/
+    ├── Utils/
+
+
 
 ### Reduction script
 
