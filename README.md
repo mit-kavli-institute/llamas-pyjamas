@@ -8,9 +8,11 @@ THIS IS AN IN-PROGRESS DEVELOPMENT PIPELINE.  IT IS MADE AVAILABLE TO THE PUBLIC
 FOR OBSERVATION PLANNING AND EXECUTION, BUT NO WARRANTY IS MADE REGARDING INSTALLATION OR 
 EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
-Users of this pipeline are requested to cite Hughes et al. (in prep).
+**Users of this pipeline are requested to cite Hughes et al. (in prep)**.
 
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
+
+**If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
