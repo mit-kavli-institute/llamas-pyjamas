@@ -4,6 +4,7 @@ from astropy.io import fits
 import numpy as np
 
 def subtract_fits(file1, file2, output_file):
+    ## From the github repo 
     # Open the two FITS files
     hdulist1 = fits.open(file1)
     hdulist2 = fits.open(file2)
@@ -25,7 +26,7 @@ def subtract_fits(file1, file2, output_file):
             if hdu1.data.shape != hdu2.data.shape:
                 print(f"Error: Data shape mismatch in HDU {i}: {hdu1.data.shape} vs {hdu2.data.shape}")
                 sys.exit(1)
-            diff_data = hdu1.data - hdu2.data
+            diff_data = hdu1.data.astype(np.float64) - hdu2.data.astype(np.float64)
             new_hdu = fits.PrimaryHDU(data=diff_data, header=hdu1.header) if i == 0 else fits.ImageHDU(data=diff_data, header=hdu1.header)
         elif hdu1.data.dtype.names is not None:
             # This is a table HDU
