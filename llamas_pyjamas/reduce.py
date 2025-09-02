@@ -264,6 +264,7 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
     
+    os.makedirs(os.path.join(extraction_path, 'flats'), exist_ok=True)
     try:
         
         generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
