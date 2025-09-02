@@ -104,7 +104,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     return 
 
 
-def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, custom=None) -> Tuple[List, List]:
+def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None) -> Tuple[List, List]:
     """Produce flat field extractions for each color channel.
 
     :param red_flat: file to use for red channel flat field extraction
@@ -128,10 +128,10 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, cus
 
 
     red_extraction, green_extraction, blue_extraction = None, None, None
-    if custom:
-        red_extraction = os.path.splitext(red_flat)[0] + '_extractions_flat.pkl'
-        green_extraction = os.path.splitext(green_flat)[0] + '_extractions_flat.pkl'
-        blue_extraction = os.path.splitext(blue_flat)[0] + '_extractions_flat.pkl'
+    if outpath:
+        red_extraction = os.path.join(outpath, 'red_extractions_flat.pkl')
+        green_extraction = os.path.join(outpath, 'green_extractions_flat.pkl')
+        blue_extraction = os.path.join(outpath, 'blue_extractions_flat.pkl')
     else:
         red_extraction = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
         green_extraction = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
