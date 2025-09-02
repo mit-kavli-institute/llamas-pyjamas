@@ -231,6 +231,8 @@ def main(config_path):
         
         print(f"Loaded configuration from {config_path}")
     print("Configuration:", config)
+
+
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
