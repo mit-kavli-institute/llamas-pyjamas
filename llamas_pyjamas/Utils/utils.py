@@ -38,7 +38,7 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import pickle
+import cloudpickle
 
 def setup_logger(name, log_filename=None)-> logging.Logger:
     """Setup logger with file and console handlers.
@@ -85,6 +85,41 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     logger.addHandler(console_handler)
     
     return logger
+
+def concat_extractions(pkl_files: list, outfile: str) -> None:
+    """Concatenate multiple pickle files containing extraction data.
+
+    This function reads multiple pickle files, concatenates their contents,
+    and saves the combined data into a new pickle file.
+
+    Args:
+        pkl_files (list): List of paths to pickle files to concatenate.
+        outfile (str): Path to the output pickle file.
+
+    Returns:
+        None
+    """
+
+    assert len(pkl_files) > 0, "No pickle files provided for concatenation."
+
+    combined_data = {'extractions': [], 'metadata': []}
+    
+    for pkl_file in pkl_files:
+        with open(pkl_file, 'rb') as f:
+            data = cloudpickle.load(f)
+            if 'extractions' in data:
+                combined_data['extractions'].extend(data['extractions'])
+            if 'metadata' in data:
+                combined_data['metadata'].extend(data['metadata'])
+    
+    with open(outfile, 'wb') as f:
+        cloudpickle.dump(combined_data, f)
+    
+    return
+
+
+
+
 
 def create_peak_lookup(peaks: list) -> dict:
     """Create lookup table mapping peak index to y position.
