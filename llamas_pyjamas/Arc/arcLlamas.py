@@ -375,17 +375,42 @@ def arcTransfer(scidict, arcdict):
     Returns:
         dict: Updated science dictionary with transferred calibration data.
     """
+    from llamas_pyjamas.constants import idx_lookup
 
     scispec = scidict['extractions']
     arcspec = arcdict['extractions']
 
     # Loop over the extensions
     for fits_ext in range(len(scispec)):
-        # Loop over the fibers
-        for ifiber in range(0,scidict['metadata'][fits_ext]['nfibers']):
+        # Get channel, bench, and side from metadata
+        channel = scidict['metadata'][fits_ext]['channel']
+        bench = str(scidict['metadata'][fits_ext]['bench'])
+        side = scidict['metadata'][fits_ext]['side']
+        
+        key = (channel, bench, side)
+
+        # Use the lookup table to get the correct arc extension index
+        arc_idx = idx_lookup[key]
+        
+        # Get number of fibers in both science and arc spectra
+        sci_nfibers = scidict['metadata'][fits_ext]['nfibers']
+        arc_nfibers = arcdict['metadata'][arc_idx]['nfibers']
+        if sci_nfibers != arc_nfibers:
+            print(f"Warning: Number of fibers mismatch for {key} - Science: {sci_nfibers}, Arc: {arc_nfibers}")
+            ### add in comparison of metadata here as I need to check the index matching is correct with the new fix
+
+        # Use the minimum number of fibers to avoid index errors
+        min_nfibers = min(sci_nfibers, arc_nfibers)
+        
+        if sci_nfibers != arc_nfibers:
+            print(f"Warning: Number of fibers mismatch for {key} - Science: {sci_nfibers}, Arc: {arc_nfibers}")
+            print(f"Using the first {min_nfibers} fibers for calibration transfer")
+        
+        # Loop over the fibers (only up to the minimum number present in both)
+        for ifiber in range(min_nfibers):
             x = scispec[fits_ext].xshift[ifiber,:]
-            scispec[fits_ext].wave[ifiber,:] = arcspec[fits_ext].wave[ifiber,:]
-            scispec[fits_ext].xshift[ifiber,:] = arcspec[fits_ext].xshift[ifiber,:]
-            scispec[fits_ext].relative_throughput[ifiber] = arcspec[fits_ext].relative_throughput[ifiber]
+            scispec[fits_ext].wave[ifiber,:] = arcspec[arc_idx].wave[ifiber,:]
+            scispec[fits_ext].xshift[ifiber,:] = arcspec[arc_idx].xshift[ifiber,:]
+            scispec[fits_ext].relative_throughput[ifiber] = arcspec[arc_idx].relative_throughput[ifiber]
 
     return(scidict)
