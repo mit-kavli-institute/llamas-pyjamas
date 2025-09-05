@@ -1,0 +1,301 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.QA package &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.QA package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/llamas_pyjamas.QA.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="llamas-pyjamas-qa-package">
+<h1>llamas_pyjamas.QA package<a class="headerlink" href="#llamas-pyjamas-qa-package" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-llamas_pyjamas.QA.llamasQA">
+<span id="llamas-pyjamas-qa-llamasqa-module"></span><h2>llamas_pyjamas.QA.llamasQA module<a class="headerlink" href="#module-llamas_pyjamas.QA.llamasQA" title="Link to this heading"></a></h2>
+<p>This module provides various functions for plotting and analyzing data related to the llamas_pyjamas pipeline
+using FITS files and matplotlib for visualization. It includes functions to plot images in DS9,
+generate QA plots for fiber tracing, plot combined templates, and compare combs between different
+channels and bench sides.</p>
+<dl class="simple">
+<dt>Functions:</dt><dd><dl class="simple">
+<dt>plot_ds9(image_array: fits, samp=False) -&gt; None:</dt><dd><p>Plots a FITS image array in DS9, with optional SAMP integration.</p>
+</dd>
+<dt>plot_trace_qa(trace_obj, save_dir=None):</dt><dd><p>Plots QA for fiber tracing, including individual fiber profiles.</p>
+</dd>
+<dt>plot_comb_template(fitsfile, channel):</dt><dd><p>Plots combined templates for a specified channel from a FITS file.</p>
+</dd>
+<dt>plot_master_comb(channel):</dt><dd><p>Plots master combs for a specified channel using data from a lookup table.</p>
+</dd>
+<dt>compare_combs(channel1, benchside1, channel2, benchside2):</dt><dd><p>Compares combs between two specified channels and bench sides.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_ds9">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_ds9</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image_array:</span> <span class="pre">&lt;module</span> <span class="pre">'astropy.io.fits'</span> <span class="pre">from</span> <span class="pre">'/Users/slhughes/anaconda3/envs/llamas_data_reduction/lib/python3.12/site-packages/astropy/io/fits/__init__.py'&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">samp=False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_ds9"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_ds9" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_trace_qa">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_trace_qa</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trace_obj</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas" title="llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas"><span class="pre">TraceLlamas</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_trace_qa"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_trace_qa" title="Link to this definition"></a></dt>
+<dd><p>Plot QA for fiber tracing</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_pkl_combs">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_pkl_combs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">channel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_pkl_combs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_pkl_combs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_comb_template">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_comb_template</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fitsfile</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">channel</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_comb_template"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_comb_template" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_master_comb">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_master_comb</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">channel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_master_comb"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_master_comb" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.compare_combs">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">compare_combs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">channel1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">benchside1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">channel2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">benchside2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#compare_combs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.compare_combs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_trace">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_trace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">traceobj</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas" title="llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas"><span class="pre">TraceLlamas</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_trace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_trace" title="Link to this definition"></a></dt>
+<dd><p>Plots the trace data from a given trace object.
+Parameters:
+traceobj (object): An object containing trace data. It should have the following attributes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>tracearr (numpy.ndarray): A 2D array where each row represents a trace.</p></li>
+<li><p>xtracefit (numpy.ndarray): A 2D array where the first row represents the x-coordinates for the trace.</p></li>
+<li><p>traces (list or numpy.ndarray): A list or array of traces to be plotted.</p></li>
+</ul>
+</div></blockquote>
+<p>The function iterates over each trace in tracearr, plots the y-coordinates against the x-coordinates,
+and attempts to plot an additional trace using the traces attribute. If an error occurs during plotting,
+it prints an error message with the index of the trace that caused the error.
+The plot is displayed using plt.show() at the end.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_traces_on_image">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_traces_on_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">traceobj</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas" title="llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas"><span class="pre">TraceLlamas</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.3)"><span class="pre">ndarray</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">zscale</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_traces_on_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_traces_on_image" title="Link to this definition"></a></dt>
+<dd><p>Plot traces overlaid on raw data with optional zscale.</p>
+<section id="parameters">
+<h3>Parameters:<a class="headerlink" href="#parameters" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>traceobj<span class="classifier">object</span></dt><dd><p>An object containing trace information. It should have the following attributes:
+- tracearr: A 2D numpy array where each row represents a fiber trace.
+- xtracefit: A 2D numpy array containing the x-coordinates for the trace fits.
+- traces: A list or array of trace lines.
+- channel: A string representing the channel information.
+- bench: A string representing the bench information.
+- side: A string representing the side information.</p>
+</dd>
+<dt>data<span class="classifier">numpy.ndarray</span></dt><dd><p>A 2D array representing the raw data image on which the traces will be overlaid.</p>
+</dd>
+<dt>zscale<span class="classifier">bool, optional</span></dt><dd><p>If True, apply zscale to the image data for better contrast. Default is False.</p>
+</dd>
+</dl>
+</section>
+<section id="returns">
+<h3>Returns:<a class="headerlink" href="#returns" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>None</dt><dd><p>This function does not return any value. It displays a plot with the traces overlaid on the raw data.</p>
+</dd>
+</dl>
+</section>
+<section id="notes">
+<h3>Notes:<a class="headerlink" href="#notes" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p>The function uses matplotlib for plotting and astropy.visualization for zscale interval.</p></li>
+<li><p>Each trace is plotted with a unique color from the viridis colormap.</p></li>
+<li><p>A vertical red dashed line is plotted at the midpoint of the image.</p></li>
+<li><p>Trace indices are annotated next to the red vertical line.</p></li>
+<li><p>If an error occurs while plotting a trace line, the error is printed and the plotting stops.</p></li>
+</ul>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_fiber_masks_on_image">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_fiber_masks_on_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">traceobj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zscale</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_fiber_masks_on_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_fiber_masks_on_image" title="Link to this definition"></a></dt>
+<dd><p>Plot fiber masks overlaid on raw data with optional zscale</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_fiber_trace">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_fiber_trace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdu_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ifiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">figsize</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(15,</span> <span class="pre">10)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_fiber_trace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_fiber_trace" title="Link to this definition"></a></dt>
+<dd><p>Plot a single fiber trace to check how well it masks the data.</p>
+<section id="id1">
+<h3>Parameters:<a class="headerlink" href="#id1" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>hdu_data<span class="classifier">np.ndarray</span></dt><dd><p>The raw 2D spectral data</p>
+</dd>
+<dt>trace<span class="classifier">TraceLlamas</span></dt><dd><p>The trace object containing profile information</p>
+</dd>
+<dt>ifiber<span class="classifier">int</span></dt><dd><p>Fiber index to visualize</p>
+</dd>
+<dt>figsize<span class="classifier">tuple</span></dt><dd><p>Figure size for the plot</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.plot_fiber_trace_with_residuals">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">plot_fiber_trace_with_residuals</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdu_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ifiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">figsize</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(15,</span> <span class="pre">15)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_fiber_trace_with_residuals"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.plot_fiber_trace_with_residuals" title="Link to this definition"></a></dt>
+<dd><p>Plot a single fiber trace with residuals to check how well it masks the data.</p>
+<section id="id2">
+<h3>Parameters:<a class="headerlink" href="#id2" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>hdu_data<span class="classifier">np.ndarray</span></dt><dd><p>The raw 2D spectral data</p>
+</dd>
+<dt>trace<span class="classifier">TraceLlamas</span></dt><dd><p>The trace object containing profile information</p>
+</dd>
+<dt>ifiber<span class="classifier">int</span></dt><dd><p>Fiber index to visualize</p>
+</dd>
+<dt>figsize<span class="classifier">tuple</span></dt><dd><p>Figure size for the plot</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.llamasQA.analyze_psf_width">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.llamasQA.</span></span><span class="sig-name descname"><span class="pre">analyze_psf_width</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdu_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ifiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_samples</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">figsize</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(12,</span> <span class="pre">10)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#analyze_psf_width"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.llamasQA.analyze_psf_width" title="Link to this definition"></a></dt>
+<dd><p>Analyze the PSF width (FWHM) of a fiber and compare to extraction mask width.</p>
+<section id="id3">
+<h3>Parameters:<a class="headerlink" href="#id3" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>hdu_data<span class="classifier">np.ndarray</span></dt><dd><p>The raw 2D spectral data</p>
+</dd>
+<dt>trace<span class="classifier">TraceLlamas</span></dt><dd><p>The trace object containing profile information</p>
+</dd>
+<dt>ifiber<span class="classifier">int</span></dt><dd><p>Fiber index to analyze</p>
+</dd>
+<dt>n_samples<span class="classifier">int</span></dt><dd><p>Number of spectral positions to sample across the detector</p>
+</dd>
+<dt>figsize<span class="classifier">tuple</span></dt><dd><p>Figure size for the plot</p>
+</dd>
+</dl>
+</section>
+<section id="id4">
+<h3>Returns:<a class="headerlink" href="#id4" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>dict</dt><dd><p>Dictionary containing FWHM measurements and mask widths</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+</section>
+<section id="module-llamas_pyjamas.QA">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-llamas_pyjamas.QA" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.QA.plot_ds9">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.QA.</span></span><span class="sig-name descname"><span class="pre">plot_ds9</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image_array:</span> <span class="pre">&lt;module</span> <span class="pre">'astropy.io.fits'</span> <span class="pre">from</span> <span class="pre">'/Users/slhughes/anaconda3/envs/llamas_data_reduction/lib/python3.12/site-packages/astropy/io/fits/__init__.py'&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">samp=False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/llamas_pyjamas/QA/llamasQA.html#plot_ds9"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.QA.plot_ds9" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

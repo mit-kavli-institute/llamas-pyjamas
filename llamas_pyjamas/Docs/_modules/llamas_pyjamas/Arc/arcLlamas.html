@@ -1,0 +1,550 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Arc.arcLlamas &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Arc.arcLlamas</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Arc.arcLlamas</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span>   <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span> <span class="nn">scipy</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">llamas_pyjamas.Extract.extractLlamas</span> <span class="k">as</span> <span class="nn">extract</span>
+<span class="kn">from</span>   <span class="nn">matplotlib</span> <span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">from</span>   <span class="nn">scipy.ndimage</span> <span class="kn">import</span> <span class="n">generic_filter</span>
+<span class="kn">from</span>   <span class="nn">scipy.signal</span> <span class="kn">import</span> <span class="n">correlate</span>
+<span class="kn">from</span>   <span class="nn">astropy.table</span> <span class="kn">import</span> <span class="n">Table</span>
+<span class="kn">import</span> <span class="nn">astropy.units</span> <span class="k">as</span> <span class="nn">u</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span>   <span class="nn">llamas_pyjamas.config</span> <span class="kn">import</span> <span class="n">BASE_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">LUT_DIR</span>
+
+<span class="kn">from</span> <span class="nn">pypeit.core.wavecal.wvutils</span> <span class="kn">import</span> <span class="n">xcorr_shift_stretch</span>
+<span class="kn">from</span> <span class="nn">pypeit.core.wave</span> <span class="kn">import</span> <span class="n">airtovac</span>
+<span class="kn">from</span> <span class="nn">pypeit.core.arc</span> <span class="kn">import</span> <span class="n">detect_peaks</span>
+<span class="kn">from</span> <span class="nn">pypeit</span> <span class="kn">import</span> <span class="n">bspline</span>
+<span class="kn">from</span> <span class="nn">pypeit.core.fitting</span> <span class="kn">import</span> <span class="n">iterfit</span><span class="p">,</span> <span class="n">robust_fit</span> <span class="c1"># type: ignore</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="c1">###############################################################################3</span>
+
+<div class="viewcode-block" id="reidentifyArc">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.reidentifyArc">[docs]</a>
+<span class="k">def</span> <span class="nf">reidentifyArc</span><span class="p">(</span><span class="n">shifted_arc</span><span class="p">,</span> <span class="n">reference_linelist</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span><span class="s1">&#39;llamas_ThAr_ref_arclines.fits&#39;</span><span class="p">)):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Re-identify arc lines using cross-correlation with reference spectrum.</span>
+
+<span class="sd">    This function takes a shifted arc spectrum and re-identifies arc lines by </span>
+<span class="sd">    cross-correlating with a reference spectrum.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shifted_arc: Path to the shifted arc extraction pickle file.</span>
+<span class="sd">        reference_linelist (str, optional): Path to the reference line list FITS file. </span>
+<span class="sd">            Defaults to the LLAMAS ThAr reference line list.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple: A tuple containing the x and y arrays of the processed arc spectrum.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">arcdict</span> <span class="o">=</span> <span class="n">extract</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">shifted_arc</span><span class="p">)</span>
+    <span class="n">arcspec</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+    <span class="n">metadata</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+
+    <span class="n">fits_ext</span> <span class="o">=</span> <span class="mi">18</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">):</span>
+        <span class="n">reference_arc</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span><span class="s1">&#39;llamasr_ThAr_reference.fits&#39;</span><span class="p">)</span>
+        <span class="n">linelist</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">reference_linelist</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+
+    <span class="n">refarc</span> <span class="o">=</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">reference_arc</span><span class="p">)[</span><span class="s1">&#39;ThAr&#39;</span><span class="p">])</span>
+    <span class="n">refarc</span> <span class="o">-=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">refarc</span><span class="p">)</span>
+    <span class="n">thisarc</span> <span class="o">=</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="mi">150</span><span class="p">])</span>
+    <span class="n">thisarc</span> <span class="o">-=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">thisarc</span><span class="p">)</span>
+
+    <span class="n">success</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">stretch</span><span class="p">,</span> <span class="n">stretch2</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> \
+        <span class="n">xcorr_shift_stretch</span><span class="p">(</span><span class="n">thisarc</span><span class="p">,</span> <span class="n">refarc</span><span class="p">,</span> <span class="n">stretch_func</span><span class="o">=</span><span class="s1">&#39;linear&#39;</span><span class="p">)</span>
+        
+<span class="c1">#    for i in range(100,200):</span>
+<span class="c1">#        plt.plot(arcspec[fits_ext].xshift[i],arcspec[fits_ext].counts[i],&#39;.&#39;,markersize=1)</span>
+
+    
+    <span class="n">xin</span> <span class="o">=</span> <span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+    <span class="n">yin</span> <span class="o">=</span> <span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+    <span class="n">indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">xin</span><span class="p">)</span>
+    <span class="n">xin</span> <span class="o">=</span> <span class="n">xin</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+    <span class="n">yin</span> <span class="o">=</span> <span class="n">yin</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+    <span class="n">yin</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">yin</span><span class="p">))]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="c1"># yin = interpolateNaNs(yin)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">xin</span><span class="p">,</span> <span class="n">yin</span><span class="p">,</span> <span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;c&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">yin</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">())</span>
+
+    <span class="n">sset</span> <span class="o">=</span> <span class="n">bspline</span><span class="o">.</span><span class="n">bspline</span><span class="p">(</span><span class="n">xin</span><span class="p">,</span> <span class="n">bkspace</span><span class="o">=</span><span class="mf">1.2</span><span class="p">)</span>
+    <span class="n">res</span><span class="p">,</span> <span class="n">yfit</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">xin</span><span class="p">,</span> <span class="n">yin</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">xin</span><span class="p">)))</span>
+    <span class="n">xmodel</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">4096</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+    <span class="n">ymodel</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="n">xmodel</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">xmodel</span><span class="p">,</span> <span class="n">ymodel</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;b&#39;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">linelist</span><span class="p">[</span><span class="s1">&#39;xpos_fiber150&#39;</span><span class="p">]:</span>
+        <span class="c1"># plt.plot([line+bestlag,line+bestlag],[0,np.max(refarc)],&#39;-&#39;,color=&#39;red&#39;, alpha=0.5)</span>
+        <span class="n">newx</span> <span class="o">=</span> <span class="n">line</span><span class="o">*</span><span class="n">stretch</span><span class="o">+</span><span class="n">shift</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">newx</span><span class="p">,</span><span class="n">newx</span><span class="p">],[</span><span class="mi">0</span><span class="p">,</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">refarc</span><span class="p">)],</span><span class="s1">&#39;-&#39;</span><span class="p">,</span><span class="n">color</span><span class="o">=</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+    <span class="k">return</span><span class="p">(</span><span class="n">xin</span><span class="p">,</span> <span class="n">yin</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># This is a slow but criticla step to calculate the shift an stretch of each fiber</span>
+<span class="c1"># relative to a reference fiber, which fiber #150 in spectrograph 4A, near the </span>
+<span class="c1"># center of the IFU.  </span>
+
+<div class="viewcode-block" id="shiftArcX">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.shiftArcX">[docs]</a>
+<span class="k">def</span> <span class="nf">shiftArcX</span><span class="p">(</span><span class="n">arc_extraction_pickle</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate shift and stretch for each fiber relative to reference fiber.</span>
+
+<span class="sd">    This is a critical step to calculate the shift and stretch of each fiber</span>
+<span class="sd">    relative to a reference fiber (fiber #150 in spectrograph 4A, near the </span>
+<span class="sd">    center of the IFU).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        arc_extraction_pickle (str): Path to the arc extraction pickle file.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: The function modifies the arc extraction object and saves it with </span>
+<span class="sd">            &#39;_shifted.pkl&#39; suffix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">UserWarning</span><span class="p">,</span> <span class="n">module</span><span class="o">=</span><span class="s2">&quot;astropy.stats.sigma_clipping&quot;</span><span class="p">)</span>
+    <span class="n">arcdict</span> <span class="o">=</span> <span class="n">extract</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">arc_extraction_pickle</span><span class="p">)</span>
+    <span class="n">arcspec</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+    <span class="n">metadata</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+
+    <span class="c1"># We will use fiber #150 in spectrograph 4A as the reference (near the center of the IFU)</span>
+    <span class="c1"># This corresponds to extension 18 (red), 19 (green) and 20 (blue) in the arc extraction object</span>
+    <span class="n">red_refspec</span>   <span class="o">=</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="mi">18</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="mi">150</span><span class="p">])</span>
+    <span class="n">green_refspec</span> <span class="o">=</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="mi">19</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="mi">150</span><span class="p">])</span>
+    <span class="n">blue_refspec</span>  <span class="o">=</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="mi">20</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="mi">150</span><span class="p">])</span>
+    
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">2048</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">fits_ext</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">arcspec</span><span class="p">)):</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">):</span>
+            <span class="n">refspec</span> <span class="o">=</span> <span class="n">red_refspec</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">):</span>
+            <span class="n">refspec</span> <span class="o">=</span> <span class="n">green_refspec</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">):</span>
+            <span class="n">refspec</span> <span class="o">=</span> <span class="n">blue_refspec</span>
+
+        <span class="k">for</span> <span class="n">ifiber</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;nfibers&#39;</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Shifting fiber number </span><span class="si">{</span><span class="n">ifiber</span><span class="si">}</span><span class="s2"> in extension </span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;bench&#39;</span><span class="p">]</span><span class="si">}{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;side&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">func</span> <span class="o">=</span> <span class="s1">&#39;quadratic&#39;</span>
+
+            <span class="n">success</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">stretch</span><span class="p">,</span> <span class="n">stretch2</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> \
+                <span class="n">xcorr_shift_stretch</span><span class="p">(</span><span class="n">refspec</span><span class="p">,</span> <span class="n">interpolateNaNs</span><span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]),</span> \
+                                    <span class="n">stretch_func</span><span class="o">=</span><span class="n">func</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">success</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span><span class="o">*</span><span class="n">stretch</span><span class="o">+</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="o">*</span><span class="n">stretch2</span><span class="p">)</span><span class="o">+</span><span class="n">shift</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;....Warning: arc shift failed for this fiber!&quot;</span><span class="p">)</span>
+                <span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">x</span>
+
+    <span class="c1"># Re-save with new information populated</span>
+    <span class="n">sv</span> <span class="o">=</span> <span class="n">arc_extraction_pickle</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.pkl&#39;</span><span class="p">,</span><span class="s1">&#39;_shifted.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extract</span><span class="o">.</span><span class="n">save_extractions</span><span class="p">(</span><span class="n">arcspec</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="n">sv</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="nan_median_filter">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.nan_median_filter">[docs]</a>
+<span class="k">def</span> <span class="nf">nan_median_filter</span><span class="p">(</span><span class="n">input_spectrum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Filter function to compute median while ignoring NaN values.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_spectrum (np.ndarray): Input spectrum array.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        float: Median value of non-NaN elements, or NaN if no valid values exist.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">input_spectrum</span><span class="p">[</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">input_spectrum</span><span class="p">)]</span>  <span class="c1"># Remove NaNs</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="k">if</span> <span class="n">values</span><span class="o">.</span><span class="n">size</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span></div>
+
+
+<div class="viewcode-block" id="interpolateNaNs">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.interpolateNaNs">[docs]</a>
+<span class="k">def</span> <span class="nf">interpolateNaNs</span><span class="p">(</span><span class="n">input_spectrum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Interpolate NaN values in spectrum using median filter.</span>
+
+<span class="sd">    This function replaces NaN values in the input spectrum by applying a </span>
+<span class="sd">    median filter that ignores NaN values.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_spectrum (np.ndarray): Input spectrum array that may contain NaN values.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        np.ndarray: Filtered spectrum with NaN values interpolated.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">array_filtered</span> <span class="o">=</span> <span class="n">generic_filter</span><span class="p">(</span><span class="n">input_spectrum</span><span class="p">,</span> <span class="n">nan_median_filter</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+    <span class="k">return</span><span class="p">(</span><span class="n">array_filtered</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="fiberRelativeThroughput">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.fiberRelativeThroughput">[docs]</a>
+<span class="k">def</span> <span class="nf">fiberRelativeThroughput</span><span class="p">(</span><span class="n">flat_extraction_pickle</span><span class="p">,</span> <span class="n">arc_extraction_pickle</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate relative fiber throughput from flat field observations.</span>
+
+<span class="sd">    This function calculates the relative throughput of each fiber compared to </span>
+<span class="sd">    a reference fiber using flat field observations.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        flat_extraction_pickle (str): Path to the flat field extraction pickle file.</span>
+<span class="sd">        arc_extraction_pickle (str): Path to the arc extraction pickle file.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: The function modifies the arc extraction object and saves it with </span>
+<span class="sd">            &#39;_shifted_tp.pkl&#39; suffix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">flatdict</span> <span class="o">=</span> <span class="n">extract</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">flat_extraction_pickle</span><span class="p">)</span>
+    <span class="n">flatspec</span> <span class="o">=</span> <span class="n">flatdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+    <span class="n">metadata</span> <span class="o">=</span> <span class="n">flatdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+
+    <span class="n">arcdict</span> <span class="o">=</span> <span class="n">extract</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">arc_extraction_pickle</span><span class="p">)</span>
+    <span class="n">arcspec</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+
+    <span class="n">reference_fiber</span> <span class="o">=</span> <span class="mi">150</span>
+
+    <span class="k">for</span> <span class="n">fits_ext</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">arcspec</span><span class="p">)):</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">):</span>
+            <span class="n">ref_ext</span> <span class="o">=</span> <span class="mi">18</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">):</span>
+            <span class="n">ref_ext</span> <span class="o">=</span> <span class="mi">19</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">):</span>
+            <span class="n">ref_ext</span> <span class="o">=</span> <span class="mi">20</span>
+
+        <span class="n">refspec</span> <span class="o">=</span> <span class="n">flatspec</span><span class="p">[</span><span class="n">ref_ext</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">reference_fiber</span><span class="p">]</span>
+        <span class="n">gd</span> <span class="o">=</span> <span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">reference_fiber</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">150</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">reference_fiber</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">2048</span><span class="o">-</span><span class="mi">150</span><span class="p">)</span>
+        <span class="n">reference_flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">refspec</span><span class="p">[</span><span class="n">gd</span><span class="p">])</span>
+
+        <span class="k">for</span> <span class="n">ifiber</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;nfibers&#39;</span><span class="p">]):</span>   
+            <span class="n">spec</span> <span class="o">=</span> <span class="n">flatspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span>
+            <span class="n">gd</span> <span class="o">=</span> <span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">150</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">2048</span><span class="o">-</span><span class="mi">150</span><span class="p">)</span>
+            <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">spec</span><span class="p">[</span><span class="n">gd</span><span class="p">])</span>
+            <span class="n">arcspec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span> <span class="o">=</span> <span class="n">flux</span><span class="o">/</span><span class="n">reference_flux</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;bench&#39;</span><span class="p">]</span><span class="si">}{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;side&#39;</span><span class="p">]</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">}</span><span class="s1"> Fiber #</span><span class="si">{</span><span class="n">ifiber</span><span class="si">}</span><span class="s1">:  Throughput = </span><span class="si">{</span><span class="n">flux</span><span class="o">/</span><span class="n">reference_flux</span><span class="si">:</span><span class="s1">5.3f</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="n">sv</span> <span class="o">=</span> <span class="n">arc_extraction_pickle</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.pkl&#39;</span><span class="p">,</span><span class="s1">&#39;_shifted_tp.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extract</span><span class="o">.</span><span class="n">save_extractions</span><span class="p">(</span><span class="n">arcspec</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="n">sv</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="arcSolve">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.arcSolve">[docs]</a>
+<span class="k">def</span> <span class="nf">arcSolve</span><span class="p">(</span><span class="n">arc_extraction_shifted_pickle</span><span class="p">,</span> <span class="n">autoid</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Solve wavelength calibration from ThAr arc spectra.</span>
+
+<span class="sd">    This function fits wavelength solutions to ThAr arc spectra by identifying </span>
+<span class="sd">    arc lines and fitting polynomial wavelength solutions.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        arc_extraction_shifted_pickle (str): Path to the shifted arc extraction pickle file.</span>
+<span class="sd">        autoid (bool, optional): Whether to use automatic line identification. </span>
+<span class="sd">            Defaults to False.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: The function saves the wavelength solution to &#39;LLAMAS_reference_arc.pkl&#39;.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Loading arc extraction&quot;</span><span class="p">)</span>
+    <span class="n">arcdict</span> <span class="o">=</span> <span class="n">extract</span><span class="o">.</span><span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">arc_extraction_shifted_pickle</span><span class="p">)</span>
+    <span class="n">arcspec_shifted</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Fitting wavelength solution&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">channel</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">]:</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">):</span>
+            <span class="n">test_extension</span> <span class="o">=</span> <span class="mi">18</span>
+            <span class="n">line_table</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;red_peaks.csv&#39;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">):</span>
+            <span class="n">test_extension</span> <span class="o">=</span> <span class="mi">19</span>
+            <span class="n">line_table</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;green_peaks.csv&#39;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">):</span>
+            <span class="n">test_extension</span> <span class="o">=</span> <span class="mi">20</span>
+            <span class="n">line_table</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;blue_peaks.csv&#39;</span><span class="p">))</span>   
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">test_extension</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;bench&#39;</span><span class="p">]</span><span class="si">}{</span><span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;side&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="n">line_table</span> <span class="o">=</span> <span class="n">line_table</span><span class="p">[(</span><span class="n">line_table</span><span class="p">[</span><span class="s1">&#39;Wavelength&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)]</span>
+        <span class="n">initial_arcfit</span> <span class="o">=</span> <span class="n">robust_fit</span><span class="p">(</span><span class="n">line_table</span><span class="p">[</span><span class="s1">&#39;Pixel&#39;</span><span class="p">],</span> <span class="p">(</span><span class="n">airtovac</span><span class="p">(</span><span class="n">line_table</span><span class="p">[</span><span class="s1">&#39;Wavelength&#39;</span><span class="p">]</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">AA</span><span class="p">))</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">function</span><span class="o">=</span><span class="s1">&#39;legendre&#39;</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">lower</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">upper</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">maxdev</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Inital arcfit </span><span class="si">{</span><span class="n">initial_arcfit</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">arc_fitx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+        <span class="n">arc_fitw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+        <span class="n">arc_fity</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+        <span class="n">nfib</span><span class="p">,</span> <span class="n">npix</span> <span class="o">=</span> <span class="n">arcspec_shifted</span><span class="p">[</span><span class="n">test_extension</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="c1"># Normalize out variations in fiber throughput and get ready to fit a bspline</span>
+        <span class="n">arcspec</span> <span class="o">=</span> <span class="n">arcspec_shifted</span><span class="p">[</span><span class="n">test_extension</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">nfib</span><span class="p">):</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">arcspec</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">i</span><span class="p">,:]</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">arcspec</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">i</span><span class="p">,:]</span><span class="o">/</span><span class="n">arcspec</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">yoffset</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+            <span class="n">arc_fitx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arc_fitx</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+            <span class="n">arc_fitw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arc_fitw</span><span class="p">,</span><span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+            <span class="n">arc_fity</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arc_fity</span><span class="p">,</span> <span class="n">y</span><span class="o">-</span><span class="n">yoffset</span><span class="p">)</span>
+        
+        <span class="c1"># Sort before passing to bspline fit</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">arc_fitx</span><span class="p">)</span>
+        <span class="n">arc_fitx</span> <span class="o">=</span> <span class="n">arc_fitx</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+        <span class="n">arc_fity</span> <span class="o">=</span> <span class="n">arc_fity</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+        <span class="n">arc_fitw</span> <span class="o">=</span> <span class="n">arc_fitw</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+
+        <span class="n">saturated</span> <span class="o">=</span> <span class="p">(</span><span class="n">arc_fity</span> <span class="o">&gt;</span> <span class="mi">60000</span><span class="p">)</span>
+        <span class="n">arc_fity</span><span class="p">[</span><span class="n">saturated</span><span class="p">]</span> <span class="o">=</span> <span class="mi">60000</span>
+
+        <span class="c1"># Scatter plot of the raw pixels</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="p">((</span><span class="n">saturated</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">arc_fity</span><span class="p">)))</span>
+
+        <span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">ax1</span><span class="p">,</span> <span class="n">ax2</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span>
+            <span class="n">nrows</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="n">ncols</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span>
+            <span class="n">gridspec_kw</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;height_ratios&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]})</span>
+
+        <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">arc_fitw</span><span class="p">[</span><span class="o">~</span><span class="n">mask</span><span class="p">],</span> <span class="n">arc_fity</span><span class="p">[</span><span class="o">~</span><span class="n">mask</span><span class="p">],</span> <span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">)</span>
+ 
+        <span class="c1"># Fit the bspline model</span>
+        <span class="n">sset</span><span class="p">,</span> <span class="n">outmask</span> <span class="o">=</span> <span class="n">iterfit</span><span class="p">(</span><span class="n">arc_fitx</span><span class="p">[</span><span class="o">~</span><span class="n">mask</span><span class="p">],</span> <span class="n">arc_fity</span><span class="p">[</span><span class="o">~</span><span class="n">mask</span><span class="p">],</span> <span class="n">maxiter</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">kwargs_bspline</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;bkspace&#39;</span><span class="p">:</span><span class="mf">0.5</span><span class="p">})</span>
+
+        <span class="n">xmodel</span> <span class="o">=</span> <span class="o">-</span><span class="mi">60</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">8400</span><span class="p">)</span><span class="o">/</span><span class="mi">4</span>
+        <span class="n">ymodel</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="n">xmodel</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">xmodel</span><span class="p">),</span> <span class="n">ymodel</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+       <span class="c1"># ax1.plot(xmodel, ymodel, color=&#39;r&#39;)</span>
+
+        <span class="n">cont</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">ymodel</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">)</span>
+
+        <span class="n">peaks</span> <span class="o">=</span> <span class="n">detect_peaks</span><span class="p">(</span><span class="n">ymodel</span><span class="o">-</span><span class="n">cont</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">mph</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">mpd</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">pkht</span>  <span class="o">=</span> <span class="n">ymodel</span><span class="p">[</span><span class="n">peaks</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">pk</span> <span class="ow">in</span> <span class="n">peaks</span><span class="p">:</span>
+            <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">xmodel</span><span class="p">[</span><span class="n">pk</span><span class="p">])],</span> <span class="p">[</span><span class="n">ymodel</span><span class="p">[</span><span class="n">pk</span><span class="p">]</span><span class="o">*</span><span class="mf">1.1</span><span class="p">],</span> <span class="s1">&#39;+&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;c&#39;</span><span class="p">)</span>
+            <span class="c1"># ax1.plot([xmodel[pk]], [ymodel[pk]*1.1], &#39;+&#39;, color=&#39;c&#39;)  </span>
+    
+        <span class="n">thar_lines</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span><span class="s1">&#39;ThAr_MagE_lines.dat&#39;</span><span class="p">),</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;ascii.fixed_width&#39;</span><span class="p">)</span>
+        <span class="n">wv_minmax</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;blue&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">3200.0</span><span class="p">,</span><span class="mf">4947.0</span><span class="p">],</span> <span class="s1">&#39;green&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">4570.0</span><span class="p">,</span> <span class="mf">7100.0</span><span class="p">],</span> <span class="s1">&#39;red&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">6570.0</span><span class="p">,</span> <span class="mf">10038.0</span><span class="p">]}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">):</span>
+            <span class="n">thar_lines</span> <span class="o">=</span> <span class="n">thar_lines</span><span class="p">[(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;green&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> 
+                                    <span class="p">(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;green&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">])]</span>     
+        <span class="k">elif</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">):</span>
+            <span class="n">thar_lines</span> <span class="o">=</span> <span class="n">thar_lines</span><span class="p">[(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;blue&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> 
+                                    <span class="p">(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;blue&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">])]</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">channel</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">):</span> 
+            <span class="n">thar_lines</span> <span class="o">=</span> <span class="n">thar_lines</span><span class="p">[(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> 
+                                    <span class="p">(</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">wv_minmax</span><span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">])]</span>
+    
+        <span class="n">final_fitx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+        <span class="n">final_fitwv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+        <span class="k">for</span> <span class="n">pk</span> <span class="ow">in</span> <span class="n">peaks</span><span class="p">:</span>
+            <span class="n">pkwv</span> <span class="o">=</span> <span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">xmodel</span><span class="p">[</span><span class="n">pk</span><span class="p">])</span>
+            <span class="n">thar_match</span> <span class="o">=</span> <span class="n">thar_lines</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">pkwv</span><span class="o">-</span><span class="n">thar_lines</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mf">0.5</span><span class="p">)]</span>
+            <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">thar_match</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">pkwv</span><span class="p">,</span><span class="n">pkwv</span><span class="p">],[</span><span class="o">-</span><span class="mi">200</span><span class="p">,</span><span class="mi">0</span><span class="p">],</span><span class="n">color</span><span class="o">=</span><span class="s1">&#39;b&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+                <span class="n">final_fitx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">,</span> <span class="n">xmodel</span><span class="p">[</span><span class="n">pk</span><span class="p">])</span>
+                <span class="n">final_fitwv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">final_fitwv</span><span class="p">,</span> <span class="n">thar_match</span><span class="p">[</span><span class="s1">&#39;wave&#39;</span><span class="p">])</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">)</span><span class="si">}</span><span class="s2"> lines in the ThAr linelist&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">)</span> <span class="o">==</span><span class="mi">0</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No lines found in ThAr linelist for this channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">final_arcfit</span> <span class="o">=</span> <span class="n">robust_fit</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">,</span> <span class="n">final_fitwv</span><span class="p">,</span> <span class="n">function</span><span class="o">=</span><span class="s1">&#39;legendre&#39;</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">lower</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">upper</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">maxdev</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">thisline</span> <span class="ow">in</span> <span class="n">final_fitwv</span><span class="p">:</span>
+            <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">thisline</span><span class="p">,</span><span class="n">thisline</span><span class="p">],</span> <span class="p">[</span><span class="o">-</span><span class="mi">200</span><span class="p">,</span><span class="mi">0</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.25</span><span class="p">)</span>
+    
+        <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">xmodel</span><span class="p">),</span> <span class="n">ymodel</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+        <span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">initial_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">xmodel</span><span class="p">[</span><span class="n">peaks</span><span class="p">]),</span> <span class="mf">1.1</span><span class="o">*</span><span class="n">ymodel</span><span class="p">[</span><span class="n">peaks</span><span class="p">],</span> <span class="s1">&#39;+&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;c&#39;</span><span class="p">)</span>
+    
+        <span class="n">ax2</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">,</span> <span class="n">final_fitwv</span><span class="o">-</span><span class="n">final_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">),</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="n">rms</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">final_fitwv</span><span class="o">-</span><span class="n">final_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">final_fitx</span><span class="p">))</span>
+        <span class="n">ax2</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">([</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span><span class="mi">2</span><span class="p">])</span>
+        <span class="n">ax2</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;RMS = </span><span class="si">{</span><span class="n">rms</span><span class="si">:</span><span class="s1">.2f</span><span class="si">}</span><span class="s1"> A&#39;</span><span class="p">)</span>
+        <span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="o">-</span><span class="mi">50</span><span class="p">,</span><span class="mi">2050</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+        <span class="c1"># peak_table = Table([xmodel[peaks], ymodel[peaks]])</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Transferring arc solution to all fibers in LLAMAS </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> channels...&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">extension</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">arcspec_shifted</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">extension</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">channel</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">ifiber</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">extension</span><span class="p">][</span><span class="s1">&#39;nfibers&#39;</span><span class="p">]):</span>
+                    <span class="n">x</span> <span class="o">=</span> <span class="n">arcspec_shifted</span><span class="p">[</span><span class="n">extension</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span>
+                    <span class="n">arcspec_shifted</span><span class="p">[</span><span class="n">extension</span><span class="p">]</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">final_arcfit</span><span class="o">.</span><span class="n">eval</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+    <span class="c1"># Save the wavelength solution to disk</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Saving wavelength solution to disk&quot;</span><span class="p">)</span>
+    <span class="n">extract</span><span class="o">.</span><span class="n">save_extractions</span><span class="p">(</span><span class="n">arcspec_shifted</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="s1">&#39;LLAMAS_reference_arc.pkl&#39;</span><span class="p">)</span>
+    <span class="k">return</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="arcTransfer">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Arc.html#llamas_pyjamas.Arc.arcLlamas.arcTransfer">[docs]</a>
+<span class="k">def</span> <span class="nf">arcTransfer</span><span class="p">(</span><span class="n">scidict</span><span class="p">,</span> <span class="n">arcdict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Transfer wavelength calibration from arc to science spectra.</span>
+
+<span class="sd">    This function transfers the wavelength solution, x-shift information, and </span>
+<span class="sd">    relative throughput data from arc calibration spectra to science spectra.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        scidict (dict): Dictionary containing science extraction data.</span>
+<span class="sd">        arcdict (dict): Dictionary containing arc extraction data with wavelength solution.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        dict: Updated science dictionary with transferred calibration data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">llamas_pyjamas.constants</span> <span class="kn">import</span> <span class="n">idx_lookup</span>
+
+    <span class="n">scispec</span> <span class="o">=</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+    <span class="n">arcspec</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+
+    <span class="c1"># Loop over the extensions</span>
+    <span class="k">for</span> <span class="n">fits_ext</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">scispec</span><span class="p">)):</span>
+        <span class="c1"># Get channel, bench, and side from metadata</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span>
+        <span class="n">bench</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;bench&#39;</span><span class="p">])</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;side&#39;</span><span class="p">]</span>
+        
+        <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">bench</span><span class="p">,</span> <span class="n">side</span><span class="p">)</span>
+
+        <span class="c1"># Use the lookup table to get the correct arc extension index</span>
+        <span class="n">arc_idx</span> <span class="o">=</span> <span class="n">idx_lookup</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">-</span><span class="mi">1</span>
+
+        <span class="n">sci_meta_channel</span><span class="p">,</span> <span class="n">sci_meta_bench</span><span class="p">,</span> <span class="n">sci_meta_side</span> <span class="o">=</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">],</span> <span class="nb">str</span><span class="p">(</span><span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;bench&#39;</span><span class="p">]),</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;side&#39;</span><span class="p">]</span>
+        <span class="n">arc_meta_channel</span><span class="p">,</span> <span class="n">arc_meta_bench</span><span class="p">,</span> <span class="n">arc_meta_side</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">arc_idx</span><span class="p">][</span><span class="s1">&#39;channel&#39;</span><span class="p">],</span> <span class="nb">str</span><span class="p">(</span><span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">arc_idx</span><span class="p">][</span><span class="s1">&#39;bench&#39;</span><span class="p">]),</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">arc_idx</span><span class="p">][</span><span class="s1">&#39;side&#39;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">sci_meta_channel</span> <span class="o">!=</span> <span class="n">arc_meta_channel</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">sci_meta_bench</span> <span class="o">!=</span> <span class="n">arc_meta_bench</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">sci_meta_side</span> <span class="o">!=</span> <span class="n">arc_meta_side</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error: Metadata mismatch between science and arc for extension </span><span class="si">{</span><span class="n">fits_ext</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Science metadata: Channel=</span><span class="si">{</span><span class="n">sci_meta_channel</span><span class="si">}</span><span class="s2">, Bench=</span><span class="si">{</span><span class="n">sci_meta_bench</span><span class="si">}</span><span class="s2">, Side=</span><span class="si">{</span><span class="n">sci_meta_side</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Arc metadata: Channel=</span><span class="si">{</span><span class="n">arc_meta_channel</span><span class="si">}</span><span class="s2">, Bench=</span><span class="si">{</span><span class="n">arc_meta_bench</span><span class="si">}</span><span class="s2">, Side=</span><span class="si">{</span><span class="n">arc_meta_side</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        
+        <span class="c1"># Get number of fibers in both science and arc spectra</span>
+        <span class="n">sci_nfibers</span> <span class="o">=</span> <span class="n">scidict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">fits_ext</span><span class="p">][</span><span class="s1">&#39;nfibers&#39;</span><span class="p">]</span>
+        <span class="n">arc_nfibers</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="n">arc_idx</span><span class="p">][</span><span class="s1">&#39;nfibers&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">sci_nfibers</span> <span class="o">!=</span> <span class="n">arc_nfibers</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: Number of fibers mismatch for </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2"> - Science: </span><span class="si">{</span><span class="n">sci_nfibers</span><span class="si">}</span><span class="s2">, Arc: </span><span class="si">{</span><span class="n">arc_nfibers</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="c1">### add in comparison of metadata here as I need to check the index matching is correct with the new fix</span>
+
+        <span class="c1"># Use the minimum number of fibers to avoid index errors</span>
+        <span class="n">min_nfibers</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">sci_nfibers</span><span class="p">,</span> <span class="n">arc_nfibers</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">sci_nfibers</span> <span class="o">!=</span> <span class="n">arc_nfibers</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: Number of fibers mismatch for </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2"> - Science: </span><span class="si">{</span><span class="n">sci_nfibers</span><span class="si">}</span><span class="s2">, Arc: </span><span class="si">{</span><span class="n">arc_nfibers</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using the first </span><span class="si">{</span><span class="n">min_nfibers</span><span class="si">}</span><span class="s2"> fibers for calibration transfer&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Loop over the fibers (only up to the minimum number present in both)</span>
+        <span class="k">for</span> <span class="n">ifiber</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">min_nfibers</span><span class="p">):</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">scispec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span>
+            <span class="n">scispec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">arcspec</span><span class="p">[</span><span class="n">arc_idx</span><span class="p">]</span><span class="o">.</span><span class="n">wave</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span>
+            <span class="n">scispec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">arcspec</span><span class="p">[</span><span class="n">arc_idx</span><span class="p">]</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span>
+            <span class="n">scispec</span><span class="p">[</span><span class="n">fits_ext</span><span class="p">]</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span> <span class="o">=</span> <span class="n">arcspec</span><span class="p">[</span><span class="n">arc_idx</span><span class="p">]</span><span class="o">.</span><span class="n">relative_throughput</span><span class="p">[</span><span class="n">ifiber</span><span class="p">]</span>
+
+    <span class="k">return</span><span class="p">(</span><span class="n">scidict</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
