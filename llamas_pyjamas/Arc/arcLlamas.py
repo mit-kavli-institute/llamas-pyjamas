@@ -390,7 +390,17 @@ def arcTransfer(scidict, arcdict):
         key = (channel, bench, side)
 
         # Use the lookup table to get the correct arc extension index
-        arc_idx = idx_lookup[key]
+        arc_idx = idx_lookup[key] -1
+
+        sci_meta_channel, sci_meta_bench, sci_meta_side = scidict['metadata'][fits_ext]['channel'], str(scidict['metadata'][fits_ext]['bench']), scidict['metadata'][fits_ext]['side']
+        arc_meta_channel, arc_meta_bench, arc_meta_side = arcdict['metadata'][arc_idx]['channel'], str(arcdict['metadata'][arc_idx]['bench']), arcdict['metadata'][arc_idx]['side']
+
+        if (sci_meta_channel != arc_meta_channel) or (sci_meta_bench != arc_meta_bench) or (sci_meta_side != arc_meta_side):
+            print(f"Error: Metadata mismatch between science and arc for extension {fits_ext}")
+            print(f"Science metadata: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}")
+            print(f"Arc metadata: Channel={arc_meta_channel}, Bench={arc_meta_bench}, Side={arc_meta_side}")
+            continue
+
         
         # Get number of fibers in both science and arc spectra
         sci_nfibers = scidict['metadata'][fits_ext]['nfibers']
