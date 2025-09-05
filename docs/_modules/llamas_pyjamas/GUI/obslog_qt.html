@@ -1,0 +1,246 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.GUI.obslog_qt &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.GUI.obslog_qt</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.GUI.obslog_qt</h1><div class="highlight"><pre>
+<span></span><span class="c1"># Form implementation generated from reading ui file &#39;obslog.ui&#39;</span>
+<span class="c1">#</span>
+<span class="c1"># Created by: PyQt6 UI code generator 6.7.1</span>
+<span class="c1">#</span>
+<span class="c1"># WARNING: Any manual changes made to this file will be lost when pyuic6 is</span>
+<span class="c1"># run again.  Do not edit this file unless you know what you are doing.</span>
+
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyQt6</span><span class="w"> </span><span class="kn">import</span> <span class="n">QtCore</span><span class="p">,</span> <span class="n">QtGui</span><span class="p">,</span> <span class="n">QtWidgets</span>
+
+
+<div class="viewcode-block" id="Ui_LLAMASObservingLog">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.obslog_qt.Ui_LLAMASObservingLog">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Ui_LLAMASObservingLog</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+<div class="viewcode-block" id="Ui_LLAMASObservingLog.setupUi">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.obslog_qt.Ui_LLAMASObservingLog.setupUi">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setupUi</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">LLAMASObservingLog</span><span class="p">):</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">)</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setEnabled</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">resize</span><span class="p">(</span><span class="mi">1115</span><span class="p">,</span> <span class="mi">863</span><span class="p">)</span>
+        <span class="n">sizePolicy</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="p">(</span><span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="o">.</span><span class="n">Policy</span><span class="o">.</span><span class="n">Fixed</span><span class="p">,</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="o">.</span><span class="n">Policy</span><span class="o">.</span><span class="n">Fixed</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setHorizontalStretch</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setVerticalStretch</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setHeightForWidth</span><span class="p">(</span><span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">sizePolicy</span><span class="p">()</span><span class="o">.</span><span class="n">hasHeightForWidth</span><span class="p">())</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setSizePolicy</span><span class="p">(</span><span class="n">sizePolicy</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QWidget</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="n">LLAMASObservingLog</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;centralwidget&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidget</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">30</span><span class="p">,</span> <span class="mi">40</span><span class="p">,</span> <span class="mi">1041</span><span class="p">,</span> <span class="mi">201</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;observationTable&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setColumnCount</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setRowCount</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidgetItem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setHorizontalHeaderItem</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">item</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidgetItem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setHorizontalHeaderItem</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">item</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidgetItem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setHorizontalHeaderItem</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">item</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidgetItem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setHorizontalHeaderItem</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">item</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QTableWidgetItem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setHorizontalHeaderItem</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">item</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">verticalHeader</span><span class="p">()</span><span class="o">.</span><span class="n">setVisible</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">verticalHeader</span><span class="p">()</span><span class="o">.</span><span class="n">setDefaultSectionSize</span><span class="p">(</span><span class="mi">35</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refreshButton</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QPushButton</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refreshButton</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">30</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">121</span><span class="p">,</span> <span class="mi">32</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refreshButton</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;refreshButton&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">headerButton</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QPushButton</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">headerButton</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">160</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">131</span><span class="p">,</span> <span class="mi">32</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">headerButton</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;headerButton&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">datapath_label</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QLabel</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">datapath_label</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">30</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">1041</span><span class="p">,</span> <span class="mi">20</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">datapath_label</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;datapath_label&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">quicklookButton</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QPushButton</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">quicklookButton</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">580</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">171</span><span class="p">,</span> <span class="mi">32</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">quicklookButton</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;quicklookButton&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">progressBar</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QProgressBar</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">progressBar</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">770</span><span class="p">,</span> <span class="mi">981</span><span class="p">,</span> <span class="mi">23</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">progressBar</span><span class="o">.</span><span class="n">setProperty</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="mi">24</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">progressBar</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;progressBar&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QWidget</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">30</span><span class="p">,</span> <span class="mi">300</span><span class="p">,</span> <span class="mi">1041</span><span class="p">,</span> <span class="mi">451</span><span class="p">))</span>
+        <span class="n">sizePolicy</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="p">(</span><span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="o">.</span><span class="n">Policy</span><span class="o">.</span><span class="n">MinimumExpanding</span><span class="p">,</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QSizePolicy</span><span class="o">.</span><span class="n">Policy</span><span class="o">.</span><span class="n">MinimumExpanding</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setHorizontalStretch</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setVerticalStretch</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">sizePolicy</span><span class="o">.</span><span class="n">setHeightForWidth</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span><span class="o">.</span><span class="n">sizePolicy</span><span class="p">()</span><span class="o">.</span><span class="n">hasHeightForWidth</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span><span class="o">.</span><span class="n">setSizePolicy</span><span class="p">(</span><span class="n">sizePolicy</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;plotWindow&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotLayout</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QVBoxLayout</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plotWindow</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotLayout</span><span class="o">.</span><span class="n">setContentsMargins</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plotLayout</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;plotLayout&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tcsOffsetButton</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QPushButton</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tcsOffsetButton</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">760</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">141</span><span class="p">,</span> <span class="mi">32</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tcsOffsetButton</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;tcsOffsetButton&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extractButton</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QPushButton</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extractButton</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">320</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">113</span><span class="p">,</span> <span class="mi">32</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extractButton</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;extractButton&quot;</span><span class="p">)</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setCentralWidget</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">centralwidget</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menubar</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QMenuBar</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="n">LLAMASObservingLog</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="o">.</span><span class="n">setGeometry</span><span class="p">(</span><span class="n">QtCore</span><span class="o">.</span><span class="n">QRect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1115</span><span class="p">,</span> <span class="mi">24</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;menubar&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuFile</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QMenu</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuFile</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;menuFile&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuHelp</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QMenu</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuHelp</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;menuHelp&quot;</span><span class="p">)</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setMenuBar</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statusbar</span> <span class="o">=</span> <span class="n">QtWidgets</span><span class="o">.</span><span class="n">QStatusBar</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="n">LLAMASObservingLog</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statusbar</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;statusbar&quot;</span><span class="p">)</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setStatusBar</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">statusbar</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">actionData_Path</span> <span class="o">=</span> <span class="n">QtGui</span><span class="o">.</span><span class="n">QAction</span><span class="p">(</span><span class="n">parent</span><span class="o">=</span><span class="n">LLAMASObservingLog</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">actionData_Path</span><span class="o">.</span><span class="n">setObjectName</span><span class="p">(</span><span class="s2">&quot;actionData_Path&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuFile</span><span class="o">.</span><span class="n">addAction</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">actionData_Path</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="o">.</span><span class="n">addAction</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">menuFile</span><span class="o">.</span><span class="n">menuAction</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menubar</span><span class="o">.</span><span class="n">addAction</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">menuHelp</span><span class="o">.</span><span class="n">menuAction</span><span class="p">())</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">retranslateUi</span><span class="p">(</span><span class="n">LLAMASObservingLog</span><span class="p">)</span>
+        <span class="n">QtCore</span><span class="o">.</span><span class="n">QMetaObject</span><span class="o">.</span><span class="n">connectSlotsByName</span><span class="p">(</span><span class="n">LLAMASObservingLog</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Ui_LLAMASObservingLog.retranslateUi">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.obslog_qt.Ui_LLAMASObservingLog.retranslateUi">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">retranslateUi</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">LLAMASObservingLog</span><span class="p">):</span>
+        <span class="n">_translate</span> <span class="o">=</span> <span class="n">QtCore</span><span class="o">.</span><span class="n">QCoreApplication</span><span class="o">.</span><span class="n">translate</span>
+        <span class="n">LLAMASObservingLog</span><span class="o">.</span><span class="n">setWindowTitle</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;LLAMAS Observing Log&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">setSortingEnabled</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">horizontalHeaderItem</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;File&quot;</span><span class="p">))</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">horizontalHeaderItem</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Object Name&quot;</span><span class="p">))</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">horizontalHeaderItem</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Exptime&quot;</span><span class="p">))</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">horizontalHeaderItem</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;UT Start&quot;</span><span class="p">))</span>
+        <span class="n">item</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observationTable</span><span class="o">.</span><span class="n">horizontalHeaderItem</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Airmass&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refreshButton</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Update List&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">headerButton</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Display Header&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">datapath_label</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Data Path: &quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">quicklookButton</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Display Spectral Image&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tcsOffsetButton</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Offset Telescope&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extractButton</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Extract&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuFile</span><span class="o">.</span><span class="n">setTitle</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;File&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">menuHelp</span><span class="o">.</span><span class="n">setTitle</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Help&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">actionData_Path</span><span class="o">.</span><span class="n">setText</span><span class="p">(</span><span class="n">_translate</span><span class="p">(</span><span class="s2">&quot;LLAMASObservingLog&quot;</span><span class="p">,</span> <span class="s2">&quot;Data Path&quot;</span><span class="p">))</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

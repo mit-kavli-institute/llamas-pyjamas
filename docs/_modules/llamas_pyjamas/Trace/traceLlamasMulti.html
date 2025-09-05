@@ -1,0 +1,1137 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Trace.traceLlamasMulti &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Trace.traceLlamasMulti</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Trace.traceLlamasMulti</h1><div class="highlight"><pre>
+<span></span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Module: traceLlamasMulti</span>
+<span class="sd">This module provides functionality for processing and tracing fibers in LLAMAS FITS files using Ray multiprocessing. </span>
+<span class="sd">It includes classes and methods for detecting peaks, fitting B-splines, and generating fiber profiles.</span>
+<span class="sd">The main class, TraceLlamas, handles the core processing logic, including:</span>
+<span class="sd">- Loading and processing FITS files</span>
+<span class="sd">- Detecting peaks and valleys in the data</span>
+<span class="sd">- Fitting B-splines to the detected features</span>
+<span class="sd">- Generating fiber profiles and bad pixel masks</span>
+<span class="sd">- Saving the processed traces to output files</span>
+<span class="sd">The module relies on a set of master traces already being produced to apply cross-correlation methods of matching the combs. </span>
+<span class="sd">This ensures accurate alignment and tracing of fibers across different channels and bench sides.</span>
+<span class="sd">Classes:</span>
+<span class="sd">- TraceLlamas: Core class for processing and tracing fibers in LLAMAS FITS files.</span>
+<span class="sd">- TraceRay: Subclass of TraceLlamas that integrates Ray for parallel processing.</span>
+<span class="sd">Functions:</span>
+<span class="sd">- run_ray_tracing: Function to initiate Ray-based tracing on a given FITS file.</span>
+<span class="sd">Usage:</span>
+<span class="sd">- The module can be run as a standalone script with command-line arguments to specify the input FITS file and other options.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">scipy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">psutil</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core.arc</span><span class="w"> </span><span class="kn">import</span> <span class="n">detect_peaks</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">pydl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pypeit.core.fitting</span><span class="w"> </span><span class="kn">import</span> <span class="n">iterfit</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">fitting</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pypeit.bspline.bspline</span><span class="w"> </span><span class="kn">import</span> <span class="n">bspline</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span><span class="o">,</span><span class="w"> </span><span class="nn">h5py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ray</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Set</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">multiprocessing</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">cloudpickle</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.signal</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_peaks</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">BASE_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">LUT_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pkg_resources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rpdb</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.File.llamasIO</span><span class="w"> </span><span class="kn">import</span> <span class="n">process_fits_by_color</span>
+
+<span class="c1"># Enable DEBUG for your specific logger</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+
+<span class="c1"># Add timestamp to log filename</span>
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="c1">#logger = setup_logger(__name__, f&#39;traceLlamasMulti_{timestamp}.log&#39;)</span>
+
+
+<div class="viewcode-block" id="get_fiber_position">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.get_fiber_position">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_fiber_position</span><span class="p">(</span><span class="n">channel</span><span class="p">:</span><span class="nb">str</span><span class="p">,</span> <span class="n">benchside</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">fiber</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span> 
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber identifier.</span>
+<span class="sd">    Args:</span>
+<span class="sd">        channel (str): The channel name to look up in the LUT (red, blue or green).</span>
+<span class="sd">        benchside (str): The benchside identifier to look up in the LUT (e.g., &#39;1A&#39;).</span>
+<span class="sd">        fiber (str): The fiber identifier to look up in the LUT.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        int: The position of the specified fiber.</span>
+<span class="sd">    Raises:</span>
+<span class="sd">        FileNotFoundError: If the LUT file does not exist.</span>
+<span class="sd">        KeyError: If the specified channel, benchside, or fiber is not found in the LUT.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">json_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;traceLUT.json&#39;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">json_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    
+    <span class="c1"># Access nested structure: GreenLUT -&gt; 1A -&gt; fiber_number</span>
+    <span class="n">position</span> <span class="o">=</span> <span class="n">lut</span><span class="p">[</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">][</span><span class="nb">str</span><span class="p">(</span><span class="n">fiber</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">position</span></div>
+
+
+
+<div class="viewcode-block" id="cross_correlate_combs">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.cross_correlate_combs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cross_correlate_combs</span><span class="p">(</span><span class="n">comb1</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">comb2</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cross correlate two combs to find the offset between them.&quot;&quot;&quot;</span>
+    <span class="c1"># Normalize combs</span>
+    <span class="n">comb1_norm</span> <span class="o">=</span> <span class="p">(</span><span class="n">comb1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">comb1</span><span class="p">))</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">comb1</span><span class="p">)</span>
+    <span class="n">comb2_norm</span> <span class="o">=</span> <span class="p">(</span><span class="n">comb2</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">comb2</span><span class="p">))</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">comb2</span><span class="p">)</span>
+    <span class="c1"># Calculate cross correlation</span>
+    <span class="n">correlation</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">correlate</span><span class="p">(</span><span class="n">comb1_norm</span><span class="p">,</span> <span class="n">comb2_norm</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;full&#39;</span><span class="p">)</span>
+    <span class="c1"># Find peak of correlation</span>
+    <span class="n">max_corr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">correlation</span><span class="p">)</span>
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">max_corr</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">comb1</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">offset</span><span class="p">,</span> <span class="n">correlation</span></div>
+
+
+
+<div class="viewcode-block" id="TraceLlamas">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TraceLlamas</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A class to trace and process fiber positions in a FITS file.</span>
+<span class="sd">    Attributes:</span>
+<span class="sd">    -----------</span>
+<span class="sd">    fitsfile : str</span>
+<span class="sd">        The path to the FITS file to be processed.</span>
+<span class="sd">    mph : Optional[int]</span>
+<span class="sd">        Minimum peak height for peak detection.</span>
+<span class="sd">    master_trace : Optional[str]</span>
+<span class="sd">        Path to the master trace file.</span>
+<span class="sd">    xmin : int</span>
+<span class="sd">        Minimum x-coordinate for trace fitting.</span>
+<span class="sd">    fitspace : int</span>
+<span class="sd">        Space for fitting.</span>
+<span class="sd">    min_pkheight : int</span>
+<span class="sd">        Minimum peak height for peak detection.</span>
+<span class="sd">    window : int</span>
+<span class="sd">        Window size for median calculation.</span>
+<span class="sd">    offset_cutoff : int</span>
+<span class="sd">        Cutoff for offset in cross-correlation.</span>
+<span class="sd">    Methods:</span>
+<span class="sd">    --------</span>
+<span class="sd">    insert_dead_fibers(LUT, benchside, pkhts):</span>
+<span class="sd">        Inserts dead fibers into the peak heights array.</span>
+<span class="sd">    generate_valleys(tslice: float) -&gt; Tuple[np.ndarray, ...]:</span>
+<span class="sd">        Generates valleys in the given slice.</span>
+<span class="sd">    fit_bspline(valley_indices: np.ndarray, valley_depths: np.ndarray, invvar: np.ndarray) -&gt; Tuple[np.ndarray, ...]:</span>
+<span class="sd">        Fits a B-spline to the given valleys.</span>
+<span class="sd">    fit_grid_single(xtmp) -&gt; Tuple[float, bspline, int, np.ndarray]:</span>
+<span class="sd">        Fits a grid to a single x-window.</span>
+<span class="sd">    find_comb(rownum=None):</span>
+<span class="sd">        Finds the comb for the given row number.</span>
+<span class="sd">    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -&gt; dict:</span>
+<span class="sd">        Processes data from a specific HDU array.</span>
+<span class="sd">    profileFit():</span>
+<span class="sd">        Fits the profile of the fibers.</span>
+<span class="sd">    saveTraces(outfile=&#39;LLAMASTrace.pkl&#39;):</span>
+<span class="sd">        Saves the traces to a file.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> 
+                 <span class="n">fitsfile</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                 <span class="n">mph</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">master_trace</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+                 <span class="p">):</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span> <span class="o">=</span> <span class="n">fitsfile</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mph</span> <span class="o">=</span> <span class="n">mph</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">xmin</span>     <span class="o">=</span> <span class="mi">200</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fitspace</span> <span class="o">=</span> <span class="mi">10</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">min_pkheight</span> <span class="o">=</span> <span class="mi">500</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">window</span> <span class="o">=</span> <span class="mi">11</span> <span class="c1">#can update to 15</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">offset_cutoff</span> <span class="o">=</span> <span class="mi">10</span><span class="c1">#3</span>
+        
+
+        <span class="c1"># 1A    298 (Green) / 298 Blue</span>
+        <span class="c1"># 1B    300 (Green) / 300 Blue</span>
+        <span class="c1"># 2A    299 (Green) / 299 Blue - potentially 2 lost fibers (only found one in comb)</span>
+        <span class="c1"># 2B    297 (Green) / 297 Blue - 1 dead fiber</span>
+        <span class="c1"># 3A    298 (Green) / 298 Blue</span>
+        <span class="c1"># 3B    300 (Green) / 300 Blue</span>
+        <span class="c1"># 4A    300 (Green) / 300 Blue</span>
+
+        <span class="k">return</span>
+    
+<div class="viewcode-block" id="TraceLlamas.insert_dead_fibers">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.insert_dead_fibers">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">insert_dead_fibers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">LUT</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">benchside</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pkhts</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Inserts dead fibers into the peak heights array at the positions specified in the LUT.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        - LUT (dict): Lookup table containing information about dead fibers.</span>
+<span class="sd">        - benchside (str): The benchside identifier to look up dead fibers in the LUT.</span>
+<span class="sd">        - pkhts (np.ndarray): Array of peak heights to insert dead fibers into.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        - np.ndarray: The updated array with dead fibers inserted at the specified positions.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Get dead fibers list for this benchside</span>
+        <span class="n">dead_fibers</span> <span class="o">=</span> <span class="n">LUT</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;dead_fibers&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">benchside</span><span class="p">,</span> <span class="p">[])</span>
+        
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">dead_fibers</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">pkhts</span>  <span class="c1"># Return original array if no dead fibers</span>
+        
+        <span class="c1"># Convert to list for easier insertion</span>
+        <span class="n">pkhts_list</span> <span class="o">=</span> <span class="n">pkhts</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        
+        <span class="c1"># Sort dead fibers in descending order to maintain correct insertion positions</span>
+        <span class="c1"># (inserting from right to left preserves indices for earlier insertions)</span>
+        <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">dead_fibers</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">fiber</span> <span class="o">&lt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pkhts_list</span><span class="p">):</span>
+                <span class="n">pkhts_list</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">fiber</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Dead fiber index </span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s2"> out of bounds for array of length </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pkhts_list</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">pkhts_list</span><span class="p">)</span></div>
+
+    
+    
+            
+<div class="viewcode-block" id="TraceLlamas.generate_valleys">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.generate_valleys">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_valleys</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tslice</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generate valleys from a given slice of the raw image.</span>
+<span class="sd">        This method detects valleys in the provided slice data and returns</span>
+<span class="sd">        the indices and depths of the valleys, along with an array of inverse variances.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        tslice (float): The slice data from which valleys are to be detected.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        Tuple[np.ndarray, ...]: A tuple containing:</span>
+<span class="sd">            - valley_indices (np.ndarray): The indices of the detected valleys.</span>
+<span class="sd">            - valley_depths (np.ndarray): The depths of the detected valleys.</span>
+<span class="sd">            - invvar (np.ndarray): An array of ones with the same length as the number of detected valleys.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+
+        <span class="n">tmp</span>            <span class="o">=</span> <span class="n">detect_peaks</span><span class="p">(</span><span class="n">tslice</span><span class="p">,</span><span class="n">mpd</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span><span class="n">threshold</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span><span class="n">show</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span><span class="n">valley</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">valley_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">tmp</span><span class="p">))</span>
+        <span class="n">valley_depths</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">tmp</span><span class="p">))</span>
+        
+        <span class="n">valley_indices</span> <span class="o">=</span> <span class="n">tmp</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">valley_depths</span>  <span class="o">=</span> <span class="n">tslice</span><span class="p">[</span><span class="n">tmp</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        
+        <span class="n">invvar</span>         <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">tmp</span><span class="p">))</span>
+        
+        <span class="k">return</span> <span class="n">valley_indices</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">,</span> <span class="n">invvar</span></div>
+
+    
+<div class="viewcode-block" id="TraceLlamas.fit_bspline">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.fit_bspline">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit_bspline</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">valley_indices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">invvar</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fit a B-spline to the given valley indices and depths.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        valley_indices (np.ndarray): Array of indices where valleys are located.</span>
+<span class="sd">        valley_depths (np.ndarray): Array of depths corresponding to the valley indices.</span>
+<span class="sd">        invvar (np.ndarray): Array of inverse variances for the valley depths.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        Tuple[np.ndarray, ...]: A tuple containing the x_model and the fitted y_model values.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">sset</span> <span class="o">=</span> <span class="n">bspline</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span><span class="n">everyn</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span> <span class="c1">#pydl.bspline(valley_indices,everyn=2)</span>
+        <span class="n">res</span><span class="p">,</span> <span class="n">yfit</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">,</span> <span class="n">invvar</span><span class="p">)</span>
+        
+        <span class="n">y_model</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x_model</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">x_model</span><span class="p">,</span> <span class="n">y_model</span></div>
+
+    
+    
+    <span class="c1"># takes in location of xwindow, and the y_model which the the dark base level along the comb</span>
+<div class="viewcode-block" id="TraceLlamas.fit_grid_single">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.fit_grid_single">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit_grid_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xtmp</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">bspline</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fits a grid to a single x-window point and returns the residuals, bspline object, </span>
+<span class="sd">        fit result, and fitted y-values.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        -----------</span>
+<span class="sd">        xtmp : int</span>
+<span class="sd">            The x-window point around which the fitting is performed.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        --------</span>
+<span class="sd">        comb : np.ndarray</span>
+<span class="sd">            The residuals after subtracting the model from the y-trace.</span>
+<span class="sd">        sset : bspline</span>
+<span class="sd">            The bspline object used for fitting.</span>
+<span class="sd">        res : int</span>
+<span class="sd">            The result of the bspline fit.</span>
+<span class="sd">        yfit : np.ndarray</span>
+<span class="sd">            The fitted y-values from the bspline model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        
+        <span class="c1">#defining a new yslice for a given xwindow point</span>
+        <span class="n">ytrace</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[:,</span><span class="n">xtmp</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">window</span><span class="p">:</span><span class="n">xtmp</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span><span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">window</span><span class="p">],</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1">#detect the valleys along this new slice</span>
+        <span class="n">valleys</span> <span class="o">=</span> <span class="n">detect_peaks</span><span class="p">(</span><span class="n">ytrace</span><span class="p">,</span><span class="n">mpd</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span><span class="n">show</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span><span class="n">valley</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+        <span class="n">nvalley</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">valleys</span><span class="p">)</span>
+
+        <span class="n">valley_indices</span> <span class="o">=</span> <span class="n">valleys</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">valley_depths</span>  <span class="o">=</span> <span class="n">ytrace</span><span class="p">[</span><span class="n">valleys</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">invvar</span>         <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">nvalley</span><span class="p">)</span>
+        
+
+        <span class="n">sset</span> <span class="o">=</span> <span class="n">bspline</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span><span class="n">everyn</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+            
+        <span class="n">res</span><span class="p">,</span> <span class="n">yfit</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">,</span> <span class="n">invvar</span><span class="p">)</span>
+        <span class="n">y_model</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x_model</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">comb</span> <span class="o">=</span> <span class="n">ytrace</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span><span class="o">-</span><span class="n">y_model</span>
+        
+        <span class="k">return</span> <span class="n">comb</span><span class="p">,</span> <span class="n">sset</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">yfit</span></div>
+
+    
+<div class="viewcode-block" id="TraceLlamas.find_comb">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.find_comb">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">find_comb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rownum</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Find and process the comb of peaks in the data.</span>
+<span class="sd">        This function extracts a slice of the data around the specified row number,</span>
+<span class="sd">        identifies valleys, fits a B-spline to the valleys, and then finds peaks</span>
+<span class="sd">        in the residuals after subtracting the fitted B-spline.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        rownum (int, optional): The row number around which to extract the data slice.</span>
+<span class="sd">                                If None, the middle row is used.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        numpy.ndarray: The comb of peaks in the data slice after subtracting the fitted B-spline.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        
+        <span class="c1"># When in doubt, extract in the middle</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">rownum</span> <span class="o">==</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="n">rownum</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="n">rownum</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">rownum</span><span class="p">)</span>
+
+        <span class="c1">#straight up to _+ 15 pixels on either side</span>
+        <span class="n">tslice</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[:,</span><span class="n">rownum</span><span class="o">-</span><span class="mi">3</span><span class="p">:</span><span class="n">rownum</span><span class="o">+</span><span class="mi">2</span><span class="p">],</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">valley_indices</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">,</span> <span class="n">invvar</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">generate_valleys</span><span class="p">(</span><span class="n">tslice</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">x_model</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        
+        
+        <span class="n">sset</span> <span class="o">=</span> <span class="n">bspline</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span><span class="n">everyn</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">nord</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">res</span><span class="p">,</span> <span class="n">yfit</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">valley_indices</span><span class="p">,</span> <span class="n">valley_depths</span><span class="p">,</span> <span class="n">invvar</span><span class="p">)</span>
+        
+        <span class="c1">#x_model = np.arange(self.naxis2).astype(float)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">y_model</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x_model</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">min_pkheight</span> <span class="o">=</span> <span class="mi">10000</span>    
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">min_pkheight</span> <span class="o">=</span> <span class="mi">5000</span>
+        
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">comb</span> <span class="o">=</span> <span class="n">tslice</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">y_model</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peak_properties</span> <span class="o">=</span> <span class="n">find_peaks</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">comb</span><span class="p">,</span><span class="n">distance</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span><span class="n">height</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span><span class="n">threshold</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">prominence</span><span class="o">=</span><span class="mi">500</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pkht</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">peak_properties</span><span class="p">[</span><span class="s1">&#39;peak_heights&#39;</span><span class="p">]</span>
+        
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">comb</span></div>
+
+    
+    
+    <span class="c1"># def find_comb(self, rownum=None)-&gt; np.ndarray:</span>
+    <span class="c1">#     &quot;&quot;&quot;</span>
+    <span class="c1">#     Finds and returns the comb for a given row number in the data.</span>
+    <span class="c1">#     Parameters:</span>
+    <span class="c1">#     rownum (int, optional): The row number to process. If None, defaults to the middle row.</span>
+    <span class="c1">#     Returns:</span>
+    <span class="c1">#     numpy.ndarray: The computed comb for the specified row.</span>
+    <span class="c1">#     Notes:</span>
+    <span class="c1">#     - If `rownum` is not provided, it defaults to the middle row of the data.</span>
+    <span class="c1">#     - The method extracts a slice of the data around the specified row and computes the valleys.</span>
+    <span class="c1">#     - A B-spline is fitted to the valley depths, and the comb is calculated by subtracting the fitted model from the slice.</span>
+    <span class="c1">#     - If an exception occurs, a default minimum peak height and master comb are used.</span>
+    <span class="c1">#     &quot;&quot;&quot;</span>
+
+    <span class="c1">#     try:</span>
+    <span class="c1">#         # When in doubt, extract in the middle</span>
+    <span class="c1">#         if (rownum == None):</span>
+    <span class="c1">#             rownum = int(self.naxis1/2)</span>
+
+    <span class="c1">#         rownum = int(rownum)</span>
+
+    <span class="c1">#         #straight up to _+ 15 pixels on either side</span>
+    <span class="c1">#         tslice = np.median(self.data[:,rownum-5:rownum+4],axis=1).astype(float)</span>
+    <span class="c1">#         valley_indices, valley_depths, invvar = self.generate_valleys(tslice)</span>
+
+    <span class="c1">#         self.x_model = np.arange(self.naxis2).astype(float)</span>
+
+
+    <span class="c1">#         sset = bspline(valley_indices,everyn=2, nord=2)</span>
+    <span class="c1">#         res, yfit = sset.fit(valley_indices, valley_depths, invvar)</span>
+
+    <span class="c1">#         #x_model = np.arange(self.naxis2).astype(float)</span>
+    <span class="c1">#         y_model = sset.value(self.x_model)[0]</span>
+
+
+    <span class="c1">#         self.min_pkheight = 10000</span>
+    <span class="c1">#         if self.channel.lower() == &#39;blue&#39;:</span>
+    <span class="c1">#             logger.info(f&quot;Setting min peak height to 1000 for blue channel&quot;)</span>
+    <span class="c1">#             self.min_pkheight = 1000</span>
+
+    <span class="c1">#         self.comb = tslice - y_model</span>
+        
+    <span class="c1">#         #self.orig_peaks, _ = find_peaks(self.comb,distance=2,height=100,threshold=None, prominence=500)</span>
+    <span class="c1">#     except:</span>
+    <span class="c1">#         self.min_pkheight = 1000</span>
+    <span class="c1">#         self.comb = self.master_comb</span>
+            
+            
+        
+    <span class="c1">#     return self.comb</span>
+    
+         
+<div class="viewcode-block" id="TraceLlamas.process_hdu_data">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.process_hdu_data">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process_hdu_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">find_LUT</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Processes data from a specific HDU (Header Data Unit) array.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        -----------</span>
+<span class="sd">        hdu_data : np.ndarray</span>
+<span class="sd">            The data array from the HDU to be processed.</span>
+<span class="sd">        hdu_header : dict</span>
+<span class="sd">            The header information associated with the HDU data.</span>
+<span class="sd">        find_LUT : bool, optional</span>
+<span class="sd">            If True, the function will only find the LUT (Lookup Table) and return without further processing. Default is False.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        --------</span>
+<span class="sd">        dict</span>
+<span class="sd">            A dictionary containing the status of the processing. If successful, returns {&quot;status&quot;: &quot;success&quot;}.</span>
+<span class="sd">            If an error occurs, returns {&quot;status&quot;: &quot;failed&quot;, &quot;error&quot;: str(e), &#39;channel&#39;: self.channel, &#39;bench&#39;: self.bench, &#39;side&#39;: self.side}.</span>
+<span class="sd">        Raises:</span>
+<span class="sd">        -------</span>
+<span class="sd">        Exception</span>
+<span class="sd">            If any error occurs during the processing, it will be caught and logged, and the function will return a failure status.</span>
+<span class="sd">        Notes:</span>
+<span class="sd">        ------</span>
+<span class="sd">        - The function processes the HDU data by extracting relevant information from the header and data array.</span>
+<span class="sd">        - It handles different cases based on the presence of specific header keys (&#39;COLOR&#39;, &#39;CAM_NAME&#39;).</span>
+<span class="sd">        - The function reads a trace LUT (Lookup Table) from a JSON file and updates peaks and peak heights arrays.</span>
+<span class="sd">        - It performs cross-correlation to find offsets and updates the comb and peaks accordingly.</span>
+<span class="sd">        - The function fits traces from the midpoint forward and backward, updating the trace array.</span>
+<span class="sd">        - It defines the coordinates of the trace along the x-axis and fits a spline along the x-axis for each fiber.</span>
+<span class="sd">        - The function interpolates the traces to give x, y positions for each fiber along the naxis.</span>
+<span class="sd">        Example:</span>
+<span class="sd">        --------</span>
+<span class="sd">        result = process_hdu_data(hdu_data, hdu_header, find_LUT=True)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Processes data from a specific HDU array.&quot;&quot;&quot;</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bspline_ssets</span> <span class="o">=</span> <span class="p">[]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span> <span class="o">=</span> <span class="n">hdu_header</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">hdu_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+            <span class="c1">#case sensitive when concerted into a dict for ray processing</span>
+            
+            <span class="k">if</span> <span class="ow">not</span> <span class="s1">&#39;COLOR&#39;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">:</span>
+                <span class="n">camname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bench</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">side</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bench</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;BENCH&#39;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">side</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;SIDE&#39;</span><span class="p">]</span>
+                      
+            <span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;NAXIS1&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span><span class="p">[</span><span class="s1">&#39;NAXIS2&#39;</span><span class="p">]</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+            
+            <span class="c1">#code which opens the trace LUT, and updates peaks and pkhts arrays to account for dead fibers</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;traceLUT.json&#39;</span><span class="p">),</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">LUT</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">LUT</span> <span class="o">=</span> <span class="n">LUT</span>    
+        
+            <span class="bp">self</span><span class="o">.</span><span class="n">master_comb</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">LUT</span><span class="p">[</span><span class="s1">&#39;combs&#39;</span><span class="p">][</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()][</span><span class="bp">self</span><span class="o">.</span><span class="n">benchside</span><span class="p">])</span>
+            <span class="n">masterpeaks_dict</span> <span class="o">=</span> <span class="n">LUT</span><span class="p">[</span><span class="s2">&quot;fib_pos&quot;</span><span class="p">][</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()][</span><span class="bp">self</span><span class="o">.</span><span class="n">benchside</span><span class="p">]</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">master_peaks</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">pos</span><span class="p">)</span> <span class="k">for</span> <span class="n">pos</span> <span class="ow">in</span> <span class="n">masterpeaks_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span>
+            
+
+            <span class="c1">#print(f&#39;Processing {self.channel} channel, {self.bench} bench, {self.side} side&#39;)</span>
+            <span class="c1">#finding the inital comb for the data we are trying to fit</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">comb</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_comb</span><span class="p">(</span><span class="n">rownum</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">first_pkht</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pkht</span>
+            
+
+            <span class="c1">#make sure peaks aren&#39;t too close to the edge</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span> <span class="o">&lt;</span> <span class="mi">2020</span><span class="p">)]</span>
+            <span class="n">pkhts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">first_pkht</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">first_peaks</span> <span class="o">&lt;</span> <span class="mi">2020</span><span class="p">)]</span>
+                
+            
+            <span class="c1">#make sure peaks aren&#39;t too close to the edge</span>
+            <span class="c1">#peaks[np.logical_and(peaks &gt; 20, peaks &lt; 2020)]</span>
+        
+            <span class="c1">#assert len(self.pkht) == len(self.master_peaks), &quot;Length of peak heights does not match master peaks&quot;</span>
+            
+            <span class="n">offset</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">cross_correlate_combs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">comb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">master_comb</span><span class="p">)</span>
+            
+            <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">offset</span><span class="p">)</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">offset_cutoff</span><span class="p">:</span>
+                <span class="c1">#find a way to print this error to terminal still and the logger</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Offset of </span><span class="si">{</span><span class="n">offset</span><span class="si">}</span><span class="s2"> exceeds cutoff of </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">offset_cutoff</span><span class="si">}</span><span class="s2"> for channel </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s2"> Bench </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s2"> side </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="c1">#plt.plot(self.comb, color=&#39;blue&#39;)</span>
+                <span class="c1">#plt.plot(self.master_comb, color=&#39;green&#39;)</span>
+                <span class="c1">#plt.show()</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Offset of </span><span class="si">{</span><span class="n">offset</span><span class="si">}</span><span class="s2"> exceeds cutoff of </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">offset_cutoff</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1">#update the peaks to the master peaks</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">updated_comb</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">master_comb</span><span class="p">)</span> 
+                <span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">master_peaks</span><span class="p">)</span>
+                
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1">#update the peaks to the master peaks</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">updated_comb</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">master_comb</span><span class="p">)</span> <span class="o">+</span> <span class="n">offset</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">master_peaks</span><span class="p">)</span> <span class="o">+</span> <span class="n">offset</span>
+                
+                
+                <span class="c1">#offset=0</span>
+                <span class="c1">#return 1</span>
+            <span class="c1"># Apply insert_dead_fibers to updated_peaks</span>
+            <span class="c1">#self.updated_peaks = self.insert_dead_fibers(self.LUT, self.benchside, np.array(self.updated_peaks))</span>
+
+            <span class="c1">#self.min_pkheight = 0.3 * np.median(pkht)</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span>  <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">xmax</span>     <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="o">-</span><span class="mi">100</span>
+
+            <span class="c1">###Note to self: window was originall fitspace here, in principle should be the same thing</span>
+            <span class="c1">#finding the number of windows along x we want for new tslice</span>
+            <span class="n">n_tracefit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">xmax</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">xmin</span><span class="p">)</span><span class="o">/</span><span class="bp">self</span><span class="o">.</span><span class="n">window</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+            
+            <span class="n">xtrace</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">xmin</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">window</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_tracefit</span><span class="p">)</span>
+            
+            <span class="n">tracearr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="p">,</span><span class="n">n_tracefit</span><span class="p">))</span>
+            
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Bench </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;NFibers = </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1">######## Fit combs from the midpoint forward ########</span>
+            <span class="n">mid_index</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">n_tracefit</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="n">tt</span> <span class="o">=</span> <span class="n">xtrace</span><span class="p">[</span><span class="n">mid_index</span><span class="p">:]</span>
+            <span class="k">for</span> <span class="n">itrace</span><span class="p">,</span> <span class="n">thisx</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">tt</span><span class="p">):</span>
+                <span class="n">thiscomb</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_comb</span><span class="p">(</span><span class="n">thisx</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">itrace</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">peaks</span> <span class="o">=</span> <span class="n">tracearr</span><span class="p">[:,</span><span class="n">mid_index</span><span class="o">+</span><span class="n">itrace</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+                <span class="k">for</span> <span class="n">ifiber</span><span class="p">,</span> <span class="n">pk_guess</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">peaks</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">ifiber</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ifiber </span><span class="si">{</span><span class="n">ifiber</span><span class="si">}</span><span class="s2"> exceeds nfibers </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="si">}</span><span class="s2"> for channel </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s2"> Bench </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s2"> side </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s2">, skipping&quot;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    
+                    <span class="c1">#if the guess is too close to the edge, skip</span>
+                    <span class="c1">###Shouldn&#39;t this not be needed if we exclude peaks too close to the edge?</span>
+                    <span class="k">if</span> <span class="n">pk_guess</span> <span class="o">-</span><span class="mi">2</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Peak guess too close condition hit&#39;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    
+                    <span class="c1">#taking the weighted sum  </span>
+                    <span class="n">pk_centroid</span> <span class="o">=</span> \
+                        <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">multiply</span><span class="p">(</span><span class="n">thiscomb</span><span class="p">[</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="p">:</span><span class="n">pk_guess</span><span class="o">+</span><span class="mi">3</span><span class="p">],</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">5</span><span class="p">)))</span> \
+                        <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">thiscomb</span><span class="p">[</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="p">:</span><span class="n">pk_guess</span><span class="o">+</span><span class="mi">3</span><span class="p">])</span>
+
+                    <span class="c1">#if the updated peak diverges too far from the peak guess then use the peak guess</span>
+                    <span class="k">if</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">pk_centroid</span><span class="o">-</span><span class="n">pk_guess</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1.5</span><span class="p">):</span>
+                        <span class="n">tracearr</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,</span><span class="n">mid_index</span><span class="o">+</span><span class="n">itrace</span><span class="p">]</span> <span class="o">=</span> <span class="n">pk_centroid</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">tracearr</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,</span><span class="n">mid_index</span><span class="o">+</span><span class="n">itrace</span><span class="p">]</span> <span class="o">=</span> <span class="n">pk_guess</span>
+
+
+            <span class="c1">######### Now go back and fit from the midpoint backward ######</span>
+            <span class="k">for</span> <span class="n">itrace</span><span class="p">,</span> <span class="n">thisx</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">xtrace</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">mid_index</span><span class="p">])):</span>
+                <span class="n">thiscomb</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_comb</span><span class="p">(</span><span class="n">thisx</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">itrace</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">updated_peaks</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">peaks</span> <span class="o">=</span> <span class="n">tracearr</span><span class="p">[:,</span><span class="n">mid_index</span><span class="o">-</span><span class="n">itrace</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+                <span class="k">for</span> <span class="n">ifiber</span><span class="p">,</span> <span class="n">pk_guess</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">peaks</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">ifiber</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ifiber </span><span class="si">{</span><span class="n">ifiber</span><span class="si">}</span><span class="s2"> exceeds nfibers </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="si">}</span><span class="s2"> for channel </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s2"> Bench </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s2"> side </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s2">, skipping&quot;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    
+                    <span class="c1">#if the guess is too close to the edge, skip</span>
+                    <span class="c1">###Shouldn&#39;t this not be needed if we exclude peaks too close to the edge?</span>
+                    <span class="k">if</span> <span class="n">pk_guess</span> <span class="o">-</span><span class="mi">2</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Peak guess too close condition hit&#39;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    
+                    <span class="c1">#taking the weighted sum  </span>
+                    <span class="n">pk_centroid</span> <span class="o">=</span> \
+                        <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">multiply</span><span class="p">(</span><span class="n">thiscomb</span><span class="p">[</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="p">:</span><span class="n">pk_guess</span><span class="o">+</span><span class="mi">3</span><span class="p">],</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">5</span><span class="p">)))</span> \
+                        <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">thiscomb</span><span class="p">[</span><span class="n">pk_guess</span><span class="o">-</span><span class="mi">2</span><span class="p">:</span><span class="n">pk_guess</span><span class="o">+</span><span class="mi">3</span><span class="p">])</span>
+
+                    <span class="c1">#if the updated peak diverges too far from the peak guess then use the peak guess</span>
+                    <span class="k">if</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">pk_centroid</span><span class="o">-</span><span class="n">pk_guess</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1.5</span><span class="p">):</span>
+                        <span class="n">tracearr</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,</span><span class="n">mid_index</span><span class="o">-</span><span class="n">itrace</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">pk_centroid</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">tracearr</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,</span><span class="n">mid_index</span><span class="o">-</span><span class="n">itrace</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">pk_guess</span>
+
+
+            <span class="c1">#defines the coordinates of the trace along the x axis</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">xtracefit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="p">),</span><span class="n">xtrace</span><span class="p">)</span>
+            <span class="c1">#defining the y (peak coord) of the trace for that window along xthe x axis for every fiber</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tracearr</span>  <span class="o">=</span> <span class="n">tracearr</span>
+            <span class="c1">#defines the traces by fitting a spline along the x axis</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">tset</span>      <span class="o">=</span> <span class="n">pydl</span><span class="o">.</span><span class="n">xy2traceset</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">xtracefit</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">tracearr</span><span class="p">,</span> <span class="n">maxdev</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+            
+            <span class="n">x2</span>          <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="p">),</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="c1">#interpolates the traces to give an x,y position for each fiber along the naxis</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">traces</span> <span class="o">=</span> <span class="n">pydl</span><span class="o">.</span><span class="n">traceset2xy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tset</span><span class="p">,</span><span class="n">xpos</span><span class="o">=</span><span class="n">x2</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+            
+            <span class="c1"># Filter traces to match expected fiber count</span>
+            <span class="n">fiber_list</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;1A&#39;</span><span class="p">:</span> <span class="mi">298</span><span class="p">,</span> <span class="s1">&#39;1B&#39;</span><span class="p">:</span> <span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;2A&#39;</span><span class="p">:</span> <span class="mi">298</span><span class="p">,</span> 
+                <span class="s1">&#39;2B&#39;</span><span class="p">:</span> <span class="mi">297</span><span class="p">,</span> <span class="s1">&#39;3A&#39;</span><span class="p">:</span> <span class="mi">298</span><span class="p">,</span> <span class="s1">&#39;3B&#39;</span><span class="p">:</span> <span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;4A&#39;</span><span class="p">:</span> <span class="mi">300</span>
+            <span class="p">}</span>
+            <span class="n">expected_count</span> <span class="o">=</span> <span class="n">fiber_list</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">benchside</span><span class="p">)</span>
+            
+            <span class="k">if</span> <span class="n">expected_count</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">expected_count</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">)</span><span class="si">}</span><span class="s2"> traces, limiting to expected </span><span class="si">{</span><span class="n">expected_count</span><span class="si">}</span><span class="s2"> for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Calculate edge proximity scores for each trace</span>
+                <span class="c1"># Lower score = further from edge = better</span>
+                <span class="n">edge_scores</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">))</span>
+                
+                <span class="c1"># Get the middle position of each trace (at center of detector)</span>
+                <span class="n">mid_x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span> <span class="o">//</span> <span class="mi">2</span>
+                <span class="n">mid_positions</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">[:,</span> <span class="n">mid_x</span><span class="p">]</span>
+                
+                <span class="c1"># Calculate distance from edges</span>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">pos</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">mid_positions</span><span class="p">):</span>
+                    <span class="c1"># Distance from top and bottom edges</span>
+                    <span class="n">dist_from_top</span> <span class="o">=</span> <span class="n">pos</span>
+                    <span class="n">dist_from_bottom</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span> <span class="o">-</span> <span class="n">pos</span>
+                    
+                    <span class="c1"># Use minimum distance to either edge as score</span>
+                    <span class="n">edge_scores</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">dist_from_top</span><span class="p">,</span> <span class="n">dist_from_bottom</span><span class="p">)</span>
+
+                <span class="c1"># Sort traces by distance from edge (descending)</span>
+                <span class="c1"># This keeps traces furthest from edges</span>
+                <span class="n">sorted_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">edge_scores</span><span class="p">)[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                
+                <span class="c1"># Keep only the expected number of traces</span>
+                <span class="n">keep_indices</span> <span class="o">=</span> <span class="n">sorted_indices</span><span class="p">[:</span><span class="n">expected_count</span><span class="p">]</span>
+                <span class="n">keep_indices</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>  <span class="c1"># Sort back to original order</span>
+                
+                <span class="c1"># Filter the traces</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">traces</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">[</span><span class="n">keep_indices</span><span class="p">]</span>
+                
+                <span class="c1"># Update other related arrays to match</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">tracearr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tracearr</span><span class="p">[</span><span class="n">keep_indices</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">xtracefit</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">xtracefit</span><span class="p">[</span><span class="n">keep_indices</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">)</span>
+                
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Filtered to </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">nfibers</span><span class="si">}</span><span class="s2"> traces for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+            
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;failed&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span> <span class="s1">&#39;channel&#39;</span><span class="p">:</span> <span class="p">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">},</span> <span class="s1">&#39;bench&#39;</span><span class="p">:</span> <span class="p">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="p">},</span> <span class="s1">&#39;side&#39;</span><span class="p">:</span> <span class="p">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="p">}}</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result</span>
+            
+        <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;success&quot;</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">result</span></div>
+
+    
+<div class="viewcode-block" id="TraceLlamas.profileFit">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.profileFit">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">profileFit</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fits the spatial profile of fibers in the data.</span>
+<span class="sd">        This method normalizes the data, generates masks for bad pixels, and fits </span>
+<span class="sd">        the fiber spatial profile using a bspline. It updates the fiber image, </span>
+<span class="sd">        profile image, and bad pixel mask attributes of the class.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple: A tuple containing:</span>
+<span class="sd">                - fiberimg (numpy.ndarray): An array listing the fiber number of each pixel.</span>
+<span class="sd">                - profimg (numpy.ndarray): An array representing the profile weighting function.</span>
+<span class="sd">                - bpmask (numpy.ndarray): A boolean array representing the bad pixel mask.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">12</span><span class="p">,:]</span>
+
+        <span class="c1"># Use a working copy of &quot;data&quot; so as not to overwrite that with normalized data</span>
+        <span class="n">data_work</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">)</span> 
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">!=</span> <span class="mi">12</span><span class="p">):</span>
+                <span class="n">data_work</span><span class="p">[</span><span class="n">i</span><span class="p">,:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">i</span><span class="p">,:]</span> <span class="o">-</span> <span class="n">ref</span>
+
+        <span class="n">fiberimg</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>   <span class="c1"># Lists the fiber # of each pixel</span>
+        <span class="n">profimg</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span> <span class="c1"># Profile weighting function</span>
+        <span class="n">bpmask</span>   <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>  <span class="c1"># bad pixel mask</span>
+        
+        <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traces</span><span class="p">):</span>
+            
+            <span class="n">ytrace</span> <span class="o">=</span> <span class="n">item</span> 
+
+            <span class="c1"># Generate a curved &quot;y&quot; image</span>
+            <span class="n">yy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span><span class="p">),</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span> \
+                <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis2</span><span class="p">),</span><span class="n">ytrace</span><span class="p">)</span>
+
+            <span class="c1"># Normalize out the spectral shape of the lamp for profile fitting</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">naxis1</span><span class="p">):</span>
+                <span class="n">norm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">data_work</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">yy</span><span class="p">[:,</span><span class="n">i</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mf">2.0</span><span class="p">),</span><span class="n">i</span><span class="p">])</span>
+                <span class="n">data_work</span><span class="p">[:,</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">data_work</span><span class="p">[:,</span><span class="n">i</span><span class="p">]</span> <span class="o">/</span> <span class="n">norm</span>
+
+            <span class="c1"># Generate a mask of pixels that are</span>
+            <span class="c1"># (a) within 4 pixels of the profile center for this fiber and</span>
+            <span class="c1"># (b) not NaNs or Infs</span>
+            <span class="c1"># Also generate an inverse variance array that is presently flat weighting</span>
+
+            <span class="n">infmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">data_work</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+            <span class="n">NaNmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">data_work</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+            <span class="n">badmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">data_work</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+            <span class="n">profmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">data_work</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+            <span class="n">invvar</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">data_work</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+            
+            <span class="n">infmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isinf</span><span class="p">(</span><span class="n">data_work</span><span class="p">))]</span>  <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">NaNmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">data_work</span><span class="p">))]</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">badmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">data_work</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">)]</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">badmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">data_work</span> <span class="o">&lt;</span> <span class="o">-</span><span class="mi">5</span><span class="p">)]</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="c1">##this is where we ajust the width of the profile mask in pixels</span>
+            <span class="n">profmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">yy</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">)]</span> <span class="o">=</span> <span class="kc">True</span>
+
+            <span class="n">inprof</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">infmask</span> <span class="o">&amp;</span> <span class="n">profmask</span> <span class="o">&amp;</span> <span class="n">NaNmask</span> <span class="o">&amp;</span> <span class="n">badmask</span><span class="p">)</span>
+
+            <span class="c1"># Fit the fiber spatial profile with a bspline</span>
+            
+            <span class="n">sset</span><span class="p">,</span><span class="n">outmask</span> <span class="o">=</span> <span class="n">iterfit</span><span class="p">(</span><span class="n">yy</span><span class="p">[</span><span class="n">inprof</span><span class="p">],</span><span class="n">data_work</span><span class="p">[</span><span class="n">inprof</span><span class="p">],</span><span class="n">maxiter</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> \
+                        <span class="n">invvar</span><span class="o">=</span><span class="n">invvar</span><span class="p">[</span><span class="n">inprof</span><span class="p">],</span><span class="n">kwargs_bspline</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;bkspace&#39;</span><span class="p">:</span><span class="mf">0.33</span><span class="p">})</span>
+            
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">profmask</span> <span class="o">=</span> <span class="n">profmask</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">inprof</span> <span class="o">=</span> <span class="n">inprof</span>
+
+            <span class="n">fiberimg</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">profmask</span> <span class="o">==</span> <span class="kc">True</span><span class="p">)]</span> <span class="o">=</span> <span class="n">index</span><span class="c1">#ifiber</span>
+            <span class="n">bpmask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">infmask</span> <span class="o">==</span> <span class="kc">False</span><span class="p">)]</span>   <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">profimg</span><span class="p">[</span><span class="n">inprof</span><span class="p">]</span> <span class="o">=</span> <span class="n">profimg</span><span class="p">[</span><span class="n">inprof</span><span class="p">]</span> <span class="o">+</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="n">yy</span><span class="p">[</span><span class="n">inprof</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">bspline_ssets</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sset</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">fiberimg</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">profimg</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bpmask</span> <span class="o">=</span> <span class="n">fiberimg</span><span class="p">,</span> <span class="n">profimg</span><span class="p">,</span> <span class="n">bpmask</span>
+        
+        <span class="k">return</span> <span class="p">(</span><span class="n">fiberimg</span><span class="p">,</span> <span class="n">profimg</span><span class="p">,</span> <span class="n">bpmask</span><span class="p">)</span></div>
+
+    
+<div class="viewcode-block" id="TraceLlamas.saveTraces">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.TraceLlamas.saveTraces">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">saveTraces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="s1">&#39;LLAMASTrace.pkl&#39;</span><span class="p">,</span> <span class="n">newpath</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Save trace data to a specified file format.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        outfile (str): The name of the output file. Default is &#39;LLAMASTrace.pkl&#39;.</span>
+<span class="sd">                       Supported formats are &#39;.pkl&#39; for pickle files and &#39;.h5&#39; for HDF5 files.</span>
+<span class="sd">        This method saves the trace data of the object to a file in the specified format.</span>
+<span class="sd">        If the output file is a pickle file (&#39;.pkl&#39;), the entire object is serialized using cloudpickle.</span>
+<span class="sd">        If the output file is an HDF5 file (&#39;.h5&#39;), the trace data and other attributes are saved in datasets.</span>
+<span class="sd">        The output file is saved in a directory named after the base name of the FITS file with &#39;_traces&#39; appended.</span>
+<span class="sd">        Raises:</span>
+<span class="sd">        OSError: If there is an error creating the output directory or writing the file.</span>
+<span class="sd">        Example:</span>
+<span class="sd">        &gt;&gt;&gt; obj.saveTraces(&#39;output_traces.h5&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># name = os.path.basename(self.fitsfile).replace(&#39;.fits&#39;, &#39;_traces&#39;)</span>
+        <span class="c1"># self.traceloc = os.path.join(OUTPUT_DIR, name)</span>
+        <span class="c1"># os.makedirs(self.traceloc, exist_ok=True)</span>
+        <span class="c1"># outpath = os.path.join(self.traceloc, outfile)</span>
+        
+        
+        <span class="k">if</span> <span class="n">newpath</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Making directory newpath: </span><span class="si">{</span><span class="n">newpath</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>   
+            <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">newpath</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">outpath</span> <span class="o">=</span> <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">newpath</span><span class="p">,</span> <span class="n">outfile</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">outfile</span><span class="p">)</span>
+        
+        
+
+        <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;.pkl&#39;</span> <span class="ow">in</span> <span class="n">outfile</span><span class="p">):</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span><span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+               <span class="n">cloudpickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fp</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;.h5&#39;</span> <span class="ow">in</span> <span class="n">outfile</span><span class="p">):</span>
+            <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="c1"># Stack all 2D data arrays along a new axis</span>
+                <span class="n">data_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">trace</span><span class="o">.</span><span class="n">data</span> <span class="k">for</span> <span class="n">trace</span> <span class="ow">in</span> <span class="n">objlist</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data_stack</span><span class="p">)</span>  
+
+                <span class="c1"># Save other attributes</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;naxis1&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">[</span><span class="n">llama</span><span class="o">.</span><span class="n">naxis1</span> <span class="k">for</span> <span class="n">llama</span> <span class="ow">in</span> <span class="n">objlist</span><span class="p">])</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;naxis2&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">[</span><span class="n">llama</span><span class="o">.</span><span class="n">naxis2</span> <span class="k">for</span> <span class="n">llama</span> <span class="ow">in</span> <span class="n">objlist</span><span class="p">])</span>
+                <span class="n">dt</span> <span class="o">=</span> <span class="n">h5py</span><span class="o">.</span><span class="n">string_dtype</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;bench&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">[</span><span class="n">llama</span><span class="o">.</span><span class="n">bench</span> <span class="k">for</span> <span class="n">llama</span> <span class="ow">in</span> <span class="n">objlist</span><span class="p">])</span>
+        <span class="k">return</span></div>
+</div>
+
+    
+    
+<span class="nd">@ray</span><span class="o">.</span><span class="n">remote</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">TraceRay</span><span class="p">(</span><span class="n">TraceLlamas</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    TraceRay class inherits from TraceLlamas and is used to process and trace data from a FITS file.</span>
+<span class="sd">    Attributes:</span>
+<span class="sd">        fitsfile (str): The name of the FITS file being processed.</span>
+<span class="sd">    Methods:</span>
+<span class="sd">        __init__(fitsfile: str) -&gt; None:</span>
+<span class="sd">            Initializes the TraceRay object with the given FITS file.</span>
+<span class="sd">        process_hdu_data(hdu_data: np.ndarray, hdu_header: dict) -&gt; dict:</span>
+<span class="sd">            Processes the HDU data and header, performs profile fitting, saves the traces, and returns the result.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fitsfile</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;fitsfile: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">return</span>
+    
+    
+    <span class="k">def</span><span class="w"> </span><span class="nf">process_hdu_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">outpath</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Processes HDU (Header Data Unit) data and performs profile fitting.</span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        hdu_data (np.ndarray): The HDU data to be processed.</span>
+<span class="sd">        hdu_header (dict): The header information associated with the HDU data.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">        dict: A dictionary containing the result of the processing, including status and any relevant data.</span>
+<span class="sd">        This method performs the following steps:</span>
+<span class="sd">        1. Records the start time of the processing.</span>
+<span class="sd">        2. Calls the superclass&#39;s process_hdu_data method to process the HDU data.</span>
+<span class="sd">        3. Performs profile fitting by calling the superclass&#39;s profileFit method and stores the results in instance variables.</span>
+<span class="sd">        4. Constructs the output file name based on the fitsfile, channel, bench, and side attributes.</span>
+<span class="sd">        5. Saves the traces to the constructed output file by calling the superclass&#39;s saveTraces method.</span>
+<span class="sd">        6. Calculates the elapsed time for the processing.</span>
+<span class="sd">        7. Returns the result of the processing if the status is not &quot;success&quot;.</span>
+<span class="sd">        Note:</span>
+<span class="sd">        - The method currently has a return statement before checking the result status, which may need to be adjusted.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        
+        <span class="n">result</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">process_hdu_data</span><span class="p">(</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">)</span>
+
+    
+        <span class="bp">self</span><span class="o">.</span><span class="n">fiberimg</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">profimg</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bpmask</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">profileFit</span><span class="p">()</span>
+        
+        <span class="n">origfile</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;color: </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        
+        <span class="n">filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;LLAMAS_master_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">_traces.pkl&#39;</span>
+        
+        <span class="k">if</span> <span class="n">outpath</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">saveTraces</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">newpath</span><span class="o">=</span><span class="n">outpath</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">saveTraces</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        
+        
+    
+        
+        <span class="n">elapsed_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;success&quot;</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">result</span>
+
+<div class="viewcode-block" id="run_ray_tracing">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamasMulti.run_ray_tracing">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_ray_tracing</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform ray tracing on a FITS file using parallel processing with Ray.</span>
+<span class="sd">    This function initializes Ray with the number of available CPU cores, processes</span>
+<span class="sd">    each HDU (Header Data Unit) in the FITS file using a remote TraceRay actor, and</span>
+<span class="sd">    monitors the processing status, including CPU usage.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    fitsfile (str): The path to the FITS file to be processed.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="n">NUMBER_OF_CORES</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> 
+    <span class="c1"># ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)</span>
+    <span class="c1"># Initialize Ray with logging config</span>
+    <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>  <span class="c1"># Clear any existing Ray instances</span>
+    <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">num_cpus</span><span class="o">=</span><span class="n">NUMBER_OF_CORES</span><span class="p">)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Starting with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores available&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>    
+    
+    <span class="c1"># with fits.open(fitsfile) as hdul:</span>
+    <span class="n">hdul</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span>
+    <span class="n">hdus</span> <span class="o">=</span> <span class="p">[(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="nb">dict</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">))</span> <span class="k">for</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="n">hdul</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        
+    <span class="n">hdu_processors</span> <span class="o">=</span> <span class="p">[</span><span class="n">TraceRay</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hdus</span><span class="p">))]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hdus</span><span class="p">)</span><span class="si">}</span><span class="s2"> HDUs with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores&quot;</span><span class="p">)</span>
+        
+    <span class="c1">#hdu_processor = TraceRay.remote(fitsfile)</span>
+        
+    <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="p">((</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">),</span> <span class="n">processor</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">hdus</span><span class="p">,</span> <span class="n">hdu_processors</span><span class="p">)):</span>
+        <span class="n">future</span> <span class="o">=</span> <span class="n">processor</span><span class="o">.</span><span class="n">process_hdu_data</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">)</span>
+        <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">future</span><span class="p">)</span>
+    
+    <span class="c1"># Monitor processing</span>
+    <span class="n">total_jobs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+    <span class="n">completed</span> <span class="o">=</span> <span class="mi">0</span>
+        
+    <span class="c1"># Monitor processing</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing Status:&quot;</span><span class="p">)</span>
+    <span class="k">while</span> <span class="n">futures</span><span class="p">:</span>
+        
+        <span class="c1"># Print current CPU usage every 5 seconds</span>
+        <span class="k">if</span> <span class="n">completed</span> <span class="o">%</span> <span class="mi">5</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Progress: </span><span class="si">{</span><span class="n">completed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+        
+        
+        <span class="n">done_id</span><span class="p">,</span> <span class="n">futures</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">done_id</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="n">completed</span> <span class="o">+=</span> <span class="mi">1</span>
+        
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">All </span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+    
+    
+    <span class="k">return</span></div>
+
+    
+    
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>  
+    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;RAY_RUNTIME_ENV_TEMPORARY_REFERENCE_EXPIRATION_S&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1200&quot;</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s1">&#39;Process LLAMAS FITS files using Ray multiprocessing.&#39;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;filename&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Path to input FITS file&#39;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--mastercalib&#39;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s1">&#39;store_true&#39;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Use master calibration&#39;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--channel&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">],</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Specify the color channel to use&#39;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--outpath&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Path to save output files&#39;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+      
+    <span class="n">NUMBER_OF_CORES</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> 
+    <span class="c1"># ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)</span>
+    <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>  <span class="c1"># Clear any existing Ray instances</span>
+    <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">num_cpus</span><span class="o">=</span><span class="n">NUMBER_OF_CORES</span><span class="p">)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Starting with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores available&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>    
+    
+    <span class="n">fitsfile</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">filename</span>
+
+    <span class="c1"># with fits.open(fitsfile) as hdul:</span>
+    <span class="n">hdul</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">channel</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s1">&#39;COLOR&#39;</span> <span class="ow">in</span> <span class="n">hdul</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">:</span>
+        <span class="n">hdus</span> <span class="o">=</span> <span class="p">[(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="nb">dict</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">))</span> <span class="k">for</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="n">hdul</span> <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span>
+    <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">channel</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s1">&#39;CAM_NAME&#39;</span> <span class="ow">in</span> <span class="n">hdul</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">:</span>
+        <span class="n">hdus</span> <span class="o">=</span> <span class="p">[(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="nb">dict</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">))</span> <span class="k">for</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="n">hdul</span> <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">hdus</span> <span class="o">=</span> <span class="p">[(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="nb">dict</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">))</span> <span class="k">for</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="n">hdul</span> <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+
+
+
+    <span class="c1">#with fits.open(fitsfile) as hdul:</span>
+    <span class="c1">#    hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header[&#39;COLOR&#39;].lower() == args.channel.lower()]</span>
+        
+    <span class="n">hdu_processors</span> <span class="o">=</span> <span class="p">[</span><span class="n">TraceRay</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hdus</span><span class="p">))]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hdus</span><span class="p">)</span><span class="si">}</span><span class="s2"> HDUs with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores&quot;</span><span class="p">)</span>
+        
+    <span class="c1">#hdu_processor = TraceRay.remote(fitsfile)</span>
+        
+    <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="p">((</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">),</span> <span class="n">processor</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">hdus</span><span class="p">,</span> <span class="n">hdu_processors</span><span class="p">)):</span>
+        <span class="n">future</span> <span class="o">=</span> <span class="n">processor</span><span class="o">.</span><span class="n">process_hdu_data</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdu_header</span><span class="p">,</span> <span class="n">outpath</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">outpath</span><span class="p">)</span>
+        <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">future</span><span class="p">)</span>
+    
+    <span class="c1"># Monitor processing</span>
+    <span class="n">total_jobs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+    <span class="n">completed</span> <span class="o">=</span> <span class="mi">0</span>
+        
+    <span class="c1"># Monitor processing</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing Status:&quot;</span><span class="p">)</span>
+    <span class="k">while</span> <span class="n">futures</span><span class="p">:</span>
+        
+        <span class="c1"># Print current CPU usage every 5 seconds</span>
+        <span class="k">if</span> <span class="n">completed</span> <span class="o">%</span> <span class="mi">5</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Progress: </span><span class="si">{</span><span class="n">completed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+        
+        
+        <span class="n">done_id</span><span class="p">,</span> <span class="n">futures</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">done_id</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="n">completed</span> <span class="o">+=</span> <span class="mi">1</span>
+        
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">All </span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+    
+    
+    
+    
+
+    
+        
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

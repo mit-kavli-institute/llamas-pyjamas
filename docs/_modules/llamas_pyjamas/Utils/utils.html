@@ -1,0 +1,683 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Utils.utils &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Utils.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Utils.utils</h1><div class="highlight"><pre>
+<span></span><span class="c1"># llamas_pyjamas/utils.py</span>
+<span class="sd">&quot;&quot;&quot;Utils module for llamas_pyjamas package.</span>
+<span class="sd">This module provides various utility functions for logging, file handling, </span>
+<span class="sd">data processing, and visualization related to the llamas_pyjamas project.</span>
+<span class="sd">Functions:</span>
+<span class="sd">    setup_logger(name, log_filename=None):</span>
+<span class="sd">        Setup logger with file and console handlers.</span>
+<span class="sd">    create_peak_lookup(peaks):</span>
+<span class="sd">        Create lookup table mapping peak index to y position.</span>
+<span class="sd">    save_combs_to_fits(comb_dict: dict, outfile: str = &#39;comb_profiles.fits&#39;) -&gt; None:</span>
+<span class="sd">        Save dictionary of comb profiles to multi-extension FITS file.</span>
+<span class="sd">    grab_peak_pos_from_LUT(file, channel, benchside, fiber=None):</span>
+<span class="sd">        Retrieve peak positions from a lookup table (LUT) file.</span>
+<span class="sd">    create_peak_lookups(peaks, benchside=None):</span>
+<span class="sd">        Create lookup dict with special handling for 2A missing fiber.</span>
+<span class="sd">    dump_LUT(channel, hdu, trace_obj):</span>
+<span class="sd">        Dump lookup table (LUT) data from HDU to a JSON file.</span>
+<span class="sd">    flip_b_side_positions():</span>
+<span class="sd">        Flip B-side positions in the LUT.</span>
+<span class="sd">    flip_positions():</span>
+<span class="sd">        Flip positions in the LUT based on predefined criteria.</span>
+<span class="sd">    plot_trace(traceobj):</span>
+<span class="sd">        Plot trace data from a trace object.</span>
+<span class="sd">    plot_traces_on_image(traceobj, data, zscale=False):</span>
+<span class="sd">        Plot traces overlaid on raw data with optional zscale.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">LUT_DIR</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">cm</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Union</span>
+<span class="c1">#from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+
+<div class="viewcode-block" id="setup_logger">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.setup_logger">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">setup_logger</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">log_filename</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Setup logger with file and console handlers.</span>
+
+<span class="sd">    Creates a logger with both file and console output, automatically creating</span>
+<span class="sd">    a logs directory if it doesn&#39;t exist.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        name (str): Logger name (usually __name__).</span>
+<span class="sd">        log_filename (str, optional): Custom log filename. If None, a default </span>
+<span class="sd">            filename will be used. Defaults to None.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        logging.Logger: Configured logger instance.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create logs directory</span>
+    <span class="n">log_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;logs&#39;</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    
+    <span class="c1"># Create logger</span>
+    <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+    
+    <span class="c1"># Clear existing handlers</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="c1"># Create file handler</span>
+    <span class="n">log_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">log_filename</span><span class="p">)</span>
+    <span class="n">file_handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">FileHandler</span><span class="p">(</span><span class="n">log_file</span><span class="p">)</span>
+    <span class="n">file_handler</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+    
+    <span class="c1"># Create console handler</span>
+    <span class="n">console_handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
+    <span class="n">console_handler</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>  <span class="c1"># Set desired console log level</span>
+    
+    
+    <span class="c1"># Create formatter</span>
+    <span class="n">formatter</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%(asctime)s</span><span class="s1"> - </span><span class="si">%(name)s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="n">file_handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">formatter</span><span class="p">)</span>
+    <span class="n">console_handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">formatter</span><span class="p">)</span>
+    
+    <span class="c1"># Add only file handler</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">file_handler</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">console_handler</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">logger</span></div>
+
+
+<div class="viewcode-block" id="create_peak_lookup">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.create_peak_lookup">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_peak_lookup</span><span class="p">(</span><span class="n">peaks</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create lookup table mapping peak index to y position.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        peaks (list): List of peak y-positions.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        dict: Dictionary mapping peak index to y position.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">peak_pos</span> <span class="o">=</span> <span class="p">{</span><span class="n">idx</span><span class="p">:</span> <span class="n">y_pos</span> <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">y_pos</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">peaks</span><span class="p">)}</span>
+    
+    <span class="k">return</span> <span class="n">peak_pos</span></div>
+
+
+<div class="viewcode-block" id="save_combs_to_fits">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.save_combs_to_fits">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">save_combs_to_fits</span><span class="p">(</span><span class="n">comb_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">outfile</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;comb_profiles.fits&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Save dictionary of comb profiles to multi-extension FITS file.</span>
+
+<span class="sd">    Creates a FITS file with each comb profile as a separate extension.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        comb_dict (dict): Dictionary of comb profiles with format {&#39;label&#39;: comb_array}.</span>
+<span class="sd">        outfile (str, optional): Output filename. Defaults to &#39;comb_profiles.fits&#39;.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create HDU list with empty primary</span>
+    <span class="n">hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">()])</span>
+    
+    <span class="c1"># Add each comb as an extension</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">comb</span> <span class="ow">in</span> <span class="n">comb_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="c1"># Create ImageHDU for this comb</span>
+        <span class="n">hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">comb</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+        <span class="c1"># Clean label for FITS extension name (remove spaces, special chars)</span>
+        <span class="n">ext_name</span> <span class="o">=</span> <span class="n">label</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="s1">&#39;_&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+        <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ext_name</span>
+        <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;LABEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">label</span>
+        <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BUNIT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Counts&#39;</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">hdu</span><span class="p">)</span>
+    
+    <span class="c1"># Write to file</span>
+    <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">outfile</span><span class="p">)</span>
+    <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    
+    <span class="k">return</span></div>
+
+
+
+
+<div class="viewcode-block" id="grab_peak_pos_from_LUT">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.grab_peak_pos_from_LUT">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">grab_peak_pos_from_LUT</span><span class="p">(</span><span class="n">file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">channel</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">benchside</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">fiber</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Retrieve peak positions from a Look-Up Table (LUT) file.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        file (str): Path to the LUT file in JSON format.</span>
+<span class="sd">        channel (str): The channel to retrieve data for.</span>
+<span class="sd">        benchside (str): The benchside to retrieve data for.</span>
+<span class="sd">        fiber (int, optional): Specific fiber to retrieve the peak position for. </span>
+<span class="sd">            If None, returns all peak positions. Defaults to None.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Union[list, int]: A list of peak positions if fiber is not specified, </span>
+<span class="sd">            otherwise the peak position for the specified fiber.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="n">peak_positions</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">fiber</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">peak_positions</span>
+    
+    <span class="k">return</span> <span class="n">peak_positions</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="create_peak_lookups">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.create_peak_lookups">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_peak_lookups</span><span class="p">(</span><span class="n">peaks</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">benchside</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a lookup dictionary for peak positions with special handling for missing fibers.</span>
+
+<span class="sd">    This function processes an array of peak positions and inserts additional peaks </span>
+<span class="sd">    at specific indices based on the provided benchside. It handles special cases </span>
+<span class="sd">    for benchsides &#39;2A&#39; and &#39;2B&#39; where fibers may be missing.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        peaks (np.ndarray): An array of peak positions.</span>
+<span class="sd">        benchside (str, optional): The benchside identifier, either &#39;2A&#39; or &#39;2B&#39;. </span>
+<span class="sd">            If None, no special handling is applied. Defaults to None.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        dict: A dictionary where the keys are the indices of the peaks (as strings) </span>
+<span class="sd">            and the values are the peak positions (as integers).</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        - **Benchside &#39;2A&#39; Handling**: Calculates average spacing and inserts new </span>
+<span class="sd">          peaks at indices 269 and 298.</span>
+<span class="sd">        - **Benchside &#39;2B&#39; Handling**: Calculates average spacing and inserts new </span>
+<span class="sd">          peak at index 48.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; peaks = np.array([100, 200, 300, 400])</span>
+<span class="sd">        &gt;&gt;&gt; create_peak_lookups(peaks, benchside=&#39;2A&#39;)</span>
+<span class="sd">        {&#39;0&#39;: 100, &#39;1&#39;: 200, &#39;2&#39;: 300, &#39;3&#39;: 400, &#39;269&#39;: 250, &#39;298&#39;: 450}</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="k">if</span> <span class="n">benchside</span> <span class="o">==</span> <span class="s1">&#39;2A&#39;</span><span class="p">:</span>
+        <span class="c1"># Calculate average peak spacing</span>
+        <span class="n">peak_diffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">peaks</span><span class="p">)</span>
+        <span class="n">avg_spacing</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">peak_diffs</span><span class="p">)</span>
+        
+        <span class="c1"># Find index 269 and insert new peak</span>
+        <span class="n">peak_list</span> <span class="o">=</span> <span class="n">peaks</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">idx_269</span> <span class="o">=</span> <span class="mi">269</span>
+        <span class="n">idx_298</span> <span class="o">=</span> <span class="mi">298</span>
+        
+        <span class="k">if</span> <span class="n">idx_269</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">peak_list</span><span class="p">):</span>
+            <span class="n">new_peak_pos</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">peak_list</span><span class="p">[</span><span class="n">idx_269</span><span class="p">]</span> <span class="o">+</span> <span class="n">avg_spacing</span><span class="p">)</span>
+            <span class="n">peak_list</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">idx_269</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">new_peak_pos</span><span class="p">)</span>
+            <span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">peak_list</span><span class="p">)</span>
+            
+        <span class="k">if</span> <span class="n">idx_298</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">peak_list</span><span class="p">):</span>
+            <span class="n">new_peak_pos</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">peak_list</span><span class="p">[</span><span class="n">idx_298</span><span class="p">]</span> <span class="o">+</span> <span class="n">avg_spacing</span><span class="p">)</span>
+            <span class="n">peak_list</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">idx_298</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">new_peak_pos</span><span class="p">)</span>
+            <span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">peak_list</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">benchside</span> <span class="o">==</span> <span class="s1">&#39;2B&#39;</span><span class="p">:</span>
+        <span class="c1"># Calculate average peak spacing</span>
+        <span class="n">peak_diffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">peaks</span><span class="p">)</span>
+        <span class="n">avg_spacing</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">peak_diffs</span><span class="p">)</span>
+        
+        <span class="c1"># Find index 269 and insert new peak</span>
+        <span class="n">peak_list</span> <span class="o">=</span> <span class="n">peaks</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">idx_48</span> <span class="o">=</span> <span class="mi">48</span>
+        
+        <span class="k">if</span> <span class="n">idx_48</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">peak_list</span><span class="p">):</span>
+            <span class="n">new_peak_pos</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">peak_list</span><span class="p">[</span><span class="n">idx_48</span><span class="p">]</span> <span class="o">+</span> <span class="n">avg_spacing</span><span class="p">)</span>
+            <span class="n">peak_list</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">idx_48</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">new_peak_pos</span><span class="p">)</span>
+            <span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">peak_list</span><span class="p">)</span>
+        
+        
+    <span class="c1"># Create lookup with regular Python ints</span>
+    <span class="k">return</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">idx</span><span class="p">):</span> <span class="nb">int</span><span class="p">(</span><span class="n">pos</span><span class="p">)</span> <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">pos</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">peaks</span><span class="p">)}</span></div>
+
+
+<div class="viewcode-block" id="dump_LUT">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.dump_LUT">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">dump_LUT</span><span class="p">(</span><span class="n">channel</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">hdu</span><span class="p">,</span> <span class="n">trace_obj</span><span class="p">:</span> <span class="s1">&#39;TraceLlamas&#39;</span><span class="p">)</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    channel (str): The channel name to be processed.</span>
+<span class="sd">    hdu (astropy.io.fits.HDUList): The HDU list containing the FITS file data.</span>
+<span class="sd">    trace_obj (TraceObject): An object that processes HDU data and extracts LUT information.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    None</span>
+<span class="sd">    Raises:</span>
+<span class="sd">    FileNotFoundError: If the &#39;traceLUT.json&#39; file is not found when attempting to load the master LUT.</span>
+<span class="sd">    Notes:</span>
+<span class="sd">    - The function initializes or loads a master LUT from &#39;traceLUT.json&#39;.</span>
+<span class="sd">    - It processes each relevant HDU to extract LUT information and updates the master LUT.</span>
+<span class="sd">    - The updated master LUT is saved back to &#39;traceLUT.json&#39;.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Initialize or load master LUT</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="s1">&#39;CAM_NAME&#39;</span> <span class="ow">in</span> <span class="n">hdu</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">:</span>
+            <span class="n">channel_hdu_idx</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">hdu</span><span class="p">))</span> <span class="k">if</span> <span class="n">channel</span> <span class="ow">in</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">channel_hdu_idx</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">hdu</span><span class="p">))</span> <span class="k">if</span> <span class="n">channel</span> <span class="ow">in</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span>
+        
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">master_lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+        <span class="n">master_lut</span> <span class="o">=</span> <span class="p">{</span><span class="n">channel</span><span class="p">:</span> <span class="p">{}}</span>
+
+    <span class="c1"># Loop through and add each LUT</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">channel_hdu_idx</span><span class="p">:</span>
+        
+        <span class="k">if</span> <span class="s1">&#39;CAM_NAME&#39;</span> <span class="ow">in</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">:</span>
+            <span class="n">cam_name</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">cam_name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="n">cam_name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">channel</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BENCH&#39;</span><span class="p">]</span>
+            <span class="n">side</span>  <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;SIDE&#39;</span><span class="p">]</span>
+            
+        <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s2">&quot;</span>
+        
+        <span class="n">trace_obj</span><span class="o">.</span><span class="n">process_hdu_data</span><span class="p">(</span><span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="nb">dict</span><span class="p">(</span><span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">),</span> <span class="n">find_LUT</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">comb</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">orig_comb</span>
+        <span class="n">peaks</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">first_peaks</span>
+        <span class="c1"># Convert numpy array to regular Python types</span>
+        <span class="n">peaks_dict</span> <span class="o">=</span> <span class="n">create_peak_lookups</span><span class="p">(</span><span class="n">peaks</span><span class="p">,</span> <span class="n">benchside</span><span class="o">=</span><span class="n">benchside</span><span class="p">)</span>
+        
+        <span class="n">master_lut</span><span class="p">[</span><span class="s2">&quot;combs&quot;</span><span class="p">][</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">orig_comb</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="c1"># Add to master LUT</span>
+        <span class="n">master_lut</span><span class="p">[</span><span class="s2">&quot;fib_pos&quot;</span><span class="p">][</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">peaks_dict</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2"> peaks to LUT&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Save updated master LUT </span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">master_lut</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    
+    <span class="k">return</span></div>
+
+
+
+<div class="viewcode-block" id="trace_dump_LUT">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.trace_dump_LUT">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">trace_dump_LUT</span><span class="p">(</span><span class="n">trace_obj</span><span class="p">:</span> <span class="s1">&#39;TraceLlamas&#39;</span><span class="p">)</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    channel (str): The channel name to be processed.</span>
+<span class="sd">    hdu (astropy.io.fits.HDUList): The HDU list containing the FITS file data.</span>
+<span class="sd">    trace_obj (TraceObject): An object that processes HDU data and extracts LUT information.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    None</span>
+<span class="sd">    Raises:</span>
+<span class="sd">    FileNotFoundError: If the &#39;traceLUT.json&#39; file is not found when attempting to load the master LUT.</span>
+<span class="sd">    Notes:</span>
+<span class="sd">    - The function initializes or loads a master LUT from &#39;traceLUT.json&#39;.</span>
+<span class="sd">    - It processes each relevant HDU to extract LUT information and updates the master LUT.</span>
+<span class="sd">    - The updated master LUT is saved back to &#39;traceLUT.json&#39;.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Initialize or load master LUT</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s2">&quot;traceLUT.json&quot;</span><span class="p">))</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;traceLUT.json&#39;</span><span class="p">),</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">master_lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;No LUT file found, for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;traceLUT.json&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">master_lut</span> <span class="o">=</span> <span class="p">{</span><span class="n">channel</span><span class="p">:</span> <span class="p">{}}</span>
+
+    <span class="n">benchside</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">benchside</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">channel</span>
+    <span class="n">comb</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">orig_comb</span>
+    <span class="n">peaks</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">first_peaks</span>
+    <span class="c1"># Convert numpy array to regular Python types</span>
+    <span class="n">peaks_dict</span> <span class="o">=</span> <span class="n">create_peak_lookups</span><span class="p">(</span><span class="n">peaks</span><span class="p">,</span> <span class="n">benchside</span><span class="o">=</span><span class="n">benchside</span><span class="p">)</span>
+    
+    <span class="n">master_lut</span><span class="p">[</span><span class="s2">&quot;combs&quot;</span><span class="p">][</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">orig_comb</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+    <span class="c1"># Add to master LUT</span>
+    <span class="n">master_lut</span><span class="p">[</span><span class="s2">&quot;fib_pos&quot;</span><span class="p">][</span><span class="n">channel</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">peaks_dict</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2"> peaks to LUT&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Save updated master LUT </span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;traceLUT.json&#39;</span><span class="p">),</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">master_lut</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    
+    <span class="k">return</span></div>
+
+
+
+
+
+
+
+<div class="viewcode-block" id="flip_b_side_positions">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.flip_b_side_positions">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">flip_b_side_positions</span><span class="p">()</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Flips the fiber positions for the &#39;B&#39; side in the lookup table (LUT) for each color.</span>
+<span class="sd">    This function reads a JSON file containing a lookup table (LUT) of fiber positions,</span>
+<span class="sd">    processes the positions for each color (&#39;green&#39;, &#39;blue&#39;, &#39;red&#39;), and flips the positions</span>
+<span class="sd">    for the &#39;B&#39; side. The flipped positions are then saved to a new JSON file.</span>
+<span class="sd">    The LUT is expected to have the following structure:</span>
+<span class="sd">    {</span>
+<span class="sd">        &quot;fib_pos&quot;: {</span>
+<span class="sd">            &quot;color&quot;: {</span>
+<span class="sd">                &quot;benchside&quot;: {</span>
+<span class="sd">                    &quot;fiber_number&quot;: &quot;position&quot;</span>
+<span class="sd">                }</span>
+<span class="sd">            }</span>
+<span class="sd">        }</span>
+<span class="sd">    }</span>
+<span class="sd">    The function performs the following steps:</span>
+<span class="sd">    1. Loads the LUT from &#39;LUT/traceLUT.json&#39;.</span>
+<span class="sd">    2. Iterates over each color (&#39;green&#39;, &#39;blue&#39;, &#39;red&#39;).</span>
+<span class="sd">    3. For each color, checks if the &#39;B&#39; side exists in the LUT.</span>
+<span class="sd">    4. If the &#39;B&#39; side exists, flips the fiber positions by reversing the fiber numbers.</span>
+<span class="sd">    5. Saves the updated LUT to &#39;LUT/traceLUT_copy.json&#39;.</span>
+<span class="sd">    Raises:</span>
+<span class="sd">        FileNotFoundError: If the LUT file does not exist.</span>
+<span class="sd">        json.JSONDecodeError: If the LUT file is not a valid JSON.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Load LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="c1"># Process each color</span>
+    <span class="k">for</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="s1">&#39;red&#39;</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">color</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">]:</span>
+            <span class="k">continue</span>
+        <span class="c1"># Process each benchside</span>
+        <span class="k">for</span> <span class="n">benchside</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+            <span class="k">if</span> <span class="s1">&#39;B&#39;</span> <span class="ow">in</span> <span class="n">benchside</span><span class="p">:</span>
+                <span class="n">positions</span> <span class="o">=</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span>
+                <span class="c1"># Get max fiber number</span>
+                <span class="n">max_fiber</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">positions</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+                <span class="c1"># Create new flipped mapping</span>
+                <span class="n">flipped</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">positions</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="n">new_key</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">max_fiber</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">))</span>
+                    <span class="n">flipped</span><span class="p">[</span><span class="n">new_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="c1"># Replace original mapping</span>
+                <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">flipped</span>
+    <span class="c1"># Save updated LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT_copy.json&#39;</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">lut</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span></div>
+
+        
+<div class="viewcode-block" id="flip_positions">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.flip_positions">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">flip_positions</span><span class="p">()</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Flips the positions of fibers in the lookup table (LUT) based on the specified configuration.</span>
+<span class="sd">    This function reads a JSON file containing the LUT, processes each color and benchside,</span>
+<span class="sd">    and flips the positions of the fibers if specified in the `flipped` dictionary. The updated</span>
+<span class="sd">    LUT is then saved back to the JSON file.</span>
+<span class="sd">    The `flipped` dictionary determines which fibers to flip for each color and benchside.</span>
+<span class="sd">    The keys in the dictionary are in the format &quot;{color}{side}&quot; (e.g., &quot;greenA&quot;, &quot;blueB&quot;),</span>
+<span class="sd">    and the values are booleans indicating whether to flip the positions (True) or not (False).</span>
+<span class="sd">    Example of `flipped` dictionary:</span>
+<span class="sd">    </span>
+<span class="sd">    flipped = {&quot;greenA&quot;: False, &quot;greenB&quot;: True, &quot;blueA&quot;: True, &quot;blueB&quot;: False, &quot;redA&quot;: False, &quot;redB&quot;: True}</span>
+<span class="sd">    </span>
+<span class="sd">    The function will flip the positions of the fibers for each specified color and benchside,</span>
+<span class="sd">    and save the updated LUT back to the JSON file.</span>
+<span class="sd">    Raises:</span>
+<span class="sd">        FileNotFoundError: If the LUT JSON file is not found.</span>
+<span class="sd">        json.JSONDecodeError: If there is an error decoding the JSON file.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># flipped = {&quot;greenA&quot;:True, &quot;greenB&quot;:False, &quot;blueA&quot;: False, &quot;blueB&quot;:True, &quot;redA&quot;:True, &quot;redB&quot;:False}</span>
+    <span class="c1">#Attempt to check on 23rd Jan 2025</span>
+    <span class="n">flipped</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;greenA&quot;</span><span class="p">:</span><span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;greenB&quot;</span><span class="p">:</span><span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;blueA&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;blueB&quot;</span><span class="p">:</span><span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;redA&quot;</span><span class="p">:</span><span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;redB&quot;</span><span class="p">:</span><span class="kc">True</span><span class="p">}</span>
+    <span class="c1">##temp one</span>
+    <span class="c1">#flipped = {&quot;greenA&quot;:True, &quot;greenB&quot;:False, &quot;blueA&quot;: True, &quot;blueB&quot;:False, &quot;redA&quot;:True, &quot;redB&quot;:False}</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;flipping </span><span class="si">{</span><span class="n">flipped</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="c1"># Load LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    
+    <span class="c1"># Process each color</span>
+    <span class="k">for</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="s1">&#39;red&#39;</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">color</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">]:</span>
+            <span class="k">continue</span>
+            
+        <span class="c1"># Process each benchside</span>
+        <span class="k">for</span> <span class="n">benchside</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span> <span class="k">if</span> <span class="s1">&#39;A&#39;</span> <span class="ow">in</span> <span class="n">benchside</span> <span class="k">else</span> <span class="s1">&#39;B&#39;</span>
+            <span class="n">lookup_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">color</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s2">&quot;</span>
+            
+            <span class="c1"># Only flip if specified in flipped dict</span>
+            <span class="k">if</span> <span class="n">flipped</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">lookup_key</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+                <span class="n">positions</span> <span class="o">=</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span>
+                
+                <span class="c1"># Get max fiber number</span>
+                <span class="n">max_fiber</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">positions</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+                
+                <span class="c1"># Create new flipped mapping</span>
+                <span class="n">flipped_positions</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">positions</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="n">new_key</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">max_fiber</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">))</span>
+                    <span class="n">flipped_positions</span><span class="p">[</span><span class="n">new_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                    
+                <span class="c1"># Replace original mapping</span>
+                <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;fib_pos&#39;</span><span class="p">][</span><span class="n">color</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">flipped_positions</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flipped </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Save updated LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">lut</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="count_trace_fibres">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.count_trace_fibres">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">count_trace_fibres</span><span class="p">(</span><span class="n">mastercalib_dir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">CALIB_DIR</span><span class="p">)</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">N_fib</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;1A&#39;</span><span class="p">:</span><span class="mi">298</span><span class="p">,</span> <span class="s1">&#39;1B&#39;</span><span class="p">:</span><span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;2A&#39;</span><span class="p">:</span><span class="mi">298</span><span class="p">,</span> <span class="s1">&#39;2B&#39;</span><span class="p">:</span><span class="mi">297</span><span class="p">,</span> <span class="s1">&#39;3A&#39;</span><span class="p">:</span><span class="mi">298</span><span class="p">,</span> <span class="s1">&#39;3B&#39;</span><span class="p">:</span><span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;4A&#39;</span><span class="p">:</span><span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;4B&#39;</span><span class="p">:</span><span class="mi">298</span><span class="p">}</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">mastercalib_dir</span><span class="o">+</span><span class="s1">&#39;/*.pkl&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">files</span><span class="p">)</span> <span class="o">==</span> <span class="nb">list</span><span class="p">,</span> <span class="s1">&#39;File extraction did not return as list&#39;</span>
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">pkl</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">files</span><span class="p">):</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">pkl</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+            <span class="n">traceobj</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+        <span class="n">shape</span> <span class="o">=</span> <span class="n">traceobj</span><span class="o">.</span><span class="n">traces</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">traceobj</span><span class="o">.</span><span class="n">channel</span>
+        <span class="n">benchside</span> <span class="o">=</span> <span class="n">traceobj</span><span class="o">.</span><span class="n">benchside</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="n">N_fib</span><span class="p">[</span><span class="n">benchside</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s1"> Benchside </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1"> trace has </span><span class="si">{</span><span class="n">shape</span><span class="si">}</span><span class="s1"> fibres and requires </span><span class="si">{</span><span class="n">req</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+        
+        
+<div class="viewcode-block" id="flip_blue_combs">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.flip_blue_combs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">flip_blue_combs</span><span class="p">()</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Flips all blue combs in the lookup table (LUT) file.</span>
+<span class="sd">    </span>
+<span class="sd">    This function reads the LUT JSON file, processes all benchsides (&#39;1A&#39; through &#39;4B&#39;)</span>
+<span class="sd">    in the blue combs section, and flips those comb arrays. The updated LUT is then </span>
+<span class="sd">    saved back to the JSON file.</span>
+<span class="sd">    </span>
+<span class="sd">    The function performs the following steps:</span>
+<span class="sd">    1. Loads the LUT from &#39;LUT/traceLUT.json&#39;.</span>
+<span class="sd">    2. Checks if &#39;combs&#39; and &#39;blue&#39; keys exist in the LUT structure.</span>
+<span class="sd">    3. For each benchside (1A-4B) in the blue combs, flips the comb array.</span>
+<span class="sd">    4. Saves the updated LUT back to the original file.</span>
+<span class="sd">    </span>
+<span class="sd">    Raises:</span>
+<span class="sd">        FileNotFoundError: If the LUT file does not exist.</span>
+<span class="sd">        json.JSONDecodeError: If the LUT file is not a valid JSON.</span>
+<span class="sd">        KeyError: If the expected structure (&#39;combs&#39; &gt; &#39;blue&#39;) is not found.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Load LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">lut</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    
+    <span class="c1"># Check if &#39;combs&#39; and &#39;blue&#39; keys exist</span>
+    <span class="k">if</span> <span class="s1">&#39;combs&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Combs data not found in LUT&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+        
+    <span class="k">if</span> <span class="s1">&#39;blue&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;combs&#39;</span><span class="p">]:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Blue comb data not found in LUT&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    
+    <span class="c1"># Process each benchside for blue combs</span>
+    <span class="k">for</span> <span class="n">benchside</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;combs&#39;</span><span class="p">][</span><span class="s1">&#39;blue&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+        <span class="c1"># Get the comb as a list</span>
+        <span class="n">comb</span> <span class="o">=</span> <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;combs&#39;</span><span class="p">][</span><span class="s1">&#39;blue&#39;</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span>
+        
+        <span class="c1"># Flip the comb array</span>
+        <span class="n">flipped_comb</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">comb</span><span class="p">))</span>
+        
+        <span class="c1"># Replace the original comb with the flipped one</span>
+        <span class="n">lut</span><span class="p">[</span><span class="s1">&#39;combs&#39;</span><span class="p">][</span><span class="s1">&#39;blue&#39;</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span> <span class="o">=</span> <span class="n">flipped_comb</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flipped blue comb for benchside </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Save the updated LUT</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;LUT/traceLUT.json&#39;</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">lut</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Blue combs successfully flipped and saved to LUT/traceLUT.json&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="check_image_properties">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Utils.html#llamas_pyjamas.Utils.utils.check_image_properties">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">check_image_properties</span><span class="p">(</span><span class="n">hdu</span><span class="p">:</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">start_idx</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">hdu</span><span class="p">)):</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span>
+        <span class="n">bench</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BENCh&#39;</span><span class="p">]</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;SIDE&#39;</span><span class="p">]</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+        <span class="n">has_nan</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">data</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()</span>
+        <span class="n">has_neg</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">data</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;color </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s1"> bench </span><span class="si">{</span><span class="n">bench</span><span class="si">}</span><span class="s1"> side </span><span class="si">{</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Has NaN: </span><span class="si">{</span><span class="n">has_nan</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Has negative value </span><span class="si">{</span><span class="n">has_neg</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+    
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
