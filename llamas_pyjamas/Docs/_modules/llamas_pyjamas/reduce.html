@@ -1,0 +1,539 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.reduce &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.reduce</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.reduce</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;LLAMAS data reduction pipeline main module.</span>
+
+<span class="sd">This module provides the primary functions for reducing LLAMAS (Large Lens Array </span>
+<span class="sd">Multi-Object Spectrograph) observations through a complete pipeline from trace generation </span>
+<span class="sd">to final data products including RSS files and data cubes.</span>
+
+<span class="sd">Functions:</span>
+<span class="sd">    generate_traces: Generate fiber traces from flat field observations.</span>
+<span class="sd">    extract_flat_field: Extract flat field spectra for calibration.</span>
+<span class="sd">    run_extraction: Extract science spectra from observations.</span>
+<span class="sd">    calc_wavelength_soln: Calculate wavelength solutions from arc lamp observations.</span>
+<span class="sd">    relative_throughput: Calculate relative throughput corrections.</span>
+<span class="sd">    correct_wavelengths: Apply wavelength corrections to extracted spectra.</span>
+<span class="sd">    construct_cube: Create 3D data cubes from RSS files.</span>
+<span class="sd">    main: Main pipeline function that processes complete observations.</span>
+
+<span class="sd">Example:</span>
+<span class="sd">    Run the complete reduction pipeline::</span>
+<span class="sd">    </span>
+<span class="sd">        python reduce.py --config config.txt</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">traceback</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Trace.traceLlamasMaster</span> <span class="kn">import</span> <span class="n">run_ray_tracing</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.config</span> <span class="kn">import</span> <span class="n">BASE_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">BIAS_DIR</span><span class="p">,</span> <span class="n">LUT_DIR</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Extract.extractLlamas</span> <span class="kn">import</span> <span class="n">ExtractLlamas</span><span class="p">,</span> <span class="n">save_extractions</span>
+<span class="kn">import</span> <span class="nn">llamas_pyjamas.GUI.guiExtract</span> <span class="k">as</span> <span class="nn">ge</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.File.llamasIO</span> <span class="kn">import</span> <span class="n">process_fits_by_color</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.File.llamasRSS</span> <span class="kn">import</span> <span class="n">update_ra_dec_in_fits</span>
+<span class="kn">import</span> <span class="nn">llamas_pyjamas.Arc.arcLlamas</span> <span class="k">as</span> <span class="nn">arc</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.File.llamasRSS</span> <span class="kn">import</span> <span class="n">RSSgeneration</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Utils.utils</span> <span class="kn">import</span> <span class="n">count_trace_fibres</span><span class="p">,</span> <span class="n">setup_logger</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Cube.cubeConstruct</span> <span class="kn">import</span> <span class="n">CubeConstructor</span>
+
+
+<span class="n">_linefile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+
+
+
+
+
+<div class="viewcode-block" id="generate_traces">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.generate_traces">[docs]</a>
+<span class="k">def</span> <span class="nf">generate_traces</span><span class="p">(</span><span class="n">red_flat</span><span class="p">,</span> <span class="n">green_flat</span><span class="p">,</span> <span class="n">blue_flat</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate fiber traces from flat field observations for all three channels.</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        red_flat: Path to red flat field FITS file.</span>
+<span class="sd">        green_flat: Path to green flat field FITS file. </span>
+<span class="sd">        blue_flat: Path to blue flat field FITS file.</span>
+<span class="sd">        output_dir: Directory to save trace files.</span>
+<span class="sd">        bias: Optional bias frame for correction.</span>
+<span class="sd">        </span>
+<span class="sd">    Raises:</span>
+<span class="sd">        AssertionError: If any of the flat field files do not exist.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+    
+    <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">red_flat</span><span class="p">),</span> <span class="s2">&quot;Red flat file does not exist.&quot;</span>
+    <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">green_flat</span><span class="p">),</span> <span class="s2">&quot;Green flat file does not exist.&quot;</span>
+    <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">blue_flat</span><span class="p">),</span> <span class="s2">&quot;Blue flat file does not exist.&quot;</span>
+
+    <span class="n">run_ray_tracing</span><span class="p">(</span><span class="n">red_flat</span><span class="p">,</span> <span class="n">outpath</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">bias</span><span class="p">)</span>
+    <span class="n">run_ray_tracing</span><span class="p">(</span><span class="n">green_flat</span><span class="p">,</span> <span class="n">outpath</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">bias</span><span class="p">)</span>
+    <span class="n">run_ray_tracing</span><span class="p">(</span><span class="n">blue_flat</span><span class="p">,</span> <span class="n">outpath</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">bias</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Traces generated and saved to </span><span class="si">{</span><span class="n">output_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span></div>
+
+
+
+<span class="c1">###need to edit GUI extract to give custom output_dir</span>
+<span class="c1">#currently designed to use skyflats</span>
+<span class="c1">#only used for generating new wl solutions</span>
+<div class="viewcode-block" id="extract_flat_field">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.extract_flat_field">[docs]</a>
+<span class="k">def</span> <span class="nf">extract_flat_field</span><span class="p">(</span><span class="n">flat_file_dir</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+
+    <span class="n">ge</span><span class="o">.</span><span class="n">GUI_extract</span><span class="p">(</span><span class="n">flat_file_dir</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">use_bias</span><span class="p">)</span>
+
+    <span class="k">return</span></div>
+
+
+
+<div class="viewcode-block" id="run_extraction">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.run_extraction">[docs]</a>
+<span class="k">def</span> <span class="nf">run_extraction</span><span class="p">(</span><span class="n">science_file</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">trace_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">science_file</span><span class="p">),</span> <span class="s2">&quot;Science file does not exist.&quot;</span>
+    <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">science_file</span><span class="p">)</span> <span class="ow">is</span> <span class="nb">list</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">science_file</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">file</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;Science file </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2"> does not exist.&quot;</span>
+            <span class="n">extraction_file_path</span> <span class="o">=</span> <span class="n">ge</span><span class="o">.</span><span class="n">GUI_extract</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">use_bias</span><span class="p">,</span> <span class="n">trace_dir</span><span class="o">=</span><span class="n">trace_dir</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">science_file</span><span class="p">),</span> <span class="s2">&quot;Science file does not exist.&quot;</span>
+        <span class="n">extraction_file_path</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">ge</span><span class="o">.</span><span class="n">GUI_extract</span><span class="p">(</span><span class="n">science_file</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">use_bias</span><span class="p">,</span> <span class="n">trace_dir</span><span class="o">=</span><span class="n">trace_dir</span><span class="p">)</span>
+
+    <span class="k">return</span>  <span class="n">extraction_file_path</span></div>
+
+
+
+<div class="viewcode-block" id="calc_wavelength_soln">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.calc_wavelength_soln">[docs]</a>
+<span class="k">def</span> <span class="nf">calc_wavelength_soln</span><span class="p">(</span><span class="n">arc_file</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+
+    <span class="n">ge</span><span class="o">.</span><span class="n">GUI_extract</span><span class="p">(</span><span class="n">arc_file</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">bias</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">)</span>
+
+    <span class="n">arc_picklename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">arc_file</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_mef.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;_extract.pkl&#39;</span><span class="p">))</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">arc_picklename</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+        <span class="n">batch_data</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span>
+    
+    <span class="n">arcdict</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">arc_picklename</span><span class="p">)</span>
+    <span class="n">arcspec</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">],</span> <span class="n">arcdict</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+
+    <span class="n">arc</span><span class="o">.</span><span class="n">shiftArcX</span><span class="p">(</span><span class="n">arc_picklename</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">arcdict</span></div>
+
+
+
+
+<div class="viewcode-block" id="relative_throughput">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.relative_throughput">[docs]</a>
+<span class="k">def</span> <span class="nf">relative_throughput</span><span class="p">(</span><span class="n">shift_picklename</span><span class="p">,</span> <span class="n">flat_picklename</span><span class="p">):</span>
+
+    <span class="n">arc</span><span class="o">.</span><span class="n">fiberRelativeThroughput</span><span class="p">(</span><span class="n">flat_picklename</span><span class="p">,</span> <span class="n">shift_picklename</span><span class="p">)</span>
+    <span class="c1">### need to add code in to return the name of the throughput file</span>
+    <span class="k">return</span></div>
+
+
+
+<div class="viewcode-block" id="correct_wavelengths">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.correct_wavelengths">[docs]</a>
+<span class="k">def</span> <span class="nf">correct_wavelengths</span><span class="p">(</span><span class="n">science_extraction_file</span><span class="p">,</span> <span class="n">soln</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">soln</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Load the reference arc dictionary if not provided</span>
+        <span class="n">arcdict</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;LLAMAS_reference_arc.pkl&#39;</span><span class="p">))</span>
+    
+    <span class="n">_science</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">science_extraction_file</span><span class="p">)</span>
+    <span class="n">extractions</span><span class="p">,</span> <span class="n">metadata</span><span class="p">,</span> <span class="n">primary_hdr</span> <span class="o">=</span> <span class="n">_science</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">],</span> <span class="n">_science</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">],</span> <span class="n">_science</span><span class="p">[</span><span class="s1">&#39;primary_header&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;extractions: </span><span class="si">{</span><span class="n">extractions</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;metadata: </span><span class="si">{</span><span class="n">metadata</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="n">std_wvcal</span> <span class="o">=</span> <span class="n">arc</span><span class="o">.</span><span class="n">arcTransfer</span><span class="p">(</span><span class="n">_science</span><span class="p">,</span> <span class="n">arcdict</span><span class="p">,)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;std_wvcal: </span><span class="si">{</span><span class="n">std_wvcal</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;std_wvcal metadata: </span><span class="si">{</span><span class="n">std_wvcal</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;metadata&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{})</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">std_wvcal</span><span class="p">,</span> <span class="n">primary_hdr</span></div>
+
+
+
+
+<div class="viewcode-block" id="construct_cube">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.construct_cube">[docs]</a>
+<span class="k">def</span> <span class="nf">construct_cube</span><span class="p">(</span><span class="n">rss_files</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">wavelength_range</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dispersion</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">spatial_sampling</span><span class="o">=</span><span class="mf">0.75</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Construct IFU data cubes from RSS files.</span>
+<span class="sd">    </span>
+<span class="sd">    This function can handle both:</span>
+<span class="sd">    1. Single RSS files with multiple channels</span>
+<span class="sd">    2. Multiple channel-specific RSS files with names like:</span>
+<span class="sd">       &quot;_extract_RSS_blue.fits&quot;, &quot;_extract_RSS_green.fits&quot;, &quot;_extract_RSS_red.fits&quot;</span>
+<span class="sd">    </span>
+<span class="sd">    Parameters:</span>
+<span class="sd">        rss_files (str or list): Path to RSS FITS file(s) or base paths</span>
+<span class="sd">        output_dir (str): Directory to save output cubes</span>
+<span class="sd">        wavelength_range (tuple, optional): Min/max wavelength range for output cubes</span>
+<span class="sd">        dispersion (float): Wavelength dispersion in Angstroms/pixel</span>
+<span class="sd">        spatial_sampling (float): Spatial sampling in arcsec/pixel</span>
+<span class="sd">        </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        list: Paths to constructed cube files</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+        
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rss_files</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">rss_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">rss_files</span><span class="p">]</span>
+        
+    <span class="n">cube_files</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="c1"># Create a single logger for all cube construction</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+    <span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;CubeConstruct_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting cube construction for </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rss_files</span><span class="p">)</span><span class="si">}</span><span class="s2"> RSS files/base paths&quot;</span><span class="p">)</span>
+    
+    <span class="k">for</span> <span class="n">rss_file</span> <span class="ow">in</span> <span class="n">rss_files</span><span class="p">:</span>
+        <span class="c1"># Get base name for output files and detect channel if present</span>
+        <span class="n">base_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">rss_file</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="kc">None</span>
+        
+        <span class="c1"># Check for channel-specific naming pattern</span>
+        <span class="k">for</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="sa">f</span><span class="s1">&#39;_extract_RSS_</span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s1">&#39;</span> <span class="ow">in</span> <span class="n">base_name</span><span class="p">:</span>
+                <span class="c1"># Extract the base name and channel color</span>
+                <span class="n">channel</span> <span class="o">=</span> <span class="n">color</span>
+                <span class="n">base_name</span> <span class="o">=</span> <span class="n">base_name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;_extract_RSS_</span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Detected </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> channel file, using base name: </span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">break</span>
+        
+        <span class="k">if</span> <span class="n">channel</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> channel RSS file with base name: </span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing RSS file (no specific channel detected): </span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Constructing channel cubes from RSS file: </span><span class="si">{</span><span class="n">rss_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Constructing channel cubes from RSS file: </span><span class="si">{</span><span class="n">rss_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Pass the common logger to the constructor</span>
+        <span class="n">constructor</span> <span class="o">=</span> <span class="n">CubeConstructor</span><span class="p">(</span><span class="n">logger</span><span class="o">=</span><span class="n">logger</span><span class="p">)</span>
+        
+        <span class="c1"># Construct one cube per channel</span>
+        <span class="n">channel_cubes</span> <span class="o">=</span> <span class="n">constructor</span><span class="o">.</span><span class="n">construct_cube_from_rss</span><span class="p">(</span>
+            <span class="n">rss_file</span><span class="p">,</span>
+            <span class="n">wavelength_range</span><span class="o">=</span><span class="n">wavelength_range</span><span class="p">,</span>
+            <span class="n">dispersion</span><span class="o">=</span><span class="n">dispersion</span><span class="p">,</span>
+            <span class="n">spatial_sampling</span><span class="o">=</span><span class="n">spatial_sampling</span>
+        <span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">channel_cubes</span><span class="p">:</span>
+            <span class="c1"># Log which channels were found</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found channels for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">rss_file</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">channel_cubes</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Save each channel cube</span>
+            <span class="n">saved_paths</span> <span class="o">=</span> <span class="n">constructor</span><span class="o">.</span><span class="n">save_channel_cubes</span><span class="p">(</span>
+                <span class="n">channel_cubes</span><span class="p">,</span>
+                <span class="n">output_prefix</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">),</span>
+                <span class="n">header_info</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;ORIGIN&#39;</span><span class="p">:</span> <span class="s1">&#39;LLAMAS Pipeline&#39;</span><span class="p">,</span> <span class="s1">&#39;SPAXELSZ&#39;</span><span class="p">:</span> <span class="n">spatial_sampling</span><span class="p">},</span>
+                <span class="n">spatial_sampling</span><span class="o">=</span><span class="n">spatial_sampling</span>
+            <span class="p">)</span>
+            
+            <span class="c1"># Add saved paths to the list</span>
+            <span class="k">for</span> <span class="n">channel</span><span class="p">,</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">saved_paths</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  - Channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> cube saved: </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">cube_files</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  No valid channel cubes constructed for </span><span class="si">{</span><span class="n">rss_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No valid channel cubes constructed for </span><span class="si">{</span><span class="n">rss_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">cube_files</span></div>
+
+
+<div class="viewcode-block" id="main">
+<a class="viewcode-back" href="../../llamas_pyjamas.html#llamas_pyjamas.reduce.main">[docs]</a>
+<span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">config_path</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;This is a placeholder for the reduce module.&quot;</span><span class="p">)</span>
+    <span class="c1"># You can add functionality here as needed.</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">line</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;#&#39;</span><span class="p">):</span>  <span class="c1"># Skip empty lines and comments</span>
+                <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;=&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                
+                <span class="c1"># Handle quoted values</span>
+                <span class="k">if</span> <span class="n">value</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">value</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">value</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;&#39;&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">value</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;&#39;&quot;</span><span class="p">):</span>
+                    <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>  <span class="c1"># Remove quotes</span>
+                
+                <span class="c1"># Handle lists of quoted values</span>
+                <span class="k">elif</span> <span class="s1">&#39;,&#39;</span> <span class="ow">in</span> <span class="n">value</span><span class="p">:</span>
+                    <span class="n">items</span> <span class="o">=</span> <span class="p">[]</span>
+                    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="p">):</span>
+                        <span class="n">item</span> <span class="o">=</span> <span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                        <span class="c1"># Remove quotes from each item if present</span>
+                        <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">item</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">item</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;&#39;&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">item</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;&#39;&quot;</span><span class="p">):</span>
+                            <span class="n">item</span> <span class="o">=</span> <span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                        <span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+                    <span class="n">value</span> <span class="o">=</span> <span class="n">items</span>
+                    
+                <span class="n">config</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loaded configuration from </span><span class="si">{</span><span class="n">config_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Configuration:&quot;</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+        
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_dir&#39;</span><span class="p">):</span>
+        <span class="n">output_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">BASE_DIR</span><span class="p">,</span> <span class="s1">&#39;reduced&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">output_dir</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_dir&#39;</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+    <span class="k">if</span> <span class="nb">bool</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;generate_new_wavelength_soln&#39;</span><span class="p">))</span> <span class="o">==</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generating new wavelength solution.&quot;</span><span class="p">)</span>
+        <span class="n">extract_flat_field</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;flat_file_dir&#39;</span><span class="p">),</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_dir&#39;</span><span class="p">),</span> <span class="n">bias_file</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bias_file&#39;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="s1">&#39;arc_file&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">config</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No arc file provided in the configuration.&quot;</span><span class="p">)</span>
+        <span class="n">relative_throughput</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;shift_picklename&#39;</span><span class="p">),</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;flat_picklename&#39;</span><span class="p">))</span>
+        <span class="n">arcdict</span> <span class="o">=</span> <span class="n">calc_wavelength_soln</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;arc_file&#39;</span><span class="p">],</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_dir&#39;</span><span class="p">),</span> <span class="n">bias</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bias_file&#39;</span><span class="p">))</span>
+        <span class="n">config</span><span class="p">[</span><span class="s1">&#39;arcdict&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">arcdict</span>
+        
+    
+    <span class="c1"># Set default for trace_output_dir if not present</span>
+    <span class="k">if</span> <span class="s1">&#39;trace_output_dir&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">config</span><span class="p">:</span>
+        <span class="n">trace_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;traces&#39;</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">trace_path</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">config</span><span class="p">[</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">trace_path</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">trace_path</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">]</span>
+        
+    <span class="c1">#set default for extraction_output_dir if not present</span>
+    <span class="k">if</span> <span class="s1">&#39;extraction_output_dir&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">config</span><span class="p">:</span>
+        <span class="n">extraction_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;extractions&#39;</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">config</span><span class="p">[</span><span class="s1">&#39;extraction_output_dir&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">extraction_path</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">extraction_path</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;extraction_output_dir&#39;</span><span class="p">]</span>
+    
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="s1">&#39;flats&#39;</span><span class="p">),</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        
+        <span class="n">generate_traces</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;red_flat_file&#39;</span><span class="p">),</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;green_flat_file&#39;</span><span class="p">),</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;blue_flat_file&#39;</span><span class="p">),</span> 
+                       <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">),</span> <span class="n">bias</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bias_file&#39;</span><span class="p">))</span>
+        
+        <span class="c1"># Check if the generated traces have the correct number of fibers</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Checking fiber counts in generated traces...&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">count_trace_fibres</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">)):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generated traces have incorrect fiber counts. Using traces from CALIB_DIR instead.&quot;</span><span class="p">)</span>
+            <span class="n">config</span><span class="p">[</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">CALIB_DIR</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generated traces have correct fiber counts. Proceeding with new traces.&quot;</span><span class="p">)</span>
+        
+        
+       <span class="c1"># Process science files by color if they&#39;re provided as a list</span>
+        <span class="k">if</span> <span class="s1">&#39;science_files&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">config</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No science files provided in the configuration.&quot;</span><span class="p">)</span>
+    
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;science_files&#39;</span><span class="p">],</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="s2">&quot;science_files&quot;</span><span class="p">])</span><span class="si">}</span><span class="s1"> science files to process.&#39;</span><span class="p">)</span>
+        
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">science_file</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;science_files&#39;</span><span class="p">]):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing science file </span><span class="si">{</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;science_files&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">science_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">science_file</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Science file </span><span class="si">{</span><span class="n">science_file</span><span class="si">}</span><span class="s2"> does not exist.&quot;</span><span class="p">)</span>
+                <span class="c1"># Process each science file by color</span>
+                <span class="n">extracted_file</span> <span class="o">=</span> <span class="n">run_extraction</span><span class="p">(</span><span class="n">science_file</span><span class="p">,</span> <span class="n">extraction_path</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bias_file&#39;</span><span class="p">),</span> <span class="n">trace_dir</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">))</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extraction completed for </span><span class="si">{</span><span class="n">science_file</span><span class="si">}</span><span class="s2">. Output file: </span><span class="si">{</span><span class="n">extracted_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">extracted_file</span> <span class="o">=</span> <span class="n">run_extraction</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;science_files&#39;</span><span class="p">),</span> <span class="n">extraction_path</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bias_file&#39;</span><span class="p">),</span> <span class="n">trace_dir</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extraction completed. Used traces </span><span class="si">{</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;trace_output_dir&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> Output file: </span><span class="si">{</span><span class="n">extracted_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># print(&quot;Correcting wavelengths in the extracted file...&quot;)</span>
+        <span class="c1"># correction_path = os.path.join(extraction_path, extracted_file)</span>
+        <span class="n">pkl_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.pkl&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="s1">&#39;corrected&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">f</span><span class="p">]</span>
+        
+        <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">file</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pkl_files</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing extraction file </span><span class="si">{</span><span class="n">index</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pkl_files</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">correction_path</span> <span class="o">=</span> <span class="n">file</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">correction_path</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extraction file </span><span class="si">{</span><span class="n">correction_path</span><span class="si">}</span><span class="s2"> does not exist.&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Correct wavelengths for each extraction file</span>
+            <span class="n">corr_extractions</span><span class="p">,</span> <span class="n">primary_hdr</span> <span class="o">=</span> <span class="n">correct_wavelengths</span><span class="p">(</span><span class="n">correction_path</span><span class="p">,</span> <span class="n">soln</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;arcdict&#39;</span><span class="p">))</span>
+            
+            <span class="n">corr_extraction_list</span> <span class="o">=</span> <span class="n">corr_extractions</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+            
+            <span class="c1"># Save the corrected extractions using the current file&#39;s base name</span>
+            <span class="n">base_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">savefile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s1">_corrected_extractions.pkl&#39;</span><span class="p">)</span>
+            <span class="n">save_extractions</span><span class="p">(</span><span class="n">corr_extraction_list</span><span class="p">,</span> <span class="n">primary_header</span><span class="o">=</span><span class="n">primary_hdr</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="n">savefile</span><span class="p">,</span> <span class="n">save_dir</span><span class="o">=</span><span class="n">extraction_path</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;LLAMASExtract_batch_corrected&#39;</span><span class="p">)</span>
+
+            <span class="c1"># Create a logger for RSS generation</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+            <span class="n">rss_logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;RSSgeneration_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+            <span class="n">rss_logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting RSS generation for </span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1">#RSS generation</span>
+            <span class="n">rss_gen</span> <span class="o">=</span> <span class="n">RSSgeneration</span><span class="p">(</span><span class="n">logger</span><span class="o">=</span><span class="n">rss_logger</span><span class="p">)</span>
+            <span class="n">rss_output_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s1">_RSS.fits&#39;</span><span class="p">)</span>
+            <span class="n">new_rss_outputs</span> <span class="o">=</span> <span class="n">rss_gen</span><span class="o">.</span><span class="n">generate_rss</span><span class="p">(</span><span class="n">savefile</span><span class="p">,</span> <span class="n">rss_output_file</span><span class="p">)</span>
+            <span class="n">rss_logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RSS file generated: </span><span class="si">{</span><span class="n">new_rss_outputs</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RSS file generated: </span><span class="si">{</span><span class="n">new_rss_outputs</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Updating RA and Dec in RSS files</span>
+        <span class="k">for</span> <span class="n">rss_output_file</span> <span class="ow">in</span> <span class="n">new_rss_outputs</span><span class="p">:</span>
+            <span class="n">update_ra_dec_in_fits</span><span class="p">(</span><span class="n">rss_output_file</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">rss_logger</span><span class="p">)</span>
+
+        <span class="c1"># Cube construction from RSS files</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Constructing cubes from RSS files...&quot;</span><span class="p">)</span>
+        <span class="c1"># First check for files with &#39;extract_RSS&#39; in the name</span>
+        <span class="n">rss_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">extraction_path</span><span class="p">)</span> 
+                <span class="k">if</span> <span class="s1">&#39;extract_RSS&#39;</span> <span class="ow">in</span> <span class="n">f</span> <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">)]</span>
+        
+        <span class="c1"># If none found, fall back to the original pattern</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">rss_files</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rss_files</span><span class="p">)</span><span class="si">}</span><span class="s2"> RSS files for cube construction&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s1">&#39;cube_output_dir&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">config</span><span class="p">:</span>
+            <span class="n">cube_output_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;cubes&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cube_output_dir</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cube_output_dir&#39;</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">cube_output_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+        <span class="k">if</span> <span class="n">rss_files</span><span class="p">:</span>
+            <span class="n">cube_files</span> <span class="o">=</span> <span class="n">construct_cube</span><span class="p">(</span>
+                <span class="n">rss_files</span><span class="p">,</span> 
+                <span class="n">cube_output_dir</span><span class="p">,</span>
+                <span class="n">wavelength_range</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;wavelength_range&#39;</span><span class="p">),</span>
+                <span class="n">dispersion</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;dispersion&#39;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>
+                <span class="n">spatial_sampling</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;spatial_sampling&#39;</span><span class="p">,</span> <span class="mf">0.75</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cubes constructed: </span><span class="si">{</span><span class="n">cube_files</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No RSS files found for cube construction&quot;</span><span class="p">)</span>
+                
+        
+        
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;An error occurred: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;Reduce module placeholder&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;config_file&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Path to the configuration file&#39;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    
+    
+    <span class="n">main</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">config_file</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
