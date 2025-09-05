@@ -1,3 +1,25 @@
+"""LLAMAS data reduction pipeline main module.
+
+This module provides the primary functions for reducing LLAMAS (Large Lens Array 
+Multi-Object Spectrograph) observations through a complete pipeline from trace generation 
+to final data products including RSS files and data cubes.
+
+Functions:
+    generate_traces: Generate fiber traces from flat field observations.
+    extract_flat_field: Extract flat field spectra for calibration.
+    run_extraction: Extract science spectra from observations.
+    calc_wavelength_soln: Calculate wavelength solutions from arc lamp observations.
+    relative_throughput: Calculate relative throughput corrections.
+    correct_wavelengths: Apply wavelength corrections to extracted spectra.
+    construct_cube: Create 3D data cubes from RSS files.
+    main: Main pipeline function that processes complete observations.
+
+Example:
+    Run the complete reduction pipeline::
+    
+        python reduce.py --config config.txt
+"""
+
 import os
 import argparse
 import pickle
@@ -22,9 +44,19 @@ _linefile = os.path.join(LUT_DIR, '')
 
 
 
-### This needs to be edited to handle a trace file per channel
-#This has been independently tested
 def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
+    """Generate fiber traces from flat field observations for all three channels.
+    
+    Args:
+        red_flat: Path to red flat field FITS file.
+        green_flat: Path to green flat field FITS file. 
+        blue_flat: Path to blue flat field FITS file.
+        output_dir: Directory to save trace files.
+        bias: Optional bias frame for correction.
+        
+    Raises:
+        AssertionError: If any of the flat field files do not exist.
+    """
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
