@@ -1,0 +1,489 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Utils package &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="llamas_pyjamas.Postprocessing package" href="llamas_pyjamas.Postprocessing.html" />
+    <link rel="prev" title="llamas_pyjamas.Flux package" href="llamas_pyjamas.Flux.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">llamas_pyjamas.Utils package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-llamas_pyjamas.Utils.utils">llamas_pyjamas.Utils.utils module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.setup_logger"><code class="docutils literal notranslate"><span class="pre">setup_logger()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.create_peak_lookup"><code class="docutils literal notranslate"><span class="pre">create_peak_lookup()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.save_combs_to_fits"><code class="docutils literal notranslate"><span class="pre">save_combs_to_fits()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.grab_peak_pos_from_LUT"><code class="docutils literal notranslate"><span class="pre">grab_peak_pos_from_LUT()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.create_peak_lookups"><code class="docutils literal notranslate"><span class="pre">create_peak_lookups()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.dump_LUT"><code class="docutils literal notranslate"><span class="pre">dump_LUT()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.trace_dump_LUT"><code class="docutils literal notranslate"><span class="pre">trace_dump_LUT()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.flip_b_side_positions"><code class="docutils literal notranslate"><span class="pre">flip_b_side_positions()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.flip_positions"><code class="docutils literal notranslate"><span class="pre">flip_positions()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.count_trace_fibres"><code class="docutils literal notranslate"><span class="pre">count_trace_fibres()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.flip_blue_combs"><code class="docutils literal notranslate"><span class="pre">flip_blue_combs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.Utils.utils.check_image_properties"><code class="docutils literal notranslate"><span class="pre">check_image_properties()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Utils package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/llamas_pyjamas.Utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="llamas-pyjamas-utils-package">
+<h1>llamas_pyjamas.Utils package<a class="headerlink" href="#llamas-pyjamas-utils-package" title="Link to this heading"></a></h1>
+<p>The Utils module provides utility functions and helper tools used throughout
+the LLAMAS pipeline, including logging, data processing utilities, and
+visualization helpers.</p>
+<section id="submodules">
+<span id="module-llamas_pyjamas.Utils"></span><h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-llamas_pyjamas.Utils.utils">
+<span id="llamas-pyjamas-utils-utils-module"></span><h2>llamas_pyjamas.Utils.utils module<a class="headerlink" href="#module-llamas_pyjamas.Utils.utils" title="Link to this heading"></a></h2>
+<p>Utils module for llamas_pyjamas package.
+This module provides various utility functions for logging, file handling,
+data processing, and visualization related to the llamas_pyjamas project.
+Functions:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>setup_logger(name, log_filename=None):</dt><dd><p>Setup logger with file and console handlers.</p>
+</dd>
+<dt>create_peak_lookup(peaks):</dt><dd><p>Create lookup table mapping peak index to y position.</p>
+</dd>
+<dt>save_combs_to_fits(comb_dict: dict, outfile: str = ‘comb_profiles.fits’) -&gt; None:</dt><dd><p>Save dictionary of comb profiles to multi-extension FITS file.</p>
+</dd>
+<dt>grab_peak_pos_from_LUT(file, channel, benchside, fiber=None):</dt><dd><p>Retrieve peak positions from a lookup table (LUT) file.</p>
+</dd>
+<dt>create_peak_lookups(peaks, benchside=None):</dt><dd><p>Create lookup dict with special handling for 2A missing fiber.</p>
+</dd>
+<dt>dump_LUT(channel, hdu, trace_obj):</dt><dd><p>Dump lookup table (LUT) data from HDU to a JSON file.</p>
+</dd>
+<dt>flip_b_side_positions():</dt><dd><p>Flip B-side positions in the LUT.</p>
+</dd>
+<dt>flip_positions():</dt><dd><p>Flip positions in the LUT based on predefined criteria.</p>
+</dd>
+<dt>plot_trace(traceobj):</dt><dd><p>Plot trace data from a trace object.</p>
+</dd>
+<dt>plot_traces_on_image(traceobj, data, zscale=False):</dt><dd><p>Plot traces overlaid on raw data with optional zscale.</p>
+</dd>
+</dl>
+</div></blockquote>
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.setup_logger">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">setup_logger</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_filename</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#setup_logger"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.setup_logger" title="Link to this definition"></a></dt>
+<dd><p>Setup logger with file and console handlers.</p>
+<p>Creates a logger with both file and console output, automatically creating
+a logs directory if it doesn’t exist.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>) – Logger name (usually __name__).</p></li>
+<li><p><strong>log_filename</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>optional</em>) – Custom log filename. If None, a default
+filename will be used. Defaults to None.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>logging.Logger</em> – Configured logger instance.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/logging.html#logging.Logger" title="(in Python v3.13)"><em>Logger</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.create_peak_lookup">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">create_peak_lookup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">peaks</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#create_peak_lookup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.create_peak_lookup" title="Link to this definition"></a></dt>
+<dd><p>Create lookup table mapping peak index to y position.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>peaks</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)"><em>list</em></a>) – List of peak y-positions.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>dict</em> – Dictionary mapping peak index to y position.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)">dict</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.save_combs_to_fits">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">save_combs_to_fits</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">comb_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outfile</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'comb_profiles.fits'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#save_combs_to_fits"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.save_combs_to_fits" title="Link to this definition"></a></dt>
+<dd><p>Save dictionary of comb profiles to multi-extension FITS file.</p>
+<p>Creates a FITS file with each comb profile as a separate extension.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>comb_dict</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><em>dict</em></a>) – Dictionary of comb profiles with format {‘label’: comb_array}.</p></li>
+<li><p><strong>outfile</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>optional</em>) – Output filename. Defaults to ‘comb_profiles.fits’.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.grab_peak_pos_from_LUT">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">grab_peak_pos_from_LUT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">channel</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">benchside</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#grab_peak_pos_from_LUT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.grab_peak_pos_from_LUT" title="Link to this definition"></a></dt>
+<dd><p>Retrieve peak positions from a Look-Up Table (LUT) file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>file</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>) – Path to the LUT file in JSON format.</p></li>
+<li><p><strong>channel</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>) – The channel to retrieve data for.</p></li>
+<li><p><strong>benchside</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>) – The benchside to retrieve data for.</p></li>
+<li><p><strong>fiber</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><em>int</em></a><em>, </em><em>optional</em>) – Specific fiber to retrieve the peak position for.
+If None, returns all peak positions. Defaults to None.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p><em>Union[list, int]</em> –</p>
+<dl class="simple">
+<dt>A list of peak positions if fiber is not specified,</dt><dd><p>otherwise the peak position for the specified fiber.</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)">list</a> | <a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)">int</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.create_peak_lookups">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">create_peak_lookups</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">peaks</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">benchside</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#create_peak_lookups"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.create_peak_lookups" title="Link to this definition"></a></dt>
+<dd><p>Create a lookup dictionary for peak positions with special handling for missing fibers.</p>
+<p>This function processes an array of peak positions and inserts additional peaks
+at specific indices based on the provided benchside. It handles special cases
+for benchsides ‘2A’ and ‘2B’ where fibers may be missing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>peaks</strong> (<em>np.ndarray</em>) – An array of peak positions.</p></li>
+<li><p><strong>benchside</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>optional</em>) – The benchside identifier, either ‘2A’ or ‘2B’.
+If None, no special handling is applied. Defaults to None.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p><em>dict</em> –</p>
+<dl class="simple">
+<dt>A dictionary where the keys are the indices of the peaks (as strings)</dt><dd><p>and the values are the peak positions (as integers).</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)">dict</a></p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p><strong>Benchside ‘2A’ Handling</strong>: Calculates average spacing and inserts new
+peaks at indices 269 and 298.</p></li>
+<li><p><strong>Benchside ‘2B’ Handling</strong>: Calculates average spacing and inserts new
+peak at index 48.</p></li>
+</ul>
+</div>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">100</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">300</span><span class="p">,</span> <span class="mi">400</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">create_peak_lookups</span><span class="p">(</span><span class="n">peaks</span><span class="p">,</span> <span class="n">benchside</span><span class="o">=</span><span class="s1">&#39;2A&#39;</span><span class="p">)</span>
+<span class="go">{&#39;0&#39;: 100, &#39;1&#39;: 200, &#39;2&#39;: 300, &#39;3&#39;: 400, &#39;269&#39;: 250, &#39;298&#39;: 450}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.dump_LUT">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">dump_LUT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">channel</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hdu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trace_obj</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#dump_LUT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.dump_LUT" title="Link to this definition"></a></dt>
+<dd><p>Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.
+Parameters:
+channel (str): The channel name to be processed.
+hdu (astropy.io.fits.HDUList): The HDU list containing the FITS file data.
+trace_obj (TraceObject): An object that processes HDU data and extracts LUT information.
+Returns:
+None
+Raises:
+FileNotFoundError: If the ‘traceLUT.json’ file is not found when attempting to load the master LUT.
+Notes:
+- The function initializes or loads a master LUT from ‘traceLUT.json’.
+- It processes each relevant HDU to extract LUT information and updates the master LUT.
+- The updated master LUT is saved back to ‘traceLUT.json’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>channel</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p></li>
+<li><p><strong>trace_obj</strong> (<a class="reference internal" href="llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamas.TraceLlamas" title="llamas_pyjamas.Trace.traceLlamas.TraceLlamas"><em>TraceLlamas</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.trace_dump_LUT">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">trace_dump_LUT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trace_obj</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#trace_dump_LUT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.trace_dump_LUT" title="Link to this definition"></a></dt>
+<dd><p>Dumps the Look-Up Table (LUT) for a given channel and HDU (Header Data Unit) into a JSON file.
+Parameters:
+channel (str): The channel name to be processed.
+hdu (astropy.io.fits.HDUList): The HDU list containing the FITS file data.
+trace_obj (TraceObject): An object that processes HDU data and extracts LUT information.
+Returns:
+None
+Raises:
+FileNotFoundError: If the ‘traceLUT.json’ file is not found when attempting to load the master LUT.
+Notes:
+- The function initializes or loads a master LUT from ‘traceLUT.json’.
+- It processes each relevant HDU to extract LUT information and updates the master LUT.
+- The updated master LUT is saved back to ‘traceLUT.json’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>trace_obj</strong> (<a class="reference internal" href="llamas_pyjamas.Trace.html#llamas_pyjamas.Trace.traceLlamas.TraceLlamas" title="llamas_pyjamas.Trace.traceLlamas.TraceLlamas"><em>TraceLlamas</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.flip_b_side_positions">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">flip_b_side_positions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#flip_b_side_positions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.flip_b_side_positions" title="Link to this definition"></a></dt>
+<dd><p>Flips the fiber positions for the ‘B’ side in the lookup table (LUT) for each color.
+This function reads a JSON file containing a lookup table (LUT) of fiber positions,
+processes the positions for each color (‘green’, ‘blue’, ‘red’), and flips the positions
+for the ‘B’ side. The flipped positions are then saved to a new JSON file.
+The LUT is expected to have the following structure:
+{</p>
+<blockquote>
+<div><dl>
+<dt>“fib_pos”: {</dt><dd><dl>
+<dt>“color”: {</dt><dd><dl class="simple">
+<dt>“benchside”: {</dt><dd><p>“fiber_number”: “position”</p>
+</dd>
+</dl>
+<p>}</p>
+</dd>
+</dl>
+<p>}</p>
+</dd>
+</dl>
+<p>}</p>
+</div></blockquote>
+<p>}
+The function performs the following steps:
+1. Loads the LUT from ‘LUT/traceLUT.json’.
+2. Iterates over each color (‘green’, ‘blue’, ‘red’).
+3. For each color, checks if the ‘B’ side exists in the LUT.
+4. If the ‘B’ side exists, flips the fiber positions by reversing the fiber numbers.
+5. Saves the updated LUT to ‘LUT/traceLUT_copy.json’.
+:raises FileNotFoundError: If the LUT file does not exist.
+:raises json.JSONDecodeError: If the LUT file is not a valid JSON.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.flip_positions">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">flip_positions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#flip_positions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.flip_positions" title="Link to this definition"></a></dt>
+<dd><p>Flips the positions of fibers in the lookup table (LUT) based on the specified configuration.
+This function reads a JSON file containing the LUT, processes each color and benchside,
+and flips the positions of the fibers if specified in the <cite>flipped</cite> dictionary. The updated
+LUT is then saved back to the JSON file.
+The <cite>flipped</cite> dictionary determines which fibers to flip for each color and benchside.
+The keys in the dictionary are in the format “{color}{side}” (e.g., “greenA”, “blueB”),
+and the values are booleans indicating whether to flip the positions (True) or not (False).
+Example of <cite>flipped</cite> dictionary:</p>
+<p>flipped = {“greenA”: False, “greenB”: True, “blueA”: True, “blueB”: False, “redA”: False, “redB”: True}</p>
+<p>The function will flip the positions of the fibers for each specified color and benchside,
+and save the updated LUT back to the JSON file.
+:raises FileNotFoundError: If the LUT JSON file is not found.
+:raises json.JSONDecodeError: If there is an error decoding the JSON file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.count_trace_fibres">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">count_trace_fibres</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mastercalib_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'/Users/slh/Documents/Projects/Magellan_dev/LLAMAS/llamas-pyjamas/llamas_pyjamas/mastercalib'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#count_trace_fibres"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.count_trace_fibres" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>mastercalib_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.flip_blue_combs">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">flip_blue_combs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#flip_blue_combs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.flip_blue_combs" title="Link to this definition"></a></dt>
+<dd><p>Flips all blue combs in the lookup table (LUT) file.</p>
+<p>This function reads the LUT JSON file, processes all benchsides (‘1A’ through ‘4B’)
+in the blue combs section, and flips those comb arrays. The updated LUT is then
+saved back to the JSON file.</p>
+<p>The function performs the following steps:
+1. Loads the LUT from ‘LUT/traceLUT.json’.
+2. Checks if ‘combs’ and ‘blue’ keys exist in the LUT structure.
+3. For each benchside (1A-4B) in the blue combs, flips the comb array.
+4. Saves the updated LUT back to the original file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#FileNotFoundError" title="(in Python v3.13)"><strong>FileNotFoundError</strong></a> – If the LUT file does not exist.</p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/json.html#json.JSONDecodeError" title="(in Python v3.13)"><strong>json.JSONDecodeError</strong></a> – If the LUT file is not a valid JSON.</p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#KeyError" title="(in Python v3.13)"><strong>KeyError</strong></a> – If the expected structure (‘combs’ &gt; ‘blue’) is not found.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.Utils.utils.check_image_properties">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.Utils.utils.</span></span><span class="sig-name descname"><span class="pre">check_image_properties</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/Utils/utils.html#check_image_properties"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.Utils.utils.check_image_properties" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>hdu</strong> (<a class="reference external" href="https://docs.astropy.org/en/stable/io/fits/api/hdulists.html#astropy.io.fits.HDUList" title="(in Astropy v7.1)"><em>HDUList</em></a>)</p></li>
+<li><p><strong>start_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><em>int</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="llamas_pyjamas.Flux.html" class="btn btn-neutral float-left" title="llamas_pyjamas.Flux package" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="llamas_pyjamas.Postprocessing.html" class="btn btn-neutral float-right" title="llamas_pyjamas.Postprocessing package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
