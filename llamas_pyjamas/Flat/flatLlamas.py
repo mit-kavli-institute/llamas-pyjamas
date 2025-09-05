@@ -47,46 +47,251 @@ logger.addHandler(console_handler)
 logger.info(f"Logging initialized. Log file: {log_file}")
 
 
-def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=0.5):
+# def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4, 
+#                           adaptive_breakpoints=True, min_breakpoints=50):
+#     # Get the xshift and counts data for a specific fiber
+#     xshift = extraction.xshift[fiber_index, :]
+#     counts = extraction.counts[fiber_index, :]
+
+#     mask = np.isfinite(counts)
+
+#     xshift_clean = xshift[mask]
+#     counts_clean = counts[mask]
+    
+#     logger.info(f"Removed NaNs: {len(xshift) - len(xshift_clean)} points removed")
+
+#     logger.debug(f"Fitting fiber {fiber_index} with xshift shape {xshift.shape}")
+    
+#     # Remove any NaN values that might cause fitting issues
+#     # valid_indices = ~np.isnan(counts) & ~np.isnan(xshift)
+#     # xshift_clean = xshift[valid_indices]
+#     # counts_clean = counts[valid_indices]
+    
+#     logger.debug(f"After NaN removal: {len(xshift)} valid points")
+
+#     # Using pypeit's iterfit (more robust for spectral data)
+#     try:
+#         sset, outmask = iterfit(
+#             xshift_clean, counts_clean, 
+#             maxiter=maxiter,
+#             kwargs_bspline={'bkspace': bkspace}  # Adjust bkspace based on your data sampling
+#         )
+        
+#         # Create an evaluation grid with finer sampling if needed
+#         xmodel = np.linspace(np.min(xshift), np.max(xshift), len(xshift))
+
+#         y_fit = sset.value(xmodel)[0]
+        
+#         logger.debug(f"Fit successful for fiber {fiber_index}")
+        
+#         return {
+#             'xshift_clean': xshift_clean,
+#             'counts_clean': counts_clean,
+#             'xmodel': xmodel,
+#             'y_fit': y_fit,
+#             'bspline_model': sset  # The pypeit bspline model object
+#         }
+#     except Exception as e:
+#         logger.error(f"Error fitting fiber {fiber_index}: {str(e)}")
+#         raise
+
+def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4, 
+                          adaptive_breakpoints=True, min_breakpoints=50):
+    """
+    Improved spectrum fitting with adaptive breakpoints for complex spectral features.
+    
+    Parameters:
+    -----------
+    extraction : object
+        Extraction object containing xshift and counts data
+    fiber_index : int
+        Index of the fiber to fit
+    maxiter : int
+        Maximum iterations for iterative fitting
+    bkspace : float or None
+        Breakpoint spacing. If None, will be calculated adaptively
+    nord : int
+        Order of B-spline (3=cubic, 4=quartic)
+    adaptive_breakpoints : bool
+        Whether to use adaptive breakpoint spacing based on data complexity
+    min_breakpoints : int
+        Minimum number of breakpoints to use
+    """
+    
     # Get the xshift and counts data for a specific fiber
     xshift = extraction.xshift[fiber_index, :]
     counts = extraction.counts[fiber_index, :]
-    
-    logger.debug(f"Fitting fiber {fiber_index} with xshift shape {xshift.shape}")
-    
-    # Remove any NaN values that might cause fitting issues
-    # valid_indices = ~np.isnan(counts) & ~np.isnan(xshift)
-    # xshift_clean = xshift[valid_indices]
-    # counts_clean = counts[valid_indices]
-    
-    logger.debug(f"After NaN removal: {len(xshift)} valid points")
 
-    # Using pypeit's iterfit (more robust for spectral data)
+    # Clean the data
+    mask = np.isfinite(counts)
+    xshift_clean = xshift[mask]
+    counts_clean = counts[mask]
+    
+    logger.info(f"Removed NaNs: {len(xshift) - len(xshift_clean)} points removed")
+    logger.debug(f"Fitting fiber {fiber_index} with {len(xshift_clean)} valid points")
+    
+    if len(xshift_clean) < 10:
+        raise ValueError(f"Not enough valid data points ({len(xshift_clean)}) for fitting")
+    
+    # Calculate adaptive breakpoint spacing
+    if bkspace is None or adaptive_breakpoints:
+        # Method 1: Base spacing on data density and range
+        xrange = xshift_clean.max() - xshift_clean.min()
+        n_points = len(xshift_clean)
+        
+        # Calculate variance in the data to detect complexity
+        counts_smooth = np.convolve(counts_clean, np.ones(5)/5, mode='same')  # Simple smoothing
+        complexity = np.std(counts_clean - counts_smooth) / np.mean(counts_clean)
+        
+        # Adaptive breakpoint calculation
+        if complexity > 0.1:  # High complexity (sharp features)
+            target_breakpoints = max(min_breakpoints, n_points // 20)  # 1 breakpoint per 20 points
+            bkspace = xrange / target_breakpoints
+        else:  # Lower complexity
+            target_breakpoints = max(min_breakpoints // 2, n_points // 50)  # 1 breakpoint per 50 points
+            bkspace = xrange / target_breakpoints
+            
+        logger.info(f"Adaptive bkspace: {bkspace:.3f}, target breakpoints: {target_breakpoints}")
+    
+    # Try multiple fitting strategies
+    fitting_strategies = [
+        {'bkspace': bkspace, 'nord': nord, 'name': 'adaptive'},
+        {'bkspace': bkspace * 0.5, 'nord': 3, 'name': 'fine_cubic'},  # Finer spacing, cubic
+        {'bkspace': bkspace * 0.3, 'nord': 4, 'name': 'very_fine'},   # Very fine spacing
+        {'bkspace': bkspace * 2.0, 'nord': 5, 'name': 'coarse_high_order'}  # Coarser but higher order
+    ]
+    
+    for i, strategy in enumerate(fitting_strategies):
+        try:
+            logger.debug(f"Trying strategy {i+1}: {strategy['name']} (bkspace={strategy['bkspace']:.3f})")
+            
+            sset, outmask = iterfit(
+                xshift_clean, counts_clean, 
+                maxiter=maxiter,
+                nord=strategy['nord'],
+                kwargs_bspline={'bkspace': strategy['bkspace']},
+                upper= 5.0, 
+                lower =5.0  # Add outlier rejection
+            )
+            
+            # Create evaluation grid
+            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*2)  # Higher resolution
+            y_fit = sset.value(xmodel)[0]
+            
+            # Evaluate fit quality
+            y_fit_original = sset.value(xshift_clean)[0] 
+            residuals = counts_clean - y_fit_original
+            rms_residual = np.sqrt(np.mean(residuals**2))
+            relative_rms = rms_residual / np.mean(counts_clean)
+            
+            logger.info(f"Strategy '{strategy['name']}' successful: RMS residual = {relative_rms:.4f}")
+            
+            # If fit quality is good, use this strategy
+            if relative_rms < 0.5:  # Accept if RMS is less than 50% of mean signal
+                return {
+                    'xshift_clean': xshift_clean,
+                    'counts_clean': counts_clean,
+                    'xmodel': xmodel,
+                    'y_fit': y_fit,
+                    'y_fit_original_grid': y_fit_original,
+                    'bspline_model': sset,
+                    'outmask': outmask,
+                    'residuals': residuals,
+                    'rms_residual': rms_residual,
+                    'relative_rms': relative_rms,
+                    'strategy_used': strategy['name'],
+                    'final_bkspace': strategy['bkspace'],
+                    'final_nord': strategy['nord']
+                }
+            
+        except Exception as e:
+            logger.warning(f"Strategy '{strategy['name']}' failed: {str(e)}")
+            continue
+    
+    # If all strategies failed, try a fallback approach
+    logger.warning("All standard strategies failed, trying fallback approach")
     try:
+        # Manual breakpoint specification as last resort
+        n_manual_breaks = max(20, len(xshift_clean) // 100)
+        xmin, xmax = xshift_clean.min(), xshift_clean.max()
+        manual_bkpt = np.linspace(xmin + 0.01*(xmax-xmin), xmax - 0.01*(xmax-xmin), n_manual_breaks)
+        
         sset, outmask = iterfit(
-            xshift, counts, 
+            xshift_clean, counts_clean,
             maxiter=maxiter,
-            kwargs_bspline={'bkspace': bkspace}  # Adjust bkspace based on your data sampling
+            nord=3,  # Use cubic for stability
+            bkpt=manual_bkpt
         )
         
-        # Create an evaluation grid with finer sampling if needed
-        xmodel = np.linspace(np.min(xshift), np.max(xshift), len(xshift))
-
+        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*2)
         y_fit = sset.value(xmodel)[0]
+        y_fit_original = sset.value(xshift_clean)[0]
+        residuals = counts_clean - y_fit_original
+        rms_residual = np.sqrt(np.mean(residuals**2))
+        relative_rms = rms_residual / np.mean(counts_clean)
         
-        logger.debug(f"Fit successful for fiber {fiber_index}")
+        logger.info(f"Fallback approach successful: RMS residual = {relative_rms:.4f}")
         
         return {
-            'xshift_clean': xshift,
-            'counts_clean': counts,
+            'xshift_clean': xshift_clean,
+            'counts_clean': counts_clean,
             'xmodel': xmodel,
             'y_fit': y_fit,
-            'bspline_model': sset  # The pypeit bspline model object
+            'y_fit_original_grid': y_fit_original,
+            'bspline_model': sset,
+            'outmask': outmask,
+            'residuals': residuals,
+            'rms_residual': rms_residual,
+            'relative_rms': relative_rms,
+            'strategy_used': 'ultra_fine_manual_breakpoints',
+            'final_bkspace': None,
+            'final_nord': 3
         }
+        
     except Exception as e:
-        logger.error(f"Error fitting fiber {fiber_index}: {str(e)}")
+        logger.error(f"All fitting approaches failed for fiber {fiber_index}: {str(e)}")
         raise
 
+
+# Alternative simpler version if the above is too complex:
+def fit_spectrum_simple(extraction, fiber_index, maxiter=6):
+    """Simplified version with aggressive breakpoint spacing for sharp features."""
+    
+    xshift = extraction.xshift[fiber_index, :]
+    counts = extraction.counts[fiber_index, :]
+    
+    mask = np.isfinite(counts)
+    xshift_clean = xshift[mask]
+    counts_clean = counts[mask]
+    
+    # Very aggressive breakpoint spacing for sharp spectral lines
+    xrange = xshift_clean.max() - xshift_clean.min()
+    bkspace = xrange / max(100, len(xshift_clean) // 15)  # Many breakpoints
+    
+    logger.info(f"Using aggressive bkspace: {bkspace:.4f}")
+    
+    sset, outmask = iterfit(
+        xshift_clean, counts_clean,
+        maxiter=maxiter,
+        nord=3,  # Cubic splines
+        upper=3.0,
+        lower=3.0,
+        kwargs_bspline={'bkspace': bkspace}
+    )
+    
+    # High-resolution model
+    xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*3)
+    y_fit = sset.value(xmodel)[0]
+    
+    return {
+        'xshift_clean': xshift_clean,
+        'counts_clean': counts_clean,
+        'xmodel': xmodel,
+        'y_fit': y_fit,
+        'bspline_model': sset,
+        'outmask': outmask,
+        'bkspace_used': bkspace
+    }
 
 
 class LlamasFlatFielding():
@@ -331,13 +536,15 @@ class Thresholding():
                     y_predicted = fiber_fit['y_fit']
                     
                     # Calculate residuals (actual - predicted)
-                    residuals = fiber_fit['counts_clean'] - y_predicted
+                    residuals = fiber_fit['residuals']
+                    rms_residual = fiber_fit['rms_residual']
+                    relative_rms = fiber_fit['relative_rms']
 
                     # Calculate statistics for thresholding
-                    median_residual = np.median(residuals)
-                    std_residual = np.std(residuals)
+                    # median_residual = np.median(residuals)
+                    # std_residual = np.std(residuals)
                     
-                    logger.debug(f"Fiber {fiber_idx}: median residual={median_residual:.4f}, std residual={std_residual:.4f}")
+                    # logger.debug(f"Fiber {fiber_idx}: median residual={median_residual:.4f}, std residual={std_residual:.4f}")
                     
                     # Store results for this fiber
                     results[ext_key][fiber_idx] = {
@@ -345,8 +552,8 @@ class Thresholding():
                         'counts_clean': fiber_fit['counts_clean'],
                         'y_predicted': y_predicted,
                         'residuals': residuals,
-                        'median_residual': median_residual,
-                        'std_residual': std_residual,
+                        'rms_residual': rms_residual,
+                        'relative_rms': relative_rms,
                         'xmodel': fiber_fit['xmodel'],
                         'y_fit': fiber_fit['y_fit'],
                         'bspline_model': bspline_model
@@ -495,6 +702,10 @@ class Thresholding():
             outpath=self.output_dir
         )
         
+        #### need to add in the concat behaiour here and then begin running the fits per extension
+
+
+
         # Assuming the extraction files are generated and available
         red_extraction_file = os.path.join(self.output_dir, 'red_extractions_flat.pkl')
         green_extraction_file = os.path.join(self.output_dir, 'green_extractions_flat.pkl')
