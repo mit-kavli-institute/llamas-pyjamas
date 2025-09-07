@@ -7,6 +7,9 @@ from astropy.io import fits
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
+from llamas_pyjamas.Utils.utils import concat_extractions
+from llamas_pyjamas.Arc.arcLlamas import arcTransfer
+from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
 from scipy.interpolate import BSpline, make_interp_spline
 from pypeit.core.fitting import iterfit
@@ -47,53 +50,6 @@ logger.addHandler(console_handler)
 logger.info(f"Logging initialized. Log file: {log_file}")
 
 
-# def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4, 
-#                           adaptive_breakpoints=True, min_breakpoints=50):
-#     # Get the xshift and counts data for a specific fiber
-#     xshift = extraction.xshift[fiber_index, :]
-#     counts = extraction.counts[fiber_index, :]
-
-#     mask = np.isfinite(counts)
-
-#     xshift_clean = xshift[mask]
-#     counts_clean = counts[mask]
-    
-#     logger.info(f"Removed NaNs: {len(xshift) - len(xshift_clean)} points removed")
-
-#     logger.debug(f"Fitting fiber {fiber_index} with xshift shape {xshift.shape}")
-    
-#     # Remove any NaN values that might cause fitting issues
-#     # valid_indices = ~np.isnan(counts) & ~np.isnan(xshift)
-#     # xshift_clean = xshift[valid_indices]
-#     # counts_clean = counts[valid_indices]
-    
-#     logger.debug(f"After NaN removal: {len(xshift)} valid points")
-
-#     # Using pypeit's iterfit (more robust for spectral data)
-#     try:
-#         sset, outmask = iterfit(
-#             xshift_clean, counts_clean, 
-#             maxiter=maxiter,
-#             kwargs_bspline={'bkspace': bkspace}  # Adjust bkspace based on your data sampling
-#         )
-        
-#         # Create an evaluation grid with finer sampling if needed
-#         xmodel = np.linspace(np.min(xshift), np.max(xshift), len(xshift))
-
-#         y_fit = sset.value(xmodel)[0]
-        
-#         logger.debug(f"Fit successful for fiber {fiber_index}")
-        
-#         return {
-#             'xshift_clean': xshift_clean,
-#             'counts_clean': counts_clean,
-#             'xmodel': xmodel,
-#             'y_fit': y_fit,
-#             'bspline_model': sset  # The pypeit bspline model object
-#         }
-#     except Exception as e:
-#         logger.error(f"Error fitting fiber {fiber_index}: {str(e)}")
-#         raise
 
 def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4, 
                           adaptive_breakpoints=True, min_breakpoints=50):
@@ -292,6 +248,124 @@ def fit_spectrum_simple(extraction, fiber_index, maxiter=6):
         'outmask': outmask,
         'bkspace_used': bkspace
     }
+
+
+def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file, 
+                               arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR, 
+                               trace_dir=CALIB_DIR):
+    """Process complete flat field workflow with wavelength calibration and pixel mapping.
+
+    This function implements the complete flat field processing workflow:
+    1. Extract individual color flat fields using produce_flat_extractions
+    2. Combine all extractions into a single .pkl file
+    3. Apply wavelength solution from arc calibration
+    4. Fit B-splines to xshift vs counts for each fiber
+    5. Generate per-pixel flat field correction images
+
+    Args:
+        red_flat_file (str): Path to red flat field FITS file
+        green_flat_file (str): Path to green flat field FITS file
+        blue_flat_file (str): Path to blue flat field FITS file
+        arc_calib_file (str, optional): Path to arc calibration file. 
+            Defaults to 'LLAMAS_reference_arc.pkl' in trace_dir.
+        use_bias (str, optional): Path to bias file. Defaults to None.
+        output_dir (str, optional): Output directory. Defaults to OUTPUT_DIR.
+        trace_dir (str, optional): Trace directory. Defaults to CALIB_DIR.
+
+    Returns:
+        dict: Dictionary containing processing results and output file paths
+    """
+    logger.info("Starting complete flat field processing workflow")
+    logger.info(f"Input files:")
+    logger.info(f"  Red: {red_flat_file}")
+    logger.info(f"  Green: {green_flat_file}")
+    logger.info(f"  Blue: {blue_flat_file}")
+    logger.info(f"  Output directory: {output_dir}")
+    logger.info(f"  Trace directory: {trace_dir}")
+
+    # Step 1: Produce individual flat extractions
+    logger.info("Step 1: Producing individual flat field extractions")
+    produce_flat_extractions(
+        red_flat_file, 
+        green_flat_file, 
+        blue_flat_file, 
+        tracedir=trace_dir, 
+        outpath=output_dir
+    )
+    
+    # Step 2: Combine all extractions into a single file
+    logger.info("Step 2: Combining individual extractions into single file")
+    red_extraction = os.path.join(output_dir, 'red_extractions_flat.pkl')
+    green_extraction = os.path.join(output_dir, 'green_extractions_flat.pkl')
+    blue_extraction = os.path.join(output_dir, 'blue_extractions_flat.pkl')
+    
+    # Check that all extraction files exist
+    extraction_files = [red_extraction, green_extraction, blue_extraction]
+    for file_path in extraction_files:
+        if not os.path.exists(file_path):
+            logger.error(f"Extraction file not found: {file_path}")
+            raise FileNotFoundError(f"Missing extraction file: {file_path}")
+    
+    combined_flat_file = os.path.join(output_dir, 'combined_flat_extractions.pkl')
+    concat_extractions(extraction_files, combined_flat_file)
+    logger.info(f"Combined extractions saved to {combined_flat_file}")
+    
+    # Step 3: Apply wavelength solution from arc calibration
+    logger.info("Step 3: Applying wavelength solution from arc calibration")
+    if arc_calib_file is None:
+        arc_calib_file = os.path.join(trace_dir, 'LLAMAS_reference_arc.pkl')
+    
+    if not os.path.exists(arc_calib_file):
+        logger.error(f"Arc calibration file not found: {arc_calib_file}")
+        raise FileNotFoundError(f"Missing arc calibration file: {arc_calib_file}")
+    
+    # Load the combined flat extractions
+    logger.info(f"Loading combined flat extractions from {combined_flat_file}")
+    flat_dict = ExtractLlamas.loadExtraction(combined_flat_file)
+    
+    # Load the arc calibration
+    logger.info(f"Loading arc calibration from {arc_calib_file}")
+    arc_dict = ExtractLlamas.loadExtraction(arc_calib_file)
+    
+    # Apply wavelength solution transfer
+    logger.info("Transferring wavelength calibration to flat field extractions")
+    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict)
+    
+    # Save the calibrated flat extractions
+    calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
+    with open(calibrated_flat_file, 'wb') as f:
+        pickle.dump(flat_dict_calibrated, f)
+    logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
+    
+    # Step 4: Fit B-splines and generate pixel maps
+    logger.info("Step 4: Fitting B-splines and generating pixel maps")
+    
+    # Initialize the Thresholding class for the remaining processing
+    threshold_processor = Thresholding(
+        red_flat_file, green_flat_file, blue_flat_file,
+        use_bias=use_bias, output_dir=output_dir, trace_dir=trace_dir
+    )
+    
+    # Calculate fits for all extensions in the calibrated file
+    fit_results = threshold_processor.calculate_fits_all_extensions(calibrated_flat_file)
+    
+    # Step 5: Generate pixel maps for each channel/bench combination
+    logger.info("Step 5: Generating pixel maps for each channel/bench combination")
+    
+    pixel_map_results = threshold_processor.generate_complete_pixel_maps(fit_results)
+    output_files = pixel_map_results['output_files']
+    
+    results = {
+        'combined_flat_file': combined_flat_file,
+        'calibrated_flat_file': calibrated_flat_file,
+        'fit_results': fit_results,
+        'pixel_map_results': pixel_map_results,
+        'output_files': output_files,
+        'processing_status': 'completed'
+    }
+    
+    logger.info("Complete flat field processing workflow finished successfully")
+    return results
 
 
 class LlamasFlatFielding():
@@ -677,6 +751,190 @@ class Thresholding():
 
         return pixel_maps
     
+    def generate_complete_pixel_maps(self, fit_results, output_fits=True):
+        """
+        Generate complete pixel maps with FITS output for each channel/bench combination.
+        
+        This method takes the B-spline fit results and generates 2D pixel maps for each
+        channel and bench combination, saving them as FITS files.
+        
+        Args:
+            fit_results (dict): Dictionary of B-spline fit results for each extension and fiber
+            output_fits (bool): Whether to save pixel maps as FITS files. Default True.
+            
+        Returns:
+            dict: Dictionary containing pixel maps and output file paths
+        """
+        logger.info("Generating complete pixel maps with FITS output")
+        
+        import glob
+        from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
+        
+        # Get all available trace files
+        trace_files = glob.glob(os.path.join(self.trace_dir, 'LLAMAS_master*traces.pkl'))
+        logger.info(f"Found {len(trace_files)} trace files")
+        
+        # Create a mapping from channel/bench/side to trace file
+        trace_file_map = {}
+        for trace_file in trace_files:
+            # Load trace object to get its metadata
+            with open(trace_file, 'rb') as f:
+                trace_obj = pickle.load(f)
+            
+            key = f"{trace_obj.channel}{trace_obj.bench}{trace_obj.side}"
+            trace_file_map[key] = trace_file
+            logger.debug(f"Mapped {key} to {trace_file}")
+        
+        pixel_maps = {}
+        output_files = []
+        
+        # Process each extension key in fit_results
+        for ext_key, fiber_fits in fit_results.items():
+            logger.info(f"Processing pixel map for extension {ext_key}")
+            
+            # Parse the extension key to find matching trace file
+            # ext_key format: "red1A", "green2B", etc.
+            found_trace = False
+            for trace_key, trace_file in trace_file_map.items():
+                if ext_key.replace(ext_key[0], '').lower() in trace_key.lower():
+                    # Try to match the channel part too
+                    channel_from_ext = None
+                    for color in ['red', 'green', 'blue']:
+                        if color in ext_key.lower():
+                            channel_from_ext = color
+                            break
+                    
+                    if channel_from_ext and channel_from_ext in trace_key.lower():
+                        logger.info(f"Matched {ext_key} to trace file {trace_file}")
+                        
+                        # Load the trace object
+                        with open(trace_file, 'rb') as f:
+                            trace_obj = pickle.load(f)
+                        
+                        # Generate pixel map for this extension
+                        pixel_map = self._generate_single_pixel_map(fiber_fits, trace_obj)
+                        pixel_maps[ext_key] = pixel_map
+                        
+                        # Save as FITS file if requested
+                        if output_fits:
+                            output_filename = os.path.join(
+                                self.output_dir, 
+                                f'flat_pixel_map_{ext_key}.fits'
+                            )
+                            
+                            # Create FITS HDU
+                            hdu = fits.PrimaryHDU(data=pixel_map.astype(np.float32))
+                            hdu.header['EXTNAME'] = ext_key
+                            hdu.header['CHANNEL'] = trace_obj.channel
+                            hdu.header['BENCH'] = trace_obj.bench
+                            hdu.header['SIDE'] = trace_obj.side
+                            hdu.header['COMMENT'] = 'Flat field pixel map from B-spline fits'
+                            hdu.header['BUNIT'] = 'Counts'
+                            
+                            # Add statistics to header
+                            valid_pixels = ~np.isnan(pixel_map)
+                            if np.any(valid_pixels):
+                                hdu.header['DATAMIN'] = np.nanmin(pixel_map)
+                                hdu.header['DATAMAX'] = np.nanmax(pixel_map)
+                                hdu.header['DATAMEAN'] = np.nanmean(pixel_map)
+                                hdu.header['NPIX'] = np.sum(valid_pixels)
+                                hdu.header['NNANS'] = np.sum(~valid_pixels)
+                            
+                            hdu.writeto(output_filename, overwrite=True)
+                            output_files.append(output_filename)
+                            logger.info(f"Saved pixel map to {output_filename}")
+                        
+                        found_trace = True
+                        break
+            
+            if not found_trace:
+                logger.warning(f"Could not find matching trace file for extension {ext_key}")
+        
+        results = {
+            'pixel_maps': pixel_maps,
+            'output_files': output_files,
+            'trace_file_map': trace_file_map
+        }
+        
+        logger.info(f"Generated pixel maps for {len(pixel_maps)} extensions")
+        logger.info(f"Saved {len(output_files)} FITS files")
+        
+        return results
+    
+    def _generate_single_pixel_map(self, fiber_fits, trace_obj):
+        """
+        Generate a single pixel map for one extension using B-spline fits and trace object.
+        
+        Args:
+            fiber_fits (dict): Dictionary of B-spline fits for each fiber
+            trace_obj: Trace object containing fiberimg and other trace information
+            
+        Returns:
+            np.ndarray: 2D pixel map with flat field values
+        """
+        logger.debug(f"Generating pixel map for {trace_obj.channel} {trace_obj.bench}{trace_obj.side}")
+        
+        # Get the fiber image from the trace object
+        fiber_image = trace_obj.fiberimg
+        
+        # Create an empty array matching the shape of the fiber image
+        pixel_map = np.full_like(fiber_image, np.nan, dtype=float)
+        
+        processed_fibers = 0
+        for fiber_idx, fiber_data in fiber_fits.items():
+            # Get the B-spline model for this fiber
+            bspline_model = fiber_data['bspline_model']
+            
+            # Find all pixels belonging to this fiber
+            fiber_pixels = (fiber_image == fiber_idx)
+            
+            if not np.any(fiber_pixels):
+                logger.debug(f"No pixels found for fiber {fiber_idx}")
+                continue
+            
+            # Get the xshift range for this fiber
+            xshift_min = np.min(fiber_data['xshift_clean'])
+            xshift_max = np.max(fiber_data['xshift_clean'])
+            
+            # For each row in the image that contains this fiber
+            for row in range(fiber_image.shape[0]):
+                row_pixels = fiber_pixels[row, :]
+                
+                if not np.any(row_pixels):
+                    continue
+                
+                # Get the column indices of the fiber pixels in this row
+                col_indices = np.where(row_pixels)[0]
+                
+                # Map the column indices to x-shift values
+                # This assumes a linear mapping from pixel column to xshift
+                xshift_values = np.interp(
+                    col_indices,
+                    [0, fiber_image.shape[1] - 1],
+                    [xshift_min, xshift_max]
+                )
+                
+                # Evaluate the B-spline model at these x-shift values
+                try:
+                    predicted_values = bspline_model.value(xshift_values)[0]
+                    # Assign the predicted values to the pixel map
+                    pixel_map[row, col_indices] = predicted_values
+                except Exception as e:
+                    logger.debug(f"Error evaluating B-spline for fiber {fiber_idx}, row {row}: {str(e)}")
+                    continue
+            
+            processed_fibers += 1
+            
+            if processed_fibers % 50 == 0:
+                logger.debug(f"Processed {processed_fibers}/{len(fiber_fits)} fibers")
+        
+        # Check for unassigned pixels
+        nan_count = np.sum(np.isnan(pixel_map))
+        total_pixels = pixel_map.size
+        logger.info(f"Pixel map has {nan_count}/{total_pixels} unassigned pixels ({100*nan_count/total_pixels:.1f}%)")
+        
+        return pixel_map
+    
     
     def generate_thresholds(self):
         """Generate thresholds for flat fielding based on science data.
@@ -764,5 +1022,40 @@ class Thresholding():
 # If run as a standalone script
 if __name__ == "__main__":
     logger.info("flatLlamas.py executed as standalone script")
+    
+    import argparse
+    parser = argparse.ArgumentParser(description='Process LLAMAS flat field data with complete workflow')
+    parser.add_argument('red_flat', help='Path to red flat field FITS file')
+    parser.add_argument('green_flat', help='Path to green flat field FITS file') 
+    parser.add_argument('blue_flat', help='Path to blue flat field FITS file')
+    parser.add_argument('--arc_calib', help='Path to arc calibration file (default: LLAMAS_reference_arc.pkl in trace dir)')
+    parser.add_argument('--output_dir', default=OUTPUT_DIR, help=f'Output directory (default: {OUTPUT_DIR})')
+    parser.add_argument('--trace_dir', default=CALIB_DIR, help=f'Trace directory (default: {CALIB_DIR})')
+    
+    args = parser.parse_args()
+    
+    logger.info(f"Processing flat fields:")
+    logger.info(f"  Red: {args.red_flat}")
+    logger.info(f"  Green: {args.green_flat}") 
+    logger.info(f"  Blue: {args.blue_flat}")
+    
+    try:
+        results = process_flat_field_complete(
+            args.red_flat,
+            args.green_flat, 
+            args.blue_flat,
+            arc_calib_file=args.arc_calib,
+            output_dir=args.output_dir,
+            trace_dir=args.trace_dir
+        )
+        
+        logger.info("Processing completed successfully!")
+        logger.info(f"Generated {len(results['output_files'])} FITS files:")
+        for output_file in results['output_files']:
+            logger.info(f"  {output_file}")
+            
+    except Exception as e:
+        logger.error(f"Processing failed: {str(e)}")
+        raise
     
     
