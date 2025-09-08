@@ -10,11 +10,141 @@ import os
 import sys
 from pathlib import Path
 
+# --- Added Ray size mitigation initialization block ---
+def _init_ray():
+    """
+    Initialize Ray in a way that avoids packaging the entire (large) project directory.
+
+    Mitigations:
+      1. Limit working_dir to the current package root (not parent folders with big data).
+      2. Exclude large / non-code directories (output, data, venv, git, caches).
+      3. Exclude .fits, .pkl, and .zip files from all included directories.
+      4. Rely on .rayignore (added separately) for the same patterns (defensive).
+    """
+    try:
+        import ray
+    except ImportError:
+        return  # Ray not installed; skip silently
+
+    if ray.is_initialized():
+        return
+
+    project_root = Path(__file__).parent  # Adjust if you want a narrower src subtree
+
+    allowed_subdirs = [
+        "Arc",
+        "Bias",
+        "Cube",
+        "Docs",
+        "Extract",
+        "File",
+        "Flat",
+        "Flux",
+        "GUI",
+        "Image",
+        "Postprocessing",
+        "QA",
+        "Trace",
+        "Tutorials",
+        "Utils",
+    ]
+
+    # Filter out unwanted files from each subdirectory
+    def filter_directory_files(directory_path):
+        """
+        Create a filtered copy of directory structure excluding .fits, .pkl, .zip files.
+        Returns a list of individual Python files to include.
+        """
+        filtered_files = []
+        dir_path = Path(directory_path)
+        
+        if not dir_path.exists():
+            return filtered_files
+            
+        # Walk through the directory and collect only Python files
+        for file_path in dir_path.rglob("*.py"):
+            # Make sure we're not including any __pycache__ directories
+            if "__pycache__" not in str(file_path):
+                filtered_files.append(str(file_path))
+                
+        return filtered_files
+
+    # Collect all Python files from allowed subdirectories
+    py_files = []
+    for name in allowed_subdirs:
+        subdir_path = project_root / name
+        if subdir_path.exists():
+            py_files.extend(filter_directory_files(subdir_path))
+
+    # Also include Python files from the project root (excluding subdirectories)
+    for file_path in project_root.glob("*.py"):
+        if file_path.name != "__init__.py":  # Avoid circular imports
+            py_files.append(str(file_path))
+
+    # Alternative approach using working_dir with excludes
+    ray.init(
+        # local_mode=True,  # Optional debug
+        runtime_env={
+            "working_dir": str(project_root),
+            "excludes": [
+                # Exclude specific directories
+                "mastercalib",
+                "LUT",
+                "output",
+                "data",
+                "large_data",
+                "raw_data",
+                ".git",
+                "venv",
+                "env",
+                "__pycache__",
+                "**/__pycache__",
+                
+                # Exclude notebook files
+                "*.ipynb",
+                "notebooks",
+                
+                # Exclude data files
+                "*.fits",
+                "*.fits.gz",
+                "*.pkl",
+                "*.pickle",
+                "*.zip",
+                "*.tar",
+                "*.tar.gz",
+                "*.whl",
+                
+                # Exclude any subdirectories not in allowed list
+                # This is done by excluding everything and then including only allowed
+                *[f"!{name}" for name in allowed_subdirs],
+            ],
+        },
+        # You can also raise the limit (bytes) via system config if truly needed:
+        # _system_config={"runtime_env_size_limit": 2_000_000_000},  # ~2GB
+    )
+
+    # Alternative implementation using py_modules (more granular control)
+    # Uncomment this block and comment the above ray.init() if you prefer this approach
+    """
+    ray.init(
+        # local_mode=True,  # Optional debug
+        runtime_env={
+            # Use individual Python files instead of directories
+            "py_modules": py_files,
+        },
+    )
+    """
+
+# Perform Ray init early (before importing modules that might spawn Ray tasks)
+_init_ray()
+# --- End Ray mitigation block ---
+
+
 # Add the llamas_pyjamas package to the path if needed
 sys.path.insert(0, str(Path(__file__).parent))
 
-from Flat.flatLlamas import process_flat_field_complete
-from config import OUTPUT_DIR, CALIB_DIR, DATA_DIR
+from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
+from config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 
 def test_flat_processing():
     """
@@ -30,13 +160,18 @@ def test_flat_processing():
     # ==== UPDATE THESE PATHS TO YOUR ACTUAL FILES ====
     
     # Example flat field file paths - update these to your actual files
-    red_flat_file = os.path.join(DATA_DIR, "your_red_flat.fits")
-    green_flat_file = os.path.join(DATA_DIR, "your_green_flat.fits") 
-    blue_flat_file = os.path.join(DATA_DIR, "your_blue_flat.fits")
+    # red_flat_file = os.path.join(DATA_DIR, "your_red_flat.fits")
+    # green_flat_file = os.path.join(DATA_DIR, "your_green_flat.fits") 
+    # blue_flat_file = os.path.join(DATA_DIR, "your_blue_flat.fits")
     
+    red_flat_file = '/Users/slhughes/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/2025-03-05/LLAMAS_2025-03-05T23_21_49.353_mef.fits'
+    green_flat_file = '/Users/slhughes/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/2025-03-05/LLAMAS_2025-03-05T18_38_32.349_mef.fits'
+    blue_flat_file = '/Users/slhughes/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/2025-03-05/LLAMAS_2025-03-05T18_38_32.349_mef.fits'
+
+
     # Optional: specify custom arc calibration file
-    # If None, will use LLAMAS_reference_arc.pkl in CALIB_DIR
-    arc_calib_file = None  # or os.path.join(CALIB_DIR, "LLAMAS_reference_arc.pkl")
+    # If None, will use LLAMAS_reference_arc.pkl in LUT_DIR
+    arc_calib_file = None  # or os.path.join(LUT_DIR, "LLAMAS_reference_arc.pkl")
     
     # Output directory for results
     output_dir = OUTPUT_DIR  # or specify custom path like "/path/to/output"
@@ -70,14 +205,15 @@ def test_flat_processing():
         print("Starting flat field processing workflow...")
         print("-" * 40)
         
-        # Run the complete processing workflow
+        # Run the complete processing workflow (with minimal output)
         results = process_flat_field_complete(
             red_flat_file=red_flat_file,
             green_flat_file=green_flat_file,
             blue_flat_file=blue_flat_file,
             arc_calib_file=arc_calib_file,
             output_dir=output_dir,
-            trace_dir=trace_dir
+            trace_dir=trace_dir,
+            verbose=False  # Set to True to see detailed processing messages
         )
         
         print("-" * 40)
@@ -126,7 +262,7 @@ def check_requirements():
     
     # Check if required directories exist
     dirs_to_check = [
-        ("Data directory", DATA_DIR),
+        ("LUT directory", LUT_DIR), 
         ("Output directory", OUTPUT_DIR), 
         ("Calibration directory", CALIB_DIR)
     ]
@@ -140,7 +276,7 @@ def check_requirements():
             missing_dirs.append(path)
     
     # Check for arc calibration file
-    arc_file = os.path.join(CALIB_DIR, "LLAMAS_reference_arc.pkl")
+    arc_file = os.path.join(LUT_DIR, "LLAMAS_reference_arc.pkl")
     if os.path.exists(arc_file):
         print(f"  ✅ Arc calibration: {arc_file}")
     else:
