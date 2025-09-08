@@ -1,11 +1,11 @@
 import os
 import logging
 from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
-from Image.WhiteLightModule import WhiteLightFits
+from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 import numpy as np
 from astropy.io import fits
 import llamas_pyjamas.GUI.guiExtract as ge
-from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR
+from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
 from llamas_pyjamas.Utils.utils import concat_extractions
 from llamas_pyjamas.Arc.arcLlamas import arcTransfer
@@ -18,36 +18,87 @@ import pickle
 from datetime import datetime
 
 # Set up logging
-log_dir = os.path.join(OUTPUT_DIR, 'logs')
-os.makedirs(log_dir, exist_ok=True)
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_file = os.path.join(log_dir, f'flatLlamas_{timestamp}.log')
+def setup_logger(verbose=False):
+    """Setup logger with configurable console verbosity."""
+    log_dir = os.path.join(OUTPUT_DIR, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = os.path.join(log_dir, f'flatLlamas_{timestamp}.log')
 
-# Configure the logger
-logger = logging.getLogger('flatLlamas')
-logger.setLevel(logging.DEBUG)
+    # Configure the logger
+    logger = logging.getLogger('flatLlamas')
+    logger.setLevel(logging.DEBUG)
+    
+    # Clear existing handlers to avoid duplicates
+    logger.handlers.clear()
 
-# Create handlers
-file_handler = logging.FileHandler(log_file)
-console_handler = logging.StreamHandler()
+    # Create handlers
+    file_handler = logging.FileHandler(log_file)
+    console_handler = logging.StreamHandler()
 
-# Set levels
-file_handler.setLevel(logging.DEBUG)
-console_handler.setLevel(logging.INFO)
+    # Set levels
+    file_handler.setLevel(logging.DEBUG)
+    console_level = logging.INFO if verbose else logging.WARNING
+    console_handler.setLevel(console_level)
 
-# Create formatters
-file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+    # Create formatters
+    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
 
-# Add formatters to handlers
-file_handler.setFormatter(file_formatter)
-console_handler.setFormatter(console_formatter)
+    # Add formatters to handlers
+    file_handler.setFormatter(file_formatter)
+    console_handler.setFormatter(console_formatter)
 
-# Add handlers to logger
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
 
-logger.info(f"Logging initialized. Log file: {log_file}")
+    if verbose:
+        logger.info(f"Verbose logging enabled. Log file: {log_file}")
+    
+    return logger
+
+# Initialize with default settings
+logger = setup_logger(verbose=False)
+
+
+def sanitize_extraction_dict_for_pickling(extraction_dict):
+    """Sanitize extraction dictionary to remove problematic references for pickling.
+    
+    This function removes the 'trace' attribute from ExtractLlamas objects to prevent
+    pickling issues caused by duplicate module imports (particularly TraceRay classes).
+    
+    Args:
+        extraction_dict (dict): Dictionary containing 'extractions' and 'metadata' keys
+        
+    Returns:
+        dict: Sanitized dictionary with trace references removed from extraction objects
+    """
+    import copy
+    
+    logger.info("Sanitizing extraction dictionary for pickling")
+    
+    # Make a deep copy to avoid modifying the original
+    sanitized_dict = copy.deepcopy(extraction_dict)
+    
+    # Remove trace references from each extraction object
+    extractions = sanitized_dict.get('extractions', [])
+    sanitized_count = 0
+    
+    for i, extraction in enumerate(extractions):
+        if hasattr(extraction, 'trace'):
+            logger.debug(f"Removing trace reference from extraction {i}")
+            extraction.trace = None
+            sanitized_count += 1
+            
+        # Also remove any other potentially problematic attributes
+        for attr_name in ['LUT', 'dead_fibers']:
+            if hasattr(extraction, attr_name):
+                logger.debug(f"Removing {attr_name} from extraction {i}")
+                setattr(extraction, attr_name, None)
+    
+    logger.info(f"Sanitized {sanitized_count} extraction objects with trace references")
+    return sanitized_dict
 
 
 
@@ -252,7 +303,7 @@ def fit_spectrum_simple(extraction, fiber_index, maxiter=6):
 
 def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file, 
                                arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR, 
-                               trace_dir=CALIB_DIR):
+                               trace_dir=CALIB_DIR, verbose=False):
     """Process complete flat field workflow with wavelength calibration and pixel mapping.
 
     This function implements the complete flat field processing workflow:
@@ -271,10 +322,14 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         use_bias (str, optional): Path to bias file. Defaults to None.
         output_dir (str, optional): Output directory. Defaults to OUTPUT_DIR.
         trace_dir (str, optional): Trace directory. Defaults to CALIB_DIR.
+        verbose (bool, optional): Enable verbose console output. Defaults to False.
 
     Returns:
         dict: Dictionary containing processing results and output file paths
     """
+    # Setup logger with appropriate verbosity level
+    global logger
+    logger = setup_logger(verbose=verbose)
     logger.info("Starting complete flat field processing workflow")
     logger.info(f"Input files:")
     logger.info(f"  Red: {red_flat_file}")
@@ -290,7 +345,8 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         green_flat_file, 
         blue_flat_file, 
         tracedir=trace_dir, 
-        outpath=output_dir
+        outpath=output_dir,
+        verbose=verbose
     )
     
     # Step 2: Combine all extractions into a single file
@@ -313,7 +369,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 3: Apply wavelength solution from arc calibration
     logger.info("Step 3: Applying wavelength solution from arc calibration")
     if arc_calib_file is None:
-        arc_calib_file = os.path.join(trace_dir, 'LLAMAS_reference_arc.pkl')
+        arc_calib_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
     
     if not os.path.exists(arc_calib_file):
         logger.error(f"Arc calibration file not found: {arc_calib_file}")
@@ -331,10 +387,11 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info("Transferring wavelength calibration to flat field extractions")
     flat_dict_calibrated = arcTransfer(flat_dict, arc_dict)
     
-    # Save the calibrated flat extractions
+    # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
+    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated)
     with open(calibrated_flat_file, 'wb') as f:
-        pickle.dump(flat_dict_calibrated, f)
+        pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
     
     # Step 4: Fit B-splines and generate pixel maps
@@ -1031,6 +1088,7 @@ if __name__ == "__main__":
     parser.add_argument('--arc_calib', help='Path to arc calibration file (default: LLAMAS_reference_arc.pkl in trace dir)')
     parser.add_argument('--output_dir', default=OUTPUT_DIR, help=f'Output directory (default: {OUTPUT_DIR})')
     parser.add_argument('--trace_dir', default=CALIB_DIR, help=f'Trace directory (default: {CALIB_DIR})')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose console output')
     
     args = parser.parse_args()
     
@@ -1046,7 +1104,8 @@ if __name__ == "__main__":
             args.blue_flat,
             arc_calib_file=args.arc_calib,
             output_dir=args.output_dir,
-            trace_dir=args.trace_dir
+            trace_dir=args.trace_dir,
+            verbose=args.verbose
         )
         
         logger.info("Processing completed successfully!")

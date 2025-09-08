@@ -17,7 +17,10 @@ from pathlib import Path
 
 from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
-from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
+import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
+import sys
+sys.modules['traceLlamasMaster'] = traceLlamasMaster
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, WhiteLightQuickLook
@@ -49,16 +52,16 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
         return None
     
     hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
-    print(hdu_trace_pairs)
+    logger.debug(f"HDU trace pairs: {hdu_trace_pairs}")
 
     extraction_list = []
 
-    print(f"Saving extractions to {extraction_file}")
+    logger.info(f"Saving extractions to {extraction_file}")
 
     counter = 1
     for hdu_index, file in hdu_trace_pairs:
 
-        print(f"Extracting extension number {counter} of 24")
+        logger.debug(f"Extracting extension number {counter} of 24")
         hdr = hdu[hdu_index].header 
         bias = np.nanmedian(hdu[hdu_index].data.astype(float))  
         
@@ -70,13 +73,13 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
             extraction_list.append(extraction)
             
         except Exception as e:
-            print(f"Error extracting trace from {file}")
-            print(traceback.format_exc())
+            logger.error(f"Error extracting trace from {file}")
+            logger.error(traceback.format_exc())
         counter += 1
         
-    print(f'Extraction list = {extraction_list}')        
+    logger.debug(f'Extraction list = {extraction_list}')        
     filename = save_extractions(extraction_list, savefile=extraction_file)
-    print(f'extraction saved filename = {filename}')
+    logger.info(f'extraction saved filename = {filename}')
 
     return None
 
@@ -115,7 +118,7 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
         if matching_trace:
             matches.append((idx, matching_trace))
         else:
-            print(f"No matching trace found for HDU {idx}: {color} {benchside}")
+            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}")
             
     return matches
 
@@ -155,9 +158,9 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
         
         bias_data = bias.data #np.median(bias.data[20:50])
             
-        # Load the trace object from the pickle file.
+        # Load the trace object from the pickle file using cloudpickle for better compatibility
         with open(trace_file, mode='rb') as f:
-            tracer = pickle.load(f)
+            tracer = cloudpickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
         if (method == 'optimal'):
             extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
@@ -165,31 +168,43 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
             extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
         return extraction
     except Exception as e:
-        print(f"Error extracting trace from {trace_file}")
-        print(traceback.format_exc())
+        logger.error(f"Error extracting trace from {trace_file}")
+        logger.error(traceback.format_exc())
         return None
 
 
 def make_writable(extraction_obj):
     """Convert a Ray-returned extraction object to a writable version."""
     import copy
-    import pickle
     
-    # First approach: Deep copy
+    # First approach: Fix class references for TraceRay objects
+    try:
+        if hasattr(extraction_obj, 'tracer') and hasattr(extraction_obj.tracer, '__class__'):
+            tracer_class = extraction_obj.tracer.__class__
+            if tracer_class.__name__ == 'TraceRay' and tracer_class.__module__ == 'traceLlamasMaster':
+                # Replace the tracer with a corrected class reference
+                correct_class = sys.modules['traceLlamasMaster'].TraceRay
+                if tracer_class is not correct_class:
+                    # Create a new object with the correct class
+                    extraction_obj.tracer.__class__ = correct_class
+    except Exception as e:
+        logger.warning(f"Could not fix tracer class reference: {e}")
+    
+    # Second approach: Deep copy
     try:
         return copy.deepcopy(extraction_obj)
     except:
         pass
     
-    # Second approach: Pickle and unpickle
+    # Third approach: Cloudpickle and unpickle for better compatibility
     try:
         # This forces a complete serialization and deserialization
-        pickled = pickle.dumps(extraction_obj)
-        return pickle.loads(pickled)
+        pickled = cloudpickle.dumps(extraction_obj)
+        return cloudpickle.loads(pickled)
     except:
         pass
     
-    # Third approach: If the object has a to_dict method, use it
+    # Fourth approach: If the object has a to_dict method, use it
     if hasattr(extraction_obj, 'to_dict') and callable(extraction_obj.to_dict):
         try:
             obj_dict = extraction_obj.to_dict()
@@ -200,7 +215,7 @@ def make_writable(extraction_obj):
             pass
     
     # If all else fails, return the original object and log a warning
-    print(f"Warning: Could not make object of type {type(extraction_obj)} writable")
+    logger.warning(f"Could not make object of type {type(extraction_obj)} writable")
     return extraction_obj
 
 
