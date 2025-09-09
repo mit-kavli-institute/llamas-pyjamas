@@ -58,6 +58,10 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     log_dir = os.path.join(os.path.dirname(__file__), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
+    # Create default filename if none provided
+    if log_filename is None:
+        log_filename = f"{name.replace('.', '_')}.log"
+    
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)

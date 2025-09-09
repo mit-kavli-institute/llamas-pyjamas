@@ -36,6 +36,8 @@ import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
+from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
+from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
 from astropy.io import fits
 import numpy as np
 
@@ -553,9 +555,9 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
 
 
-def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75):
+def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75, use_crr=True, crr_config=None, parallel=False):
     """
-    Construct IFU data cubes from RSS files.
+    Construct IFU data cubes from RSS files using either traditional or CRR method.
     
     This function can handle both:
     1. Single RSS files with multiple channels
@@ -568,6 +570,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         wavelength_range (tuple, optional): Min/max wavelength range for output cubes
         dispersion (float): Wavelength dispersion in Angstroms/pixel
         spatial_sampling (float): Spatial sampling in arcsec/pixel
+        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method
+        crr_config (CRRCubeConfig, optional): CRR configuration parameters
+        parallel (bool): Use parallel processing for CRR method
         
     Returns:
         list: Paths to constructed cube files
@@ -615,39 +620,95 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         else:
             print(f"Processing RSS file (no specific channel detected): {base_name}")
             
-        logger.info(f"Constructing channel cubes from RSS file: {rss_file}")
-        print(f"Constructing channel cubes from RSS file: {rss_file}")
-        
-        # Pass the common logger to the constructor
-        constructor = CubeConstructor(logger=logger)
-        
-        # Construct one cube per channel
-        channel_cubes = constructor.construct_cube_from_rss(
-            rss_file,
-            wavelength_range=wavelength_range,
-            dispersion=dispersion,
-            spatial_sampling=spatial_sampling
-        )
-        
-        if channel_cubes:
-            # Log which channels were found
-            logger.info(f"Found channels for {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
+        if use_crr:
+            # Use CRR (Covariance-regularized Reconstruction) method
+            logger.info(f"Constructing CRR cube from RSS file: {rss_file}")
+            print(f"Constructing CRR cube from RSS file: {rss_file}")
             
-            # Save each channel cube
-            saved_paths = constructor.save_channel_cubes(
-                channel_cubes,
-                output_prefix=os.path.join(output_dir, f"{base_name}"),
-                header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+            try:
+                # Convert RSS to CRR format
+                rss_data = load_rss_as_crr_data(rss_file)
+                
+                # Create CRR configuration
+                if crr_config is None:
+                    crr_config = CRRCubeConfig(
+                        pixel_scale=spatial_sampling,
+                        use_sky_subtraction=False  # Sky subtraction handled in pipeline
+                    )
+                
+                # Construct CRR cube
+                if parallel:
+                    from llamas_pyjamas.Cube.crr_parallel import parallel_cube_construction
+                    logger.info("Using parallel CRR reconstruction")
+                    crr_cube = parallel_cube_construction(rss_data, crr_config)
+                else:
+                    logger.info("Using serial CRR reconstruction")
+                    constructor = CRRCubeConstructor(crr_config)
+                    crr_cube = constructor.reconstruct_cube(rss_data)
+                
+                # Save CRR cube
+                output_suffix = "_crr_cube"
+                if parallel:
+                    output_suffix += "_parallel"
+                
+                cube_filename = f"{base_name}{output_suffix}.fits"
+                cube_path = os.path.join(output_dir, cube_filename)
+                
+                crr_cube.save_to_fits(cube_path)
+                cube_files.append(cube_path)
+                
+                print(f"  - CRR cube saved: {cube_path}")
+                logger.info(f"CRR cube saved: {cube_path}")
+                
+                # Log quality metrics
+                if hasattr(crr_cube, 'quality_metrics') and crr_cube.quality_metrics:
+                    coverage = crr_cube.quality_metrics.get('total_coverage_fraction', 0)
+                    print(f"  - Coverage: {coverage:.1%}")
+                    logger.info(f"CRR cube quality: {coverage:.1%} coverage")
+                
+            except Exception as e:
+                logger.error(f"CRR cube construction failed: {e}")
+                print(f"  ERROR: CRR cube construction failed: {e}")
+                print("  Falling back to traditional cube construction...")
+                
+                # Fall back to traditional method
+                use_crr = False
+        
+        if not use_crr:
+            # Use traditional cube construction method
+            logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
+            print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
+            
+            # Pass the common logger to the constructor
+            constructor = CubeConstructor(logger=logger)
+            
+            # Construct one cube per channel
+            channel_cubes = constructor.construct_cube_from_rss(
+                rss_file,
+                wavelength_range=wavelength_range,
+                dispersion=dispersion,
                 spatial_sampling=spatial_sampling
             )
             
-            # Add saved paths to the list
-            for channel, path in saved_paths.items():
-                print(f"  - Channel {channel} cube saved: {path}")
-                cube_files.append(path)
-        else:
-            print(f"  No valid channel cubes constructed for {rss_file}")
-            logger.warning(f"No valid channel cubes constructed for {rss_file}")
+            if channel_cubes:
+                # Log which channels were found
+                logger.info(f"Found channels for {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
+                
+                # Save each channel cube
+                saved_paths = constructor.save_channel_cubes(
+                    channel_cubes,
+                    output_prefix=os.path.join(output_dir, f"{base_name}"),
+                    header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+                    spatial_sampling=spatial_sampling
+                )
+                
+                # Add saved paths to the list
+                for channel, path in saved_paths.items():
+                    print(f"  - Channel {channel} cube saved: {path}")
+                    cube_files.append(path)
+            else:
+                print(f"  No valid channel cubes constructed for {rss_file}")
+                logger.warning(f"No valid channel cubes constructed for {rss_file}")
     
     return cube_files
 
@@ -678,10 +739,21 @@ def main(config_path):
                         items.append(item)
                     value = items
                     
+                # Handle boolean values
+                elif value.lower() in ('true', 'false'):
+                    value = value.lower() == 'true'
+                    
                 config[key] = value
         
         print(f"Loaded configuration from {config_path}")
     print("Configuration:", config)
+    
+    # Parse CRR cube configuration (defaults to True if not specified)
+    use_crr_cube = config.get('CRR_cube', True)  # Default to True
+    if isinstance(use_crr_cube, str):
+        use_crr_cube = use_crr_cube.lower() == 'true'
+    
+    print(f"CRR cube reconstruction: {'enabled' if use_crr_cube else 'disabled'}")
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
@@ -934,7 +1006,9 @@ def main(config_path):
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
-                spatial_sampling=config.get('spatial_sampling', 0.75)
+                spatial_sampling=config.get('spatial_sampling', 0.75),
+                use_crr=use_crr_cube,
+                parallel=config.get('CRR_parallel', False)
             )
             print(f"Cubes constructed: {cube_files}")
         else:
