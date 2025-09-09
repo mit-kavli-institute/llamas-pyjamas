@@ -36,6 +36,8 @@ import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
+from astropy.io import fits
+import numpy as np
 
 
 _linefile = os.path.join(LUT_DIR, '')
@@ -144,6 +146,412 @@ def correct_wavelengths(science_extraction_file, soln=None):
     return std_wvcal, primary_hdr
 
 
+def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir, 
+                                  arc_calib_file=None, verbose=False):
+    """Generate flat field pixel maps for science frame correction.
+    
+    Args:
+        red_flat (str): Path to red flat field FITS file
+        green_flat (str): Path to green flat field FITS file  
+        blue_flat (str): Path to blue flat field FITS file
+        trace_dir (str): Directory containing trace files
+        output_dir (str): Output directory for flat field products
+        arc_calib_file (str, optional): Path to arc calibration file
+        verbose (bool): Enable verbose output
+        
+    Returns:
+        list: List of flat field pixel map FITS file paths
+    """
+    from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
+    
+    # Create flat field output directory
+    flat_output_dir = os.path.join(output_dir, 'flats')
+    os.makedirs(flat_output_dir, exist_ok=True)
+    
+    print(f"Processing flat field calibration...")
+    print(f"  Red flat: {os.path.basename(red_flat)}")
+    print(f"  Green flat: {os.path.basename(green_flat)}")
+    print(f"  Blue flat: {os.path.basename(blue_flat)}")
+    print(f"  Output directory: {flat_output_dir}")
+    
+    # Run the complete flat field workflow
+    try:
+        results = process_flat_field_complete(
+            red_flat, green_flat, blue_flat,
+            arc_calib_file=arc_calib_file,
+            output_dir=flat_output_dir,
+            trace_dir=trace_dir,
+            verbose=verbose
+        )
+        
+        pixel_map_files = results.get('output_files', [])
+        print(f"Successfully generated {len(pixel_map_files)} flat field pixel maps")
+        
+        return pixel_map_files
+        
+    except Exception as e:
+        print(f"Error in flat field calibration: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def build_flat_field_map(flat_pixel_maps, science_file):
+    """
+    Build mapping between science extensions and corresponding flat field pixel maps.
+    
+    Args:
+        flat_pixel_maps (list): List of flat field pixel map file paths
+        science_file (str): Path to science FITS file
+        
+    Returns:
+        dict: {extension_index: {'flat_file': path, 'match_info': details}}
+    """
+    flat_map = {}
+    
+    print(f"Building flat field mapping for: {os.path.basename(science_file)}")
+    print(f"Available flat field pixel maps: {len(flat_pixel_maps)}")
+    
+    # Open science file to get extension headers
+    try:
+        with fits.open(science_file) as sci_hdul:
+            for ext_idx in range(1, len(sci_hdul)):  # Skip primary HDU
+                sci_hdu = sci_hdul[ext_idx]
+                
+                # Extract science extension metadata
+                sci_channel = sci_hdu.header.get('COLOR', '').lower()
+                sci_bench = sci_hdu.header.get('BENCH', '')
+                sci_side = sci_hdu.header.get('SIDE', '')
+                
+                # Alternative naming if COLOR not present
+                if not sci_channel:
+                    cam_name = sci_hdu.header.get('CAM_NAME', '')
+                    if cam_name:
+                        parts = cam_name.split('_')
+                        if len(parts) >= 2:
+                            sci_channel = parts[1].lower()
+                            if len(parts[0]) >= 2:
+                                sci_bench = parts[0][0]
+                                sci_side = parts[0][1]
+                
+                # Build expected flat field key
+                sci_key = f"{sci_channel}{sci_bench}{sci_side}"
+                
+                # Find matching flat field pixel map
+                matching_flat = None
+                best_match_score = 0
+                
+                for flat_file in flat_pixel_maps:
+                    flat_basename = os.path.basename(flat_file)
+                    
+                    # Check if flat file contains the science key
+                    if sci_key.lower() in flat_basename.lower():
+                        # Try to verify match by reading flat file header
+                        try:
+                            with fits.open(flat_file) as flat_hdul:
+                                flat_channel = flat_hdul[0].header.get('CHANNEL', '').lower()
+                                flat_bench = flat_hdul[0].header.get('BENCH', '')
+                                flat_side = flat_hdul[0].header.get('SIDE', '')
+                                
+                                # Calculate match score
+                                match_score = 0
+                                if flat_channel == sci_channel:
+                                    match_score += 3
+                                if flat_bench == sci_bench:
+                                    match_score += 2  
+                                if flat_side == sci_side:
+                                    match_score += 1
+                                
+                                # Perfect match verification
+                                if (flat_channel == sci_channel and 
+                                    flat_bench == sci_bench and 
+                                    flat_side == sci_side):
+                                    matching_flat = flat_file
+                                    best_match_score = match_score
+                                    break
+                                elif match_score > best_match_score:
+                                    # Keep track of best partial match
+                                    matching_flat = flat_file
+                                    best_match_score = match_score
+                                    
+                        except Exception as e:
+                            print(f"Warning: Could not read flat file {flat_file}: {str(e)}")
+                            continue
+                    
+                    # Fallback: try pattern matching in filename
+                    elif not matching_flat:
+                        # Look for individual components in filename
+                        name_lower = flat_basename.lower()
+                        component_matches = 0
+                        if sci_channel in name_lower:
+                            component_matches += 1
+                        if sci_bench.lower() in name_lower:
+                            component_matches += 1
+                        if sci_side.lower() in name_lower:
+                            component_matches += 1
+                            
+                        if component_matches >= 2:  # At least 2 out of 3 match
+                            matching_flat = flat_file
+                            best_match_score = component_matches
+                
+                # Store mapping result
+                flat_map[ext_idx] = {
+                    'flat_file': matching_flat,
+                    'science_key': sci_key,
+                    'science_channel': sci_channel,
+                    'science_bench': sci_bench, 
+                    'science_side': sci_side,
+                    'match_found': matching_flat is not None,
+                    'match_score': best_match_score
+                }
+    
+    except Exception as e:
+        print(f"Error reading science file {science_file}: {str(e)}")
+        return {}
+    
+    return flat_map
+
+
+def validate_flat_field_matching(flat_map, science_file):
+    """
+    Validate flat field matching and provide detailed reporting.
+    
+    Args:
+        flat_map (dict): Flat field mapping from build_flat_field_map()
+        science_file (str): Path to science FITS file
+        
+    Returns:
+        dict: {'valid': bool, 'report': str, 'warnings': list, 'stats': dict}
+    """
+    total_extensions = len(flat_map)
+    matched_extensions = sum(1 for v in flat_map.values() if v['match_found'])
+    perfect_matches = sum(1 for v in flat_map.values() if v.get('match_score', 0) >= 6)
+    
+    validation_report = []
+    warnings = []
+    
+    validation_report.append(f"Flat Field Validation for: {os.path.basename(science_file)}")
+    validation_report.append(f"Total extensions: {total_extensions}")
+    validation_report.append(f"Matched extensions: {matched_extensions}")
+    validation_report.append(f"Perfect matches: {perfect_matches}")
+    validation_report.append(f"Unmatched extensions: {total_extensions - matched_extensions}")
+    validation_report.append("-" * 60)
+    
+    # Group extensions by channel for better reporting
+    channels = {}
+    for ext_idx, mapping in flat_map.items():
+        channel = mapping.get('science_channel', 'unknown')
+        if channel not in channels:
+            channels[channel] = {'matched': 0, 'total': 0, 'extensions': []}
+        channels[channel]['total'] += 1
+        channels[channel]['extensions'].append((ext_idx, mapping))
+        if mapping['match_found']:
+            channels[channel]['matched'] += 1
+    
+    # Report by channel
+    for channel, info in sorted(channels.items()):
+        validation_report.append(f"\n{channel.upper()} Channel: {info['matched']}/{info['total']} matched")
+        for ext_idx, mapping in sorted(info['extensions']):
+            if mapping['match_found']:
+                flat_name = os.path.basename(mapping['flat_file'])
+                score = mapping.get('match_score', 0)
+                score_str = f"(score: {score})" if score < 6 else "(perfect)"
+                validation_report.append(
+                    f"  ✓ Extension {ext_idx:2d} ({mapping['science_key']}): {flat_name} {score_str}"
+                )
+            else:
+                validation_report.append(
+                    f"  ✗ Extension {ext_idx:2d} ({mapping['science_key']}): No matching flat found"
+                )
+                warnings.append(f"Extension {ext_idx} ({mapping['science_key']}) has no flat field correction")
+    
+    # Check for critical channels missing
+    critical_missing = []
+    critical_channels = ['red', 'green', 'blue']
+    
+    for ext_idx, mapping in flat_map.items():
+        if (not mapping['match_found'] and 
+            mapping['science_channel'] in critical_channels):
+            critical_missing.append(mapping['science_key'])
+    
+    # Determine validity
+    coverage_ratio = matched_extensions / total_extensions if total_extensions > 0 else 0
+    is_valid = coverage_ratio >= 0.5 and len(critical_missing) == 0  # At least 50% coverage and no critical missing
+    
+    if critical_missing:
+        warnings.append(f"Critical channels missing flat corrections: {critical_missing}")
+    
+    if coverage_ratio < 0.8:
+        warnings.append(f"Low flat field coverage: {coverage_ratio:.1%}")
+    
+    stats = {
+        'total_count': total_extensions,
+        'matched_count': matched_extensions,
+        'perfect_matches': perfect_matches,
+        'coverage_ratio': coverage_ratio,
+        'critical_missing': len(critical_missing)
+    }
+    
+    return {
+        'valid': is_valid,
+        'report': '\n'.join(validation_report),
+        'warnings': warnings,
+        'stats': stats
+    }
+
+
+def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir, 
+                               validate_matching=True, require_all_matches=False):
+    """
+    Apply flat field corrections to a science frame with robust cross-checking.
+    
+    Args:
+        science_file (str): Path to science FITS file
+        flat_pixel_maps (list): List of flat field pixel map files
+        output_dir (str): Output directory for corrected files
+        validate_matching (bool): Whether to validate matching before processing
+        require_all_matches (bool): Whether to require all extensions to have matches
+        
+    Returns:
+        tuple: (output_file_path, correction_statistics)
+    """
+    
+    print(f"Applying flat field correction to: {os.path.basename(science_file)}")
+    
+    # Step 1: Build flat field mapping with cross-checking
+    flat_map = build_flat_field_map(flat_pixel_maps, science_file)
+    
+    if not flat_map:
+        print("ERROR: Could not build flat field mapping")
+        return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
+    
+    # Step 2: Validate matching if requested
+    if validate_matching:
+        validation = validate_flat_field_matching(flat_map, science_file)
+        print("\n" + validation['report'])
+        
+        if validation['warnings']:
+            for warning in validation['warnings']:
+                print(f"WARNING: {warning}")
+        
+        if require_all_matches and not validation['valid']:
+            raise ValueError("Not all extensions have matching flat fields and require_all_matches=True")
+        
+        print(f"\nProceeding with {validation['stats']['matched_count']}/{validation['stats']['total_count']} extensions matched")
+        print("=" * 60)
+    
+    # Step 3: Apply corrections with verified matching
+    try:
+        with fits.open(science_file) as sci_hdul:
+            corrected_hdus = [sci_hdul[0].copy()]  # Primary header
+            
+            correction_stats = {'corrected': 0, 'skipped': 0, 'errors': 0}
+            
+            for ext_idx in range(1, len(sci_hdul)):
+                sci_hdu = sci_hdul[ext_idx]
+                mapping = flat_map.get(ext_idx, {})
+                
+                if mapping.get('match_found') and sci_hdu.data is not None:
+                    try:
+                        # Apply flat field correction with verified matching
+                        with fits.open(mapping['flat_file']) as flat_hdul:
+                            flat_data = flat_hdul[0].data
+                            
+                            # Shape verification
+                            if flat_data.shape != sci_hdu.data.shape:
+                                print(f"  ERROR: Shape mismatch for extension {ext_idx} "
+                                      f"(sci: {sci_hdu.data.shape}, flat: {flat_data.shape})")
+                                raise ValueError(f"Shape mismatch: sci={sci_hdu.data.shape}, flat={flat_data.shape}")
+                            
+                            # Check for valid flat field data
+                            valid_flat_pixels = np.isfinite(flat_data) & (flat_data > 0)
+                            if not np.any(valid_flat_pixels):
+                                print(f"  ERROR: No valid flat field data for extension {ext_idx}")
+                                raise ValueError("No valid flat field data")
+                            
+                            # Perform division with NaN protection
+                            corrected_data = np.divide(
+                                sci_hdu.data.astype(np.float32),
+                                flat_data.astype(np.float32),
+                                out=np.full_like(sci_hdu.data, np.nan, dtype=np.float32),
+                                where=flat_data > 0
+                            )
+                            
+                            # Create new HDU with corrected data
+                            new_hdu = fits.ImageHDU(
+                                data=corrected_data,
+                                header=sci_hdu.header.copy()
+                            )
+                            
+                            # Add correction metadata
+                            new_hdu.header['FLATCORR'] = (True, 'Flat field corrected')
+                            new_hdu.header['FLATFILE'] = (os.path.basename(mapping['flat_file']), 'Flat field file used')
+                            new_hdu.header['FLATKEY'] = (mapping['science_key'], 'Flat field matching key')
+                            new_hdu.header['FLATSCORE'] = (mapping.get('match_score', 0), 'Flat field match score')
+                            
+                            # Add statistics
+                            valid_pixels = np.isfinite(corrected_data)
+                            if np.any(valid_pixels):
+                                new_hdu.header['FLATMEAN'] = (float(np.nanmean(corrected_data)), 'Mean after flat correction')
+                                new_hdu.header['FLATMED'] = (float(np.nanmedian(corrected_data)), 'Median after flat correction')
+                                new_hdu.header['FLATVPIX'] = (int(np.sum(valid_pixels)), 'Valid pixels after flat correction')
+                            
+                            corrected_hdus.append(new_hdu)
+                            correction_stats['corrected'] += 1
+                            
+                            print(f"  ✓ Extension {ext_idx:2d} ({mapping['science_key']}): Corrected with {os.path.basename(mapping['flat_file'])}")
+                            
+                    except Exception as e:
+                        print(f"  ✗ Extension {ext_idx:2d} ({mapping.get('science_key', 'UNKNOWN')}): Error - {str(e)}")
+                        # Copy original on error
+                        new_hdu = sci_hdu.copy()
+                        new_hdu.header['FLATCORR'] = (False, f'Flat correction failed: {str(e)}')
+                        new_hdu.header['FLATKEY'] = (mapping.get('science_key', 'UNKNOWN'), 'Failed flat correction')
+                        corrected_hdus.append(new_hdu)
+                        correction_stats['errors'] += 1
+                        
+                else:
+                    # No flat correction applied
+                    new_hdu = sci_hdu.copy()
+                    new_hdu.header['FLATCORR'] = (False, 'No matching flat field found')
+                    if mapping:
+                        new_hdu.header['FLATKEY'] = (mapping.get('science_key', 'UNKNOWN'), 'No matching flat found')
+                    corrected_hdus.append(new_hdu)
+                    correction_stats['skipped'] += 1
+                    print(f"  - Extension {ext_idx:2d} ({mapping.get('science_key', 'UNKNOWN')}): Skipped (no flat)")
+            
+            # Save corrected science frame
+            base_name = os.path.splitext(os.path.basename(science_file))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_flat_corrected.fits")
+            
+            corrected_hdul = fits.HDUList(corrected_hdus)
+            
+            # Add summary to primary header
+            corrected_hdul[0].header['FLATSTAT'] = (
+                f"{correction_stats['corrected']}C/{correction_stats['skipped']}S/{correction_stats['errors']}E",
+                'Flat correction stats: Corrected/Skipped/Errors'
+            )
+            corrected_hdul[0].header['FLATTIME'] = (
+                datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+                'Flat field correction timestamp'
+            )
+            
+            corrected_hdul.writeto(output_file, overwrite=True)
+            
+            print(f"\nFlat field correction summary:")
+            print(f"  - Corrected: {correction_stats['corrected']} extensions")
+            print(f"  - Skipped: {correction_stats['skipped']} extensions") 
+            print(f"  - Errors: {correction_stats['errors']} extensions")
+            print(f"  - Output file: {os.path.basename(output_file)}")
+            
+            return output_file, correction_stats
+            
+    except Exception as e:
+        print(f"ERROR: Failed to process science file {science_file}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
+
 
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75):
     """
@@ -182,7 +590,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         base_name = os.path.splitext(os.path.basename(rss_file))[0]
         channel = None
         
-        # Check for channel-specific naming pattern
+        # Check for channel-specific naming pattern (handle both old and new patterns)
         for color in ['red', 'green', 'blue']:
             if f'_extract_RSS_{color}' in base_name:
                 # Extract the base name and channel color
@@ -190,6 +598,17 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 base_name = base_name.split(f'_extract_RSS_{color}')[0]
                 logger.info(f"Detected {color} channel file, using base name: {base_name}")
                 break
+        
+        # If no channel-specific pattern found, check for generic RSS pattern
+        if not channel and '_RSS' in base_name:
+            # This handles the new flat-corrected naming pattern: {base}_flat_corrected_RSS_{channel}.fits
+            # or fallback pattern: {base}_RSS.fits (single file with all channels)
+            if '_flat_corrected_RSS' in base_name:
+                base_name = base_name.split('_flat_corrected_RSS')[0]
+                logger.info(f"Detected flat-corrected RSS file, using base name: {base_name}")
+            elif '_RSS' in base_name:
+                base_name = base_name.split('_RSS')[0]
+                logger.info(f"Detected generic RSS file, using base name: {base_name}")
         
         if channel:
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
@@ -299,34 +718,149 @@ def main(config_path):
     os.makedirs(os.path.join(extraction_path, 'flats'), exist_ok=True)
     try:
         
-        generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
-                       config.get('trace_output_dir'), bias=config.get('bias_file'))
+        # Check if we should use existing traces or generate new ones
+        if config.get('use_existing_traces', False) and os.path.exists(config.get('trace_output_dir')):
+            # Check if trace files exist in the specified directory
+            import glob
+            existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
+            if existing_traces:
+                print(f"Using existing traces from {config.get('trace_output_dir')}")
+                print(f"Found {len(existing_traces)} existing trace files.")
+            else:
+                print("No existing trace files found, generating new traces...")
+                generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
+                               config.get('trace_output_dir'), bias=config.get('bias_file'))
+        else:
+            print("Generating new traces...")
+            generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
+                           config.get('trace_output_dir'), bias=config.get('bias_file'))
         
-        # Check if the generated traces have the correct number of fibers
-        print("Checking fiber counts in generated traces...")
+        # Check if the traces (whether existing or newly generated) have the correct number of fibers
+        print("Checking fiber counts in traces...")
         if not count_trace_fibres(config.get('trace_output_dir')):
-            print("Generated traces have incorrect fiber counts. Using traces from CALIB_DIR instead.")
+            print("Traces have incorrect fiber counts. Using traces from CALIB_DIR instead.")
             config['trace_output_dir'] = CALIB_DIR
         else:
-            print("Generated traces have correct fiber counts. Proceeding with new traces.")
+            print("Traces have correct fiber counts. Proceeding with current traces.")
+        
+        # Generate flat field pixel maps if flat correction is enabled
+        flat_pixel_maps = []
+        if config.get('apply_flat_field_correction', True):  # Default to True
+            print("\n" + "="*60)
+            print("FLAT FIELD PROCESSING")
+            print("="*60)
+            
+            flat_pixel_maps = process_flat_field_calibration(
+                config.get('red_flat_file'), 
+                config.get('green_flat_file'), 
+                config.get('blue_flat_file'),
+                config.get('trace_output_dir'),
+                config.get('flat_field_output_dir', os.path.join(output_dir, 'flats')),
+                arc_calib_file=config.get('arc_calib_file'),
+                verbose=config.get('verbose_flat_processing', False)
+            )
+            
+            if flat_pixel_maps:
+                print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
+                for flat_file in flat_pixel_maps:
+                    print(f"  - {os.path.basename(flat_file)}")
+            else:
+                print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
         
         
-       # Process science files by color if they're provided as a list
+       # Apply flat field corrections to science files before extraction
+        science_files_to_process = config['science_files']
+        
+        if config.get('apply_flat_field_correction', True) and flat_pixel_maps:
+            print("\n" + "="*60)
+            print("APPLYING FLAT FIELD CORRECTIONS")
+            print("="*60)
+            
+            flat_corrected_files = []
+            flat_output_dir = os.path.join(output_dir, 'flat_corrected')
+            os.makedirs(flat_output_dir, exist_ok=True)
+            
+            overall_stats = {'total_corrected': 0, 'total_skipped': 0, 'total_errors': 0}
+            
+            if isinstance(config['science_files'], list):
+                for i, science_file in enumerate(config['science_files']):
+                    print(f"\nFlat-correcting science file {i+1}/{len(config['science_files'])}:")
+                    print(f"Input: {os.path.basename(science_file)}")
+                    
+                    if not os.path.exists(science_file):
+                        raise FileNotFoundError(f"Science file {science_file} does not exist.")
+                    
+                    corrected_file, stats = apply_flat_field_correction(
+                        science_file, 
+                        flat_pixel_maps, 
+                        flat_output_dir,
+                        validate_matching=config.get('validate_flat_matching', True),
+                        require_all_matches=config.get('require_all_flat_matches', False)
+                    )
+                    
+                    if corrected_file:
+                        flat_corrected_files.append(corrected_file)
+                        # Accumulate statistics
+                        overall_stats['total_corrected'] += stats['corrected']
+                        overall_stats['total_skipped'] += stats['skipped'] 
+                        overall_stats['total_errors'] += stats['errors']
+                    else:
+                        print(f"ERROR: Failed to flat-correct {science_file}")
+                        # Use original file as fallback
+                        flat_corrected_files.append(science_file)
+                        
+                science_files_to_process = flat_corrected_files
+            else:
+                # Single science file
+                science_file = config['science_files']
+                if not os.path.exists(science_file):
+                    raise FileNotFoundError(f"Science file {science_file} does not exist.")
+                
+                print(f"\nFlat-correcting science file: {os.path.basename(science_file)}")
+                corrected_file, stats = apply_flat_field_correction(
+                    science_file,
+                    flat_pixel_maps,
+                    flat_output_dir,
+                    validate_matching=config.get('validate_flat_matching', True),
+                    require_all_matches=config.get('require_all_flat_matches', False)
+                )
+                
+                if corrected_file:
+                    science_files_to_process = corrected_file
+                    overall_stats['total_corrected'] = stats['corrected']
+                    overall_stats['total_skipped'] = stats['skipped']
+                    overall_stats['total_errors'] = stats['errors']
+                else:
+                    print(f"ERROR: Failed to flat-correct {science_file}, using original")
+                    science_files_to_process = science_file
+            
+            print("\n" + "="*60)
+            print("FLAT FIELD CORRECTION SUMMARY")
+            print("="*60)
+            files_processed = len(config['science_files']) if isinstance(config['science_files'], list) else 1
+            print(f"Files processed: {files_processed}")
+            print(f"Total extensions corrected: {overall_stats['total_corrected']}")
+            print(f"Total extensions skipped: {overall_stats['total_skipped']}")
+            print(f"Total extensions with errors: {overall_stats['total_errors']}")
+        
+        # Process science files (now potentially flat-corrected) for extraction
         if 'science_files' not in config:
             raise ValueError("No science files provided in the configuration.")
     
-        if isinstance(config['science_files'], list):
-            print(f'Found {len(config["science_files"])} science files to process.')
+        # Track whether files were flat-corrected
+        were_flat_corrected = config.get('apply_flat_field_correction', True) and flat_pixel_maps and len(flat_pixel_maps) > 0
         
-            for i, science_file in enumerate(config['science_files']):
-                print(f"Processing science file {i+1}/{len(config['science_files'])}: {science_file}")
-                if not os.path.exists(science_file):
-                    raise FileNotFoundError(f"Science file {science_file} does not exist.")
+        if isinstance(science_files_to_process, list):
+            print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
+        
+            for i, science_file in enumerate(science_files_to_process):
+                print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
                 # Process each science file by color
                 extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
-                print(f"Extraction completed for {science_file}. Output file: {extracted_file}")
+                print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_file}")
         else:
-            extracted_file = run_extraction(config.get('science_files'), extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
+            print(f"Extracting science file: {os.path.basename(science_files_to_process)}")
+            extracted_file = run_extraction(science_files_to_process, extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
             print(f"Extraction completed. Used traces {config.get('trace_output_dir')} Output file: {extracted_file}")
 
         # print("Correcting wavelengths in the extracted file...")
@@ -354,9 +888,16 @@ def main(config_path):
             rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
+            # Construct RSS output filename with flat correction traceability
+            flat_suffix = '_flat_corrected' if were_flat_corrected else ''
+            rss_output_file = os.path.join(extraction_path, f'{base_name}{flat_suffix}_RSS.fits')
+            
+            if were_flat_corrected:
+                rss_logger.info(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
+                print(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
+            
             #RSS generation
             rss_gen = RSSgeneration(logger=rss_logger)
-            rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
             new_rss_outputs = rss_gen.generate_rss(savefile, rss_output_file)
             rss_logger.info(f"RSS file generated: {new_rss_outputs}")
             print(f"RSS file generated: {new_rss_outputs}")
@@ -367,12 +908,17 @@ def main(config_path):
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
-        # First check for files with 'extract_RSS' in the name
+        # Look for RSS files (both flat-corrected and uncorrected patterns)
         rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) 
-                if 'extract_RSS' in f and f.endswith('.fits')]
+                if ('extract_RSS' in f or '_RSS' in f) and f.endswith('.fits')]
         
-        # If none found, fall back to the original pattern
-        if not rss_files:
+        if rss_files:
+            print(f"Found {len(rss_files)} RSS files for cube construction:")
+            for rss_file in rss_files:
+                is_flat_corrected = '_flat_corrected' in os.path.basename(rss_file)
+                status = " (flat-corrected)" if is_flat_corrected else " (original)"
+                print(f"  - {os.path.basename(rss_file)}{status}")
+        else:
             print(f"Found {len(rss_files)} RSS files for cube construction")
 
         if 'cube_output_dir' not in config:

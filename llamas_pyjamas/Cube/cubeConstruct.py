@@ -1535,8 +1535,9 @@ class CubeConstructor:
         """
         Find all channel-specific RSS files for a given base path.
         
-        This method searches for RSS files with channel-specific suffixes like
-        '_extract_RSS_blue.fits', '_extract_RSS_green.fits', '_extract_RSS_red.fits'.
+        This method searches for RSS files with channel-specific suffixes like:
+        - '_extract_RSS_blue.fits', '_extract_RSS_green.fits', '_extract_RSS_red.fits' (old format)
+        - '_flat_corrected_RSS_blue.fits', '_flat_corrected_RSS_green.fits', '_flat_corrected_RSS_red.fits' (new format)
         
         Parameters:
             base_path (str): Base path/prefix to the RSS files or a single RSS file
@@ -1555,18 +1556,29 @@ class CubeConstructor:
             # Extract base name without extension
             base_name = os.path.splitext(base_name)[0]
             
-            # Check if it's already a channel-specific file
-            if '_extract_RSS_' in base_name:
-                # Extract the channel from the filename
-                parts = base_name.split('_extract_RSS_')
-                if len(parts) == 2 and parts[1] in ['blue', 'green', 'red']:
-                    channel = parts[1]
-                    # Just return this file with its detected channel
-                    self.logger.info(f"Input is already a channel-specific file for channel: {channel}")
-                    return {channel: base_path}
-                
-                # Get the base name without channel suffix
-                base_name = parts[0]
+            # Check if it's already a channel-specific file (handle both old and new formats)
+            rss_patterns = ['_extract_RSS_', '_flat_corrected_RSS_']
+            detected_channel = None
+            detected_base_name = None
+            
+            for pattern in rss_patterns:
+                if pattern in base_name:
+                    # Extract the channel from the filename
+                    parts = base_name.split(pattern)
+                    if len(parts) == 2 and parts[1] in ['blue', 'green', 'red']:
+                        detected_channel = parts[1]
+                        detected_base_name = parts[0]
+                        # Just return this file with its detected channel
+                        self.logger.info(f"Input is already a channel-specific file for channel: {detected_channel} (pattern: {pattern})")
+                        return {detected_channel: base_path}
+                    # Get the base name without channel suffix for further processing
+                    elif len(parts) == 2:
+                        detected_base_name = parts[0]
+                        break
+            
+            # Update base_name if we found a pattern
+            if detected_base_name is not None:
+                base_name = detected_base_name
         
         # Construct the base path without extension
         base_path_no_ext = os.path.join(base_dir, base_name)
@@ -1574,38 +1586,67 @@ class CubeConstructor:
         # Dictionary to store found channel files
         channel_files = {}
         
-        # Define common channel names
+        # Define common channel names and RSS patterns to try
         channels = ['blue', 'green', 'red']
+        rss_patterns = ['_flat_corrected_RSS_', '_extract_RSS_']  # Try new format first
         
-        # Check for existence of each channel file
+        # Check for existence of each channel file using both patterns
         for channel in channels:
-            channel_path = f"{base_path_no_ext}_extract_RSS_{channel}.fits"
-            if os.path.isfile(channel_path):
-                self.logger.info(f"Found {channel} channel RSS file: {channel_path}")
-                channel_files[channel] = channel_path
+            for pattern in rss_patterns:
+                channel_path = f"{base_path_no_ext}{pattern}{channel}.fits"
+                if os.path.isfile(channel_path):
+                    self.logger.info(f"Found {channel} channel RSS file: {channel_path}")
+                    channel_files[channel] = channel_path
+                    break  # Found the file, no need to try other patterns
         
         if not channel_files:
             # If no channel-specific files found, check if the original file exists
             original_path = f"{base_path_no_ext}.fits"
             if os.path.isfile(original_path):
                 self.logger.info(f"No channel-specific RSS files found, using original file: {original_path}")
-                # We'll return this as an "unknown" channel for compatibility
-                channel_files['unknown'] = original_path
+                
+                # Try to detect channel from the RSS file header instead of assuming "unknown"
+                try:
+                    with fits.open(original_path) as hdul:
+                        primary_header = hdul[0].header
+                        channel_from_header = primary_header.get('CHANNEL', 'unknown').lower()
+                        if channel_from_header and channel_from_header != 'unknown':
+                            self.logger.info(f"Detected channel '{channel_from_header}' from RSS file header")
+                            channel_files[channel_from_header] = original_path
+                        else:
+                            channel_files['unknown'] = original_path
+                except Exception as e:
+                    self.logger.warning(f"Could not read channel from RSS file header: {e}")
+                    channel_files['unknown'] = original_path
             else:
                 self.logger.warning(f"No RSS files found for base path: {base_path_no_ext}")
                 
                 # Last resort: if the input is a valid file, use it directly
                 if os.path.isfile(base_path):
                     self.logger.info(f"Using input file directly: {base_path}")
-                    channel = 'unknown'  # Default channel name
-                    # Try to detect channel from filename if possible
-                    if 'blue' in base_path.lower():
-                        channel = 'blue'
-                    elif 'green' in base_path.lower():
-                        channel = 'green'
-                    elif 'red' in base_path.lower():
-                        channel = 'red'
-                    channel_files[channel] = base_path
+                    
+                    # Try to read channel from the file header first
+                    try:
+                        with fits.open(base_path) as hdul:
+                            primary_header = hdul[0].header
+                            channel_from_header = primary_header.get('CHANNEL', '').lower()
+                            if channel_from_header and channel_from_header in ['blue', 'green', 'red']:
+                                self.logger.info(f"Detected channel '{channel_from_header}' from file header")
+                                channel_files[channel_from_header] = base_path
+                            else:
+                                raise ValueError("No valid channel found in header")
+                    except Exception:
+                        # Fallback to filename detection
+                        channel = 'unknown'  # Default channel name
+                        # Try to detect channel from filename if possible
+                        if 'blue' in base_path.lower():
+                            channel = 'blue'
+                        elif 'green' in base_path.lower():
+                            channel = 'green'
+                        elif 'red' in base_path.lower():
+                            channel = 'red'
+                        self.logger.info(f"Detected channel '{channel}' from filename")
+                        channel_files[channel] = base_path
         
         return channel_files
     

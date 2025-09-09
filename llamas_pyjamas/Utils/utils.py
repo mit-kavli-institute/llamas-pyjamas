@@ -501,7 +501,7 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
     
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
-            traceobj = pickle.load(file)
+            traceobj = cloudpickle.load(file)
         shape = traceobj.traces.shape[0]
         channel = traceobj.channel
         benchside = f"{traceobj.bench}{traceobj.side}"
