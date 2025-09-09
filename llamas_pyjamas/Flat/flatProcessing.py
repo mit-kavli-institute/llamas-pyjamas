@@ -105,7 +105,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
             writable_ex = make_writable(ex)
             extraction_list.append(writable_ex)    
 
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file)
+    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
     logger.info(f'Extractions saved to {extracted_filename}')
     
     return 
@@ -122,6 +122,8 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     :type blue_flat: str
     :param tracedir: Directory to use find the trace files, defaults to None
     :type tracedir: str, optional
+    :param outpath: Directory to save the extraction files, defaults to None (uses OUTPUT_DIR)
+    :type outpath: str, optional
     :param verbose: Enable verbose console output, defaults to False
     :type verbose: bool, optional
     """
@@ -133,6 +135,13 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
             if isinstance(handler, logging.StreamHandler):
                 handler.setLevel(logging.INFO)
 
+    # Determine the output directory
+    output_directory = outpath if outpath else OUTPUT_DIR
+    
+    # Ensure the output directory exists
+    os.makedirs(output_directory, exist_ok=True)
+    logger.info(f'Using output directory: {output_directory}')
+
     # Reduce the red flat field image
     reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red')
     # Reduce the green flat field image
@@ -142,26 +151,59 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     
     logger.info('Flat field extractions complete.')
 
-
-    red_extraction, green_extraction, blue_extraction = None, None, None
-    if outpath:
-        red_extraction = os.path.join(outpath, 'red_extractions_flat.pkl')
-        green_extraction = os.path.join(outpath, 'green_extractions_flat.pkl')
-        blue_extraction = os.path.join(outpath, 'blue_extractions_flat.pkl')
-    else:
-        red_extraction = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
-        green_extraction = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
-        blue_extraction = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+    # Build paths to extraction files - use OUTPUT_DIR for where files are actually saved
+    # but move them to outpath if specified
+    red_extraction_source = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
+    green_extraction_source = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
+    blue_extraction_source = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+    
+    # Final paths where files should be located
+    red_extraction = os.path.join(output_directory, 'red_extractions_flat.pkl')
+    green_extraction = os.path.join(output_directory, 'green_extractions_flat.pkl')
+    blue_extraction = os.path.join(output_directory, 'blue_extractions_flat.pkl')
+    
+    # If outpath is specified and different from OUTPUT_DIR, copy files to the correct location
+    if outpath and outpath != OUTPUT_DIR:
+        import shutil
+        for source, dest in [(red_extraction_source, red_extraction),
+                           (green_extraction_source, green_extraction),
+                           (blue_extraction_source, blue_extraction)]:
+            if os.path.exists(source):
+                shutil.copy2(source, dest)
+                logger.info(f'Copied {source} to {dest}')
+            else:
+                logger.warning(f'Source file {source} does not exist')
 
     all_extractions = []
     all_metadata = []
+    missing_files = []
+    
+    for fname in [red_extraction, green_extraction, blue_extraction]:
+        if not os.path.exists(fname):
+            missing_files.append(fname)
+            logger.error(f'File {fname} does not exist. Flat field extraction may have failed.')
+        else:
+            logger.debug(f'Found flat field file: {fname}')
+            
+    if missing_files:
+        error_msg = (
+            f"Missing required flat field files: {missing_files}\n"
+            f"Expected location: {output_directory}\n"
+            f"Available files in {output_directory}: {os.listdir(output_directory) if os.path.exists(output_directory) else 'Directory does not exist'}\n"
+            f"Please ensure flat field processing completed successfully before running reduction."
+        )
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
     for fname in [red_extraction, green_extraction, blue_extraction]:
         with open(fname, 'rb') as f:
             data = pickle.load(f)
         all_extractions.extend(data.get('extractions', []))
         all_metadata.extend(data.get('metadata', []))
-    logger.debug(f"Total extractions: {len(all_extractions)}")
-    logger.debug(f"Total metadata entries: {len(all_metadata)}")
+    
+    logger.info(f"Successfully loaded flat field data:")
+    logger.info(f"  Total extractions: {len(all_extractions)}")
+    logger.info(f"  Total metadata entries: {len(all_metadata)}")
     logger.debug(f"All metadata is {all_metadata}")
 
     return all_extractions, all_metadata
