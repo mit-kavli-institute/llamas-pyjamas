@@ -61,22 +61,34 @@ Called by `reduce.py:process_flat_field_calibration()`:
 3. Combine exposures using median or mean
 4. Remove cosmic rays and bad pixels
 
-### Pixel Map Generation  
-1. Use fiber traces to define extraction regions
-2. Calculate pixel-level corrections within fibers
-3. Model inter-fiber scattered light
-4. Generate per-channel correction maps
-5. Save as FITS files for later application
+### B-spline Fitting and Pixel Map Generation  
+1. Extract flat field spectra from master flats using fiber traces
+2. Apply wavelength calibration to extracted spectra
+3. **B-spline Fitting**: For each fiber, fit B-spline to `xshift` (pixel position along fiber) vs `counts` (flat field intensity)
+4. **Pixel Map Creation**: Generate 2D maps containing B-spline predicted flat field values at each pixel location along fiber traces
+5. Save individual pixel map FITS files per channel/bench/side combination
+
+### Normalized Flat Field Creation
+1. **Pixel Map Division**: Divide original flat field data by pixel maps (removes B-spline modeled variations)
+2. **Trace Normalization**: Scale corrected data so median within fiber traces ≈ 1.0
+3. **Background Setting**: Set pixels outside fiber traces to exactly 1.0
+4. **Multi-Extension Output**: Create 24-extension FITS file ordered by `idx_lookup` for direct application to science frames
 
 ### Throughput Calculation
-1. Extract 1D profiles from master flat
-2. Compare fiber-to-fiber variations
+1. Extract 1D profiles from corrected flat field data
+2. Compare fiber-to-fiber variations after pixel map corrections
 3. Calculate relative throughput corrections
 4. Apply to extraction weights
 
 ## Output Products
-- **Pixel Maps**: FITS files with pixel-level corrections per channel/benchside
-- **Master Flats**: Combined flat field images
+- **Pixel Maps**: Individual FITS files containing B-spline predicted flat field values per channel/bench/side (stored in `extractions/pixel_maps/`)
+  - Format: `flat_pixel_map_red1A.fits`, `flat_pixel_map_green2B.fits`, etc.
+  - Content: 2D arrays with predicted values along fiber traces, zero/NaN elsewhere
+- **Normalized Flat Field**: Multi-extension FITS file for science frame correction (stored in `extractions/normalized_flat_field.fits`)
+  - 24 extensions ordered by `idx_lookup` from `constants.py`
+  - Values within fiber traces ≈ 1.0 after pixel map and trace corrections
+  - Values outside fiber traces = exactly 1.0
+- **Master Flats**: Combined flat field images for intermediate processing
 - **Throughput Maps**: Fiber efficiency correction arrays
 - **QA Products**: Diagnostic plots and quality metrics
 - **Processing Logs**: Detailed workflow documentation
@@ -110,24 +122,68 @@ Called by `reduce.py:process_flat_field_calibration()`:
 - Bad pixel identification and flagging
 - Cross-channel consistency checks
 
+## Technical Implementation Details
+
+### Pixel Map Structure and Usage
+**Pixel Maps Contain**: B-spline predicted flat field intensities along fiber traces
+- **B-spline Input**: `xshift` (pixel position along fiber) vs `counts` (flat field intensity) for each fiber
+- **B-spline Output**: Predicted flat field value at each pixel position  
+- **Pixel Map Values**: These predicted values placed at corresponding pixel locations along fiber traces
+- **Non-trace pixels**: Set to 0 or NaN in pixel maps
+
+### Normalized Flat Field Creation Process
+```python
+# Step 1: Remove B-spline modeled variation
+corrected_data = original_flat_data / pixel_map_data
+
+# Step 2: Scale to median ≈ 1.0 within traces  
+normalized_data = corrected_data / median(corrected_data[trace_mask])
+
+# Step 3: Set background to 1.0
+normalized_data[~trace_mask] = 1.0
+```
+
+### Directory Structure
+- **Pixel Maps**: `extractions/pixel_maps/flat_pixel_map_*.fits` (individual files)
+- **Normalized Flat**: `extractions/normalized_flat_field.fits` (24-extension MEF file)
+- **Processing intermediate files**: Various directories as needed
+
+### Extension Ordering Convention
+Normalized flat field extensions follow `constants.py:idx_lookup` ordering:
+1. Extensions 1-24: ordered by channel (red/green/blue), then bench (1-4), then side (A/B)
+2. Headers include: CHANNEL, BENCH, SIDE, BENCHSIDE for proper matching
+3. Compatible with science frame extension structure
+
 ## Advanced Features
 - **Scattered Light Modeling**: Uses `scattered2dLlamas.py` for advanced background subtraction
 - **Sunburst Pattern Correction**: Specialized handling of LLAMAS optical patterns
 - **Multi-Flat Combination**: Combines dome and twilight flats optimally
 - **Wavelength-Dependent Corrections**: Accounts for spectral variations in flat response
 
-## Developer Fixes Needed
+## Recent Implementation Updates
 
-### Multi-Extension FITS Combination for Pixel Maps
+### ✅ COMPLETED: Normalized Flat Field Creation Fix
 
-**Issue**: Individual pixel map FITS files need to be combined into a single multi-extension FITS file with extensions ordered to match raw science frame structure.
+**Issue Resolved**: The flat field processing now correctly creates normalized flat fields using a two-step process:
+
+**Implementation Details**:
+1. **Pixel Map Division**: Original flat field data is divided by pixel maps (containing B-spline predicted values) to remove smooth modeled variations
+2. **Trace Normalization**: The corrected data is then normalized so the median within fiber traces ≈ 1.0  
+3. **Background Setting**: Pixels outside fiber traces are set to exactly 1.0
+4. **Multi-Extension Output**: Creates a 24-extension FITS file with proper `idx_lookup` ordering
+
+**Status**: ✅ IMPLEMENTED in `create_normalized_flat_field_fits()` method
+
+### ✅ COMPLETED: Multi-Extension FITS Combination for Pixel Maps
+
+**Issue Resolved**: Individual pixel map FITS files are combined into a single multi-extension FITS file with extensions ordered to match raw science frame structure.
 
 **Current State**: 
-- Flat field processing generates 24 individual pixel map files (3 channels × 4 benches × 2 sides)
+- Flat field processing generates 24 individual pixel map files (3 channels × 4 benches × 2 sides)  
 - Files named as: `flat_pixel_map_red1A.fits`, `flat_pixel_map_green2B.fits`, etc.
 - Each file contains a single 2D correction array with appropriate headers
 
-**Required Implementation**:
+**Implemented Solution**:
 
 #### New Function: `combine_pixel_maps_to_mef()`
 **Status**: ✅ IMPLEMENTED

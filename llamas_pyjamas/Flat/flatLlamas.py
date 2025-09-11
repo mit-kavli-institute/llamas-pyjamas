@@ -425,6 +425,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     try:
         normalized_flat_field_file = threshold_processor.create_normalized_flat_field_fits(
             original_flat_files=original_flat_files,
+            pixel_map_files=output_files,  # Pass generated pixel maps for B-spline correction
             output_filename=None  # Will use default naming in output_dir
         )
         logger.info(f"Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
@@ -1245,26 +1246,39 @@ class Thresholding():
         
         return output_filename
     
-    def create_normalized_flat_field_fits(self, original_flat_files, output_filename=None):
+    def create_normalized_flat_field_fits(self, original_flat_files, pixel_map_files=None, output_filename=None):
         """
         Create normalized flat field FITS file for reduce.py pipeline.
         
-        This method creates a multi-extension FITS file with normalized flat field data
-        where values within fiber traces are multipliers around 1.0 and values outside
-        fiber traces are exactly 1.0, suitable for direct division with science frames.
+        This method creates a multi-extension FITS file with normalized flat field data by:
+        1. Dividing original flat data by pixel maps (B-spline predicted values)
+        2. Normalizing corrected data so median within fiber traces ≈ 1.0
+        3. Setting values outside fiber traces to exactly 1.0
         
         Args:
             original_flat_files (dict): Dictionary with 'red', 'green', 'blue' FITS file paths
+            pixel_map_files (list, optional): List of pixel map FITS file paths containing
+                B-spline predicted flat field values. If None, falls back to trace-only normalization.
             output_filename (str, optional): Output filename for normalized flat field.
                 If None, defaults to 'normalized_flat_field.fits'
                 
         Returns:
             str: Path to the created normalized flat field FITS file
         """
+        # Import required modules
+        import numpy as np
+        import pickle
+        from datetime import datetime
+        from astropy.io import fits
+        from llamas_pyjamas.constants import idx_lookup
+        
         logger.info("Creating normalized flat field FITS file for reduce.py pipeline")
+        logger.info("="*60)
         
         if output_filename is None:
-            output_filename = os.path.join(self.output_dir, 'normalized_flat_field.fits')
+            # Save normalized flat field in parent directory of pixel_maps for easy access
+            parent_dir = os.path.dirname(self.output_dir) if os.path.basename(self.output_dir) == 'pixel_maps' else self.output_dir
+            output_filename = os.path.join(parent_dir, 'normalized_flat_field.fits')
         
         # Validate input files
         required_colors = ['red', 'green', 'blue']
@@ -1277,6 +1291,50 @@ class Thresholding():
         logger.info(f"Input flat files:")
         for color, file_path in original_flat_files.items():
             logger.info(f"  {color.capitalize()}: {os.path.basename(file_path)}")
+        
+        # Load pixel maps if provided (contains B-spline predicted flat field values)
+        pixel_maps = {}
+        if pixel_map_files:
+            logger.info(f"Loading {len(pixel_map_files)} pixel map files:")
+            for file_path in pixel_map_files:
+                if not os.path.exists(file_path):
+                    logger.warning(f"Pixel map file not found: {file_path}")
+                    continue
+                    
+                filename = os.path.basename(file_path)
+                logger.info(f"  {filename}")
+                
+                # Parse filename to extract channel/bench/side
+                # Expected format: flat_pixel_map_red1A.fits
+                if filename.startswith('flat_pixel_map_') and filename.endswith('.fits'):
+                    channel_bench_side = filename.replace('flat_pixel_map_', '').replace('.fits', '')
+                    
+                    # Extract channel
+                    channel = None
+                    for color in ['blue', 'green', 'red']:
+                        if channel_bench_side.lower().startswith(color):
+                            channel = color
+                            bench_side = channel_bench_side[len(color):]
+                            break
+                    
+                    if channel and len(bench_side) >= 2:
+                        bench = bench_side[0]  # First character is bench number
+                        side = bench_side[1]   # Second character is side (A or B)
+                        
+                        try:
+                            with fits.open(file_path) as pix_hdul:
+                                pixel_map_data = pix_hdul[0].data
+                                key = f"{channel}{bench}{side}"
+                                pixel_maps[key] = pixel_map_data
+                                logger.debug(f"Loaded pixel map for {key}: shape {pixel_map_data.shape}")
+                        except Exception as e:
+                            logger.warning(f"Error loading pixel map {file_path}: {str(e)}")
+                    else:
+                        logger.warning(f"Could not parse pixel map filename: {filename}")
+                else:
+                    logger.warning(f"Unexpected pixel map filename format: {filename}")
+        else:
+            logger.info("No pixel map files provided - using trace-only normalization")
         
         # Create HDU list starting with primary HDU
         hdul = fits.HDUList()
@@ -1338,33 +1396,53 @@ class Thresholding():
                         logger.warning(f"No matching extension found for {channel} {bench}{side} in {flat_file}")
                         continue
                 
-                # Get trace information for fiber locations
+                # STEP 1: Divide by pixel map (removes B-spline modeled variation)
+                pixel_map_key = f"{channel}{bench}{side}"
+                corrected_data = flat_data.copy()
+                
+                if pixel_map_key in pixel_maps:
+                    pixel_map = pixel_maps[pixel_map_key]
+                    
+                    # Verify shapes match
+                    if pixel_map.shape != flat_data.shape:
+                        logger.error(f"Shape mismatch for {pixel_map_key}: flat {flat_data.shape} vs pixel map {pixel_map.shape}")
+                        logger.warning(f"Skipping pixel map division for {pixel_map_key}")
+                    else:
+                        # Divide flat by pixel map (B-spline predictions)
+                        with np.errstate(divide='ignore', invalid='ignore'):
+                            corrected_data = np.where(pixel_map > 0, 
+                                                     flat_data / pixel_map,
+                                                     0.0)  # Set to 0 where pixel map is 0/invalid
+                        logger.debug(f"  Applied pixel map correction for {pixel_map_key}")
+                else:
+                    logger.info(f"  No pixel map found for {pixel_map_key} - using original flat data")
+                
+                # STEP 2: Apply trace-based normalization to corrected data
                 trace_key = f"{channel}{bench}{side}"
+                normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                
                 if trace_key in trace_file_map:
                     trace_obj = trace_file_map[trace_key]['obj']
                     fiber_image = trace_obj.fiberimg
-                    
-                    # Create normalized flat field data
-                    normalized_data = np.ones_like(flat_data, dtype=np.float32)
                     
                     if fiber_image is not None and fiber_image.shape == flat_data.shape:
                         # Find traced regions (non-zero in fiber image)
                         traced_mask = fiber_image > 0
                         
                         if np.any(traced_mask):
-                            # Get flat field values in traced regions
-                            traced_flat_values = flat_data[traced_mask]
+                            # Get corrected flat field values in traced regions
+                            traced_corrected_values = corrected_data[traced_mask]
                             
                             # Remove bad values
-                            valid_mask = np.isfinite(traced_flat_values) & (traced_flat_values > 0)
+                            valid_mask = np.isfinite(traced_corrected_values) & (traced_corrected_values > 0)
                             if np.any(valid_mask):
-                                valid_traced_values = traced_flat_values[valid_mask]
+                                valid_traced_values = traced_corrected_values[valid_mask]
                                 
-                                # Normalize to median = 1.0 within traced regions
-                                median_flat = np.median(valid_traced_values)
-                                if median_flat > 0:
-                                    normalization_factor = 1.0 / median_flat
-                                    normalized_traced_values = flat_data[traced_mask] * normalization_factor
+                                # Normalize corrected data so median = 1.0 within traced regions
+                                median_corrected = np.median(valid_traced_values)
+                                if median_corrected > 0:
+                                    normalization_factor = 1.0 / median_corrected
+                                    normalized_traced_values = corrected_data[traced_mask] * normalization_factor
                                     
                                     # Clip extreme values to reasonable range
                                     normalized_traced_values = np.clip(normalized_traced_values, 0.1, 5.0)
@@ -1372,34 +1450,52 @@ class Thresholding():
                                     # Set normalized values in traced regions
                                     normalized_data[traced_mask] = normalized_traced_values
                                     
+                                    # Set untraced regions to exactly 1.0
+                                    normalized_data[~traced_mask] = 1.0
+                                    
                                     traced_count = np.sum(traced_mask)
                                     untraced_count = normalized_data.size - traced_count
-                                    logger.debug(f"  {channel}{bench}{side}: {traced_count:,} traced pixels, "
-                                               f"{untraced_count:,} untraced pixels (={1.0})")
+                                    logger.debug(f"  {channel}{bench}{side}: {traced_count:,} traced pixels normalized, "
+                                               f"{untraced_count:,} untraced pixels set to 1.0")
+                                    logger.debug(f"    Median in traces after correction: {median_corrected:.3f}")
                                 else:
-                                    logger.warning(f"Invalid median flat value for {channel}{bench}{side}")
+                                    logger.warning(f"Invalid median corrected value for {channel}{bench}{side}")
+                                    # Fallback: set all to 1.0
+                                    normalized_data = np.ones_like(flat_data, dtype=np.float32)
                             else:
-                                logger.warning(f"No valid flat field values for {channel}{bench}{side}")
+                                logger.warning(f"No valid corrected flat field values for {channel}{bench}{side}")
+                                # Fallback: set all to 1.0
+                                normalized_data = np.ones_like(flat_data, dtype=np.float32)
                         else:
                             logger.warning(f"No traced pixels found for {channel}{bench}{side}")
+                            # Fallback: set all to 1.0
+                            normalized_data = np.ones_like(flat_data, dtype=np.float32)
                     else:
                         logger.warning(f"Fiber image shape mismatch or missing for {channel}{bench}{side}")
-                        # Use original flat data normalized to median = 1.0
-                        valid_flat = flat_data[np.isfinite(flat_data) & (flat_data > 0)]
-                        if len(valid_flat) > 0:
-                            median_flat = np.median(valid_flat)
-                            if median_flat > 0:
-                                normalized_data = np.clip(flat_data / median_flat, 0.1, 5.0)
+                        # Fallback: normalize corrected data directly
+                        valid_corrected = corrected_data[np.isfinite(corrected_data) & (corrected_data > 0)]
+                        if len(valid_corrected) > 0:
+                            median_corrected = np.median(valid_corrected)
+                            if median_corrected > 0:
+                                normalized_data = np.clip(corrected_data / median_corrected, 0.1, 5.0)
                                 normalized_data[~np.isfinite(normalized_data)] = 1.0
+                            else:
+                                normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                        else:
+                            normalized_data = np.ones_like(flat_data, dtype=np.float32)
                 else:
                     logger.warning(f"No trace information found for {channel}{bench}{side}")
-                    # Fallback: use original flat data normalized to median = 1.0
-                    valid_flat = flat_data[np.isfinite(flat_data) & (flat_data > 0)]
-                    if len(valid_flat) > 0:
-                        median_flat = np.median(valid_flat)
-                        if median_flat > 0:
-                            normalized_data = np.clip(flat_data / median_flat, 0.1, 5.0)
+                    # Fallback: use corrected data normalized to median = 1.0
+                    valid_corrected = corrected_data[np.isfinite(corrected_data) & (corrected_data > 0)]
+                    if len(valid_corrected) > 0:
+                        median_corrected = np.median(valid_corrected)
+                        if median_corrected > 0:
+                            normalized_data = np.clip(corrected_data / median_corrected, 0.1, 5.0)
                             normalized_data[~np.isfinite(normalized_data)] = 1.0
+                        else:
+                            normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                    else:
+                        normalized_data = np.ones_like(flat_data, dtype=np.float32)
                 
                 # Create extension HDU
                 ext_name = f"FLAT_{channel.upper()}{bench}{side.upper()}"
