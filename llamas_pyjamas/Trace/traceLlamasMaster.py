@@ -870,7 +870,7 @@ class TraceRay(TraceLlamas):
 
 def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None) -> None:
 
-    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     # Initialize Ray with logging config
     ray.shutdown()  # Clear any existing Ray instances
@@ -936,7 +936,7 @@ if __name__ == "__main__":
     parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
     args = parser.parse_args()
       
-    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     ray.shutdown()  # Clear any existing Ray instances
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)

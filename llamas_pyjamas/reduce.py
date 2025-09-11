@@ -24,6 +24,7 @@ import os
 import argparse
 import pickle
 import traceback
+import multiprocessing
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
@@ -747,13 +748,21 @@ def main(config_path):
         
         print(f"Loaded configuration from {config_path}")
     print("Configuration:", config)
-    
+
     # Parse CRR cube configuration (defaults to True if not specified)
     use_crr_cube = config.get('CRR_cube', True)  # Default to True
     if isinstance(use_crr_cube, str):
         use_crr_cube = use_crr_cube.lower() == 'true'
     
     print(f"CRR cube reconstruction: {'enabled' if use_crr_cube else 'disabled'}")
+
+    # Configure Ray CPU usage globally
+    ray_num_cpus = config.get('ray_num_cpus', multiprocessing.cpu_count())
+    if isinstance(ray_num_cpus, str):
+        ray_num_cpus = int(ray_num_cpus)
+    os.environ['LLAMAS_RAY_CPUS'] = str(ray_num_cpus)
+    print(f"Configuring pipeline to use {ray_num_cpus} Ray cores")
+
         
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
