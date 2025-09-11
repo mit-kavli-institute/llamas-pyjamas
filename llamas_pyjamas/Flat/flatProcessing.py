@@ -55,7 +55,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
         }
 
     # Initialize Ray
-    num_cpus = 8
+    num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
     ray.shutdown()
     ray.init(num_cpus=num_cpus, runtime_env=runtime_env)    
     

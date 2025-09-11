@@ -255,7 +255,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         }
 
         # Initialize Ray
-        num_cpus = 8
+        num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
         ray.shutdown()
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
