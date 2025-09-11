@@ -167,8 +167,8 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
     """
     from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
     
-    # Create flat field output directory
-    flat_output_dir = os.path.join(output_dir, 'flats')
+    # Create flat field output directory for pixel maps
+    flat_output_dir = os.path.join(output_dir, 'pixel_maps')
     os.makedirs(flat_output_dir, exist_ok=True)
     
     print(f"Processing flat field calibration...")
@@ -796,7 +796,8 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
     
-    os.makedirs(os.path.join(extraction_path, 'flats'), exist_ok=True)
+    # Create pixel_maps directory for flat field processing
+    os.makedirs(os.path.join(extraction_path, 'pixel_maps'), exist_ok=True)
     try:
         
         # Check if we should use existing traces or generate new ones
@@ -836,7 +837,7 @@ def main(config_path):
                 config.get('green_flat_file'), 
                 config.get('blue_flat_file'),
                 config.get('trace_output_dir'),
-                config.get('flat_field_output_dir', os.path.join(output_dir, 'flats')),
+                config.get('flat_field_output_dir', os.path.join(extraction_path, 'pixel_maps')),
                 arc_calib_file=config.get('arc_calib_file'),
                 verbose=config.get('verbose_flat_processing', False)
             )
