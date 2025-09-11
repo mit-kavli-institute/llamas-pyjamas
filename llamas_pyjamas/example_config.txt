@@ -25,3 +25,6 @@ trace_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fre
 extraction_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/extractions
 cube_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/cubes
 
+# Ray parallelization control (optional, defaults to all CPU cores)
+ray_num_cpus = 8
+

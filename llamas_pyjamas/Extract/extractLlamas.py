@@ -459,7 +459,7 @@ if __name__ == '__main__':
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     
-    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
