@@ -6,6 +6,7 @@ import numpy as np
 from astropy.io import fits
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
+from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
 from llamas_pyjamas.Utils.utils import concat_extractions
 from llamas_pyjamas.Arc.arcLlamas import arcTransfer
@@ -182,7 +183,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             )
             
             # Create evaluation grid
-            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*2)  # Higher resolution
+            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift_clean))  # was 2* for Higher resolution
             y_fit = sset.value(xmodel)[0]
             
             # Evaluate fit quality
@@ -230,7 +231,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             bkpt=manual_bkpt
         )
         
-        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*2)
+        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)) # why was this twice the length?
         y_fit = sset.value(xmodel)[0]
         y_fit_original = sset.value(xshift_clean)[0]
         residuals = counts_clean - y_fit_original
@@ -412,12 +413,33 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     pixel_map_results = threshold_processor.generate_complete_pixel_maps(fit_results)
     output_files = pixel_map_results['output_files']
     
+    # Step 6: Create normalized flat field FITS file for reduce.py pipeline
+    logger.info("Step 6: Creating normalized flat field FITS file for reduce.py pipeline")
+    
+    original_flat_files = {
+        'red': red_flat_file,
+        'green': green_flat_file,
+        'blue': blue_flat_file
+    }
+    
+    try:
+        normalized_flat_field_file = threshold_processor.create_normalized_flat_field_fits(
+            original_flat_files=original_flat_files,
+            output_filename=None  # Will use default naming in output_dir
+        )
+        logger.info(f"Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
+    except Exception as e:
+        logger.error(f"Failed to create normalized flat field: {str(e)}")
+        normalized_flat_field_file = None
+    
     results = {
         'combined_flat_file': combined_flat_file,
         'calibrated_flat_file': calibrated_flat_file,
         'fit_results': fit_results,
         'pixel_map_results': pixel_map_results,
         'output_files': output_files,
+        'combined_mef_file': pixel_map_results.get('combined_mef_file'),
+        'normalized_flat_field_file': normalized_flat_field_file,
         'processing_status': 'completed'
     }
     
@@ -808,7 +830,7 @@ class Thresholding():
 
         return pixel_maps
     
-    def generate_complete_pixel_maps(self, fit_results, output_fits=True):
+    def generate_complete_pixel_maps(self, fit_results, output_fits=True, create_mef=True):
         """
         Generate complete pixel maps with FITS output for each channel/bench combination.
         
@@ -818,6 +840,7 @@ class Thresholding():
         Args:
             fit_results (dict): Dictionary of B-spline fit results for each extension and fiber
             output_fits (bool): Whether to save pixel maps as FITS files. Default True.
+            create_mef (bool): Whether to create combined multi-extension FITS file. Default True.
             
         Returns:
             dict: Dictionary containing pixel maps and output file paths
@@ -907,14 +930,28 @@ class Thresholding():
             if not found_trace:
                 logger.warning(f"Could not find matching trace file for extension {ext_key}")
         
+        # Create combined multi-extension FITS file if requested
+        combined_mef_file = None
+        if create_mef and output_files:
+            try:
+                logger.info("Creating combined multi-extension FITS file")
+                combined_mef_file = self.combine_pixel_maps_to_mef(output_files)
+                logger.info(f"Successfully created combined MEF file: {combined_mef_file}")
+            except Exception as e:
+                logger.error(f"Failed to create combined MEF file: {str(e)}")
+                # Don't raise the exception - individual files are still valid
+        
         results = {
             'pixel_maps': pixel_maps,
             'output_files': output_files,
+            'combined_mef_file': combined_mef_file,
             'trace_file_map': trace_file_map
         }
         
         logger.info(f"Generated pixel maps for {len(pixel_maps)} extensions")
-        logger.info(f"Saved {len(output_files)} FITS files")
+        logger.info(f"Saved {len(output_files)} individual FITS files")
+        if combined_mef_file:
+            logger.info(f"Created combined MEF file: {os.path.basename(combined_mef_file)}")
         
         return results
     
@@ -985,10 +1022,18 @@ class Thresholding():
             if processed_fibers % 50 == 0:
                 logger.debug(f"Processed {processed_fibers}/{len(fiber_fits)} fibers")
         
-        # Check for unassigned pixels
-        nan_count = np.sum(np.isnan(pixel_map))
+        # Set unassigned pixels (outside fiber traces) to 1.0 for proper flat field normalization
+        nan_mask = np.isnan(pixel_map)
+        pixel_map[nan_mask] = 1.0
+        
+        # Check statistics
+        nan_count = np.sum(nan_mask)  # Count of pixels that were NaN (now set to 1.0)
         total_pixels = pixel_map.size
-        logger.info(f"Pixel map has {nan_count}/{total_pixels} unassigned pixels ({100*nan_count/total_pixels:.1f}%)")
+        traced_pixels = total_pixels - nan_count
+        
+        logger.info(f"Pixel map normalization: {traced_pixels}/{total_pixels} traced pixels, "
+                   f"{nan_count}/{total_pixels} untraced pixels set to 1.0 "
+                   f"({100*nan_count/total_pixels:.1f}% untraced)")
         
         return pixel_map
     
@@ -1058,6 +1103,354 @@ class Thresholding():
         logger.info("Threshold generation complete")
         return results
     
+    def combine_pixel_maps_to_mef(self, pixel_map_files, output_filename=None):
+        """
+        Combine individual pixel map FITS files into a single multi-extension FITS file.
+        
+        This method takes individual pixel map files and combines them into a single
+        multi-extension FITS file with extensions ordered by color, bench, and side
+        to match the raw science frame structure.
+        
+        Args:
+            pixel_map_files (list): List of individual pixel map FITS file paths
+            output_filename (str, optional): Output filename for combined MEF file.
+                If None, defaults to 'combined_pixel_maps.fits'
+                
+        Returns:
+            str: Path to the created multi-extension FITS file
+        """
+        logger.info("Combining individual pixel maps into multi-extension FITS file")
+        
+        if not pixel_map_files:
+            logger.error("No pixel map files provided")
+            raise ValueError("No pixel map files to combine")
+            
+        # Default output filename
+        if output_filename is None:
+            output_filename = os.path.join(self.output_dir, 'combined_flat_pixel_maps.fits')
+        
+        # Parse filenames to extract channel/bench/side information
+        file_info = []
+        for file_path in pixel_map_files:
+            if not os.path.exists(file_path):
+                logger.warning(f"Pixel map file not found: {file_path}")
+                continue
+                
+            filename = os.path.basename(file_path)
+            
+            # Parse filename like: flat_pixel_map_red1A.fits
+            if filename.startswith('flat_pixel_map_') and filename.endswith('.fits'):
+                channel_bench_side = filename.replace('flat_pixel_map_', '').replace('.fits', '')
+                
+                # Extract channel
+                channel = None
+                for color in ['blue', 'green', 'red']:
+                    if channel_bench_side.lower().startswith(color):
+                        channel = color
+                        bench_side = channel_bench_side[len(color):]
+                        break
+                
+                if channel and len(bench_side) >= 2:
+                    bench = bench_side[0]  # First character is bench number
+                    side = bench_side[1]   # Second character is side (A or B)
+                    
+                    file_info.append({
+                        'file_path': file_path,
+                        'channel': channel,
+                        'bench': bench,
+                        'side': side,
+                        'sort_key': f"{channel}_{bench}{side}"
+                    })
+                    logger.debug(f"Parsed {filename}: {channel} {bench}{side}")
+                else:
+                    logger.warning(f"Could not parse filename: {filename}")
+            else:
+                logger.warning(f"Unexpected filename format: {filename}")
+        
+        if not file_info:
+            logger.error("No valid pixel map files found")
+            raise ValueError("No valid pixel map files to combine")
+        
+        # Sort by LLAMAS idx_lookup ordering from constants.py
+        file_info.sort(key=lambda x: idx_lookup.get((x['channel'], x['bench'], x['side']), 999))
+        
+        logger.info(f"Will combine {len(file_info)} pixel maps in the following order:")
+        for i, info in enumerate(file_info):
+            logger.info(f"  Extension {i+1}: {info['channel']}{info['bench']}{info['side']}")
+        
+        # Create HDU list starting with primary HDU
+        hdul = fits.HDUList()
+        
+        # Create primary HDU with basic header information
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['COMMENT'] = 'Combined flat field pixel maps for LLAMAS'
+        primary_hdu.header['CREATOR'] = 'LLAMAS flatLlamas.py'
+        primary_hdu.header['DATE'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+        primary_hdu.header['NEXTEND'] = len(file_info)
+        primary_hdu.header['ORIGIN'] = 'LLAMAS Pipeline'
+        hdul.append(primary_hdu)
+        
+        # Add each pixel map as an extension
+        for i, info in enumerate(file_info):
+            try:
+                # Read the individual pixel map file
+                logger.debug(f"Reading {info['file_path']}")
+                with fits.open(info['file_path']) as pixel_hdul:
+                    pixel_data = pixel_hdul[0].data
+                    pixel_header = pixel_hdul[0].header.copy()
+                
+                # Create extension name
+                ext_name = f"FLAT_{info['channel'].upper()}{info['bench']}{info['side'].upper()}"
+                
+                # Create image HDU
+                hdu = fits.ImageHDU(data=pixel_data.astype(np.float32), 
+                                  header=pixel_header, 
+                                  name=ext_name)
+                
+                # Add additional metadata to header
+                hdu.header['EXTVER'] = i + 1
+                hdu.header['CHANNEL'] = info['channel'].upper()
+                hdu.header['BENCH'] = info['bench']
+                hdu.header['SIDE'] = info['side'].upper()
+                hdu.header['BENCHSIDE'] = f"{info['bench']}{info['side'].upper()}"
+                hdu.header['COLOUR'] = info['channel'].upper()
+                hdu.header['ORIGFILE'] = os.path.basename(info['file_path'])
+                
+                # Ensure BUNIT is set consistently
+                if 'BUNIT' not in hdu.header:
+                    hdu.header['BUNIT'] = 'Counts'
+                
+                hdul.append(hdu)
+                logger.debug(f"Added extension {ext_name} from {info['file_path']}")
+                
+            except Exception as e:
+                logger.error(f"Error reading pixel map file {info['file_path']}: {str(e)}")
+                continue
+        
+        # Write the combined FITS file
+        try:
+            hdul.writeto(output_filename, overwrite=True)
+            logger.info(f"Successfully created combined pixel map file: {output_filename}")
+            logger.info(f"File contains {len(hdul)-1} extensions (plus primary)")
+            
+            # Log file size for reference
+            file_size = os.path.getsize(output_filename)
+            logger.info(f"Combined file size: {file_size / (1024*1024):.1f} MB")
+            
+        except Exception as e:
+            logger.error(f"Error writing combined FITS file: {str(e)}")
+            raise
+        finally:
+            hdul.close()
+        
+        return output_filename
+    
+    def create_normalized_flat_field_fits(self, original_flat_files, output_filename=None):
+        """
+        Create normalized flat field FITS file for reduce.py pipeline.
+        
+        This method creates a multi-extension FITS file with normalized flat field data
+        where values within fiber traces are multipliers around 1.0 and values outside
+        fiber traces are exactly 1.0, suitable for direct division with science frames.
+        
+        Args:
+            original_flat_files (dict): Dictionary with 'red', 'green', 'blue' FITS file paths
+            output_filename (str, optional): Output filename for normalized flat field.
+                If None, defaults to 'normalized_flat_field.fits'
+                
+        Returns:
+            str: Path to the created normalized flat field FITS file
+        """
+        logger.info("Creating normalized flat field FITS file for reduce.py pipeline")
+        
+        if output_filename is None:
+            output_filename = os.path.join(self.output_dir, 'normalized_flat_field.fits')
+        
+        # Validate input files
+        required_colors = ['red', 'green', 'blue']
+        for color in required_colors:
+            if color not in original_flat_files:
+                raise ValueError(f"Missing {color} flat file in original_flat_files")
+            if not os.path.exists(original_flat_files[color]):
+                raise FileNotFoundError(f"{color} flat file not found: {original_flat_files[color]}")
+        
+        logger.info(f"Input flat files:")
+        for color, file_path in original_flat_files.items():
+            logger.info(f"  {color.capitalize()}: {os.path.basename(file_path)}")
+        
+        # Create HDU list starting with primary HDU
+        hdul = fits.HDUList()
+        
+        # Create primary HDU with metadata
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['COMMENT'] = 'Normalized flat field for LLAMAS science data reduction'
+        primary_hdu.header['CREATOR'] = 'LLAMAS flatLlamas.py create_normalized_flat_field_fits()'
+        primary_hdu.header['DATE'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+        primary_hdu.header['PURPOSE'] = 'Direct division flat field correction'
+        primary_hdu.header['ORIGIN'] = 'LLAMAS Pipeline'
+        primary_hdu.header['NEXTEND'] = 24
+        hdul.append(primary_hdu)
+        
+        # Get trace files for fiber location information
+        import glob
+        trace_files = glob.glob(os.path.join(self.trace_dir, 'LLAMAS_master*traces.pkl'))
+        if not trace_files:
+            logger.warning(f"No trace files found in {self.trace_dir}")
+        
+        # Create trace file mapping
+        trace_file_map = {}
+        for trace_file in trace_files:
+            try:
+                with open(trace_file, 'rb') as f:
+                    trace_obj = pickle.load(f)
+                key = f"{trace_obj.channel}{trace_obj.bench}{trace_obj.side}"
+                trace_file_map[key] = {'file': trace_file, 'obj': trace_obj}
+                logger.debug(f"Mapped trace {key} to {os.path.basename(trace_file)}")
+            except Exception as e:
+                logger.warning(f"Error loading trace file {trace_file}: {str(e)}")
+                continue
+        
+        # Process extensions in idx_lookup order
+        extensions_created = 0
+        for (channel, bench, side), ext_idx in sorted(idx_lookup.items(), key=lambda x: x[1]):
+            logger.debug(f"Processing extension {ext_idx}: {channel} {bench}{side}")
+            
+            try:
+                # Load original flat field data for this channel
+                flat_file = original_flat_files[channel]
+                with fits.open(flat_file) as flat_hdul:
+                    # Find matching extension in original flat file
+                    flat_data = None
+                    for i in range(1, len(flat_hdul)):  # Skip primary
+                        hdu = flat_hdul[i]
+                        hdu_bench = hdu.header.get('BENCH', '')
+                        hdu_side = hdu.header.get('SIDE', '')
+                        hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+                        
+                        if (hdu_channel == channel and 
+                            hdu_bench == bench and 
+                            hdu_side == side):
+                            flat_data = hdu.data.copy()
+                            original_header = hdu.header.copy()
+                            break
+                    
+                    if flat_data is None:
+                        logger.warning(f"No matching extension found for {channel} {bench}{side} in {flat_file}")
+                        continue
+                
+                # Get trace information for fiber locations
+                trace_key = f"{channel}{bench}{side}"
+                if trace_key in trace_file_map:
+                    trace_obj = trace_file_map[trace_key]['obj']
+                    fiber_image = trace_obj.fiberimg
+                    
+                    # Create normalized flat field data
+                    normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                    
+                    if fiber_image is not None and fiber_image.shape == flat_data.shape:
+                        # Find traced regions (non-zero in fiber image)
+                        traced_mask = fiber_image > 0
+                        
+                        if np.any(traced_mask):
+                            # Get flat field values in traced regions
+                            traced_flat_values = flat_data[traced_mask]
+                            
+                            # Remove bad values
+                            valid_mask = np.isfinite(traced_flat_values) & (traced_flat_values > 0)
+                            if np.any(valid_mask):
+                                valid_traced_values = traced_flat_values[valid_mask]
+                                
+                                # Normalize to median = 1.0 within traced regions
+                                median_flat = np.median(valid_traced_values)
+                                if median_flat > 0:
+                                    normalization_factor = 1.0 / median_flat
+                                    normalized_traced_values = flat_data[traced_mask] * normalization_factor
+                                    
+                                    # Clip extreme values to reasonable range
+                                    normalized_traced_values = np.clip(normalized_traced_values, 0.1, 5.0)
+                                    
+                                    # Set normalized values in traced regions
+                                    normalized_data[traced_mask] = normalized_traced_values
+                                    
+                                    traced_count = np.sum(traced_mask)
+                                    untraced_count = normalized_data.size - traced_count
+                                    logger.debug(f"  {channel}{bench}{side}: {traced_count:,} traced pixels, "
+                                               f"{untraced_count:,} untraced pixels (={1.0})")
+                                else:
+                                    logger.warning(f"Invalid median flat value for {channel}{bench}{side}")
+                            else:
+                                logger.warning(f"No valid flat field values for {channel}{bench}{side}")
+                        else:
+                            logger.warning(f"No traced pixels found for {channel}{bench}{side}")
+                    else:
+                        logger.warning(f"Fiber image shape mismatch or missing for {channel}{bench}{side}")
+                        # Use original flat data normalized to median = 1.0
+                        valid_flat = flat_data[np.isfinite(flat_data) & (flat_data > 0)]
+                        if len(valid_flat) > 0:
+                            median_flat = np.median(valid_flat)
+                            if median_flat > 0:
+                                normalized_data = np.clip(flat_data / median_flat, 0.1, 5.0)
+                                normalized_data[~np.isfinite(normalized_data)] = 1.0
+                else:
+                    logger.warning(f"No trace information found for {channel}{bench}{side}")
+                    # Fallback: use original flat data normalized to median = 1.0
+                    valid_flat = flat_data[np.isfinite(flat_data) & (flat_data > 0)]
+                    if len(valid_flat) > 0:
+                        median_flat = np.median(valid_flat)
+                        if median_flat > 0:
+                            normalized_data = np.clip(flat_data / median_flat, 0.1, 5.0)
+                            normalized_data[~np.isfinite(normalized_data)] = 1.0
+                
+                # Create extension HDU
+                ext_name = f"FLAT_{channel.upper()}{bench}{side.upper()}"
+                hdu = fits.ImageHDU(data=normalized_data, name=ext_name)
+                
+                # Set header information
+                hdu.header['EXTVER'] = ext_idx
+                hdu.header['CHANNEL'] = channel.upper()
+                hdu.header['BENCH'] = bench
+                hdu.header['SIDE'] = side.upper()
+                hdu.header['BENCHSIDE'] = f"{bench}{side.upper()}"
+                hdu.header['COLOUR'] = channel.upper()
+                hdu.header['BUNIT'] = 'Normalized'
+                hdu.header['PURPOSE'] = 'Flat field correction by division'
+                hdu.header['ORIGFILE'] = os.path.basename(original_flat_files[channel])
+                
+                # Add statistics
+                valid_pixels = np.isfinite(normalized_data)
+                if np.any(valid_pixels):
+                    hdu.header['DATAMIN'] = float(np.nanmin(normalized_data))
+                    hdu.header['DATAMAX'] = float(np.nanmax(normalized_data))
+                    hdu.header['DATAMEAN'] = float(np.nanmean(normalized_data))
+                    hdu.header['DATAMD'] = float(np.nanmedian(normalized_data))
+                    hdu.header['NPIX'] = int(np.sum(valid_pixels))
+                
+                hdul.append(hdu)
+                extensions_created += 1
+                logger.debug(f"Created extension {ext_idx}: {ext_name}")
+                
+            except Exception as e:
+                logger.error(f"Error creating extension for {channel} {bench}{side}: {str(e)}")
+                continue
+        
+        # Write the normalized flat field FITS file
+        try:
+            hdul.writeto(output_filename, overwrite=True)
+            logger.info(f"Successfully created normalized flat field: {output_filename}")
+            logger.info(f"File contains {extensions_created} extensions (plus primary)")
+            
+            # Log file size
+            file_size = os.path.getsize(output_filename)
+            logger.info(f"Normalized flat field file size: {file_size / (1024*1024):.1f} MB")
+            
+        except Exception as e:
+            logger.error(f"Error writing normalized flat field FITS file: {str(e)}")
+            raise
+        finally:
+            hdul.close()
+        
+        return output_filename
+    
     def apply_thresholds(self, science_data):
         """Apply calculated thresholds to the flat field data.
 
@@ -1109,9 +1502,19 @@ if __name__ == "__main__":
         )
         
         logger.info("Processing completed successfully!")
-        logger.info(f"Generated {len(results['output_files'])} FITS files:")
+        logger.info(f"Generated {len(results['output_files'])} individual FITS files:")
         for output_file in results['output_files']:
             logger.info(f"  {output_file}")
+        
+        if results['combined_mef_file']:
+            logger.info(f"Combined multi-extension FITS file: {results['combined_mef_file']}")
+        else:
+            logger.warning("Combined multi-extension FITS file was not created")
+        
+        if results['normalized_flat_field_file']:
+            logger.info(f"Normalized flat field for reduce.py: {results['normalized_flat_field_file']}")
+        else:
+            logger.warning("Normalized flat field file was not created")
             
     except Exception as e:
         logger.error(f"Processing failed: {str(e)}")
