@@ -832,12 +832,16 @@ def main(config_path):
             print("FLAT FIELD PROCESSING")
             print("="*60)
             
+            # Create proper flat field directory structure: extractions/flat/
+            flat_field_dir = config.get('flat_field_output_dir', os.path.join(extraction_path, 'flat'))
+            os.makedirs(flat_field_dir, exist_ok=True)
+            
             flat_pixel_maps = process_flat_field_calibration(
                 config.get('red_flat_file'), 
                 config.get('green_flat_file'), 
                 config.get('blue_flat_file'),
                 config.get('trace_output_dir'),
-                config.get('flat_field_output_dir', os.path.join(extraction_path, 'pixel_maps')),
+                flat_field_dir,
                 arc_calib_file=config.get('arc_calib_file'),
                 verbose=config.get('verbose_flat_processing', False)
             )
