@@ -107,6 +107,7 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None):
     return  extraction_file_path
 
 
+#this isn't quite right -> nneeds checking
 def calc_wavelength_soln(arc_file, output_dir, bias=None):
 
     ge.GUI_extract(arc_file, use_bias=bias, output_dir=output_dir)

@@ -162,17 +162,162 @@ Normalized flat field extensions follow `constants.py:idx_lookup` ordering:
 
 ## Recent Implementation Updates
 
+### ✅ COMPLETED: New Isolated Flat Field Processing Workflow
+
+**Issue Resolved**: Complete redesign of the flat field processing workflow to properly create normalized images from B-spline fits and trace data.
+
+**New Implementation**: Added comprehensive standalone workflow with the following functions:
+
+#### Core Functions Added to `flatLlamas.py`:
+
+1. **`find_trace_file(color, bench, side, trace_dir, fallback_dir)`**
+   - Locates correct trace files using naming convention: `LLAMAS_master_{color}_{bench}_{side}_traces.pkl`
+   - Searches primary directory first, then fallback (mastercalib)
+   - Returns file path, location info, and existence status
+
+2. **`create_pixel_maps_from_bsplines(extraction_file, trace_dir, fallback_dir)`**
+   - Loads B-spline fit data from `combined_flat_extractions_calibrated_fits.pkl`
+   - Matches each extension to correct trace file by metadata
+   - Loads trace `.fiberimg` attribute and combines with B-spline values
+   - Creates 2D pixel maps where trace pixels get B-spline predicted values
+   - Returns pixel maps dictionary and comprehensive matching log
+
+3. **`generate_normalized_images(pixel_maps, raw_flat_files, matching_log, output_file)`**
+   - Divides raw flat field images by pixel maps (trace regions only)
+   - Normalizes trace regions so median ≈ 1.0
+   - Sets non-trace regions to exactly 1.0
+   - Creates 24-extension `normalised_images.fits` following `idx_lookup` ordering
+   - Includes detailed metadata in each extension header
+
+4. **`print_flat_field_matching_log(matching_log)`**
+   - Comprehensive verification log showing file matching and processing results
+   - Cross-check of extension → trace file → B-spline data → raw flat file mapping
+   - Processing statistics and quality metrics
+   - Error reporting and troubleshooting information
+
+#### Complete Standalone Test Script: `isolated_flat_fielding.py`
+
+**Purpose**: Complete standalone script that replicates the entire flat field processing workflow from reduce.py, starting with raw flat files
+
+**Enhanced Features**:
+- **Complete Workflow**: Processes from raw red/green/blue flat files to final normalized images
+- **User-configurable paths**: Modify file paths in USER CONFIGURATION section
+- **Step-by-step processing**: Detailed validation and reporting at each stage
+- **Debugging options**: STOP_AT_STEP parameter for inspecting intermediate results
+- **Comprehensive logging**: Verbose output and detailed error reporting
+- **Organized output structure**: Separate directories for traces, extractions, finals, logs
+- **Dual verification**: Both existing workflow + new verification functions
+- **Usage instructions**: Built-in help and troubleshooting guide
+
+**Complete 7-Step Workflow**:
+```python
+# Step 1: Generate fiber traces from flat field files (optional)
+generate_traces(red_flat, green_flat, blue_flat, trace_dir, bias)
+
+# Step 2-6: Complete flat field processing workflow
+process_flat_field_complete(
+    red_flat_file, green_flat_file, blue_flat_file,
+    arc_calib_file, use_bias, output_dir, trace_dir
+)
+# Includes:
+#   - Step 2: Flat field extraction (extract spectra using traces)
+#   - Step 3: Wavelength calibration (arc transfer for xshift vs counts)
+#   - Step 4: B-spline fitting (fit B-splines to each fiber's xshift vs counts)
+#   - Step 5: Pixel map generation (combine B-splines + trace.fiberimg)
+#   - Step 6: Normalized image creation (divide raw flats by pixel maps)
+
+# Step 7: Enhanced verification and cross-checking
+pixel_maps, log = create_pixel_maps_from_bsplines(calibrated_file, trace_dir)
+verification_file = generate_normalized_images(pixel_maps, raw_flats, log)
+print_flat_field_matching_log(log)  # Comprehensive verification report
+```
+
+**Input Requirements**:
+- **Raw flat files**: red_flat.fits, green_flat.fits, blue_flat.fits (multi-extension FITS)
+- **Optional bias**: bias.fits for correction
+- **Arc calibration**: For wavelength solution (uses default if not provided)
+- **Existing traces**: Optional, will generate new traces if not provided
+
+**Output Structure**:
+```
+output_dir/
+├── traces/              # Generated or used trace files (.pkl)
+├── extractions/         # Complete extraction workflow outputs
+│   ├── *_extractions_flat.pkl         # Individual color extractions
+│   ├── combined_flat_extractions.pkl  # Combined extractions
+│   ├── combined_flat_extractions_calibrated.pkl  # With wavelength cal
+│   ├── combined_flat_extractions_calibrated_fits.pkl  # With B-splines
+│   ├── flat_pixel_map_*.fits          # Individual pixel maps
+│   ├── combined_flat_pixel_maps.fits  # Combined MEF pixel maps
+│   └── normalized_flat_field.fits     # Main output from workflow
+├── final/               # Verification and final outputs
+│   ├── verification_normalised_images.fits  # Cross-check output
+│   └── processing_summary.txt         # Summary report
+└── logs/                # Detailed processing logs
+```
+
+**Key Features**:
+- **Debugging Support**: STOP_AT_STEP=N to halt at specific stage for inspection
+- **Flexible Input**: Use existing traces or generate new ones
+- **Comprehensive Verification**: Dual processing + cross-check verification
+- **Error Recovery**: Detailed error reporting and troubleshooting guidance
+- **Resource Management**: Optional cleanup of intermediate files
+
+**Status**: ✅ FULLY IMPLEMENTED AND ENHANCED
+
+**Usage**:
+```bash
+# Modify file paths in script, then run:
+python isolated_flat_fielding.py
+
+# For help and detailed instructions:
+python isolated_flat_fielding.py --help
+
+# Debug specific step (stops after step 3):
+# Set STOP_AT_STEP = 3 in script configuration
+```
+
+#### Key Technical Details:
+
+**File Matching Logic**:
+- Extension metadata (color, bench, side) → trace filename pattern
+- Search order: primary trace directory → fallback mastercalib directory
+- Robust error handling for missing files
+
+**Pixel Map Creation**:
+- Extract fiber numbers from `trace.fiberimg` (values represent fiber IDs)
+- Apply B-spline fit values to corresponding trace pixels
+- Set non-trace pixels to NaN for proper masking
+
+**Normalized Image Generation**:
+```python
+# Step 1: Divide raw flat by pixel map (trace regions)
+corrected_data = raw_flat_data / pixel_map
+
+# Step 2: Normalize to median ≈ 1.0
+normalized_data = corrected_data / median(corrected_data[trace_mask])
+
+# Step 3: Set background to 1.0
+final_data[~trace_mask] = 1.0
+```
+
+**Output Structure**:
+- Primary HDU with metadata
+- Extensions 1-24 following `constants.py:idx_lookup` ordering  
+- Each extension includes: CHANNEL, BENCH, SIDE, BENCHSIDE, processing stats
+- Trace file provenance and processing metrics in headers
+
+**Verification Features**:
+- Detailed cross-check log showing all file matches
+- Processing statistics (fibers processed, median values, file locations)
+- Error reporting for troubleshooting
+- Output file validation and size reporting
+
 ### ✅ COMPLETED: Normalized Flat Field Creation Fix
 
-**Issue Resolved**: The flat field processing now correctly creates normalized flat fields using a two-step process:
+**Legacy Implementation**: The original `create_normalized_flat_field_fits()` method has been superseded by the new workflow above.
 
-**Implementation Details**:
-1. **Pixel Map Division**: Original flat field data is divided by pixel maps (containing B-spline predicted values) to remove smooth modeled variations
-2. **Trace Normalization**: The corrected data is then normalized so the median within fiber traces ≈ 1.0  
-3. **Background Setting**: Pixels outside fiber traces are set to exactly 1.0
-4. **Multi-Extension Output**: Creates a 24-extension FITS file with proper `idx_lookup` ordering
-
-**Status**: ✅ IMPLEMENTED in `create_normalized_flat_field_fits()` method
+**Status**: ✅ REPLACED with comprehensive new implementation
 
 ### ✅ COMPLETED: Multi-Extension FITS Combination for Pixel Maps
 

@@ -431,8 +431,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         )
         logger.info(f"Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
         
-        # Add to results for return
-        results['normalized_flat_field_file'] = normalized_flat_field_file
     except Exception as e:
         logger.error(f"CRITICAL ERROR: Failed to create normalized flat field: {str(e)}")
         import traceback
@@ -1862,5 +1860,519 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Processing failed: {str(e)}")
         raise
+
+
+def find_trace_file(color, bench, side, trace_dir, fallback_dir="mastercalib"):
+    """
+    Find the correct trace file based on color, bench, and side.
     
+    Args:
+        color (str): Color channel ('red', 'green', 'blue')
+        bench (str): Bench number ('1', '2', '3', '4')  
+        side (str): Side ('A', 'B')
+        trace_dir (str): Primary directory to search for traces
+        fallback_dir (str): Fallback directory (default: "mastercalib")
+        
+    Returns:
+        dict: {
+            'file_path': path to trace file,
+            'location': 'primary' or 'fallback',
+            'exists': True/False
+        }
+    """
+    # Construct expected filename pattern
+    trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
+    
+    # Try primary directory first
+    primary_path = os.path.join(trace_dir, trace_filename)
+    if os.path.exists(primary_path):
+        return {
+            'file_path': primary_path,
+            'location': 'primary',
+            'exists': True
+        }
+    
+    # Try fallback directory
+    fallback_path = os.path.join(fallback_dir, trace_filename)
+    if os.path.exists(fallback_path):
+        return {
+            'file_path': fallback_path,
+            'location': 'fallback', 
+            'exists': True
+        }
+    
+    # Neither found
+    return {
+        'file_path': primary_path,  # Return expected path for error reporting
+        'location': 'not_found',
+        'exists': False
+    }
+
+
+def create_pixel_maps_from_bsplines(extraction_file, trace_dir, fallback_dir="mastercalib"):
+    """
+    Create pixel maps by combining B-spline fit data with fiber trace masks.
+    
+    Args:
+        extraction_file (str): Path to combined_flat_extractions_calibrated_fits.pkl
+        trace_dir (str): Directory containing trace files
+        fallback_dir (str): Fallback directory for trace files
+        
+    Returns:
+        tuple: (pixel_maps_dict, matching_log)
+            pixel_maps_dict: {extension_idx: pixel_map_2d_array}
+            matching_log: detailed tracking for verification
+    """
+    logger.info(f"Creating pixel maps from B-splines and traces")
+    logger.info(f"  Extraction file: {extraction_file}")
+    logger.info(f"  Trace directory: {trace_dir}")
+    logger.info(f"  Fallback directory: {fallback_dir}")
+    
+    # Load extraction file with B-spline data
+    try:
+        with open(extraction_file, 'rb') as f:
+            extraction_data = pickle.load(f)
+        logger.info(f"Loaded extraction file with {len(extraction_data['extractions'])} extensions")
+    except Exception as e:
+        logger.error(f"Failed to load extraction file {extraction_file}: {e}")
+        raise
+    
+    pixel_maps = {}
+    matching_log = {
+        'extraction_file': extraction_file,
+        'trace_directory': trace_dir,
+        'fallback_directory': fallback_dir,
+        'extensions': {}
+    }
+    
+    # Process each extension
+    for ext_idx, extraction in enumerate(extraction_data['extractions'], 1):
+        logger.info(f"\nProcessing extension {ext_idx}")
+        
+        # Extract metadata from extraction object
+        metadata = extraction.metadata if hasattr(extraction, 'metadata') else {}
+        color = metadata.get('color', '').lower()
+        bench = str(metadata.get('bench', ''))
+        side = metadata.get('side', '').upper()
+        
+        # Handle alternative metadata fields
+        if not color and 'channel' in metadata:
+            color = metadata['channel'].lower()
+        if not bench and 'BENCH' in metadata:
+            bench = str(metadata['BENCH'])
+        if not side and 'SIDE' in metadata:
+            side = metadata['SIDE'].upper()
+            
+        logger.info(f"  Extension metadata: color={color}, bench={bench}, side={side}")
+        
+        # Find matching trace file
+        trace_info = find_trace_file(color, bench, side, trace_dir, fallback_dir)
+        
+        if not trace_info['exists']:
+            logger.warning(f"  No trace file found for extension {ext_idx} ({color}_{bench}_{side})")
+            matching_log['extensions'][ext_idx] = {
+                'metadata': {'color': color, 'bench': bench, 'side': side},
+                'trace_file': None,
+                'trace_location': 'not_found',
+                'error': f"Trace file not found: {os.path.basename(trace_info['file_path'])}"
+            }
+            continue
+        
+        logger.info(f"  Found trace file: {os.path.basename(trace_info['file_path'])} ({trace_info['location']})")
+        
+        # Load trace file
+        try:
+            with open(trace_info['file_path'], 'rb') as f:
+                trace_obj = pickle.load(f)
+            
+            if not hasattr(trace_obj, 'fiberimg'):
+                logger.error(f"  Trace object missing fiberimg attribute")
+                continue
+                
+            fiberimg = trace_obj.fiberimg
+            logger.info(f"  Loaded fiberimg with shape: {fiberimg.shape}")
+            
+        except Exception as e:
+            logger.error(f"  Failed to load trace file: {e}")
+            matching_log['extensions'][ext_idx] = {
+                'metadata': {'color': color, 'bench': bench, 'side': side},
+                'trace_file': trace_info['file_path'],
+                'trace_location': trace_info['location'],
+                'error': f"Failed to load trace file: {str(e)}"
+            }
+            continue
+        
+        # Get B-spline fit data for this extension
+        bspline_data = {}
+        fiber_count = 0
+        
+        # Extract B-spline fits from extraction object
+        if hasattr(extraction, 'xshift') and hasattr(extraction, 'counts'):
+            # Assume the extraction has per-fiber B-spline data
+            # This may need adjustment based on actual data structure
+            xshift_data = extraction.xshift if hasattr(extraction, 'xshift') else None
+            counts_data = extraction.counts if hasattr(extraction, 'counts') else None
+            
+            if xshift_data is not None and counts_data is not None:
+                logger.info(f"  Found B-spline data with {len(xshift_data)} entries")
+                bspline_data = {'xshift': xshift_data, 'counts': counts_data}
+                fiber_count = len(xshift_data)
+            else:
+                logger.warning(f"  No B-spline data found in extraction object")
+        
+        # Create pixel map
+        pixel_map = np.ones_like(fiberimg, dtype=float)
+        
+        # Get unique fiber numbers from fiberimg
+        unique_fibers = np.unique(fiberimg)
+        unique_fibers = unique_fibers[unique_fibers > 0]  # Remove background (0 or negative values)
+        
+        logger.info(f"  Found {len(unique_fibers)} unique fibers in trace")
+        
+        # For each fiber, apply B-spline values to corresponding pixels
+        processed_fibers = 0
+        for fiber_num in unique_fibers:
+            # Create mask for this fiber's trace
+            fiber_mask = (fiberimg == fiber_num)
+            
+            # Get B-spline fit for this fiber (this needs to match actual data structure)
+            if bspline_data and fiber_num <= len(bspline_data.get('counts', [])):
+                # Apply B-spline values (placeholder - needs actual B-spline evaluation)
+                # For now, use a simple approach - this will need refinement
+                fiber_pixels = np.sum(fiber_mask)
+                if fiber_pixels > 0:
+                    # Use the counts data as pixel values (simplified)
+                    fiber_idx = int(fiber_num - 1) if fiber_num > 0 else 0
+                    if fiber_idx < len(bspline_data['counts']):
+                        avg_value = np.mean(bspline_data['counts'][fiber_idx]) if len(bspline_data['counts'][fiber_idx]) > 0 else 1.0
+                        pixel_map[fiber_mask] = avg_value
+                        processed_fibers += 1
+        
+        # Set non-trace pixels to NaN or 0
+        background_mask = (fiberimg <= 0)
+        pixel_map[background_mask] = np.nan
+        
+        pixel_maps[ext_idx] = pixel_map
+        
+        # Update matching log
+        matching_log['extensions'][ext_idx] = {
+            'metadata': {'color': color, 'bench': bench, 'side': side},
+            'trace_file': trace_info['file_path'],
+            'trace_location': trace_info['location'],
+            'fiber_count_trace': len(unique_fibers),
+            'fiber_count_bspline': fiber_count,
+            'processed_fibers': processed_fibers,
+            'fiberimg_shape': fiberimg.shape,
+            'pixel_map_created': True
+        }
+        
+        logger.info(f"  Created pixel map: {processed_fibers}/{len(unique_fibers)} fibers processed")
+    
+    logger.info(f"\nPixel map creation complete: {len(pixel_maps)} extensions processed")
+    return pixel_maps, matching_log
+
+
+def generate_normalized_images(pixel_maps, raw_flat_files, matching_log, output_file="normalised_images.fits"):
+    """
+    Generate normalized flat field images by dividing raw flats by pixel maps.
+    
+    Args:
+        pixel_maps (dict): {extension_idx: pixel_map_array}
+        raw_flat_files (dict): {extension_idx: raw_flat_file_path} or single file path
+        matching_log (dict): Matching log from create_pixel_maps_from_bsplines
+        output_file (str): Output FITS file path
+        
+    Returns:
+        str: Path to output file
+    """
+    logger.info(f"Generating normalized flat field images")
+    logger.info(f"  Output file: {output_file}")
+    
+    # Handle single raw flat file case
+    if isinstance(raw_flat_files, str):
+        single_flat_file = raw_flat_files
+        logger.info(f"  Using single raw flat file: {single_flat_file}")
+    else:
+        single_flat_file = None
+        logger.info(f"  Using multiple raw flat files")
+    
+    # Create output HDU list
+    hdu_list = [fits.PrimaryHDU()]  # Primary header
+    
+    # Process extensions according to idx_lookup order (1-24)
+    for ext_idx in range(1, 25):
+        logger.info(f"\nProcessing extension {ext_idx}")
+        
+        if ext_idx not in pixel_maps:
+            logger.warning(f"  No pixel map for extension {ext_idx}, creating empty extension")
+            # Create empty extension
+            empty_data = np.ones((2048, 2048), dtype=float)
+            hdu = fits.ImageHDU(data=empty_data)
+            hdu.header['EXTNAME'] = f'EXT_{ext_idx}'
+            hdu.header['NORMALIZED'] = False
+            hdu.header['COMMENT'] = 'No pixel map available'
+            hdu_list.append(hdu)
+            continue
+        
+        pixel_map = pixel_maps[ext_idx]
+        ext_info = matching_log['extensions'].get(ext_idx, {})
+        
+        # Get raw flat data for this extension
+        if single_flat_file:
+            # Load specific extension from multi-extension FITS
+            try:
+                with fits.open(single_flat_file) as hdul:
+                    if ext_idx < len(hdul):
+                        raw_flat_data = hdul[ext_idx].data.astype(float)
+                        logger.info(f"  Loaded raw flat data from extension {ext_idx}, shape: {raw_flat_data.shape}")
+                    else:
+                        logger.error(f"  Extension {ext_idx} not found in raw flat file")
+                        continue
+            except Exception as e:
+                logger.error(f"  Failed to load raw flat extension {ext_idx}: {e}")
+                continue
+        else:
+            # Load from individual file (if provided)
+            flat_file = raw_flat_files.get(ext_idx)
+            if not flat_file or not os.path.exists(flat_file):
+                logger.warning(f"  No raw flat file for extension {ext_idx}")
+                continue
+            try:
+                with fits.open(flat_file) as hdul:
+                    raw_flat_data = hdul[0].data.astype(float)
+                    logger.info(f"  Loaded raw flat data from {os.path.basename(flat_file)}, shape: {raw_flat_data.shape}")
+            except Exception as e:
+                logger.error(f"  Failed to load raw flat file {flat_file}: {e}")
+                continue
+        
+        # Create normalized image
+        normalized_data = np.ones_like(raw_flat_data, dtype=float)
+        
+        # Apply pixel map correction where traces exist
+        valid_pixel_mask = np.isfinite(pixel_map) & (pixel_map > 0)
+        
+        if np.any(valid_pixel_mask):
+            # Divide raw flat by pixel map
+            corrected_data = np.divide(
+                raw_flat_data,
+                pixel_map,
+                out=np.ones_like(raw_flat_data),
+                where=valid_pixel_mask
+            )
+            
+            # Normalize so median of trace regions ≈ 1.0
+            trace_values = corrected_data[valid_pixel_mask]
+            if len(trace_values) > 0:
+                median_value = np.median(trace_values)
+                if median_value > 0:
+                    corrected_data = corrected_data / median_value
+                    logger.info(f"  Normalized by median value: {median_value:.6f}")
+            
+            # Set trace regions to corrected values
+            normalized_data[valid_pixel_mask] = corrected_data[valid_pixel_mask]
+            
+            # Set non-trace regions to exactly 1.0
+            normalized_data[~valid_pixel_mask] = 1.0
+            
+        else:
+            logger.warning(f"  No valid pixel map data for extension {ext_idx}")
+            # Set entire image to 1.0
+            normalized_data.fill(1.0)
+        
+        # Create HDU
+        hdu = fits.ImageHDU(data=normalized_data)
+        hdu.header['EXTNAME'] = f'EXT_{ext_idx}'
+        
+        # Add metadata
+        metadata = ext_info.get('metadata', {})
+        hdu.header['CHANNEL'] = metadata.get('color', '').upper()
+        hdu.header['BENCH'] = metadata.get('bench', '')
+        hdu.header['SIDE'] = metadata.get('side', '')
+        hdu.header['BENCHSIDE'] = f"{metadata.get('bench', '')}{metadata.get('side', '')}"
+        
+        hdu.header['TRACEFILE'] = os.path.basename(ext_info.get('trace_file', ''))
+        hdu.header['TRACELOC'] = ext_info.get('trace_location', '')
+        hdu.header['FIBCOUNT'] = ext_info.get('fiber_count_trace', 0)
+        hdu.header['PROCFIB'] = ext_info.get('processed_fibers', 0)
+        hdu.header['NORMALIZED'] = True
+        
+        # Add processing statistics
+        valid_pixels = np.sum(valid_pixel_mask)
+        hdu.header['VALIDPIX'] = int(valid_pixels)
+        if valid_pixels > 0:
+            trace_median = np.median(normalized_data[valid_pixel_mask])
+            trace_std = np.std(normalized_data[valid_pixel_mask])
+            hdu.header['TRACEMD'] = float(trace_median)
+            hdu.header['TRACESTD'] = float(trace_std)
+        
+        hdu_list.append(hdu)
+        
+        # Update matching log
+        matching_log['extensions'][ext_idx]['processing_stats'] = {
+            'median_value': float(np.median(normalized_data[valid_pixel_mask])) if np.any(valid_pixel_mask) else 1.0,
+            'pixels_processed': int(valid_pixels),
+            'raw_flat_file': single_flat_file if single_flat_file else raw_flat_files.get(ext_idx, 'unknown')
+        }
+        
+        logger.info(f"  Extension {ext_idx} processed: {valid_pixels} pixels, median={np.median(normalized_data[valid_pixel_mask]):.3f}")
+    
+    # Write output file
+    try:
+        hdul = fits.HDUList(hdu_list)
+        hdul.writeto(output_file, overwrite=True)
+        logger.info(f"\nNormalized flat field saved: {output_file}")
+        
+        # Add summary to matching log
+        matching_log['output_file'] = output_file
+        matching_log['total_extensions'] = len(pixel_maps)
+        matching_log['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+    except Exception as e:
+        logger.error(f"Failed to write output file {output_file}: {e}")
+        raise
+    
+    return output_file
+
+
+def print_flat_field_matching_log(matching_log):
+    """
+    Print comprehensive cross-check log showing file matching and processing results.
+    
+    Args:
+        matching_log (dict): Matching log from create_pixel_maps_from_bsplines
+    """
+    print("\n" + "="*80)
+    print("FLAT FIELD PROCESSING CROSS-CHECK LOG")  
+    print("="*80)
+    
+    # Processing summary
+    print(f"\nProcessing Summary:")
+    print(f"- Extraction file: {os.path.basename(matching_log.get('extraction_file', 'unknown'))}")
+    print(f"- Trace directory: {matching_log.get('trace_directory', 'unknown')} (primary)")
+    print(f"- Fallback directory: {matching_log.get('fallback_directory', 'unknown')} (fallback)")
+    if 'output_file' in matching_log:
+        print(f"- Output file: {os.path.basename(matching_log['output_file'])}")
+    if 'timestamp' in matching_log:
+        print(f"- Processing time: {matching_log['timestamp']}")
+    
+    print(f"\nExtension Matching Details:")
+    print("="*80)
+    
+    # Statistics counters
+    total_extensions = 0
+    successful_matches = 0
+    primary_trace_files = 0
+    fallback_trace_files = 0
+    total_fibers = 0
+    processing_errors = 0
+    
+    # Sort extensions by number for consistent output
+    extensions = matching_log.get('extensions', {})
+    for ext_idx in sorted(extensions.keys()):
+        ext_info = extensions[ext_idx]
+        total_extensions += 1
+        
+        metadata = ext_info.get('metadata', {})
+        color = metadata.get('color', 'unknown').upper()
+        bench = metadata.get('bench', '?')
+        side = metadata.get('side', '?')
+        
+        print(f"\nExtension {ext_idx} ({color}, Bench {bench}, Side {side}):")
+        
+        # Trace file info
+        trace_file = ext_info.get('trace_file')
+        trace_location = ext_info.get('trace_location', 'unknown')
+        
+        if trace_file and trace_location != 'not_found':
+            print(f"  ✓ Trace file: {os.path.basename(trace_file)}")
+            print(f"    - Location: {trace_file} ({trace_location})")
+            
+            if trace_location == 'primary':
+                primary_trace_files += 1
+            elif trace_location == 'fallback':
+                fallback_trace_files += 1
+            
+            # Fiber counts
+            fiber_count_trace = ext_info.get('fiber_count_trace', 0)
+            fiber_count_bspline = ext_info.get('fiber_count_bspline', 0)
+            processed_fibers = ext_info.get('processed_fibers', 0)
+            
+            print(f"    - Fibers found in trace: {fiber_count_trace}")
+            if 'fiberimg_shape' in ext_info:
+                print(f"    - fiberimg shape: {ext_info['fiberimg_shape']}")
+            
+            # B-spline info
+            if fiber_count_bspline > 0:
+                print(f"  ✓ B-spline data: {fiber_count_bspline} fibers with fits")
+            else:
+                print(f"  ⚠ B-spline data: No B-spline fits found")
+            
+            # Processing results
+            if ext_info.get('pixel_map_created', False):
+                print(f"  ✓ Processing: {processed_fibers} fibers processed")
+                total_fibers += processed_fibers
+                successful_matches += 1
+                
+                # Processing statistics
+                stats = ext_info.get('processing_stats', {})
+                if stats:
+                    median_val = stats.get('median_value', 1.0)
+                    pixels_processed = stats.get('pixels_processed', 0)
+                    raw_flat_file = stats.get('raw_flat_file', 'unknown')
+                    
+                    print(f"    - Median trace value: {median_val:.3f}")
+                    print(f"    - Pixels processed: {pixels_processed:,}")
+                    print(f"    - Raw flat file: {os.path.basename(raw_flat_file)}")
+                    
+            else:
+                print(f"  ✗ Processing: Failed to create pixel map")
+                processing_errors += 1
+        else:
+            print(f"  ✗ Trace file: {ext_info.get('error', 'Not found')}")
+            processing_errors += 1
+        
+        # Show any errors
+        if 'error' in ext_info:
+            print(f"  ⚠ Error: {ext_info['error']}")
+    
+    # Final statistics
+    print("\n" + "="*80)
+    print("PROCESSING STATISTICS")
+    print("="*80)
+    print(f"Total extensions processed: {total_extensions}")
+    print(f"Successful matches: {successful_matches}")
+    print(f"Processing errors: {processing_errors}")
+    print(f"Total fibers processed: {total_fibers:,}")
+    print(f"Trace files from primary dir: {primary_trace_files}")
+    print(f"Trace files from fallback dir: {fallback_trace_files}")
+    
+    if successful_matches > 0:
+        # Calculate average normalization
+        median_values = []
+        for ext_info in extensions.values():
+            stats = ext_info.get('processing_stats', {})
+            if stats and 'median_value' in stats:
+                median_values.append(stats['median_value'])
+        
+        if median_values:
+            avg_median = np.mean(median_values)
+            std_median = np.std(median_values)
+            print(f"Average trace normalization: {avg_median:.3f} ± {std_median:.3f}")
+    
+    # Output file info
+    if 'output_file' in matching_log:
+        output_file = matching_log['output_file']
+        if os.path.exists(output_file):
+            file_size_mb = os.path.getsize(output_file) / (1024 * 1024)
+            print(f"Output file size: {file_size_mb:.1f} MB")
+    
+    if processing_errors == 0 and successful_matches > 0:
+        print(f"\n🎉 Processing completed successfully!")
+    elif processing_errors > 0:
+        print(f"\n⚠️  Processing completed with {processing_errors} errors")
+    else:
+        print(f"\n❌ Processing failed - no successful matches")
+    
+    print("="*80)
+
     
