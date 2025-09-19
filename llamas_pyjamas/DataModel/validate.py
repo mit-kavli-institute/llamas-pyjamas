@@ -295,6 +295,15 @@ def validate_and_fix_extensions(fits_file: str,
             logger.info(f"Creating backup: {backup_file}")
             import shutil
             shutil.copy2(fits_file, backup_file)
+    else:
+        # Expand user path and convert to absolute path
+        output_file = os.path.abspath(os.path.expanduser(output_file))
+
+        # Ensure output directory exists
+        output_dir = os.path.dirname(output_file)
+        if not os.path.exists(output_dir):
+            logger.info(f"Creating output directory: {output_dir}")
+            os.makedirs(output_dir, exist_ok=True)
 
     # Get reference dimensions
     reference_shape = get_reference_dimensions(fits_file)
@@ -335,7 +344,11 @@ def validate_and_fix_extensions(fits_file: str,
 
             # Write the corrected file
             logger.info(f"Writing corrected file: {output_file}")
-            new_hdul.writeto(output_file, overwrite=True)
+            try:
+                new_hdul.writeto(output_file, overwrite=True)
+            except OSError as e:
+                logger.error(f"Failed to write output file {output_file}: {e}")
+                raise
 
     except Exception as e:
         logger.error(f"Error processing FITS file: {e}")
