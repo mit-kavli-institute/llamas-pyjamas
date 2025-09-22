@@ -451,7 +451,7 @@ class TraceLlamas:
             #assert len(self.pkht) == len(self.master_peaks), "Length of peak heights does not match master peaks"
             
             offset, _ = cross_correlate_combs(self.comb, self.master_comb)
-            
+            self.offset = offset
             if np.abs(offset) > self.offset_cutoff:
                 #find a way to print this error to terminal still and the logger
                 print(f"Offset of {offset} exceeds cutoff of {self.offset_cutoff} for channel {self.channel} Bench {self.bench} side {self.side}")
@@ -582,7 +582,7 @@ class TraceLlamas:
             # Filter traces to match expected fiber count
             fiber_list = {
                 '1A': 298, '1B': 300, '2A': 298, 
-                '2B': 297, '3A': 298, '3B': 300, '4A': 300
+                '2B': 297, '3A': 298, '3B': 300, '4A': 300, '4B':298
             }
             expected_count = fiber_list.get(self.benchside)
 

@@ -1,0 +1,194 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Flat.scattered2dLlamas &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Flat.scattered2dLlamas</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Flat.scattered2dLlamas</h1><div class="highlight"><pre>
+<span></span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Module: scattered2dLlamas</span>
+<span class="sd">This module provides functionality to process and analyze 2D scattered light data from Llamas Pyjamas project. </span>
+<span class="sd">It includes functions to read FITS files, perform profile fitting, and generate fitted surfaces.</span>
+<span class="sd">Functions:</span>
+<span class="sd">    - scattered2dLlamas: Main function to process 2D scattered light data.</span>
+<span class="sd">    Process and analyze 2D scattered light data.</span>
+<span class="sd">    This function reads dark and profile FITS files, performs profile fitting, </span>
+<span class="sd">    and generates fitted surfaces. It also uses DS9 for visualization.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple: A tuple containing:</span>
+<span class="sd">            - fitimg (numpy.ndarray): The image after profile fitting and dark subtraction.</span>
+<span class="sd">            - fitsurface (numpy.ndarray): The fitted surface.</span>
+<span class="sd">            - profdata-dark (numpy.ndarray): The profile data after dark subtraction.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="c1"># from   ..Trace import traceLlamas</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Trace.traceLlamasMaster</span> <span class="kn">import</span> <span class="n">TraceLlamas</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Image.WhiteLightModule</span> <span class="kn">import</span> <span class="n">WhiteLightFits</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="c1">#import pyds9</span>
+<span class="kn">from</span>   <span class="nn">matplotlib</span> <span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">from</span>   <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Tuple</span>
+<span class="kn">from</span>   <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">from</span>   <span class="nn">pypeit.core</span> <span class="kn">import</span> <span class="n">fitting</span> <span class="k">as</span> <span class="n">f</span>
+
+
+<div class="viewcode-block" id="scattered2dLlamas">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.scattered2dLlamas.scattered2dLlamas">[docs]</a>
+<span class="k">def</span> <span class="nf">scattered2dLlamas</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span> 
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Processes 2D scattered light data from Llamas.</span>
+<span class="sd">    This function performs the following steps:</span>
+<span class="sd">    1. Reads a dark frame from a FITS file.</span>
+<span class="sd">    2. Reads a profile data frame from another FITS file.</span>
+<span class="sd">    3. Uses the profile data to trace and fit the profile.</span>
+<span class="sd">    4. Subtracts the dark frame from the profile data.</span>
+<span class="sd">    5. Sets pixels in the fit image to zero where the profile fit is greater than zero.</span>
+<span class="sd">    6. Displays the fit image using DS9.</span>
+<span class="sd">    7. Creates x and y coordinate images.</span>
+<span class="sd">    8. Identifies pixels to fit a 2D polynomial surface.</span>
+<span class="sd">    9. Fits a 2D polynomial surface to the identified pixels.</span>
+<span class="sd">    10. Evaluates the fitted surface.</span>
+<span class="sd">    11. Displays the fitted surface using DS9.</span>
+<span class="sd">    12. Returns the fit image, the fitted surface, and the dark-subtracted profile data.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:</span>
+<span class="sd">            - fitimg: The fit image with pixels set to zero where the profile fit is greater than zero.</span>
+<span class="sd">            - fitsurface: The evaluated 2D polynomial surface.</span>
+<span class="sd">            - profdata-dark: The dark-subtracted profile data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="n">darkfile</span> <span class="o">=</span> <span class="s1">&#39;bllamas_0003_Camera00_DARK_60s_Loff.fits&#39;</span>
+    <span class="n">hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">darkfile</span><span class="p">)</span>
+    <span class="n">dark</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">hdu</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    
+    <span class="n">proffile</span> <span class="o">=</span> <span class="s1">&#39;20200210_190852_Camera00_Blue_MASK.fits&#39;</span>
+    <span class="n">hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">proffile</span><span class="p">)</span>
+    <span class="n">profdata</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">hdu</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    
+    <span class="n">trace</span>  <span class="o">=</span> <span class="n">traceLlamas</span><span class="o">.</span><span class="n">TraceLlamas</span><span class="p">(</span><span class="n">proffile</span><span class="p">,</span> \
+                         <span class="n">spectrograph</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="n">channel</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span><span class="n">mph</span><span class="o">=</span><span class="mi">1500</span><span class="p">)</span>
+
+    <span class="n">profimg</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">profileFit</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="n">fitimg</span> <span class="o">=</span> <span class="n">profdata</span> <span class="o">-</span> <span class="n">dark</span>
+    <span class="n">fitimg</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">profimg</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="n">ds9</span> <span class="o">=</span> <span class="n">pyds9</span><span class="o">.</span><span class="n">DS9</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="s1">&#39;DS9:*&#39;</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">ds9</span><span class="o">.</span><span class="n">set_np2arr</span><span class="p">(</span><span class="n">fitimg</span><span class="p">)</span>
+
+    <span class="n">ximg</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis2</span><span class="p">),</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+    <span class="n">yimg</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis2</span><span class="p">),</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+
+    <span class="n">fitpix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">profimg</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span><span class="n">ximg</span> <span class="o">&gt;</span> <span class="mi">40</span><span class="p">))</span>
+
+    <span class="n">c</span><span class="p">,</span><span class="n">minx</span><span class="p">,</span> <span class="n">maxx</span><span class="p">,</span> <span class="n">miny</span><span class="p">,</span><span class="n">maxy</span> <span class="o">=</span> \
+        <span class="n">f</span><span class="o">.</span><span class="n">polyfit2d_general</span><span class="p">(</span><span class="n">ximg</span><span class="p">[</span><span class="n">fitpix</span><span class="p">],</span><span class="n">yimg</span><span class="p">[</span><span class="n">fitpix</span><span class="p">],</span><span class="n">fitimg</span><span class="p">[</span><span class="n">fitpix</span><span class="p">],(</span><span class="mi">2</span><span class="p">,</span><span class="mi">2</span><span class="p">))</span>
+
+    <span class="n">fitsurface</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">evaluate_fit</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="s1">&#39;polynomial2d&#39;</span><span class="p">,</span><span class="n">ximg</span><span class="p">,</span><span class="n">x2</span><span class="o">=</span><span class="n">yimg</span><span class="p">)</span>
+
+    <span class="n">ds9</span><span class="o">.</span><span class="n">set_np2arr</span><span class="p">(</span><span class="n">fitsurface</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">fitimg</span><span class="p">,</span><span class="n">fitsurface</span><span class="p">,</span><span class="n">profdata</span><span class="o">-</span><span class="n">dark</span></div>
+
+
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
