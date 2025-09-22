@@ -1,3 +1,25 @@
+"""LLAMAS data reduction pipeline main module.
+
+This module provides the primary functions for reducing LLAMAS (Large Lens Array 
+Multi-Object Spectrograph) observations through a complete pipeline from trace generation 
+to final data products including RSS files and data cubes.
+
+Functions:
+    generate_traces: Generate fiber traces from flat field observations.
+    extract_flat_field: Extract flat field spectra for calibration.
+    run_extraction: Extract science spectra from observations.
+    calc_wavelength_soln: Calculate wavelength solutions from arc lamp observations.
+    relative_throughput: Calculate relative throughput corrections.
+    correct_wavelengths: Apply wavelength corrections to extracted spectra.
+    construct_cube: Create 3D data cubes from RSS files.
+    main: Main pipeline function that processes complete observations.
+
+Example:
+    Run the complete reduction pipeline::
+    
+        python reduce.py --config config.txt
+"""
+
 import os
 import argparse
 import pickle
@@ -23,9 +45,19 @@ _linefile = os.path.join(LUT_DIR, '')
 
 
 
-### This needs to be edited to handle a trace file per channel
-#This has been independently tested
 def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
+    """Generate fiber traces from flat field observations for all three channels.
+    
+    Args:
+        red_flat: Path to red flat field FITS file.
+        green_flat: Path to green flat field FITS file. 
+        blue_flat: Path to blue flat field FITS file.
+        output_dir: Directory to save trace files.
+        bias: Optional bias frame for correction.
+        
+    Raises:
+        AssertionError: If any of the flat field files do not exist.
+    """
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -118,8 +150,13 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     """
     Construct IFU data cubes from RSS files.
     
+    This function can handle both:
+    1. Single RSS files with multiple channels
+    2. Multiple channel-specific RSS files with names like:
+       "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
+    
     Parameters:
-        rss_files (str or list): Path to RSS FITS file(s)
+        rss_files (str or list): Path to RSS FITS file(s) or base paths
         output_dir (str): Directory to save output cubes
         wavelength_range (tuple, optional): Min/max wavelength range for output cubes
         dispersion (float): Wavelength dispersion in Angstroms/pixel
@@ -139,17 +176,32 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     # Create a single logger for all cube construction
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
-    logger.info(f"Starting cube construction for {len(rss_files)} RSS files")
+    logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
     
     for rss_file in rss_files:
+        # Get base name for output files and detect channel if present
+        base_name = os.path.splitext(os.path.basename(rss_file))[0]
+        channel = None
+        
+        # Check for channel-specific naming pattern
+        for color in ['red', 'green', 'blue']:
+            if f'_extract_RSS_{color}' in base_name:
+                # Extract the base name and channel color
+                channel = color
+                base_name = base_name.split(f'_extract_RSS_{color}')[0]
+                logger.info(f"Detected {color} channel file, using base name: {base_name}")
+                break
+        
+        if channel:
+            print(f"Processing {channel} channel RSS file with base name: {base_name}")
+        else:
+            print(f"Processing RSS file (no specific channel detected): {base_name}")
+            
         logger.info(f"Constructing channel cubes from RSS file: {rss_file}")
         print(f"Constructing channel cubes from RSS file: {rss_file}")
         
         # Pass the common logger to the constructor
         constructor = CubeConstructor(logger=logger)
-        
-        # Get base name for output files
-        base_name = os.path.splitext(os.path.basename(rss_file))[0]
         
         # Construct one cube per channel
         channel_cubes = constructor.construct_cube_from_rss(
@@ -160,8 +212,8 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         )
         
         if channel_cubes:
-            # Log which channels were found in this file
-            logger.info(f"Found channels in {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
+            # Log which channels were found
+            logger.info(f"Found channels for {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
             
             # Save each channel cube
             saved_paths = constructor.save_channel_cubes(
@@ -177,6 +229,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 cube_files.append(path)
         else:
             print(f"  No valid channel cubes constructed for {rss_file}")
+            logger.warning(f"No valid channel cubes constructed for {rss_file}")
     
     return cube_files
 
@@ -251,6 +304,7 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
     
+    os.makedirs(os.path.join(extraction_path, 'flats'), exist_ok=True)
     try:
         
         generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
@@ -311,16 +365,23 @@ def main(config_path):
             #RSS generation
             rss_gen = RSSgeneration(logger=rss_logger)
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
-            rss_gen.generate_rss(savefile, rss_output_file)
-            rss_logger.info(f"RSS file generated: {rss_output_file}")
-            print(f"RSS file generated: {rss_output_file}")
-        
+            new_rss_outputs = rss_gen.generate_rss(savefile, rss_output_file)
+            rss_logger.info(f"RSS file generated: {new_rss_outputs}")
+            print(f"RSS file generated: {new_rss_outputs}")
+
         # Updating RA and Dec in RSS files
-        update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+        for rss_output_file in new_rss_outputs:
+            update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
-        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('_RSS.fits')]
+        # First check for files with 'extract_RSS' in the name
+        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) 
+                if 'extract_RSS' in f and f.endswith('.fits')]
+        
+        # If none found, fall back to the original pattern
+        if not rss_files:
+            print(f"Found {len(rss_files)} RSS files for cube construction")
 
         if 'cube_output_dir' not in config:
             cube_output_dir = os.path.join(output_dir, 'cubes')

@@ -762,7 +762,7 @@ class TraceLlamas:
             badmask[np.where(data_work > 20)] = False
             badmask[np.where(data_work < -5)] = False
             ##this is where we ajust the width of the profile mask in pixels
-            profmask[np.where(np.abs(yy) < 4)] = True #originally this was 4
+            profmask[np.where(np.abs(yy) < 2)] = True #originally this was 4
 
             inprof = np.where(infmask & profmask & NaNmask & badmask)
 
