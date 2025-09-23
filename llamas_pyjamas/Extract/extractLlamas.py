@@ -151,7 +151,15 @@ class ExtractLlamas:
                 logger.warning(f"Error accessing dead fibers in LUT: {e}")
 
 
-            for ifiber in range(trace.nfibers):    
+            for ifiber in range(trace.nfibers):
+                extracted = np.zeros(self.trace.naxis1)
+                # print fiber, and list of dead fibers, print also bench and color
+                logger.info(self.dead_fibers)
+                logger.info(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
+                if ifiber in self.dead_fibers:
+                    logger.info(f"Skipping dead fiber # {ifiber}")
+                    self.counts[ifiber,:] = extracted
+                    continue
 
                 if (optimal == True):
                     # Optimally weighted extraction (a la Horne et al ~1986)
@@ -219,14 +227,15 @@ class ExtractLlamas:
                 
                 for i in range(total_fibers):
                     if i in dead_set:
+                        new_counts[i] = np.zeros(trace.naxis1)
                         # Leave zeros for dead fiber positions
                         logger.info(f"Inserting dead fiber at index {i}")
                         continue
                     else:
                         # Copy data from original array if position exists
-                        if current_idx < len(self.counts):
-                            new_counts[i] = self.counts[current_idx]
-                            current_idx += 1
+                        #if current_idx < len(self.counts):
+                        new_counts[i] = self.counts[current_idx]
+                        current_idx += 1
                 
                 # Replace the counts array with the new one
                 self.counts = new_counts
