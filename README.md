@@ -19,6 +19,7 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
   note         = {in preparation},
   year         = {2025}}
 ```
+</details>
 
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
