@@ -168,8 +168,8 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
     """
     from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
     
-    # Create flat field output directory for pixel maps
-    flat_output_dir = os.path.join(output_dir, 'pixel_maps')
+    # Use flat field output directory directly (no nested pixel_maps subdirectory)
+    flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
     
     print(f"Processing flat field calibration...")
@@ -797,34 +797,83 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
     
-    # Create pixel_maps directory for flat field processing
-    os.makedirs(os.path.join(extraction_path, 'pixel_maps'), exist_ok=True)
+    # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
+    # No need to pre-create a separate pixel_maps directory
     try:
         
+        # =====================================================================
+        # CENTRALIZED TRACE DIRECTORY SELECTION
+        # This is the SINGLE decision point for traces used throughout pipeline
+        # =====================================================================
+
+        print("\n" + "="*60)
+        print("TRACE DIRECTORY SELECTION")
+        print("="*60)
+
+        final_trace_dir = None
+        trace_source = None
+
         # Check if we should use existing traces or generate new ones
         if config.get('use_existing_traces', False) and os.path.exists(config.get('trace_output_dir')):
             # Check if trace files exist in the specified directory
             import glob
             existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
             if existing_traces:
-                print(f"Using existing traces from {config.get('trace_output_dir')}")
-                print(f"Found {len(existing_traces)} existing trace files.")
+                print(f"Found {len(existing_traces)} existing trace files in {config.get('trace_output_dir')}")
+
+                # Validate existing traces have correct fiber counts
+                print("Validating existing traces...")
+                if count_trace_fibres(config.get('trace_output_dir')):
+                    final_trace_dir = config.get('trace_output_dir')
+                    trace_source = "existing_validated"
+                    print("✓ Existing traces validated successfully")
+                else:
+                    print("✗ Existing traces have incorrect fiber counts")
+                    final_trace_dir = None  # Will fallback to mastercalib
+                    trace_source = "existing_failed"
             else:
-                print("No existing trace files found, generating new traces...")
-                generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
-                               config.get('trace_output_dir'), bias=config.get('bias_file'))
+                print("No existing trace files found in specified directory")
+                final_trace_dir = None  # Will generate new or fallback
+                trace_source = "existing_missing"
         else:
             print("Generating new traces...")
-            generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
+            generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'),
                            config.get('trace_output_dir'), bias=config.get('bias_file'))
-        
-        # Check if the traces (whether existing or newly generated) have the correct number of fibers
-        print("Checking fiber counts in traces...")
-        if not count_trace_fibres(config.get('trace_output_dir')):
-            print("Traces have incorrect fiber counts. Using traces from CALIB_DIR instead.")
-            config['trace_output_dir'] = CALIB_DIR
-        else:
-            print("Traces have correct fiber counts. Proceeding with current traces.")
+
+            # Validate newly generated traces
+            print("Validating newly generated traces...")
+            if count_trace_fibres(config.get('trace_output_dir')):
+                final_trace_dir = config.get('trace_output_dir')
+                trace_source = "generated_validated"
+                print("✓ Generated traces validated successfully")
+            else:
+                print("✗ Generated traces have incorrect fiber counts")
+                final_trace_dir = None  # Will fallback to mastercalib
+                trace_source = "generated_failed"
+
+        # Final fallback to mastercalib if needed
+        if final_trace_dir is None:
+            print(f"\n⚠️  FALLBACK: Using mastercalib traces from {CALIB_DIR}")
+
+            # Validate mastercalib traces exist and are valid
+            if count_trace_fibres(CALIB_DIR):
+                final_trace_dir = CALIB_DIR
+                trace_source = "mastercalib"
+                print("✓ Mastercalib traces validated successfully")
+            else:
+                raise RuntimeError(f"FATAL: Even mastercalib traces in {CALIB_DIR} are invalid or missing!")
+
+        # Update config to reflect final decision
+        config['trace_output_dir'] = final_trace_dir
+
+        # Clear status reporting
+        print("\n" + "="*60)
+        print("TRACE SELECTION FINAL DECISION")
+        print("="*60)
+        print(f"Selected trace directory: {final_trace_dir}")
+        print(f"Trace source: {trace_source}")
+        print(f"All pipeline steps will use traces from: {final_trace_dir}")
+        print("="*60)
         
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
@@ -864,8 +913,8 @@ def main(config_path):
             print("="*60)
             
             flat_corrected_files = []
-            flat_output_dir = os.path.join(output_dir, 'flat_corrected')
-            os.makedirs(flat_output_dir, exist_ok=True)
+            # Output flat-corrected files directly to main output directory to avoid unnecessary subdirectories
+            flat_output_dir = output_dir
             
             overall_stats = {'total_corrected': 0, 'total_skipped': 0, 'total_errors': 0}
             
