@@ -10,6 +10,16 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
 **Users of this pipeline are requested to cite Hughes et al. (in prep)**.
 
+<details>
+<summary>Citation</summary>
+```bibtex
+@unpublished{Hughes2025,
+  author       = {Hughes, Sarah and others},
+  title        = {{The LLAMAS data reduction pipeline}},
+  note         = {in preparation},
+  year         = {2025}}
+
+
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
