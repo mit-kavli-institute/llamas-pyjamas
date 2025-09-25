@@ -300,9 +300,11 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         if not trace_dir:
             trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+            print(f'No trace_dir specified, using CALIB_DIR: {CALIB_DIR}')
         else:
             trace_files = glob.glob(os.path.join(trace_dir, f'{masterfile}*traces.pkl'))
-        print(f'Using master traces {trace_files}')
+            print(f'Using specified trace_dir: {trace_dir}')
+        print(f'Found {len(trace_files)} trace files: {[os.path.basename(f) for f in trace_files]}')
         
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile

@@ -416,11 +416,19 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 6: Create normalized flat field FITS file for reduce.py pipeline
     logger.info("Step 6: Creating normalized flat field FITS file for reduce.py pipeline")
     
+    # Convert all flat file paths to absolute paths to ensure they can be found
     original_flat_files = {
-        'red': red_flat_file,
-        'green': green_flat_file,
-        'blue': blue_flat_file
+        'red': os.path.abspath(red_flat_file),
+        'green': os.path.abspath(green_flat_file),
+        'blue': os.path.abspath(blue_flat_file)
     }
+
+    # Debug: Log the original flat file paths being passed
+    logger.info(f"Original flat files dictionary:")
+    for channel, filepath in original_flat_files.items():
+        logger.info(f"  {channel}: {filepath}")
+        logger.info(f"  {channel} exists: {os.path.exists(filepath)}")
+        logger.info(f"  {channel} absolute: {os.path.abspath(filepath)}")
     
     try:
         logger.info("Starting normalized flat field creation...")
@@ -1283,10 +1291,12 @@ class Thresholding():
         logger.info("="*60)
         
         # Initialize processing counters
-        total_extensions_expected = 24  # 3 colors × 4 benches × 2 sides
+        total_extensions_expected = len(idx_lookup)  # Should be 24: 3 colors × 4 benches × 2 sides
         extensions_attempted = 0
         extensions_successful = 0
         processing_errors = []
+
+        logger.info(f"Expected to create {total_extensions_expected} extensions based on idx_lookup")
         
         if output_filename is None:
             # Determine correct output directory for normalized flat field
@@ -1466,9 +1476,27 @@ class Thresholding():
         if trace_files_loaded == 0:
             logger.error("No trace files were successfully loaded - normalization will fail")
         
+        # Inspect original flat files before processing
+        logger.info(f"\nInspecting original flat files before processing:")
+        for channel, flat_file in original_flat_files.items():
+            if os.path.exists(flat_file):
+                with fits.open(flat_file) as flat_hdul:
+                    logger.info(f"  {channel.upper()} flat: {os.path.basename(flat_file)} - {len(flat_hdul)-1} extensions")
+                    for i in range(1, min(len(flat_hdul), 6)):  # Show first 5 extensions
+                        hdu = flat_hdul[i]
+                        hdu_bench = str(hdu.header.get('BENCH', ''))
+                        hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                        hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+                        logger.info(f"    Ext {i}: {hdu_channel} {hdu_bench}{hdu_side}")
+            else:
+                logger.error(f"  {channel.upper()} flat: {flat_file} - FILE NOT FOUND")
+
         # Process extensions in idx_lookup order
         extensions_created = 0
         logger.info(f"\nProcessing {len(idx_lookup)} extensions for normalized flat field:")
+        logger.info(f"Expected to process 24 extensions from idx_lookup")
+        logger.info(f"Available pixel maps: {list(pixel_maps.keys()) if pixel_maps else 'None'}")
+        logger.info(f"Available trace files: {list(trace_file_map.keys()) if trace_file_map else 'None'}")
         logger.info("-" * 60)
         
         for (channel, bench, side), ext_idx in sorted(idx_lookup.items(), key=lambda x: x[1]):
@@ -1482,45 +1510,65 @@ class Thresholding():
                 # Load original flat field data for this channel
                 flat_file = original_flat_files[channel]
                 logger.info(f"  Loading from: {os.path.basename(flat_file)}")
-                
-                with fits.open(flat_file) as flat_hdul:
-                    # Find matching extension in original flat file
-                    flat_data = None
-                    original_header = None
-                    extension_found = False
-                    
-                    logger.debug(f"    Searching {len(flat_hdul)-1} extensions for match...")
-                    for i in range(1, len(flat_hdul)):  # Skip primary
-                        hdu = flat_hdul[i]
-                        hdu_bench = str(hdu.header.get('BENCH', ''))
-                        hdu_side = str(hdu.header.get('SIDE', '')).upper()
-                        hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
-                        
-                        logger.debug(f"    Ext {i}: channel='{hdu_channel}', bench='{hdu_bench}', side='{hdu_side}'")
-                        
-                        if (hdu_channel == channel and 
-                            hdu_bench == bench and 
-                            hdu_side.upper() == side.upper()):
-                            
-                            if hdu.data is None:
-                                logger.error(f"    ERROR: Extension {i} has no data")
-                                error_details.append(f"Extension {i} has no data")
-                                continue
-                                
-                            flat_data = hdu.data.copy()
-                            original_header = hdu.header.copy()
-                            extension_found = True
-                            logger.info(f"    ✓ Found matching extension {i}: {flat_data.shape}")
-                            break
-                    
-                    if not extension_found or flat_data is None:
-                        logger.error(f"    ERROR: No matching extension found for {channel} {bench}{side}")
-                        error_details.append(f"No matching extension in {os.path.basename(flat_file)}")
-                        processing_errors.append(f"Extension {ext_idx}: {error_details[-1]}")
-                        continue
+                logger.info(f"  Full path: {flat_file}")
+                logger.info(f"  File exists check: {os.path.exists(flat_file)}")
+                logger.info(f"  Absolute path: {os.path.abspath(flat_file)}")
+
+                if not os.path.exists(flat_file):
+                    logger.error(f"    ERROR: Original flat file not found: {flat_file}")
+                    logger.error(f"    This flat file should exist as it was used successfully in earlier pipeline steps")
+                    logger.error(f"    Check file paths and working directory")
+                    error_details.append(f"Original flat file not found: {flat_file}")
+                    processing_errors.append(f"Extension {ext_idx}: {error_details[-1]}")
+                    continue
+                else:
+                    # Original logic for loading from actual flat file
+                    with fits.open(flat_file) as flat_hdul:
+                        # Find matching extension in original flat file
+                        flat_data = None
+                        original_header = None
+                        extension_found = False
+
+                        logger.debug(f"    Searching {len(flat_hdul)-1} extensions for match...")
+                        for i in range(1, len(flat_hdul)):  # Skip primary
+                            hdu = flat_hdul[i]
+                            hdu_bench = str(hdu.header.get('BENCH', ''))
+                            hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                            hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+
+                            logger.debug(f"    Ext {i}: channel='{hdu_channel}', bench='{hdu_bench}', side='{hdu_side}'")
+
+                            if (hdu_channel == channel and
+                                hdu_bench == bench and
+                                hdu_side.upper() == side.upper()):
+
+                                if hdu.data is None:
+                                    logger.error(f"    ERROR: Extension {i} has no data")
+                                    error_details.append(f"Extension {i} has no data")
+                                    continue
+
+                                flat_data = hdu.data.copy()
+                                original_header = hdu.header.copy()
+                                extension_found = True
+                                logger.info(f"    ✓ Found matching extension {i}: {flat_data.shape}")
+                                break
+
+                        if not extension_found or flat_data is None:
+                            logger.error(f"    ERROR: No matching extension found for {channel} {bench}{side}")
+                            logger.error(f"    Available extensions in {os.path.basename(flat_file)}:")
+                            for i in range(1, len(flat_hdul)):
+                                hdu = flat_hdul[i]
+                                hdu_bench = str(hdu.header.get('BENCH', ''))
+                                hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                                hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+                                logger.error(f"      Extension {i}: {hdu_channel} {hdu_bench}{hdu_side}")
+                            error_details.append(f"No matching extension in {os.path.basename(flat_file)}")
+                            processing_errors.append(f"Extension {ext_idx}: {error_details[-1]}")
+                            continue
                 
                 # STEP 1: Divide by pixel map (removes B-spline modeled variation)
                 pixel_map_key = f"{channel}{bench}{side}"
+                logger.info(f"  Looking for pixel map: {pixel_map_key}")
                 corrected_data = flat_data.copy()
                 pixel_map_applied = False
                 
@@ -1539,11 +1587,11 @@ class Thresholding():
                             logger.error(f"    ERROR: Pixel map contains no valid data")
                             error_details.append(f"Invalid pixel map data")
                         else:
-                            # Divide flat by pixel map (B-spline predictions)
+                            # Divide flat by pixel map (B-spline predictions) - IFU Standard
                             with np.errstate(divide='ignore', invalid='ignore'):
-                                corrected_data = np.where(pixel_map > 0, 
+                                corrected_data = np.where(pixel_map > 0,
                                                          flat_data / pixel_map,
-                                                         flat_data)  # Keep original where pixel map is invalid
+                                                         np.nan)  # Set invalid regions to NaN (IFU standard)
                             
                             # Validate corrected data
                             valid_corrected = np.isfinite(corrected_data)
@@ -1563,9 +1611,10 @@ class Thresholding():
                 
                 # STEP 2: Apply trace-based normalization to corrected data
                 trace_key = f"{channel}{bench}{side}"
+                logger.info(f"  Looking for trace file: {trace_key}")
                 normalized_data = np.ones_like(flat_data, dtype=np.float32)
                 normalization_successful = False
-                
+
                 logger.info(f"  Step 2: Trace-based normalization for {trace_key}")
                 if trace_key in trace_file_map:
                     trace_obj = trace_file_map[trace_key]['obj']
@@ -1589,23 +1638,34 @@ class Thresholding():
                                 if median_corrected > 0 and np.isfinite(median_corrected):
                                     normalization_factor = 1.0 / median_corrected
                                     normalized_traced_values = corrected_data[traced_mask] * normalization_factor
-                                    
-                                    # Clip extreme values to reasonable range
-                                    normalized_traced_values = np.clip(normalized_traced_values, 0.1, 5.0)
-                                    
-                                    # Set normalized values in traced regions
+
+                                    # Handle NaN values from invalid pixel map regions
+                                    # Only set valid (non-NaN) normalized values in traced regions
+                                    valid_normalized = np.isfinite(normalized_traced_values)
+
+                                    # Clip extreme values to reasonable range (excluding NaN)
+                                    normalized_traced_values[valid_normalized] = np.clip(
+                                        normalized_traced_values[valid_normalized], 0.1, 5.0
+                                    )
+
+                                    # Set normalized values in traced regions (keeping NaN where pixel map was invalid)
                                     normalized_data[traced_mask] = normalized_traced_values
-                                    
+
                                     # Set untraced regions to exactly 1.0
                                     normalized_data[~traced_mask] = 1.0
                                     
-                                    # Calculate and log final statistics
+                                    # Calculate and log final statistics (excluding NaN)
                                     traced_count = np.sum(traced_mask)
                                     untraced_count = normalized_data.size - traced_count
-                                    final_median_in_traces = np.median(normalized_data[traced_mask])
+                                    traced_data = normalized_data[traced_mask]
+                                    valid_traced_data = traced_data[np.isfinite(traced_data)]
+                                    final_median_in_traces = np.median(valid_traced_data) if len(valid_traced_data) > 0 else np.nan
+                                    nan_count_in_traces = np.sum(np.isnan(traced_data))
                                     
                                     logger.info(f"    ✓ Normalized {traced_count:,} traced pixels, {untraced_count:,} background pixels set to 1.0")
                                     logger.info(f"    Original median: {median_corrected:.3f}, Final median in traces: {final_median_in_traces:.3f}")
+                                    if nan_count_in_traces > 0:
+                                        logger.info(f"    {nan_count_in_traces:,} traced pixels set to NaN (invalid pixel map regions)")
                                     
                                     # Verify final normalization
                                     if 0.8 <= final_median_in_traces <= 1.2:
@@ -1748,6 +1808,14 @@ class Thresholding():
         if extensions_created == 0:
             logger.error("ERROR: No extensions were successfully created - cannot write FITS file")
             raise ValueError("No valid extensions created for normalized flat field")
+
+        if extensions_created != total_extensions_expected:
+            logger.error(f"ERROR: Created {extensions_created} extensions, expected {total_extensions_expected}")
+            logger.error("This will result in an incomplete normalized flat field unsuitable for science reduction")
+            if extensions_created < total_extensions_expected // 2:  # Less than half
+                raise ValueError(f"Too few extensions created: {extensions_created}/{total_extensions_expected}")
+            else:
+                logger.warning("Proceeding with incomplete normalized flat field - may cause issues in science reduction")
             
         try:
             hdul.writeto(output_filename, overwrite=True)
@@ -2152,11 +2220,11 @@ def generate_normalized_images(pixel_maps, raw_flat_files, matching_log, output_
         valid_pixel_mask = np.isfinite(pixel_map) & (pixel_map > 0)
         
         if np.any(valid_pixel_mask):
-            # Divide raw flat by pixel map
+            # Divide raw flat by pixel map - IFU Standard
             corrected_data = np.divide(
                 raw_flat_data,
                 pixel_map,
-                out=np.ones_like(raw_flat_data),
+                out=np.full_like(raw_flat_data, np.nan, dtype=float),  # Use NaN for invalid regions
                 where=valid_pixel_mask
             )
             
