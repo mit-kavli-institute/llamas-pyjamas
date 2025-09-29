@@ -15,7 +15,6 @@ to final data products including RSS files and 3D data cubes.
    installation
    quickstart
    modules
-   examples
 
 Features
 --------

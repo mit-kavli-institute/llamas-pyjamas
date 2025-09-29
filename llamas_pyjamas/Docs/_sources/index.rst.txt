@@ -14,8 +14,7 @@ to final data products including RSS files and 3D data cubes.
 
    installation
    quickstart
-   api/modules
-   examples
+   modules
 
 Features
 --------
@@ -46,7 +45,7 @@ API Reference
 .. toctree::
    :maxdepth: 4
    
-   api/llamas_pyjamas
+   llamas_pyjamas
 
 Indices and tables
 ==================

@@ -7,7 +7,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quick Start Guide &mdash; llamas-pyjamas 1.0.0 documentation</title>
-      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
 
   
@@ -19,7 +19,7 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Examples" href="examples.html" />
+    <link rel="next" title="llamas_pyjamas" href="modules.html" />
     <link rel="prev" title="Installation" href="installation.html" /> 
 </head>
 
@@ -56,7 +56,10 @@
 <li class="toctree-l2"><a class="reference internal" href="#example-notebook">Example Notebook</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">llamas_pyjamas</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.html">llamas_pyjamas package</a></li>
 </ul>
 
         </div>
@@ -112,19 +115,19 @@
 <p>You can also run individual steps:</p>
 <ol class="arabic">
 <li><p>Generate traces:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">llamas_pyjamas.reduce</span> <span class="kn">import</span> <span class="n">generate_traces</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.reduce</span><span class="w"> </span><span class="kn">import</span> <span class="n">generate_traces</span>
 <span class="n">generate_traces</span><span class="p">(</span><span class="s1">&#39;red_flat.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;green_flat.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;blue_flat.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;output/&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
 <li><p>Extract science spectra:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">llamas_pyjamas.reduce</span> <span class="kn">import</span> <span class="n">run_extraction</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.reduce</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_extraction</span>
 <span class="n">run_extraction</span><span class="p">(</span><span class="s1">&#39;science.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;output/&#39;</span><span class="p">,</span> <span class="n">trace_dir</span><span class="o">=</span><span class="s1">&#39;traces/&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
 <li><p>Calculate wavelength solution:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">llamas_pyjamas.reduce</span> <span class="kn">import</span> <span class="n">calc_wavelength_soln</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.reduce</span><span class="w"> </span><span class="kn">import</span> <span class="n">calc_wavelength_soln</span>
 <span class="n">calc_wavelength_soln</span><span class="p">(</span><span class="s1">&#39;arc.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;output/&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
@@ -158,7 +161,7 @@
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="examples.html" class="btn btn-neutral float-right" title="Examples" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="modules.html" class="btn btn-neutral float-right" title="llamas_pyjamas" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>
