@@ -28,7 +28,7 @@ For instructions on installation, compilation, and runtime, please see below and
 **If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
 
 <details>
-<summary>Command Line Usage</summary>
+<summary>Missing camera command line steps</summary>
 
 Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
 
