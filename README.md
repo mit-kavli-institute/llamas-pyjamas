@@ -25,6 +25,34 @@ For instructions on installation, compilation, and runtime, please see below and
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 
+**If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
+
+<details>
+<summary>Command Line Usage</summary>
+
+Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
+
+## Create a corrected copy
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits
+```
+
+## With verbose logging to see what's happening
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits -v
+```
+
+## Direct module execution
+```bash
+# From the validate.py directory
+python validate.py original_science.fits -o science_fixed.fits -v
+```
+
+</details>
+
+
+
+
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
 To join the mailing list:
