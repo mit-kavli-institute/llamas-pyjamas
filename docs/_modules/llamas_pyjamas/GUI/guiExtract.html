@@ -1,0 +1,579 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.GUI.guiExtract &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.GUI.guiExtract</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.GUI.guiExtract</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w">   </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">scipy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core.arc</span><span class="w"> </span><span class="kn">import</span> <span class="n">detect_peaks</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">pydl</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span><span class="o">,</span><span class="w"> </span><span class="nn">cloudpickle</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span><span class="o">,</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ray</span><span class="o">,</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="o">,</span><span class="w"> </span><span class="nn">psutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pkg_resources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">BASE_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">BIAS_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace.traceLlamasMaster</span><span class="w"> </span><span class="kn">import</span> <span class="n">_grab_bias_hdu</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract.extractLlamas</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExtractLlamas</span><span class="p">,</span> <span class="n">save_extractions</span><span class="p">,</span> <span class="n">load_extractions</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Image.WhiteLight</span><span class="w"> </span><span class="kn">import</span> <span class="n">WhiteLight</span><span class="p">,</span> <span class="n">WhiteLightFits</span><span class="p">,</span> <span class="n">WhiteLightQuickLook</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.File.llamasIO</span><span class="w"> </span><span class="kn">import</span> <span class="n">process_fits_by_color</span>
+
+<span class="c1"># Set up logging</span>
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="n">log_filename</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;extractLlamas_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+
+
+
+<span class="c1">####################################################################################</span>
+
+<div class="viewcode-block" id="ExtractLlamasCube">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.ExtractLlamasCube">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">ExtractLlamasCube</span><span class="p">(</span><span class="n">infits</span><span class="p">,</span> <span class="n">tracefits</span><span class="p">,</span> <span class="n">optimal</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+
+    <span class="k">assert</span> <span class="n">infits</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">),</span> <span class="s1">&#39;File must be a .fits file&#39;</span>  
+    <span class="c1"># hdu = fits.open(infits)</span>
+    <span class="n">hdu</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">infits</span><span class="p">)</span>
+
+    <span class="c1"># Find the trace files</span>
+    <span class="n">basefile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">tracefits</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">trace_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">basefile</span><span class="si">}</span><span class="s1">*traces.pkl&#39;</span><span class="p">))</span>
+    <span class="n">extraction_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">infits</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;mef.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;extract.pkl&#39;</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">trace_files</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;No trace files found for the indicated file root!&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    
+    <span class="n">hdu_trace_pairs</span> <span class="o">=</span> <span class="n">match_hdu_to_traces</span><span class="p">(</span><span class="n">hdu</span><span class="p">,</span> <span class="n">trace_files</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">hdu_trace_pairs</span><span class="p">)</span>
+
+    <span class="n">extraction_list</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saving extractions to </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">counter</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="k">for</span> <span class="n">hdu_index</span><span class="p">,</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">hdu_trace_pairs</span><span class="p">:</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extracting extension number </span><span class="si">{</span><span class="n">counter</span><span class="si">}</span><span class="s2"> of 24&quot;</span><span class="p">)</span>
+        <span class="n">hdr</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">header</span> 
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">))</span>  
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">tracer</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    
+            <span class="n">extraction</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">tracer</span><span class="p">,</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span><span class="o">-</span><span class="n">bias</span><span class="p">,</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">)</span>
+            <span class="n">extraction_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">extraction</span><span class="p">)</span>
+            
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error extracting trace from </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+        <span class="n">counter</span> <span class="o">+=</span> <span class="mi">1</span>
+        
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Extraction list = </span><span class="si">{</span><span class="n">extraction_list</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>        
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">save_extractions</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="n">extraction_file</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;extraction saved filename = </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="kc">None</span></div>
+
+
+
+<div class="viewcode-block" id="match_hdu_to_traces">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.match_hdu_to_traces">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">match_hdu_to_traces</span><span class="p">(</span><span class="n">hdu_list</span><span class="p">,</span> <span class="n">trace_files</span><span class="p">,</span> <span class="n">start_idx</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Match HDU extensions to their corresponding trace files&quot;&quot;&quot;</span>
+    <span class="n">matches</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="c1"># Skip primary HDU (index 0)</span>
+    <span class="c1">#### need to be super careful with this starting index</span>
+    <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">start_idx</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">hdu_list</span><span class="p">)):</span>
+        
+        <span class="n">header</span> <span class="o">=</span> <span class="n">hdu_list</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span><span class="o">.</span><span class="n">header</span>
+
+        <span class="c1"># Get color and benchside from header</span>
+        <span class="k">if</span> <span class="s1">&#39;COLOR&#39;</span> <span class="ow">in</span> <span class="n">header</span><span class="p">:</span>
+            <span class="n">color</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;BENCH&#39;</span><span class="p">]</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;SIDE&#39;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">camname</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span>
+            <span class="n">color</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">pattern</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">bench</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">side</span><span class="si">}</span><span class="s2">_traces&quot;</span>
+        
+        <span class="c1"># Find matching trace file</span>
+        <span class="n">matching_trace</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">tf</span> <span class="k">for</span> <span class="n">tf</span> <span class="ow">in</span> <span class="n">trace_files</span> 
+             <span class="k">if</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">tf</span><span class="p">)),</span>
+            <span class="kc">None</span>
+        <span class="p">)</span>
+        <span class="c1">#print(f&#39;HDU {idx}: {color} {benchside} -&gt; {matching_trace}&#39;)</span>
+        <span class="k">if</span> <span class="n">matching_trace</span><span class="p">:</span>
+            <span class="n">matches</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">idx</span><span class="p">,</span> <span class="n">matching_trace</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No matching trace found for HDU </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+    <span class="k">return</span> <span class="n">matches</span></div>
+
+
+<span class="c1"># Define a Ray remote function for processing a single trace extraction.</span>
+<span class="nd">@ray</span><span class="o">.</span><span class="n">remote</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">process_trace</span><span class="p">(</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">trace_file</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.</span>
+<span class="sd">    Returns the extraction object or None if there is an error.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Compute the bias from the current extension data.</span>
+        <span class="k">if</span> <span class="s1">&#39;COLOR&#39;</span> <span class="ow">in</span> <span class="n">header</span><span class="p">:</span>
+            <span class="n">color</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;COLOR&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;BENCH&#39;</span><span class="p">]</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;SIDE&#39;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">camname</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">]</span>
+            <span class="n">color</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+            <span class="n">bench</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">side</span> <span class="o">=</span> <span class="n">camname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            
+        <span class="n">bias_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">BIAS_DIR</span><span class="p">,</span> <span class="s1">&#39;combined_bias.fits&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Bias file: </span><span class="si">{</span><span class="n">bias_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="c1">#### fix the directory here!</span>
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">_grab_bias_hdu</span><span class="p">(</span><span class="n">bench</span><span class="o">=</span><span class="n">bench</span><span class="p">,</span> <span class="n">side</span><span class="o">=</span><span class="n">side</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">color</span><span class="p">,</span> <span class="nb">dir</span><span class="o">=</span><span class="n">bias_file</span><span class="p">)</span>
+        
+        <span class="n">bias_data</span> <span class="o">=</span> <span class="n">bias</span><span class="o">.</span><span class="n">data</span>
+            
+        <span class="c1"># Load the trace object from the pickle file.</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">trace_file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">tracer</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="c1"># Create an ExtractLlamas object; note the subtraction of the bias.</span>
+        <span class="n">extraction</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">tracer</span><span class="p">,</span> <span class="n">hdu_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span><span class="o">-</span><span class="n">bias_data</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">extraction</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error extracting trace from </span><span class="si">{</span><span class="n">trace_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="make_writable">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.make_writable">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_writable</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert a Ray-returned extraction object to a writable version.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">copy</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+    
+    <span class="c1"># First approach: Deep copy</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="k">pass</span>
+    
+    <span class="c1"># Second approach: Pickle and unpickle</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># This forces a complete serialization and deserialization</span>
+        <span class="n">pickled</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">pickled</span><span class="p">)</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="k">pass</span>
+    
+    <span class="c1"># Third approach: If the object has a to_dict method, use it</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">,</span> <span class="s1">&#39;to_dict&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">callable</span><span class="p">(</span><span class="n">extraction_obj</span><span class="o">.</span><span class="n">to_dict</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">obj_dict</span> <span class="o">=</span> <span class="n">extraction_obj</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+            <span class="c1"># Assuming there&#39;s a from_dict or similar constructor</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">),</span> <span class="s1">&#39;from_dict&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">callable</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span><span class="o">.</span><span class="n">from_dict</span><span class="p">):</span>
+                <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">obj_dict</span><span class="p">)</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="k">pass</span>
+    
+    <span class="c1"># If all else fails, return the original object and log a warning</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: Could not make object of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span><span class="si">}</span><span class="s2"> writable&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">extraction_obj</span></div>
+
+
+
+
+<span class="c1">##Main function currently used by the Quicklook for full extraction</span>
+
+<div class="viewcode-block" id="GUI_extract">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.GUI_extract">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">GUI_extract</span><span class="p">(</span><span class="n">file</span><span class="p">:</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="p">,</span> <span class="n">flatfiles</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Extracts data from a FITS file using calibration files and saves the extracted data.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    file (str): Path to the FITS file to be processed. Must have a .fits extension.</span>
+<span class="sd">    flatfiles (str, optional): Path to the flat files for generating new traces. Defaults to None.</span>
+<span class="sd">    biasfiles (str, optional): Path to the bias files for calibration. Defaults to None.</span>
+<span class="sd">    </span>
+<span class="sd">    Returns:</span>
+<span class="sd">    None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>  <span class="c1"># Start timer</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;file is </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">file</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">),</span> <span class="s1">&#39;File must be a .fits file&#39;</span>
+        
+        <span class="n">master_pkls</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="s1">&#39;*.pkl&#39;</span><span class="p">))</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">master_pkls</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No master calibration files found in CALIB_DIR&quot;</span><span class="p">)</span>
+        
+        <span class="c1">#getting package sources for Ray</span>
+        <span class="c1"># Get absolute path to llamas_pyjamas package</span>
+        <span class="n">package_path</span> <span class="o">=</span> <span class="n">pkg_resources</span><span class="o">.</span><span class="n">resource_filename</span><span class="p">(</span><span class="s1">&#39;llamas_pyjamas&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="n">package_root</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">package_path</span><span class="p">)</span>
+
+        <span class="c1"># Configure Ray runtime environment</span>
+        <span class="n">runtime_env</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;py_modules&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">package_root</span><span class="p">],</span>
+            <span class="s2">&quot;env_vars&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;PYTHONPATH&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">package_root</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">},</span>
+            <span class="s2">&quot;excludes&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;**&quot;</span><span class="p">),</span>  <span class="c1"># Exclude DATA_DIR and all subdirectories</span>
+                <span class="s2">&quot;**/*.fits&quot;</span><span class="p">,</span>                 <span class="c1"># Exclude all FITS files anywhere</span>
+                <span class="s2">&quot;**/*.pkl&quot;</span><span class="p">,</span>                  <span class="c1"># Exclude all pickle files anywhere</span>
+                <span class="s2">&quot;**/.git/**&quot;</span><span class="p">,</span>               <span class="c1"># Exclude git directory</span>
+                <span class="s2">&quot;**/*.zip/**&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;**/*.tar.gz/**&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;**/mastercalib*/**&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;**/*.zip&quot;</span><span class="p">,</span>
+                
+            <span class="p">]</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Initialize Ray</span>
+        <span class="n">num_cpus</span> <span class="o">=</span> <span class="mi">8</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">num_cpus</span><span class="o">=</span><span class="n">num_cpus</span><span class="p">,</span> <span class="n">runtime_env</span><span class="o">=</span><span class="n">runtime_env</span><span class="p">)</span>
+
+        <span class="c1">#opening the fitsfile</span>
+        <span class="n">hdu</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+        
+
+        <span class="n">extraction_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;mef.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;extract.pkl&#39;</span>
+
+        <span class="c1">#Defining the base filename</span>
+        <span class="c1">#basefile = os.path.basename(file).split(&#39;.fits&#39;)[0]</span>
+        <span class="n">basefile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">masterfile</span> <span class="o">=</span> <span class="s1">&#39;LLAMAS_master&#39;</span>
+        <span class="n">masterbiasfile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">BIAS_DIR</span><span class="p">,</span> <span class="s1">&#39;combined_bias.fits&#39;</span><span class="p">)</span>
+
+        <span class="c1">#Debug statements</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;basefile = </span><span class="si">{</span><span class="n">basefile</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;masterfile = </span><span class="si">{</span><span class="n">masterfile</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Bias file is </span><span class="si">{</span><span class="n">masterbiasfile</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+
+        <span class="n">bias_hdu</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="c1">#if bias == None:</span>
+            <span class="c1">#opening the masterbias</span>
+
+            <span class="c1">##not implementing this yet</span>
+            <span class="c1">#bias_hdu = fits.open(masterbiasfile)</span>
+            <span class="c1">#assert len(hdu) == len(bias_hdu), &#39;Number of extensions in the bias and fits file do not match&#39;</span>
+
+        
+        <span class="n">trace_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">masterfile</span><span class="si">}</span><span class="s1">*traces.pkl&#39;</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Using master traces </span><span class="si">{</span><span class="n">trace_files</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        
+        <span class="c1">#Running the extract routine</span>
+        <span class="c1">#This code should isolate to only the traces for the given fitsfile</span>
+        
+        <span class="n">extraction_list</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="n">hdu_trace_pairs</span> <span class="o">=</span> <span class="n">match_hdu_to_traces</span><span class="p">(</span><span class="n">hdu</span><span class="p">,</span> <span class="n">trace_files</span><span class="p">)</span>
+        <span class="c1">#print(hdu_trace_pairs)</span>
+
+        <span class="c1">### Testing ray usage</span>
+
+        <span class="c1"># Process each HDU-trace pair in parallel using Ray.</span>
+        <span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">hdu_index</span><span class="p">,</span> <span class="n">trace_file</span> <span class="ow">in</span> <span class="n">hdu_trace_pairs</span><span class="p">:</span>
+            
+            <span class="n">hdu_data</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+            
+            <span class="c1"># Get the data and header from the current extension.</span>
+            
+            <span class="n">hdr</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">header</span>
+            <span class="n">future</span> <span class="o">=</span> <span class="n">process_trace</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">hdu_data</span><span class="p">,</span> <span class="n">hdr</span><span class="p">,</span> <span class="n">trace_file</span><span class="p">)</span>
+            <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">future</span><span class="p">)</span>
+        
+        <span class="c1"># Wait for all remote tasks to complete.</span>
+        <span class="n">raw_extraction_list</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+        <span class="c1">#extraction_list = [ex for ex in extraction_list if ex is not None]</span>
+
+        <span class="c1"># Post-process to make objects writable</span>
+        <span class="n">extraction_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">ex</span> <span class="ow">in</span> <span class="n">raw_extraction_list</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">ex</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">writable_ex</span> <span class="o">=</span> <span class="n">make_writable</span><span class="p">(</span><span class="n">ex</span><span class="p">)</span>
+                <span class="n">extraction_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">writable_ex</span><span class="p">)</span>
+
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Extraction list = </span><span class="si">{</span><span class="n">extraction_list</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>        
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">save_extractions</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="n">extraction_file</span><span class="p">)</span>
+        <span class="c1">#print(f&#39;extraction saved filename = {filename}&#39;)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;extraction saved filename = </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="c1"># obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, filename))</span>
+        <span class="n">obj</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">load_extractions</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">extraction_file</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;obj = </span><span class="si">{</span><span class="n">obj</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">outfile</span> <span class="o">=</span> <span class="n">basefile</span><span class="o">+</span><span class="s1">&#39;_whitelight.fits&#39;</span>
+        <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">metadata</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="n">outfile</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;white_light_file = </span><span class="si">{</span><span class="n">white_light_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+        <span class="k">return</span>
+    
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>  <span class="c1"># End timer</span>
+    <span class="n">elapsed</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+    <span class="c1"># Log or print out the elapsed time</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Full GUI extraction process completed in </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds.&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> </div>
+
+
+<div class="viewcode-block" id="make_ifuimage">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.make_ifuimage">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_ifuimage</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">,</span> <span class="n">flat</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">obj</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">load_extractions</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">extraction_file</span><span class="p">))</span>
+    <span class="n">outfile</span> <span class="o">=</span> <span class="s1">&#39;test_whitelight.fits&#39;</span>
+    <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="n">outfile</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;white_light_file = </span><span class="si">{</span><span class="n">white_light_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="box_extract">
+<a class="viewcode-back" href="../../../llamas_pyjamas.GUI.html#llamas_pyjamas.GUI.guiExtract.box_extract">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">box_extract</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">flat</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+    
+        <span class="k">assert</span> <span class="n">file</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">),</span> <span class="s1">&#39;File must be a .fits file&#39;</span>
+        
+        <span class="n">master_pkls</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="s1">&#39;*.pkl&#39;</span><span class="p">))</span>
+        
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">master_pkls</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No master calibration files found in CALIB_DIR&quot;</span><span class="p">)</span>
+        
+        <span class="c1">#getting package sources for Ray</span>
+        <span class="c1"># Get absolute path to llamas_pyjamas package</span>
+        <span class="n">package_path</span> <span class="o">=</span> <span class="n">pkg_resources</span><span class="o">.</span><span class="n">resource_filename</span><span class="p">(</span><span class="s1">&#39;llamas_pyjamas&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="n">package_root</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">package_path</span><span class="p">)</span>
+
+        <span class="c1"># Configure Ray runtime environment</span>
+        <span class="n">runtime_env</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;py_modules&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">package_root</span><span class="p">],</span>
+            <span class="s2">&quot;env_vars&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;PYTHONPATH&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">package_root</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">},</span>
+            <span class="s2">&quot;excludes&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;**&quot;</span><span class="p">),</span>  <span class="c1"># Exclude DATA_DIR and all subdirectories</span>
+                <span class="s2">&quot;**/*.fits&quot;</span><span class="p">,</span>                 <span class="c1"># Exclude all FITS files anywhere</span>
+                <span class="s2">&quot;**/*.pkl&quot;</span><span class="p">,</span>                  <span class="c1"># Exclude all pickle files anywhere</span>
+                <span class="s2">&quot;**/.git/**&quot;</span><span class="p">,</span>               <span class="c1"># Exclude git directory</span>
+                <span class="s2">&quot;**/*.zip/**&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;**/*.tar.gz/**&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;**/mastercalib*/**&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Initialize Ray</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">runtime_env</span><span class="o">=</span><span class="n">runtime_env</span><span class="p">)</span>
+
+        <span class="c1">#opening the fitsfile</span>
+        <span class="n">hdu</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+        <span class="c1">#Defining the base filename</span>
+        <span class="n">basefile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1">#Debug statements</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;basefile = </span><span class="si">{</span><span class="n">basefile</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">flat</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Running trace routine with flat fielding&#39;</span><span class="p">)</span>
+            <span class="c1">##Running the trace routine</span>
+            <span class="n">main</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+            <span class="n">trace_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">basefile</span><span class="si">}</span><span class="s1">*traces.pkl&#39;</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Using master traces&#39;</span><span class="p">)</span>
+            <span class="n">trace_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;*traces.pkl&#39;</span><span class="p">))</span>
+
+        <span class="c1">#print(os.path.join(CALIB_DIR, f&#39;{basefile}*traces.pkl&#39;))</span>
+
+        <span class="c1">#Running the extract routine</span>
+        <span class="c1">#This code should isolate to only the traces for the given fitsfile</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;trace_files = </span><span class="si">{</span><span class="n">trace_files</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">extraction_list</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="n">hdu_trace_pairs</span> <span class="o">=</span> <span class="n">match_hdu_to_traces</span><span class="p">(</span><span class="n">hdu</span><span class="p">,</span> <span class="n">trace_files</span><span class="p">)</span>
+        <span class="c1">#print(hdu_trace_pairs)</span>
+        
+        <span class="c1">#for file in trace_files:</span>
+        <span class="k">for</span> <span class="n">hdu_index</span><span class="p">,</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">hdu_trace_pairs</span><span class="p">:</span>
+            <span class="n">hdr</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">header</span>
+            
+            <span class="n">data</span> <span class="o">=</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+            
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+            
+            <span class="c1">#print(f&#39;hdu_index {hdu_index}, file {file}, {hdr[&#39;CAM_NAME&#39;]}&#39;)</span>
+            
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                    <span class="n">tracer</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+      
+                <span class="n">extraction</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="p">(</span><span class="n">tracer</span><span class="p">,</span> <span class="n">data</span><span class="o">-</span><span class="n">bias</span><span class="p">,</span> <span class="n">hdu</span><span class="p">[</span><span class="n">hdu_index</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">,</span> <span class="n">optimal</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                <span class="n">extraction_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">extraction</span><span class="p">)</span>
+                
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error extracting trace from </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Extraction list = </span><span class="si">{</span><span class="n">extraction_list</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>        
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">save_extractions</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;extraction saved filename = </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="n">obj</span><span class="p">,</span> <span class="n">metadata</span> <span class="o">=</span> <span class="n">load_extractions</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">filename</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;obj = </span><span class="si">{</span><span class="n">obj</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">outfile</span> <span class="o">=</span> <span class="n">basefile</span> <span class="o">+</span> <span class="s1">&#39;_whitelight.fits&#39;</span>
+        <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="n">outfile</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;white_light_file = </span><span class="si">{</span><span class="n">white_light_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+        <span class="k">return</span>
+    
+    
+    <span class="k">return</span> </div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

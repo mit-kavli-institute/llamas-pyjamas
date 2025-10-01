@@ -1,89 +1,43 @@
 
 
 
-"""
+"""FITS file I/O module for the llamas-pyjamas project.
+
 This module provides classes and functions to handle FITS files for the llamas-pyjamas project.
-It includes functionality to read and process data from multiple cameras stored in a FITS file.
+It includes functionality to read and process data from multiple cameras stored in a FITS file,
+with support for coordinate transformations and metadata extraction.
+
 Classes:
     llamasOneCamera: Represents a single camera's data and metadata.
     llamasAllCameras: Represents all cameras' data and metadata from a FITS file.
+
 Functions:
-    getBenchSideChannel(fitsfile, bench, side, channel): Retrieves data for a specific bench, side, and channel from a FITS file.
+    getBenchSideChannel: Retrieves data for a specific bench, side, and channel from a FITS file.
+    process_fits_by_color: Processes FITS data with color-based image transformations.
+    update_ra_dec_in_header: Converts telescope coordinates to decimal degrees in FITS headers.
 
-    Represents a single camera's data and metadata.
-    Attributes:
-        header (str): The header information from the FITS file.
-        data (numpy.ndarray): The data from the FITS file.
-        bench (int): The bench number from the header.
-        side (str): The side information from the header.
-        channel (str): The channel information from the header.
-
-        Initializes a new instance of the llamasOneCamera class.
-
-        self.header = ''
-        self.data = 0
-        self.bench = -1
-        self.side = ''
-        self.channel = ''
-
-        Reads data and metadata from a given HDU (Header/Data Unit).
-        Args:
-            hdu (astropy.io.fits.HDUList): The HDU to read data from.
-
-        self.data = hdu.data
-        self.bench = self.header['BENCH']
-        self.side = self.header['SIDE']
-        self.index = -1
+Example:
+    Basic usage for reading multi-camera FITS data::
     
-    Represents all cameras' data and metadata from a FITS file.
-    Attributes:
-        header (str): The primary header information from the FITS file.
-        Next (int): The number of extensions in the FITS file.
-        extensions (list): A list of llamasOneCamera instances for each extension in the FITS file.
-    
+        # Read data from all cameras in a FITS file
+        cameras = llamasAllCameras('observation.fits')
         
-        Initializes a new instance of the llamasAllCameras class and reads data from the given FITS file.
-        Args:
-            fitsfile (str): The path to the FITS file to read.
-        
-            self.header = hdulist[0].header
-            self.Next = len(hdulist) - 1
-    
-    Retrieves data for a specific bench, side, and channel from a FITS file.
-    Args:
-        fitsfile (str): The path to the FITS file to read.
-        bench (int): The bench number to filter by.
-        side (str): The side information to filter by.
-        channel (str): The channel information to filter by.
-    Returns:
-        numpy.ndarray: The data for the specified bench, side, and channel.
-                if (hdu.header['COLOR'] == 'Color'):
-                    return hdu.data
+        # Access specific camera data
+        for ext in cameras.extensions:
+            print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
 from astropy.io import fits # type: ignore
 ##############################################################
 
 class llamasOneCamera:
-    """
-    A class to represent a single camera in the llamas system.
-    Attributes
-    ----------
-    header : str
-        The header information of the camera.
-    data : int
-        The data associated with the camera.
-    bench : int
-        The bench number of the camera.
-    side : str
-        The side of the camera.
-    channel : str
-        The color channel of the camera.
-    Methods
-    -------
-    __init__():
-        Initializes the llamasOneCamera with default values.
-    readhdu(hdu):
-        Reads the header and data from the given HDU (Header Data Unit).
+    """A class to represent a single camera in the llamas system.
+    
+    Attributes:
+        header (str): The header information of the camera.
+        data (int): The data associated with the camera.
+        bench (int): The bench number of the camera.
+        side (str): The side of the camera.
+        channel (str): The color channel of the camera.
     """
 
 
@@ -95,19 +49,14 @@ class llamasOneCamera:
         self.channel =  ''
 
     def readhdu(self, hdu: fits.HDUList) -> None:
-        """
+        """Read header and data from the given HDU and extract metadata.
+        
         Reads the header and data from the given HDU (Header Data Unit) and assigns
         them to the instance variables. Additionally, extracts specific header 
         information such as 'BENCH', 'SIDE', and 'COLOR'.
-        Parameters:
-        hdu (astropy.io.fits.HDUList): The HDU object from which to read the header and data.
-        Attributes:
-        header (astropy.io.fits.Header): The header of the HDU.
-        data (numpy.ndarray): The data of the HDU.
-        bench (str): The 'BENCH' value from the header.
-        side (str): The 'SIDE' value from the header.
-        channel (str): The 'COLOR' value from the header.
-        index (int): An index initialized to -1.
+        
+        Args:
+            hdu: The HDU object from which to read the header and data.
         """
 
         self.header = hdu.header
@@ -120,20 +69,12 @@ class llamasOneCamera:
 ##############################################################
 
 class llamasAllCameras:
-    """
-    A class to handle multiple camera data from a FITS file.
+    """A class to handle multiple camera data from a FITS file.
+    
     Attributes:
-    -----------
-    header : astropy.io.fits.header.Header
-        The header of the primary HDU in the FITS file.
-    Next : int
-        The number of extensions (HDUs) in the FITS file.
-    extensions : list
-        A list of llamasOneCamera objects, each representing an extension in the FITS file.
-    Methods:
-    --------
-    __init__(fitsfile)
-        Initializes the llamasAllCameras object by reading the FITS file and storing the header and extensions.
+        header: The header of the primary HDU in the FITS file.
+        Next (int): The number of extensions (HDUs) in the FITS file.
+        extensions (list): A list of llamasOneCamera objects, each representing an extension.
     """
 
 
@@ -153,15 +94,16 @@ class llamasAllCameras:
 ##############################################################
             
 def getBenchSideChannel(fitsfile: str, bench: str, side: str, channel: str)-> None:
-    """
-    Extracts and returns the data from a FITS file for a specific bench, side, and channel.
-    Parameters:
-    fitsfile (str): The path to the FITS file.
-    bench (str): The bench identifier to match in the FITS file header.
-    side (str): The side identifier to match in the FITS file header.
-    channel (str): The channel identifier to match in the FITS file header.
+    """Extract data from a FITS file for a specific bench, side, and channel.
+    
+    Args:
+        fitsfile: The path to the FITS file.
+        bench: The bench identifier to match in the FITS file header.
+        side: The side identifier to match in the FITS file header.
+        channel: The channel identifier to match in the FITS file header.
+        
     Returns:
-    numpy.ndarray: The data from the FITS file that matches the specified bench, side, and channel.
+        The data from the FITS file that matches the specified bench, side, and channel.
     """
 
 
@@ -174,23 +116,18 @@ def getBenchSideChannel(fitsfile: str, bench: str, side: str, channel: str)-> No
                 
 
 def process_fits_by_color(fits_file):
-    """
-    Process a FITS file, transform image data based on color attribute, and return a table of HDUs.
+    """Process a FITS file and transform image data based on color attribute.
     
     The function applies the following transformations:
     - Blue: Flip both x and y axes
     - Green: Flip only x axis (horizontally)
     - Red: No transformation
     
-    Parameters:
-    ----------
-    fits_file : str
-        Path to the FITS file
+    Args:
+        fits_file: Path to the FITS file.
         
     Returns:
-    -------
-    astropy.io.fits.HDUList
-        HDUList with color-based transformations applied
+        HDUList with color-based transformations applied.
     """
     from astropy.io import fits
     import numpy as np
@@ -269,17 +206,18 @@ def process_fits_by_color(fits_file):
     
 ### Function to convert telescope RA and DEC into decimeral degrees for the FITS header
 def update_ra_dec_in_header(header, save_to_file=None) -> fits.Header:
-    """
+    """Extract and convert RA/DEC coordinates from FITS header to decimal degrees.
+    
     Extract RA and DEC from HIERARCH TEL RA and HIERARCH TEL DEC in a FITS header,
     convert them to decimal degrees, and update the header's RA and DEC keywords.
     Only updates if RA and DEC are not already set.
     
-    Parameters:
-    header (astropy.io.fits.Header): The FITS header to process
-    save_to_file (str, optional): Path to FITS file to update with the new header
+    Args:
+        header: The FITS header to process.
+        save_to_file: Path to FITS file to update with the new header.
     
     Returns:
-    astropy.io.fits.Header: The updated header
+        The updated header.
     """
     from astropy.coordinates import SkyCoord
     

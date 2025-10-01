@@ -1,0 +1,215 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Image.processWhiteLight &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Image.processWhiteLight</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Image.processWhiteLight</h1><div class="highlight"><pre>
+<span></span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Module: processWhiteLight</span>
+<span class="sd">This module provides functions for processing white light images, including </span>
+<span class="sd">removing striping patterns and applying quartile bias correction.</span>
+<span class="sd">Functions:</span>
+<span class="sd">- quartile_bias(frame, quartile=20): Applies a quartile bias correction to the input frame.</span>
+<span class="sd">- remove_striping(image, axis=0, smoothing=None): Removes striping patterns from the input image.</span>
+<span class="sd">Dependencies:</span>
+<span class="sd">- numpy</span>
+<span class="sd">- pickle</span>
+<span class="sd">- matplotlib.pyplot</span>
+<span class="sd">- scipy.interpolate.LinearNDInterpolator</span>
+<span class="sd">- astropy.io.fits</span>
+<span class="sd">- astropy.table.Table</span>
+<span class="sd">- os</span>
+<span class="sd">- matplotlib.tri.Triangulation</span>
+<span class="sd">- matplotlib.tri.LinearTriInterpolator</span>
+<span class="sd">- llamas_pyjamas.Utils.utils</span>
+<span class="sd">- datetime</span>
+<span class="sd">- traceback</span>
+<span class="sd">    Apply a quartile bias correction to the input frame.</span>
+<span class="sd">        frame (numpy.ndarray): The input 2D array representing the image frame.</span>
+<span class="sd">        quartile (int, optional): The quartile percentage to use for bias correction. </span>
+<span class="sd">                                  Default is 20.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        numpy.ndarray: The bias-corrected frame.</span>
+<span class="sd">    pass</span>
+<span class="sd">    Remove striping pattern from the input image.</span>
+<span class="sd">        image (numpy.ndarray): The input 2D array representing the image.</span>
+<span class="sd">        axis (int, optional): The axis along which to remove stripes. </span>
+<span class="sd">                              0 for vertical stripes, 1 for horizontal. Default is 0.</span>
+<span class="sd">        smoothing (int or None, optional): Optional smoothing window for the pattern. </span>
+<span class="sd">                                           If None, no smoothing is applied. Default is None.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        numpy.ndarray: The image with the striping pattern removed.</span>
+<span class="sd">    pass</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">from</span> <span class="nn">scipy.interpolate</span> <span class="kn">import</span> <span class="n">LinearNDInterpolator</span>
+<span class="kn">from</span> <span class="nn">..Extract.extractLlamas</span> <span class="kn">import</span> <span class="n">ExtractLlamas</span>
+<span class="kn">from</span> <span class="nn">..QA</span> <span class="kn">import</span> <span class="n">plot_ds9</span>
+<span class="kn">from</span> <span class="nn">..config</span> <span class="kn">import</span> <span class="n">OUTPUT_DIR</span>
+<span class="kn">from</span> <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">from</span> <span class="nn">astropy.table</span> <span class="kn">import</span> <span class="n">Table</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">matplotlib.tri</span> <span class="kn">import</span> <span class="n">Triangulation</span><span class="p">,</span> <span class="n">LinearTriInterpolator</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Utils.utils</span> <span class="kn">import</span> <span class="n">setup_logger</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">import</span> <span class="nn">traceback</span>
+
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;ProcessWhiteLight_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="quartile_bias">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.processWhiteLight.quartile_bias">[docs]</a>
+<span class="k">def</span> <span class="nf">quartile_bias</span><span class="p">(</span><span class="n">frame</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">quartile</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Adjusts the input frame by subtracting the specified quartile value and setting negative values to zero.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    frame (numpy.ndarray): The input data frame to be processed.</span>
+<span class="sd">    quartile (int, optional): The percentile value to be used as the threshold. Default is 20.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    numpy.ndarray: The processed data frame with values adjusted based on the specified quartile.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">threshold</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanpercentile</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">quartile</span><span class="p">)</span>
+    <span class="n">cleaned_data</span> <span class="o">=</span> <span class="n">frame</span> <span class="o">-</span> <span class="n">threshold</span>
+    <span class="n">cleaned_data</span><span class="p">[</span><span class="n">cleaned_data</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    
+    <span class="k">return</span> <span class="n">cleaned_data</span></div>
+
+
+<div class="viewcode-block" id="remove_striping">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.processWhiteLight.remove_striping">[docs]</a>
+<span class="k">def</span> <span class="nf">remove_striping</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">smoothing</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Remove striping pattern from image</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        image: 2D numpy array</span>
+<span class="sd">        axis: 0 for vertical stripes, 1 for horizontal</span>
+<span class="sd">        smoothing: Optional smoothing window for pattern</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Make copy to avoid modifying original</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    
+    <span class="c1"># Calculate median along opposite axis</span>
+    <span class="n">pattern</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="n">axis</span><span class="p">)</span>
+    
+    <span class="c1"># Optional smoothing of pattern</span>
+    <span class="k">if</span> <span class="n">smoothing</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">scipy.ndimage</span> <span class="kn">import</span> <span class="n">gaussian_filter1d</span>
+        <span class="n">pattern</span> <span class="o">=</span> <span class="n">gaussian_filter1d</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">smoothing</span><span class="p">)</span>
+    
+    <span class="c1"># Reshape pattern to match image dimensions</span>
+    <span class="k">if</span> <span class="n">axis</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">pattern</span> <span class="o">=</span> <span class="n">pattern</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># Row pattern</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">pattern</span> <span class="o">=</span> <span class="n">pattern</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Column pattern</span>
+        
+    <span class="c1"># Subtract pattern</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="n">image</span> <span class="o">-</span> <span class="n">pattern</span>
+    
+    <span class="c1"># Handle negatives</span>
+    <span class="n">cleaned</span><span class="p">[</span><span class="n">cleaned</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    
+    <span class="k">return</span> <span class="n">cleaned</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

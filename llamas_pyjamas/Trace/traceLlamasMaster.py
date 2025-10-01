@@ -838,7 +838,7 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None, is_master_calib: bool = True) -> dict:
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)
@@ -849,8 +849,12 @@ class TraceRay(TraceLlamas):
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
         print(f'color: {color}')
-        
-        filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+
+        # Generate filename based on whether this is master calibration or user traces
+        if is_master_calib:
+            filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+        else:
+            filename = f'LLAMAS_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
         
         if outpath:
             os.makedirs(outpath, exist_ok=True)
@@ -868,9 +872,9 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None, is_master_calib: bool = True) -> None:
 
-    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     # Initialize Ray with logging config
     ray.shutdown()  # Clear any existing Ray instances
@@ -896,7 +900,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     #hdu_processor = TraceRay.remote(fitsfile)
         
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias, is_master_calib=is_master_calib)
         futures.append(future)
     
     # Monitor processing
@@ -936,7 +940,7 @@ if __name__ == "__main__":
     parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
     args = parser.parse_args()
       
-    NUMBER_OF_CORES = multiprocessing.cpu_count() 
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     ray.shutdown()  # Clear any existing Ray instances
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
