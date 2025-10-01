@@ -1,0 +1,1296 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Image.WhiteLight &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Image.WhiteLight</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Image.WhiteLight</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Module for processing and analyzing white light images from LLAMAS.</span>
+
+<span class="sd">This module provides functions for processing white light images from the LLAMAS </span>
+<span class="sd">instrument, including color channel isolation, FITS file creation, and fiber mapping.</span>
+
+<span class="sd">Functions:</span>
+<span class="sd">    color_isolation: Isolates blue, green, and red channels from extraction objects.</span>
+<span class="sd">    WhiteLightFits: Creates a FITS file from extraction objects.</span>
+<span class="sd">    WhiteLight: Generates a white light image from extraction objects.</span>
+<span class="sd">    WhiteLightQuickLook: Generates a quick look white light image.</span>
+<span class="sd">    WhiteLightHex: Creates hexagonal grid white light images.</span>
+<span class="sd">    FiberMap: Maps a fiber to its x and y coordinates.</span>
+<span class="sd">    FiberMap_LUT: Looks up fiber coordinates using a lookup table.</span>
+<span class="sd">    plot_fibermap: Plots the fiber map for the LLAMAS instrument.</span>
+<span class="sd">    fibermap_table: Generates a table of fiber mappings.</span>
+<span class="sd">    rerun: Reruns the white light generation process.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.interpolate</span><span class="w"> </span><span class="kn">import</span> <span class="n">LinearNDInterpolator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract.extractLlamas</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExtractLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.QA</span><span class="w"> </span><span class="kn">import</span> <span class="n">plot_ds9</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.table</span><span class="w"> </span><span class="kn">import</span> <span class="n">Table</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib.tri</span><span class="w"> </span><span class="kn">import</span> <span class="n">Triangulation</span><span class="p">,</span> <span class="n">LinearTriInterpolator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">LUT_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tuple</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.interpolate</span><span class="w"> </span><span class="kn">import</span> <span class="n">LinearNDInterpolator</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.File.llamasIO</span><span class="w"> </span><span class="kn">import</span> <span class="n">process_fits_by_color</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib.patches</span><span class="w"> </span><span class="kn">import</span> <span class="n">RegularPolygon</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.cm</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">cm</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib.colors</span><span class="w"> </span><span class="kn">import</span> <span class="n">Normalize</span>
+
+
+
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;WhiteLight_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+
+<span class="n">orig_fibre_map_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)),</span> <span class="s1">&#39;LLAMAS_FiberMap_revA.dat&#39;</span><span class="p">)</span>
+<span class="n">fibre_map_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;LLAMAS_FiberMap_rev02.dat&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Fibre map path: </span><span class="si">{</span><span class="n">fibre_map_path</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+<span class="n">fibermap_lut</span> <span class="o">=</span> <span class="n">Table</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">fibre_map_path</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;ascii.fixed_width&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="color_isolation">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.color_isolation">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">color_isolation</span><span class="p">(</span><span class="n">extractions</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Isolate blue, green, and red channels from extraction objects.</span>
+
+<span class="sd">    This function separates extraction objects by their color channels and returns </span>
+<span class="sd">    both the extraction objects and their corresponding metadata.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        extractions (list): A list of extraction objects loaded from ExtractLlamas.</span>
+<span class="sd">        metadata (dict): Dictionary containing metadata for each extraction.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple: A tuple containing six lists:</span>
+<span class="sd">            - blue_extractions (list): Blue channel extraction objects.</span>
+<span class="sd">            - green_extractions (list): Green channel extraction objects.</span>
+<span class="sd">            - red_extractions (list): Red channel extraction objects.</span>
+<span class="sd">            - blue_meta (list): Metadata for blue channel extractions.</span>
+<span class="sd">            - green_meta (list): Metadata for green channel extractions.</span>
+<span class="sd">            - red_meta (list): Metadata for red channel extractions.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">blue_extractions</span> <span class="o">=</span> <span class="p">[</span><span class="n">ext</span> <span class="k">for</span> <span class="n">ext</span> <span class="ow">in</span> <span class="n">extractions</span> <span class="k">if</span> <span class="n">ext</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">]</span>
+    <span class="n">green_extractions</span> <span class="o">=</span> <span class="p">[</span><span class="n">ext</span> <span class="k">for</span> <span class="n">ext</span> <span class="ow">in</span> <span class="n">extractions</span> <span class="k">if</span> <span class="n">ext</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">]</span>
+    <span class="n">red_extractions</span> <span class="o">=</span> <span class="p">[</span><span class="n">ext</span> <span class="k">for</span> <span class="n">ext</span> <span class="ow">in</span> <span class="n">extractions</span> <span class="k">if</span> <span class="n">ext</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">]</span>
+
+    <span class="n">blue_meta</span> <span class="o">=</span> <span class="p">[</span><span class="n">meta</span> <span class="k">for</span> <span class="n">meta</span> <span class="ow">in</span> <span class="n">metadata</span> <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">]</span>
+    <span class="n">green_meta</span> <span class="o">=</span> <span class="p">[</span><span class="n">meta</span> <span class="k">for</span> <span class="n">meta</span> <span class="ow">in</span> <span class="n">metadata</span> <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">]</span>
+    <span class="n">red_meta</span> <span class="o">=</span> <span class="p">[</span><span class="n">meta</span> <span class="k">for</span> <span class="n">meta</span> <span class="ow">in</span> <span class="n">metadata</span> <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">]</span>
+
+    
+    <span class="k">return</span> <span class="n">blue_extractions</span><span class="p">,</span> <span class="n">green_extractions</span><span class="p">,</span> <span class="n">red_extractions</span><span class="p">,</span> <span class="n">blue_meta</span><span class="p">,</span> <span class="n">green_meta</span><span class="p">,</span> <span class="n">red_meta</span></div>
+
+
+
+<div class="viewcode-block" id="WhiteLightFits">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.WhiteLightFits">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">WhiteLightFits</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Process extraction data to create a white light FITS file.</span>
+
+<span class="sd">    This function takes an array of extracted color data and creates a FITS file </span>
+<span class="sd">    containing white light images for each bench/side/channel combination.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        extraction_array (list): A list of extracted color data arrays.</span>
+<span class="sd">        metadata (dict): Dictionary containing metadata for each extraction.</span>
+<span class="sd">        outfile (str, optional): The output file path for the white light FITS file. </span>
+<span class="sd">            If None, the output file name is generated based on the input file name. </span>
+<span class="sd">            Defaults to None.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        str: The file path of the created white light FITS file.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        - The function assumes that all extraction objects came from the same original file.</span>
+<span class="sd">        - The function processes blue, green, and red data if they exist in the extraction array.</span>
+<span class="sd">        - The function creates a primary HDU and additional HDUs for each color data and their corresponding tables.</span>
+<span class="sd">        - The function writes the created HDU list to a FITS file in the specified output directory.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    
+    <span class="n">blue</span><span class="p">,</span> <span class="n">green</span><span class="p">,</span> <span class="n">red</span><span class="p">,</span> <span class="n">blue_meta</span><span class="p">,</span> <span class="n">green_meta</span><span class="p">,</span> <span class="n">red_meta</span> <span class="o">=</span> <span class="n">color_isolation</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">blue</span><span class="p">,</span> <span class="n">green</span><span class="p">,</span> <span class="n">red</span><span class="p">)</span>
+    <span class="n">fitsfile</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="c1">###For now assuming that all extraction objects came from the same original file</span>
+    <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="ow">not</span> <span class="n">color</span> <span class="k">for</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span><span class="n">blue</span><span class="p">,</span> <span class="n">green</span><span class="p">,</span> <span class="n">red</span><span class="p">]):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;No blue, green, or red extractions found. Exiting...&#39;</span><span class="p">)</span>
+        <span class="k">return</span>
+    
+    <span class="c1"># Create HDU list</span>
+    <span class="n">hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">()</span>
+    <span class="n">primary_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">()</span>
+    
+    
+    <span class="n">fitsfile</span> <span class="o">=</span> <span class="n">blue</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">fitsfile</span> <span class="k">if</span> <span class="n">blue</span> <span class="k">else</span> <span class="n">green</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">fitsfile</span> <span class="k">if</span> <span class="n">green</span> <span class="k">else</span> <span class="n">red</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">fitsfile</span>
+    <span class="n">primary_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;ORIGFILE&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">fitsfile</span><span class="p">)</span>
+    <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">())</span>
+
+    <span class="c1"># Process blue data if exists</span>
+    <span class="k">if</span> <span class="n">blue</span><span class="p">:</span>
+        
+        <span class="n">blue_whitelight</span><span class="p">,</span> <span class="n">blue_x</span><span class="p">,</span> <span class="n">blue_y</span><span class="p">,</span> <span class="n">blue_flux</span> <span class="o">=</span> <span class="n">WhiteLight</span><span class="p">(</span><span class="n">blue</span><span class="p">,</span> <span class="n">blue_meta</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">blue_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">blue_whitelight</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;BLUE&#39;</span><span class="p">)</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">blue_hdu</span><span class="p">)</span>
+        
+        <span class="n">blue_tab</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="o">.</span><span class="n">from_columns</span><span class="p">([</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;XDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">blue_x</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;YDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">blue_y</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FLUX&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">blue_flux</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+        <span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;BLUE_TAB&#39;</span><span class="p">,</span> <span class="n">nrows</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">blue_whitelight</span><span class="p">))</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">blue_tab</span><span class="p">)</span>
+    
+    <span class="c1"># Process green data if exists</span>
+    <span class="k">if</span> <span class="n">green</span><span class="p">:</span>
+      
+        <span class="n">green_whitelight</span><span class="p">,</span> <span class="n">green_x</span><span class="p">,</span> <span class="n">green_y</span><span class="p">,</span> <span class="n">green_flux</span> <span class="o">=</span> <span class="n">WhiteLight</span><span class="p">(</span><span class="n">green</span><span class="p">,</span> <span class="n">green_meta</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">green_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">green_whitelight</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;GREEN&#39;</span><span class="p">)</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">green_hdu</span><span class="p">)</span>
+        
+        <span class="n">green_tab</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="o">.</span><span class="n">from_columns</span><span class="p">([</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;XDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">green_x</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;YDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">green_y</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FLUX&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">green_flux</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">))</span>
+        <span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;GREEN_TAB&#39;</span><span class="p">)</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">green_tab</span><span class="p">)</span>
+    
+    <span class="c1"># Process red data if exists</span>
+    <span class="k">if</span> <span class="n">red</span><span class="p">:</span>
+        <span class="n">red_whitelight</span><span class="p">,</span> <span class="n">red_x</span><span class="p">,</span> <span class="n">red_y</span><span class="p">,</span> <span class="n">red_flux</span> <span class="o">=</span> <span class="n">WhiteLight</span><span class="p">(</span><span class="n">red</span><span class="p">,</span> <span class="n">red_meta</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">red_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">red_whitelight</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;RED&#39;</span><span class="p">)</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">red_hdu</span><span class="p">)</span>
+        
+        <span class="n">red_tab</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="o">.</span><span class="n">from_columns</span><span class="p">([</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;XDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">red_x</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;YDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">red_y</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+            <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FLUX&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">red_flux</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+        <span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;RED_TAB&#39;</span><span class="p">,</span> <span class="n">nrows</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">red_whitelight</span><span class="p">))</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">red_tab</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">outfile</span><span class="p">:</span>
+        <span class="n">fitsfilebase</span> <span class="o">=</span> <span class="n">fitsfile</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">fitsfilebase</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;_whitelight.fits&#39;</span><span class="p">)</span>
+    
+    <span class="c1">#code added in to allow for normalisation in flat fielding process</span>
+    <span class="k">elif</span> <span class="n">outfile</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">hdul</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">outfile</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Writing white light file to </span><span class="si">{</span><span class="n">white_light_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="c1"># Write to file</span>
+    <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">white_light_file</span><span class="p">),</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">white_light_file</span></div>
+
+
+
+<div class="viewcode-block" id="WhiteLight">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.WhiteLight">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">WhiteLight</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">metadata</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate a white light image from an array of extraction files or objects.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    extraction_array (list): A list of extraction files (str) or ExtractLlamas objects.</span>
+<span class="sd">    ds9plot (bool, optional): If True, plot the white light image using DS9. Default is True.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    tuple: A tuple containing:</span>
+<span class="sd">        - whitelight (numpy.ndarray): The interpolated white light image.</span>
+<span class="sd">        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.</span>
+<span class="sd">        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.</span>
+<span class="sd">        - flux (numpy.ndarray): The flux values for each fiber.</span>
+<span class="sd">    Raises:</span>
+<span class="sd">    AssertionError: If extraction_array is not a list.</span>
+<span class="sd">    TypeError: If an element in extraction_array is not a string or ExtractLlamas object.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    
+    <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">)</span> <span class="o">==</span> <span class="nb">list</span><span class="p">,</span> <span class="s1">&#39;Extraction array must be a list of extraction files&#39;</span>
+    
+    <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">flux</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    
+    <span class="k">for</span> <span class="n">extraction_obj</span><span class="p">,</span> <span class="n">meta</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">,</span> <span class="n">metadata</span><span class="p">):</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;side&#39;</span><span class="p">]</span>
+        <span class="n">counts</span> <span class="o">=</span> <span class="n">extraction_obj</span><span class="o">.</span><span class="n">counts</span>
+        <span class="c1">#Might need to put in side condition here as well it depends on the outcome</span>
+        <span class="c1"># if channel == &#39;blue&#39;:</span>
+        <span class="c1">#     counts = np.flipud(extraction_obj.counts)</span>
+    
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">extraction</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Loaded extraction object </span><span class="si">{</span><span class="n">extraction</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="n">extraction</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">,</span> <span class="n">ExtractLlamas</span><span class="p">):</span>
+            <span class="n">extraction</span> <span class="o">=</span> <span class="n">extraction_obj</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unexpected type: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span><span class="si">}</span><span class="s2">. Must be string or ExtractLlamas object&quot;</span><span class="p">)</span>
+        
+        
+        <span class="n">nfib</span><span class="p">,</span> <span class="n">naxis1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">shape</span><span class="p">(</span><span class="n">extraction</span><span class="o">.</span><span class="n">counts</span><span class="p">)</span>
+        
+        <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfib</span><span class="p">):</span>
+            <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">extraction</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="n">extraction</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+            
+            
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="n">benchside</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Fiber </span><span class="si">{</span><span class="n">ifib</span><span class="si">}</span><span class="s1"> not found in fiber map for bench </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1"> for color </span><span class="si">{</span><span class="n">extraction</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+                <span class="k">continue</span>
+            
+            
+            <span class="c1"># thisflux = np.nansum(extraction.counts[ifib])</span>
+            <span class="n">thisflux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">counts</span><span class="p">[</span><span class="n">ifib</span><span class="p">])</span>
+            <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flux</span><span class="p">,</span> <span class="n">thisflux</span><span class="p">)</span>
+            <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span><span class="n">x</span><span class="p">)</span>
+            <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ydata</span><span class="p">,</span><span class="n">y</span><span class="p">)</span>
+
+    <span class="n">flux_interpolator</span> <span class="o">=</span> <span class="n">LinearNDInterpolator</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">)),</span> <span class="n">flux</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        
+    <span class="k">if</span> <span class="p">(</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">xx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="p">)</span>
+        <span class="n">yy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+
+        <span class="n">subsample</span> <span class="o">=</span> <span class="mf">1.5</span>
+
+        <span class="n">xx</span> <span class="o">=</span> <span class="mf">1.0</span><span class="o">/</span><span class="n">subsample</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="o">*</span><span class="n">subsample</span><span class="p">)</span>
+        <span class="n">yy</span> <span class="o">=</span> <span class="mf">1.0</span><span class="o">/</span><span class="n">subsample</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="o">*</span><span class="n">subsample</span><span class="p">)</span>
+
+    <span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">xx</span><span class="p">,</span> <span class="n">yy</span><span class="p">)</span>
+    
+    <span class="n">whitelight</span> <span class="o">=</span> <span class="n">flux_interpolator</span><span class="p">(</span><span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span><span class="p">)</span>
+    <span class="c1"># whitelight = np.fliplr(whitelight)</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ds9plot</span><span class="p">):</span>
+        <span class="c1">#ds9 = pyds9.DS9(target=&#39;DS9:*&#39;, start=True, wait=10, verify=True)</span>
+        <span class="c1">#ds9.set_np2arr(whitelight)</span>
+        <span class="n">plot_ds9</span><span class="p">(</span><span class="n">whitelight</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">whitelight</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span></div>
+
+
+<div class="viewcode-block" id="WhiteLightQuickLook">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.WhiteLightQuickLook">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">WhiteLightQuickLook</span><span class="p">(</span><span class="n">tracefile</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate a quick look white light image from trace data and image data.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    tracefile (str): Path to the trace file containing the trace object.</span>
+<span class="sd">    data (numpy.ndarray): Image data array.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    tuple: A tuple containing:</span>
+<span class="sd">        - whitelight (numpy.ndarray): Interpolated white light image.</span>
+<span class="sd">        - xdata (numpy.ndarray): Array of x-coordinates for fibers.</span>
+<span class="sd">        - ydata (numpy.ndarray): Array of y-coordinates for fibers.</span>
+<span class="sd">        - flux (numpy.ndarray): Array of flux values for fibers.</span>
+<span class="sd">    Notes:</span>
+<span class="sd">    - The function reads the trace object from the provided tracefile.</span>
+<span class="sd">    - It uses a fiber map lookup table (FiberMap_LUT) to get x and y coordinates for each fiber.</span>
+<span class="sd">    - The flux for each fiber is calculated by summing the data values where the fiber image matches the fiber index.</span>
+<span class="sd">    - A linear interpolator (LinearNDInterpolator) is used to create the white light image.</span>
+<span class="sd">    - Optionally, the white light image can be plotted using DS9 (if ds9plot is set to True).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#    hdul = fits.open(data)</span>
+
+    <span class="c1"># Each trace object represents one camera / side pair</span>
+    
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">tracefile</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+        <span class="n">traceobj</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span>
+    <span class="n">fiberimg</span> <span class="o">=</span> <span class="n">traceobj</span><span class="o">.</span><span class="n">fiberimg</span>
+    <span class="n">nfib</span>     <span class="o">=</span> <span class="n">traceobj</span><span class="o">.</span><span class="n">nfibers</span>
+    
+    <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">flux</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfib</span><span class="p">):</span>
+        <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">traceobj</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="n">traceobj</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">traceobj</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="n">benchside</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Fiber </span><span class="si">{</span><span class="n">ifib</span><span class="si">}</span><span class="s1"> not found in fiber map for bench </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+            <span class="k">continue</span>
+        
+        <span class="n">thisflux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">fiberimg</span> <span class="o">==</span> <span class="n">ifib</span><span class="p">])</span>
+        <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flux</span><span class="p">,</span> <span class="n">thisflux</span><span class="p">)</span>
+        <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ydata</span><span class="p">,</span><span class="n">y</span><span class="p">)</span>
+
+    <span class="n">flux_interpolator</span> <span class="o">=</span> <span class="n">LinearNDInterpolator</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">)),</span> <span class="n">flux</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        
+    <span class="n">xx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">46</span><span class="p">)</span>
+    <span class="n">yy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">43</span><span class="p">)</span>
+    <span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">xx</span><span class="p">,</span> <span class="n">yy</span><span class="p">)</span>
+    
+    <span class="n">whitelight</span> <span class="o">=</span> <span class="n">flux_interpolator</span><span class="p">(</span><span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span><span class="p">)</span>
+
+    <span class="n">ds9plot</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ds9plot</span><span class="p">):</span>
+        <span class="n">plot_ds9</span><span class="p">(</span><span class="n">whitelight</span><span class="p">,</span> <span class="n">samp</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">whitelight</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span></div>
+
+
+        
+<span class="k">def</span><span class="w"> </span><span class="nf">WhiteLightHex</span><span class="p">(</span><span class="n">extraction_array</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+    <span class="c1">## placeholder for eventual hexagonal grid inclusion</span>
+
+    <span class="k">return</span>
+
+   
+<div class="viewcode-block" id="FiberMap">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.FiberMap">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">FiberMap</span><span class="p">(</span><span class="n">bench</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">infiber</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Calculate the fiber map coordinates for a given bench and fiber number.</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    bench (str): The bench identifier, which can be &#39;1A&#39;, &#39;2A&#39;, &#39;3A&#39;, &#39;4A&#39;, &#39;1B&#39;, &#39;2B&#39;, &#39;3B&#39;, or &#39;4B&#39;.</span>
+<span class="sd">    infiber (int): The fiber number.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">    tuple: A tuple containing the x and y coordinates of the fiber.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="n">n_right</span>    <span class="o">=</span> <span class="mi">23</span>
+    <span class="n">n_left</span>     <span class="o">=</span> <span class="mi">23</span>
+    <span class="n">n_vertical</span> <span class="o">=</span> <span class="mi">51</span>
+    <span class="n">dy</span>         <span class="o">=</span> <span class="mf">0.8660254037</span> <span class="c1"># == np.sin(60), but hardwire the factor for time saving</span>
+    <span class="n">dx</span>         <span class="o">=</span> <span class="mf">1.0</span>
+
+    <span class="n">wrap</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;1A&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">Nfib</span><span class="o">=</span><span class="mi">298</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;2A&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(</span><span class="n">n_right</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">6.0</span>
+        <span class="n">wrap</span> <span class="o">=</span> <span class="mi">23</span>
+        <span class="n">Nfib</span><span class="o">=</span><span class="mi">300</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;3A&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">13.0</span>
+        <span class="n">Nfib</span><span class="o">=</span><span class="mi">298</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;4A&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(</span><span class="n">n_right</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mi">19</span>
+        <span class="n">wrap</span> <span class="o">=</span> <span class="mi">23</span>
+        <span class="n">Nfib</span><span class="o">=</span><span class="mi">300</span>
+
+        
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;1B&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mi">45</span>
+        <span class="n">Nfib</span> <span class="o">=</span> <span class="mi">300</span><span class="c1">#298</span>
+        <span class="n">wrap</span> <span class="o">=</span> <span class="mi">23</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;2B&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(</span><span class="n">n_right</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">39.0</span>
+        <span class="n">Nfib</span> <span class="o">=</span> <span class="mi">298</span><span class="c1">#300</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;3B&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">32.0</span>
+        <span class="n">Nfib</span><span class="o">=</span><span class="mi">300</span><span class="c1">#298</span>
+        <span class="n">wrap</span> <span class="o">=</span> <span class="mi">23</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="n">bench</span> <span class="o">==</span> <span class="s1">&#39;4B&#39;</span><span class="p">):</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(</span><span class="n">n_right</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="mf">26.0</span>
+        <span class="n">Nfib</span> <span class="o">=</span> <span class="mi">298</span><span class="c1">#300</span>
+        
+    <span class="n">fiber</span> <span class="o">=</span> <span class="n">infiber</span>
+        
+    <span class="k">if</span> <span class="p">(</span><span class="n">fiber</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">xoffset</span> <span class="o">=</span> <span class="n">n_left</span>
+        <span class="n">wrap</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">xoffset</span> <span class="o">=</span> <span class="mi">0</span>
+
+
+    <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;A&#39;</span> <span class="ow">in</span> <span class="n">bench</span><span class="p">):</span>
+        <span class="n">y_rownum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">((</span><span class="n">fiber</span><span class="o">+</span><span class="n">wrap</span><span class="p">),</span> <span class="p">(</span><span class="n">n_left</span><span class="o">+</span><span class="n">n_right</span><span class="p">))</span>
+        <span class="n">y_value</span>  <span class="o">=</span> <span class="p">(</span><span class="n">y0</span> <span class="o">+</span> <span class="n">y_rownum</span><span class="p">)</span> <span class="o">*</span> <span class="n">dy</span>
+
+        <span class="c1"># Account for the fact that the fibers snake back and forth within the two</span>
+        <span class="c1"># sides of the IFU. Even rows go right to left, off rows go left to right</span>
+
+        <span class="n">x_index</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(((</span><span class="n">fiber</span><span class="o">+</span><span class="n">wrap</span><span class="p">)</span> <span class="o">%</span> <span class="p">(</span><span class="n">n_left</span><span class="o">+</span><span class="n">n_right</span><span class="p">)),</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">y_rownum</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">fiber</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_left</span><span class="o">+</span><span class="n">n_right</span><span class="p">)</span> <span class="o">-</span> <span class="n">x_index</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="n">n_left</span> <span class="o">-</span> <span class="n">x_index</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">fiber</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="n">n_left</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="n">x_index</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="n">x_index</span>
+
+        <span class="n">x_value</span> <span class="o">=</span> <span class="n">x_fiber</span> <span class="o">-</span> <span class="mf">0.5</span>
+        <span class="n">y_value</span> <span class="o">=</span> <span class="n">n_vertical</span><span class="o">*</span><span class="n">dy</span><span class="o">-</span><span class="n">y_value</span>
+
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;B&#39;</span> <span class="ow">in</span> <span class="n">bench</span><span class="p">):</span>
+
+        <span class="n">ncols</span> <span class="o">=</span> <span class="n">n_left</span> <span class="o">+</span> <span class="n">n_right</span>
+        <span class="n">y_rownum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">((</span><span class="n">fiber</span><span class="o">+</span><span class="n">wrap</span><span class="p">),</span> <span class="n">ncols</span><span class="p">)</span>
+        <span class="n">y_value</span>  <span class="o">=</span> <span class="p">(</span><span class="n">y0</span> <span class="o">+</span> <span class="n">y_rownum</span><span class="p">)</span> <span class="o">*</span> <span class="n">dy</span>
+
+        <span class="c1"># Account for the fact that the fibers snake back and forth within the two</span>
+        <span class="c1"># sides of the IFU. Even rows go right to left, odd rows go left to right</span>
+
+        <span class="n">x_index</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor_divide</span><span class="p">(((</span><span class="n">fiber</span><span class="o">+</span><span class="n">wrap</span><span class="p">)</span> <span class="o">%</span> <span class="p">(</span><span class="n">n_left</span><span class="o">+</span><span class="n">n_right</span><span class="p">)),</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">y_rownum</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">fiber</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_left</span><span class="o">+</span><span class="n">n_right</span><span class="p">)</span> <span class="o">-</span> <span class="n">x_index</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="n">n_left</span> <span class="o">-</span> <span class="n">x_index</span>
+            <span class="n">x_fiber</span> <span class="o">-=</span> <span class="mf">0.5</span>
+            <span class="n">x_value</span> <span class="o">=</span> <span class="n">x_fiber</span> <span class="o">-</span> <span class="mf">0.5</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">bench</span><span class="o">==</span><span class="s1">&#39;2B&#39;</span><span class="p">):</span>
+                <span class="n">x_fiber</span><span class="o">+=</span><span class="mf">0.5</span>
+            
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">fiber</span> <span class="o">%</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="n">n_left</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="n">x_index</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">x_fiber</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="n">x_index</span>
+            <span class="n">x_fiber</span> <span class="o">+=</span> <span class="mf">0.5</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">bench</span><span class="o">==</span><span class="s1">&#39;2B&#39;</span><span class="p">):</span>
+                <span class="n">x_fiber</span><span class="o">-=</span><span class="mf">0.5</span>
+            
+
+        <span class="n">y_value</span> <span class="o">=</span> <span class="n">n_vertical</span><span class="o">*</span><span class="n">dy</span><span class="o">-</span><span class="n">y_value</span>
+        
+    <span class="c1"># return(x_value,y_value)</span>
+    <span class="k">return</span><span class="p">(</span><span class="n">x_fiber</span><span class="p">,</span><span class="n">n_vertical</span><span class="o">-</span><span class="nb">int</span><span class="p">(</span><span class="n">y0</span><span class="o">+</span><span class="n">y_rownum</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="FiberMap_LUT">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.FiberMap_LUT">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">FiberMap_LUT</span><span class="p">(</span><span class="n">bench</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">fiber</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+
+    <span class="c1">#if (np.logical_and(bench == &#39;2B&#39;,fiber &gt;= 49)):</span>
+    <span class="c1">#    fiber += 1</span>
+    
+    <span class="n">fiber_row</span> <span class="o">=</span> <span class="n">fibermap_lut</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">fibermap_lut</span><span class="p">[</span><span class="s1">&#39;bench&#39;</span><span class="p">]</span><span class="o">==</span><span class="n">bench</span><span class="p">,</span> \
+                                            <span class="n">fibermap_lut</span><span class="p">[</span><span class="s1">&#39;fiber&#39;</span><span class="p">]</span><span class="o">==</span><span class="n">fiber</span><span class="p">)]</span>
+    <span class="c1">#breakpoint()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span><span class="p">(</span><span class="n">fiber_row</span><span class="p">[</span><span class="s1">&#39;xpos&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span><span class="n">fiber_row</span><span class="p">[</span><span class="s1">&#39;ypos&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="k">return</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="plot_fibermap">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.plot_fibermap">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_fibermap</span><span class="p">()</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Plots the fiber map for the LLAMAS IFU, showing the mapping of fibers to different configurations.</span>
+<span class="sd">    This function generates a plot with the fiber numbers annotated at their respective positions for </span>
+<span class="sd">    different configurations (1A, 2A, 3A, 4A, 1B, 2B, 3B, 4B). It also includes directional annotations </span>
+<span class="sd">    (N for North, E for East) and saves the plot as an image file.</span>
+<span class="sd">    Annotations:</span>
+<span class="sd">    - Fibers in configuration 1A, 3A, 4B, and 2B are plotted in black and red.</span>
+<span class="sd">    - Fibers in configuration 2A, 4A, 3B, and 1B are plotted in blue and green.</span>
+<span class="sd">    - Directional annotations for North and East are included.</span>
+<span class="sd">    The plot is saved as &quot;fiber.png&quot; in the specified directory.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="c1"># 1A - N=298</span>
+    <span class="c1"># 2A - N=300</span>
+    <span class="c1"># 3A - all fibers fine (N=298)</span>
+    <span class="c1"># 4A - all fibers fine (N=300)</span>
+    <span class="c1"># 4B - all fibers fine (N=298)</span>
+    <span class="c1"># 3B - all fibers fine (N=300)</span>
+    <span class="c1"># 2B - fiber 49 (zero index) is broken / dead (N=297 good + 1 dead)</span>
+    <span class="c1"># 1B - all fibers fine (N=300)</span>
+    
+    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">fibernum_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">298</span><span class="p">)</span>
+    <span class="n">fibernum_b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">300</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="n">fibernum_a</span><span class="p">:</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;1A&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;3A&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;4B&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;2B&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+        
+        
+    <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="n">fibernum_b</span><span class="p">:</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;2A&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;b&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;4A&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;g&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;3B&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;b&#39;</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="s1">&#39;1B&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">fiber</span><span class="p">))</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span><span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;g&#39;</span><span class="p">)</span>
+        
+        
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span><span class="mi">75</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span><span class="mi">47</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_aspect</span><span class="p">(</span><span class="s1">&#39;equal&#39;</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">2.5</span><span class="p">,</span><span class="s2">&quot;1B&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">7.5</span><span class="p">,</span><span class="s2">&quot;2B&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">12.5</span><span class="p">,</span><span class="s2">&quot;3B&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">17.5</span><span class="p">,</span><span class="s2">&quot;4B&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">24.5</span><span class="p">,</span><span class="s2">&quot;4A&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">29.5</span><span class="p">,</span><span class="s2">&quot;3A&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">34.5</span><span class="p">,</span><span class="s2">&quot;2A&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">49</span><span class="p">,</span><span class="mf">39.5</span><span class="p">,</span><span class="s2">&quot;1A&quot;</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">40.5</span><span class="p">,</span> <span class="s2">&quot;R-1&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">39.5</span><span class="p">,</span> <span class="s2">&quot;G-2&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">38.5</span><span class="p">,</span> <span class="s2">&quot;B-3&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">35.5</span><span class="p">,</span> <span class="s2">&quot;R-7&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">34.5</span><span class="p">,</span> <span class="s2">&quot;G-8&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">33.5</span><span class="p">,</span> <span class="s2">&quot;B-9&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">30.5</span><span class="p">,</span> <span class="s2">&quot;R-13&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">29.5</span><span class="p">,</span> <span class="s2">&quot;G-14&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">28.5</span><span class="p">,</span> <span class="s2">&quot;B-15&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">25.5</span><span class="p">,</span> <span class="s2">&quot;R-19&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">24.5</span><span class="p">,</span> <span class="s2">&quot;G-20&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">23.5</span><span class="p">,</span> <span class="s2">&quot;B-21&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">3.5</span><span class="p">,</span> <span class="s2">&quot;R-4&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">2.5</span><span class="p">,</span> <span class="s2">&quot;G-5&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="s2">&quot;B-6&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">8.5</span><span class="p">,</span> <span class="s2">&quot;R-10&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">7.5</span><span class="p">,</span> <span class="s2">&quot;G-11&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">6.5</span><span class="p">,</span> <span class="s2">&quot;B-12&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">13.5</span><span class="p">,</span> <span class="s2">&quot;R-16&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">12.5</span><span class="p">,</span> <span class="s2">&quot;G-17&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">11.5</span><span class="p">,</span> <span class="s2">&quot;B-18&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">18.5</span><span class="p">,</span> <span class="s2">&quot;R-22&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">17.5</span><span class="p">,</span> <span class="s2">&quot;G-23&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">52.25</span><span class="p">,</span> <span class="mf">16.5</span><span class="p">,</span> <span class="s2">&quot;B-24&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">xy</span><span class="o">=</span><span class="p">(</span><span class="mi">73</span><span class="p">,</span><span class="mi">20</span><span class="p">),</span> <span class="n">xytext</span><span class="o">=</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span><span class="mi">20</span><span class="p">),</span>
+            <span class="n">arrowprops</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">facecolor</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">edgecolor</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">arrowstyle</span><span class="o">=</span><span class="s1">&#39;-&gt;&#39;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">xy</span><span class="o">=</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span><span class="mi">25</span><span class="p">),</span> <span class="n">xytext</span><span class="o">=</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span><span class="mi">20</span><span class="p">),</span>
+            <span class="n">arrowprops</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">facecolor</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">edgecolor</span><span class="o">=</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">arrowstyle</span><span class="o">=</span><span class="s1">&#39;-&gt;&#39;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">71</span><span class="p">,</span> <span class="mf">15.5</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span> <span class="mi">27</span><span class="p">,</span> <span class="s2">&quot;E&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s2">&quot;LLAMAS IFU Fiber to slit / FITS extension mapping (Rev 02)&quot;</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">&quot;/Users/simcoe/fiber.png&quot;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">600</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="fibermap_table">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.fibermap_table">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">fibermap_table</span><span class="p">()</span><span class="o">-&gt;</span> <span class="n">Table</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generates a fiber map table for the LLAMAS instrument and writes it to a file.</span>
+<span class="sd">    The function creates a table with columns: &#39;bench&#39;, &#39;fiber&#39;, &#39;xindex&#39;, &#39;yindex&#39;, &#39;xpos&#39;, and &#39;ypos&#39;.</span>
+<span class="sd">    It populates the table with fiber positions for both A and B sides of the instrument, using the FiberMap function</span>
+<span class="sd">    to get the x and y indices for each fiber. The y position is adjusted by the sine of 60 degrees.</span>
+<span class="sd">    The table is then written to a file named &#39;LLAMAS_FiberMap_rev02_updated.dat&#39; in fixed-width ASCII format.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        astropy.table.Table: The populated fiber map table.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="n">fiber_table</span> <span class="o">=</span> <span class="n">Table</span><span class="p">(</span><span class="n">names</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;bench&#39;</span><span class="p">,</span><span class="s1">&#39;fiber&#39;</span><span class="p">,</span><span class="s1">&#39;xindex&#39;</span><span class="p">,</span><span class="s1">&#39;yindex&#39;</span><span class="p">,</span><span class="s1">&#39;xpos&#39;</span><span class="p">,</span><span class="s1">&#39;ypos&#39;</span><span class="p">),</span>\
+                        <span class="n">dtype</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;S4&#39;</span><span class="p">,</span><span class="s1">&#39;i4&#39;</span><span class="p">,</span><span class="s1">&#39;i4&#39;</span><span class="p">,</span><span class="s1">&#39;i4&#39;</span><span class="p">,</span><span class="s1">&#39;f4&#39;</span><span class="p">,</span><span class="s1">&#39;f4&#39;</span><span class="p">))</span>
+
+    <span class="c1"># A sides - DONE!</span>
+    
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">298</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;1A&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;1A&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;2A&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;2A&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">298</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;3A&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;3A&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;4A&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;4A&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="c1"># B Sides</span>
+        
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;1B&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;1B&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="mi">299</span><span class="o">-</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">298</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;2B&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;2B&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="mi">297</span><span class="o">-</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;3B&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;3B&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="mi">299</span><span class="o">-</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">298</span><span class="p">):</span>
+        <span class="n">ix</span><span class="p">,</span> <span class="n">iy</span> <span class="o">=</span> <span class="n">FiberMap</span><span class="p">(</span><span class="s1">&#39;4B&#39;</span><span class="p">,</span><span class="n">ifib</span><span class="p">)</span>
+        <span class="n">fiber_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span><span class="s1">&#39;4B&#39;</span><span class="p">,</span><span class="nb">int</span><span class="p">(</span><span class="mi">297</span><span class="o">-</span><span class="n">ifib</span><span class="p">),</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="p">,</span><span class="n">ix</span><span class="p">,</span><span class="n">iy</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">60</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">180</span><span class="p">)])</span>
+
+    <span class="n">fiber_table</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;LLAMAS_FiberMap_rev02_updated.dat&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;ascii.fixed_width&#39;</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+    <span class="k">return</span><span class="p">(</span><span class="n">fiber_table</span><span class="p">)</span></div>
+
+    
+<div class="viewcode-block" id="rerun">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.rerun">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">rerun</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Reruns the WhiteLight process with a set of predefined extractions.</span>
+<span class="sd">    This function loads several extraction files using the ExtractLlamas class and then</span>
+<span class="sd">    runs the WhiteLight process with these extractions.</span>
+<span class="sd">    The following extraction files are loaded:</span>
+<span class="sd">    - Extract_1A.pkl</span>
+<span class="sd">    - Extract_2A.pkl</span>
+<span class="sd">    - Extract_3A.pkl</span>
+<span class="sd">    - Extract_4A.pkl</span>
+<span class="sd">    - Extract_1B.pkl</span>
+<span class="sd">    - Extract_2B.pkl</span>
+<span class="sd">    - Extract_3B.pkl</span>
+<span class="sd">    - Extract_4B.pkl</span>
+<span class="sd">    The loaded extractions are then passed to the WhiteLight function for processing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">extraction1a</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Extract_1A.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction2a</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_2A.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction3a</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_3A.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction4a</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_4A.pkl&#39;</span><span class="p">)</span>
+
+    <span class="n">extraction1b</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_1B.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction2b</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_2B.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction3b</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_3B.pkl&#39;</span><span class="p">)</span>
+    <span class="n">extraction4b</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="s1">&#39;Extract_4B.pkl&#39;</span><span class="p">)</span>
+    
+
+    <span class="n">WhiteLight</span><span class="p">([</span><span class="n">extraction1a</span><span class="p">,</span> <span class="n">extraction2a</span><span class="p">,</span> <span class="n">extraction3a</span><span class="p">,</span> <span class="n">extraction4a</span><span class="p">,</span> <span class="n">extraction1b</span><span class="p">,</span> <span class="n">extraction2b</span><span class="p">,</span> <span class="n">extraction3b</span><span class="p">,</span> <span class="n">extraction4b</span><span class="p">])</span></div>
+
+
+
+
+<span class="c1">######### Testing qucik whitelight</span>
+
+<div class="viewcode-block" id="QuickWhiteLight">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.QuickWhiteLight">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">QuickWhiteLight</span><span class="p">(</span><span class="n">trace_list</span><span class="p">,</span> <span class="n">data_list</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate a white light image by directly summing unmasked fiber values without extraction.</span>
+<span class="sd">    </span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    -----------</span>
+<span class="sd">    trace_list : list</span>
+<span class="sd">        A list of TraceLlamas objects containing the fiber trace information.</span>
+<span class="sd">    data_list : list</span>
+<span class="sd">        A list of data arrays corresponding to each trace object.</span>
+<span class="sd">    metadata : list, optional</span>
+<span class="sd">        Optional metadata for each trace/data pair.</span>
+<span class="sd">    ds9plot : bool, optional</span>
+<span class="sd">        If True, display the resulting white light image using DS9. Default is False.</span>
+<span class="sd">    </span>
+<span class="sd">    Returns:</span>
+<span class="sd">    --------</span>
+<span class="sd">    tuple</span>
+<span class="sd">        A tuple containing:</span>
+<span class="sd">        - whitelight (numpy.ndarray): The interpolated white light image.</span>
+<span class="sd">        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.</span>
+<span class="sd">        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.</span>
+<span class="sd">        - flux (numpy.ndarray): The flux values for each fiber.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    
+    <span class="k">for</span> <span class="n">trace_obj</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">meta</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">trace_list</span><span class="p">,</span> <span class="n">data_list</span><span class="p">,</span> <span class="n">metadata</span> <span class="k">if</span> <span class="n">metadata</span> <span class="k">else</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">trace_list</span><span class="p">)):</span>
+        <span class="c1"># Get bench and side information</span>
+        <span class="n">bench</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">bench</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">side</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">channel</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">trace_obj</span><span class="p">,</span> <span class="s1">&#39;channel&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;channel&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span> <span class="k">else</span> <span class="kc">None</span>
+        
+        <span class="c1"># Process each fiber</span>
+        <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">trace_obj</span><span class="o">.</span><span class="n">nfibers</span><span class="p">):</span>
+            <span class="c1"># Get fiber mask from the trace object</span>
+            <span class="n">fiber_mask</span> <span class="o">=</span> <span class="n">trace_obj</span><span class="o">.</span><span class="n">fiberimg</span> <span class="o">==</span> <span class="n">ifib</span>
+            
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">fiber_mask</span><span class="p">):</span>
+                <span class="k">continue</span>  <span class="c1"># Skip if no pixels for this fiber</span>
+            
+            <span class="c1"># Get bench-side identifier</span>
+            <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+            
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Map fiber to physical coordinates</span>
+                <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="n">benchside</span><span class="p">,</span> <span class="n">ifib</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">x</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="ow">and</span> <span class="n">y</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                    <span class="k">continue</span>  <span class="c1"># Skip if fiber mapping not found</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Fiber </span><span class="si">{</span><span class="n">ifib</span><span class="si">}</span><span class="s1"> not found in fiber map for bench </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+                <span class="k">continue</span>
+            
+            <span class="c1"># Sum the flux directly from masked values in the data</span>
+            <span class="n">thisflux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">fiber_mask</span><span class="p">])</span>
+            
+            <span class="c1"># Record the position and flux</span>
+            <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flux</span><span class="p">,</span> <span class="n">thisflux</span><span class="p">)</span>
+            <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+            <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ydata</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    
+    <span class="c1"># Create interpolated image</span>
+    <span class="n">flux_interpolator</span> <span class="o">=</span> <span class="n">LinearNDInterpolator</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">)),</span> <span class="n">flux</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    
+    <span class="c1"># Define grid for interpolation</span>
+    <span class="n">subsample</span> <span class="o">=</span> <span class="mf">1.5</span>
+    <span class="n">xx</span> <span class="o">=</span> <span class="mf">1.0</span><span class="o">/</span><span class="n">subsample</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="o">*</span><span class="n">subsample</span><span class="p">)</span>
+    <span class="n">yy</span> <span class="o">=</span> <span class="mf">1.0</span><span class="o">/</span><span class="n">subsample</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">53</span><span class="o">*</span><span class="n">subsample</span><span class="p">)</span>
+    <span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">xx</span><span class="p">,</span> <span class="n">yy</span><span class="p">)</span>
+    
+    <span class="c1"># Generate white light image</span>
+    <span class="n">whitelight</span> <span class="o">=</span> <span class="n">flux_interpolator</span><span class="p">(</span><span class="n">x_grid</span><span class="p">,</span> <span class="n">y_grid</span><span class="p">)</span>
+    
+    <span class="c1"># Optional DS9 plot</span>
+    <span class="k">if</span> <span class="n">ds9plot</span><span class="p">:</span>
+        <span class="n">plot_ds9</span><span class="p">(</span><span class="n">whitelight</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">whitelight</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span></div>
+
+
+<div class="viewcode-block" id="QuickWhiteLightCube">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.QuickWhiteLightCube">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">QuickWhiteLightCube</span><span class="p">(</span><span class="n">science_file</span><span class="p">,</span> <span class="n">ds9plot</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">outfile</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generates a cube FITS file with quick-look white light images for each color.</span>
+<span class="sd">        The function groups the mastercalib dictionary by color (keys: blue, green, red),</span>
+<span class="sd">        calls QuickWhiteLight for each color group, and creates an HDU for the image and an</span>
+<span class="sd">        associated binary table HDU with fiber positions and flux data.</span>
+<span class="sd">        </span>
+<span class="sd">        Parameters:</span>
+<span class="sd">            mastercalib (dict): Dictionary with keys &#39;blue&#39;, &#39;green&#39;, and &#39;red&#39;. For each key, </span>
+<span class="sd">                the value should be a dict with the following entries:</span>
+<span class="sd">                    &#39;traces&#39;   - list of trace objects,</span>
+<span class="sd">                    &#39;data&#39;     - list of corresponding data arrays,</span>
+<span class="sd">                    &#39;metadata&#39; - (optional) list of metadata dictionaries.</span>
+<span class="sd">            ds9plot (bool, optional): If True, display each generated white light image using DS9.</span>
+<span class="sd">                                        Default is True.</span>
+<span class="sd">            outfile (str, optional): Output FITS file name. If None, a file name is generated</span>
+<span class="sd">                                     with the current timestamp.</span>
+<span class="sd">        </span>
+<span class="sd">        Returns:</span>
+<span class="sd">            str: The file path of the created quick-look white light cube FITS file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+
+
+
+
+
+        <span class="c1"># Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR</span>
+        
+
+        <span class="n">trace_objs</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Open the science FITS file and create the output HDU list</span>
+        <span class="n">science_hdul</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">science_file</span><span class="p">)</span> <span class="c1">#fits.open(science_file)</span>
+
+        <span class="n">bias_hdul</span> <span class="o">=</span> <span class="n">process_fits_by_color</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="s1">&#39;combined_bias.fits&#39;</span><span class="p">))</span>
+
+        <span class="n">primary_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">()</span>
+        <span class="n">primary_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COMMENT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Quick White Light Cube created from science file extensions.&quot;</span>
+        <span class="n">hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">primary_hdu</span><span class="p">])</span>
+
+        <span class="n">blue_traces</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">green_traces</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">red_green</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="n">blue_data</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">green_data</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">red_data</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">blue_meta</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">green_meta</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">red_meta</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Loop over each extension (skip primary) to process data</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ext</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">science_hdul</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="n">bias_data</span> <span class="o">=</span> <span class="n">bias_hdul</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">data</span> <span class="o">-</span> <span class="n">bias_data</span>
+            
+            
+            <span class="k">if</span> <span class="s1">&#39;COLOR&#39;</span> <span class="ow">in</span> <span class="n">ext</span><span class="o">.</span><span class="n">header</span><span class="p">:</span>
+                <span class="n">header</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">header</span>
+                <span class="n">color</span> <span class="o">=</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;COLOR&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+                <span class="n">bench</span> <span class="o">=</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;BENCH&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                <span class="n">side</span> <span class="o">=</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;SIDE&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">header</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">header</span>
+                <span class="c1"># Parse the CAM_NAME to determine color, bench, and side</span>
+                <span class="n">cam_name</span> <span class="o">=</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CAM_NAME&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">cam_name</span><span class="p">:</span>
+                    <span class="c1"># Example format: &#39;1A_Red&#39; -&gt; bench=&#39;1&#39;, side=&#39;A&#39;, color=&#39;red&#39;</span>
+                    <span class="n">parts</span> <span class="o">=</span> <span class="n">cam_name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+                        <span class="n">benchside</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                        <span class="n">color</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>  <span class="c1"># Convert &#39;Red&#39; to &#39;red&#39;</span>
+                        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">benchside</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+                            <span class="n">bench</span> <span class="o">=</span> <span class="n">benchside</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                            <span class="n">side</span> <span class="o">=</span> <span class="n">benchside</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Processing extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s1">: </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="c1"># Determine the corresponding trace file based on benchside and color</span>
+            <span class="c1">#LLAMAS_master_blue_1_A_traces.pkl</span>
+            <span class="n">trace_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;LLAMAS_master_</span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">bench</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">side</span><span class="si">}</span><span class="s2">_traces.pkl&quot;</span>
+            <span class="n">trace_filepath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">trace_filename</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">trace_filepath</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Trace file </span><span class="si">{</span><span class="n">trace_filepath</span><span class="si">}</span><span class="s2"> not found for </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2">. Skipping extension.&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">trace_filepath</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">trace_obj</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            
+            <span class="c1"># Build trace and data lists for QuickWhiteLight processing</span>
+            
+            
+            <span class="n">metadata</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;channel&#39;</span><span class="p">:</span> <span class="n">color</span><span class="p">,</span> <span class="s1">&#39;bench&#39;</span><span class="p">:</span> <span class="n">bench</span><span class="p">,</span> <span class="s1">&#39;side&#39;</span><span class="p">:</span> <span class="n">side</span><span class="p">}</span>
+            <span class="k">if</span> <span class="n">color</span> <span class="o">==</span> <span class="s1">&#39;blue&#39;</span><span class="p">:</span>
+                <span class="n">blue_traces</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">trace_obj</span><span class="p">)</span>
+                <span class="n">blue_data</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">blue_meta</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">color</span> <span class="o">==</span> <span class="s1">&#39;green&#39;</span><span class="p">:</span>
+                <span class="n">green_traces</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">trace_obj</span><span class="p">)</span>
+                <span class="n">green_data</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">green_meta</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">color</span> <span class="o">==</span> <span class="s1">&#39;red&#39;</span><span class="p">:</span>
+                <span class="n">red_green</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">trace_obj</span><span class="p">)</span>
+                <span class="n">red_data</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">red_meta</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+            
+            <span class="c1"># After processing all science_hdul extensions, generate white light images for each color</span>
+
+        <span class="n">whitelight_results</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">traces_list</span><span class="p">,</span> <span class="n">data_list</span><span class="p">,</span> <span class="n">meta_list</span> <span class="ow">in</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="n">blue_traces</span><span class="p">,</span> <span class="n">blue_data</span><span class="p">,</span> <span class="n">blue_meta</span><span class="p">),</span>
+            <span class="p">(</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="n">green_traces</span><span class="p">,</span> <span class="n">green_data</span><span class="p">,</span> <span class="n">green_meta</span><span class="p">),</span>
+            <span class="p">(</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">red_green</span><span class="p">,</span> <span class="n">red_data</span><span class="p">,</span> <span class="n">red_meta</span><span class="p">)</span>
+        <span class="p">]:</span>
+            <span class="k">if</span> <span class="n">traces_list</span> <span class="ow">and</span> <span class="n">data_list</span><span class="p">:</span>
+                <span class="n">wl</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span> <span class="o">=</span> <span class="n">QuickWhiteLight</span><span class="p">(</span><span class="n">traces_list</span><span class="p">,</span> <span class="n">data_list</span><span class="p">,</span> <span class="n">meta_list</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="n">ds9plot</span><span class="p">)</span>
+                <span class="n">whitelight_results</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">wl</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No data found for </span><span class="si">{</span><span class="n">col</span><span class="si">}</span><span class="s2"> color.&quot;</span><span class="p">)</span>
+                <span class="n">whitelight_results</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;red&#39;</span><span class="p">]:</span>
+            <span class="n">wl</span><span class="p">,</span> <span class="n">xdata</span><span class="p">,</span> <span class="n">ydata</span><span class="p">,</span> <span class="n">flux</span> <span class="o">=</span> <span class="n">whitelight_results</span><span class="p">[</span><span class="n">color</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">wl</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="c1"># Create an image HDU for the white light image</span>
+            <span class="n">image_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">wl</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="n">color</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+            <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">image_hdu</span><span class="p">)</span>
+            
+            <span class="c1"># Create a binary table HDU with the fiber x, y positions and flux data</span>
+            <span class="n">tab_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="o">.</span><span class="n">from_columns</span><span class="p">([</span>
+                <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;XDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+                <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;YDATA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">ydata</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)),</span>
+                <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FLUX&#39;</span><span class="p">,</span>  <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;E&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">flux</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+            <span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">color</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s1">_TAB&#39;</span><span class="p">)</span>
+            <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tab_hdu</span><span class="p">)</span>
+         
+        
+        <span class="n">science_hdul</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        
+        <span class="c1"># Determine output file name</span>
+        <span class="k">if</span> <span class="n">outfile</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">fitsfilebase</span> <span class="o">=</span> <span class="n">science_file</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">white_light_file</span> <span class="o">=</span> <span class="n">fitsfilebase</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;_quickwhitelight.fits&#39;</span><span class="p">)</span>
+            
+        
+        <span class="c1"># Write the FITS file to disk.</span>
+        <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">white_light_file</span><span class="p">)</span>
+        <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Quick white light cube saved to </span><span class="si">{</span><span class="n">outpath</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">outpath</span></div>
+
+
+
+<div class="viewcode-block" id="WhiteLightHex">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Image.html#llamas_pyjamas.Image.WhiteLight.WhiteLightHex">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">WhiteLightHex</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">,</span> <span class="n">ds9plot</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">median</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> 
+                 <span class="n">zscale</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">scale_min</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scale_max</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">colorbar</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> 
+                 <span class="n">colormap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">,</span> <span class="n">fig</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a hexagonal grid white light image without interpolation between fibers.</span>
+<span class="sd">    Each fiber is represented as a discrete hexagon with its measured value.</span>
+<span class="sd">    </span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    extraction_list : list</span>
+<span class="sd">        List of ExtractLlamas objects</span>
+<span class="sd">    metadata : list, optional</span>
+<span class="sd">        Metadata for each extraction object, by default None</span>
+<span class="sd">    ds9plot : bool, optional</span>
+<span class="sd">        If True, display the image with DS9, by default False</span>
+<span class="sd">    median : bool, optional</span>
+<span class="sd">        If True, use median instead of mean for combining extractions, by default False</span>
+<span class="sd">    mask : ndarray, optional</span>
+<span class="sd">        Mask to apply to the data, by default None</span>
+<span class="sd">    zscale : bool, optional</span>
+<span class="sd">        If True, use zscale for display, by default True</span>
+<span class="sd">    scale_min : float, optional</span>
+<span class="sd">        Minimum value for display scaling, by default None</span>
+<span class="sd">    scale_max : float, optional</span>
+<span class="sd">        Maximum value for display scaling, by default None</span>
+<span class="sd">    colorbar : bool, optional</span>
+<span class="sd">        If True, display colorbar, by default True</span>
+<span class="sd">    colormap : str, optional</span>
+<span class="sd">        Colormap to use, by default &#39;viridis&#39;</span>
+<span class="sd">    fig : matplotlib.figure.Figure, optional</span>
+<span class="sd">        Figure to plot on, by default None</span>
+<span class="sd">    ax : matplotlib.axes.Axes, optional</span>
+<span class="sd">        Axes to plot on, by default None</span>
+<span class="sd">        </span>
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    ndarray</span>
+<span class="sd">        2D hexagonal grid image</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    
+    <span class="c1"># Initialize data structures</span>
+    <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+    <span class="n">bench_sides</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Type is str-&gt; loading file </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">extraction</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Loaded extraction object from file: </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">,</span> <span class="n">ExtractLlamas</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Type is ExtractLlamas-&gt; using object&#39;</span><span class="p">)</span>
+        <span class="n">extraction</span> <span class="o">=</span> <span class="n">extraction_obj</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unexpected type: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">extraction_obj</span><span class="p">)</span><span class="si">}</span><span class="s2">. Must be string or ExtractLlamas object&quot;</span><span class="p">)</span>
+    
+
+    <span class="n">extract_obj</span> <span class="o">=</span> <span class="n">ExtractLlamas</span><span class="o">.</span><span class="n">loadExtraction</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">)</span>
+    <span class="n">extraction_list</span> <span class="o">=</span> <span class="n">extract_obj</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+    <span class="n">metadata</span> <span class="o">=</span> <span class="n">extract_obj</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span> <span class="k">if</span> <span class="s1">&#39;metadata&#39;</span> <span class="ow">in</span> <span class="n">extract_obj</span> <span class="k">else</span> <span class="kc">None</span>
+    
+    <span class="c1"># Process extraction list</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">extraction_obj</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">):</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">if</span> <span class="n">metadata</span> <span class="k">else</span> <span class="kc">None</span>
+        
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">extraction_obj</span><span class="o">.</span><span class="n">channel</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">extraction_obj</span><span class="o">.</span><span class="n">side</span>
+        <span class="n">counts</span> <span class="o">=</span> <span class="n">extraction_obj</span><span class="o">.</span><span class="n">counts</span>
+        
+        <span class="n">nfib</span><span class="p">,</span> <span class="n">naxis1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">shape</span><span class="p">(</span><span class="n">counts</span><span class="p">)</span>
+        
+        <span class="k">for</span> <span class="n">ifib</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfib</span><span class="p">):</span>
+            <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">extraction_obj</span><span class="o">.</span><span class="n">bench</span><span class="si">}{</span><span class="n">extraction_obj</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">&#39;</span>
+            
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">FiberMap_LUT</span><span class="p">(</span><span class="n">benchside</span><span class="p">,</span> <span class="n">ifib</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">x</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="ow">and</span> <span class="n">y</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                    <span class="k">continue</span>  <span class="c1"># Skip if fiber mapping not found</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Fiber </span><span class="si">{</span><span class="n">ifib</span><span class="si">}</span><span class="s1"> not found in fiber map for bench </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+                <span class="k">continue</span>
+            
+            <span class="c1"># Get fiber value</span>
+            <span class="n">thisflux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">counts</span><span class="p">[</span><span class="n">ifib</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">thisflux</span> <span class="o">=</span> <span class="n">thisflux</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">mask</span><span class="p">[</span><span class="n">ifib</span><span class="p">])</span>
+                
+            <span class="c1"># Store data</span>
+            <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flux</span><span class="p">,</span> <span class="n">thisflux</span><span class="p">)</span>
+            <span class="n">xdata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">xdata</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+            <span class="n">ydata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ydata</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+            <span class="n">bench_sides</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bench_sides</span><span class="p">,</span> <span class="n">benchside</span><span class="p">)</span>
+    
+    <span class="c1"># Create figure if not provided</span>
+    <span class="k">if</span> <span class="n">fig</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">ax</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+    
+    <span class="c1"># Determine colormap scaling</span>
+    <span class="k">if</span> <span class="n">zscale</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">astropy.visualization</span><span class="w"> </span><span class="kn">import</span> <span class="n">ZScaleInterval</span>
+        <span class="n">interval</span> <span class="o">=</span> <span class="n">ZScaleInterval</span><span class="p">()</span>
+        <span class="n">vmin</span><span class="p">,</span> <span class="n">vmax</span> <span class="o">=</span> <span class="n">interval</span><span class="o">.</span><span class="n">get_limits</span><span class="p">(</span><span class="n">flux</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">vmin</span> <span class="o">=</span> <span class="n">scale_min</span> <span class="k">if</span> <span class="n">scale_min</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmin</span><span class="p">(</span><span class="n">flux</span><span class="p">)</span>
+        <span class="n">vmax</span> <span class="o">=</span> <span class="n">scale_max</span> <span class="k">if</span> <span class="n">scale_max</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">flux</span><span class="p">)</span>
+    
+    <span class="n">norm</span> <span class="o">=</span> <span class="n">Normalize</span><span class="p">(</span><span class="n">vmin</span><span class="o">=</span><span class="n">vmin</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="n">vmax</span><span class="p">)</span>
+    <span class="n">cmap</span> <span class="o">=</span> <span class="n">cm</span><span class="o">.</span><span class="n">get_cmap</span><span class="p">(</span><span class="n">colormap</span><span class="p">)</span>
+    
+    <span class="c1"># Compute hexagon size based on fiber spacing (using median distance between adjacent fibers)</span>
+    <span class="n">x_sorted</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">xdata</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">x_sorted</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">x_diffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">x_sorted</span><span class="p">)</span>
+        <span class="n">hex_size</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">x_diffs</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1.5</span>  <span class="c1"># Adjust to prevent overlap</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">hex_size</span> <span class="o">=</span> <span class="mf">0.5</span>  <span class="c1"># Default if we can&#39;t compute</span>
+    
+    <span class="c1"># Create a grid to store hexagonal values for DS9 display</span>
+    <span class="n">x_range</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">xdata</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">xdata</span><span class="p">))</span> <span class="o">+</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span>
+    <span class="n">y_range</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">ydata</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">ydata</span><span class="p">))</span> <span class="o">+</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span>
+    <span class="n">x_min</span><span class="p">,</span> <span class="n">y_min</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">xdata</span><span class="p">)</span> <span class="o">-</span> <span class="n">hex_size</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">ydata</span><span class="p">)</span> <span class="o">-</span> <span class="n">hex_size</span>
+    
+    <span class="c1"># Create grid with higher resolution for DS9</span>
+    <span class="n">grid_scale</span> <span class="o">=</span> <span class="mi">5</span>  <span class="c1"># Higher resolution for better hexagon approximation</span>
+    <span class="n">hex_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span>
+        <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">y_range</span> <span class="o">*</span> <span class="n">grid_scale</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">x_range</span> <span class="o">*</span> <span class="n">grid_scale</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+    <span class="p">)</span>
+    
+    <span class="c1"># Plot hexagons for each fiber</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">xdata</span><span class="p">)):</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">xdata</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">ydata</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">flux</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+            <span class="k">continue</span>
+            
+        <span class="n">color</span> <span class="o">=</span> <span class="n">cmap</span><span class="p">(</span><span class="n">norm</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+        
+        <span class="c1"># Create hexagon patch for matplotlib</span>
+        <span class="n">hex_patch</span> <span class="o">=</span> <span class="n">RegularPolygon</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">),</span> 
+            <span class="n">numVertices</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> 
+            <span class="n">radius</span><span class="o">=</span><span class="n">hex_size</span><span class="p">,</span>
+            <span class="n">orientation</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">6</span><span class="p">,</span>  <span class="c1"># 30 degrees rotation</span>
+            <span class="n">facecolor</span><span class="o">=</span><span class="n">color</span><span class="p">,</span> 
+            <span class="n">edgecolor</span><span class="o">=</span><span class="s1">&#39;black&#39;</span><span class="p">,</span> 
+            <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+            <span class="n">alpha</span><span class="o">=</span><span class="mf">1.0</span>
+        <span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">add_patch</span><span class="p">(</span><span class="n">hex_patch</span><span class="p">)</span>
+        
+        <span class="c1"># Fill corresponding area in hex_grid for DS9</span>
+        <span class="c1"># Convert hexagon vertices to grid coordinates</span>
+        <span class="k">for</span> <span class="n">phi</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="mi">60</span><span class="p">):</span>  <span class="c1"># 60 points around hexagon</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">hex_size</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span>
+            <span class="n">hy</span> <span class="o">=</span> <span class="n">y</span> <span class="o">+</span> <span class="n">hex_size</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span>
+            
+            <span class="c1"># Convert to grid indices</span>
+            <span class="n">ix</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">hx</span> <span class="o">-</span> <span class="n">x_min</span><span class="p">)</span> <span class="o">*</span> <span class="n">grid_scale</span><span class="p">)</span>
+            <span class="n">iy</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">hy</span> <span class="o">-</span> <span class="n">y_min</span><span class="p">)</span> <span class="o">*</span> <span class="n">grid_scale</span><span class="p">)</span>
+            
+            <span class="c1"># Check bounds and set value</span>
+            <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">ix</span> <span class="o">&lt;</span> <span class="n">hex_grid</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">and</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">iy</span> <span class="o">&lt;</span> <span class="n">hex_grid</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+                <span class="n">hex_grid</span><span class="p">[</span><span class="n">iy</span><span class="p">,</span> <span class="n">ix</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+    
+    <span class="c1"># Fill in the interior of hexagons in grid (simple flood fill)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">ndimage</span>
+    <span class="c1"># Create a binary mask of valid points</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">hex_grid</span><span class="p">)</span>
+    <span class="c1"># Label connected regions</span>
+    <span class="n">labels</span><span class="p">,</span> <span class="n">num</span> <span class="o">=</span> <span class="n">ndimage</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
+    <span class="c1"># Fill holes in each labeled region</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">num</span><span class="o">+</span><span class="mi">1</span><span class="p">):</span>
+        <span class="n">region</span> <span class="o">=</span> <span class="n">labels</span> <span class="o">==</span> <span class="n">i</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="n">hex_grid</span><span class="p">[</span><span class="n">region</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">median_value</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmedian</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+            <span class="c1"># Fill entire region with median value</span>
+            <span class="n">hex_grid</span><span class="p">[</span><span class="n">region</span><span class="p">]</span> <span class="o">=</span> <span class="n">median_value</span>
+    
+    <span class="c1"># Set axis limits</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">xdata</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">xdata</span><span class="p">)</span> <span class="o">+</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">ydata</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">ydata</span><span class="p">)</span> <span class="o">+</span> <span class="mi">2</span><span class="o">*</span><span class="n">hex_size</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_aspect</span><span class="p">(</span><span class="s1">&#39;equal&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># Add colorbar if requested</span>
+    <span class="k">if</span> <span class="n">colorbar</span><span class="p">:</span>
+        <span class="n">cbar</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">cm</span><span class="o">.</span><span class="n">ScalarMappable</span><span class="p">(</span><span class="n">norm</span><span class="o">=</span><span class="n">norm</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">),</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">)</span>
+        <span class="n">cbar</span><span class="o">.</span><span class="n">set_label</span><span class="p">(</span><span class="s1">&#39;Flux&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># Set labels and title</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;X Position&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Y Position&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Hexagonal Fiber Grid (No Interpolation)&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># Show the plot</span>
+    <span class="k">if</span> <span class="n">ds9plot</span><span class="p">:</span>
+        <span class="c1"># Display in DS9</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.QA</span><span class="w"> </span><span class="kn">import</span> <span class="n">plot_ds9</span>
+            <span class="n">plot_ds9</span><span class="p">(</span><span class="n">hex_grid</span><span class="p">,</span> <span class="n">samp</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error displaying in DS9: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+    
+    <span class="k">return</span> <span class="n">hex_grid</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

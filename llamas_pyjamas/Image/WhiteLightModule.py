@@ -741,28 +741,40 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     ydata = np.array([])
     flux = np.array([])
     
+    # Track all fiber positions for exclusion of dead fibers in interpolation
+    all_fiber_positions = []
+    dead_fiber_positions = []
+    
     for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
         # Get bench and side information
         bench = trace_obj.bench
         side = trace_obj.side
         channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
         
+        # Get dead fibers list
+        dead_fibers = trace_obj.dead_fibers if hasattr(trace_obj, 'dead_fibers') else []
+        benchside = f'{bench}{side}'
+        
         # Process each fiber
         for ifib in range(trace_obj.nfibers):
             # Get fiber mask from the trace object
             fiber_mask = trace_obj.fiberimg == ifib
             
-            if not np.any(fiber_mask):
-                continue  # Skip if no pixels for this fiber
-            
-            # Get bench-side identifier
-            benchside = f'{bench}{side}'
-            
+            # Store the fiber position regardless of whether it's dead
             try:
-                # Map fiber to physical coordinates
                 x, y = FiberMap_LUT(benchside, ifib)
                 if x == -1 and y == -1:
                     continue  # Skip if fiber mapping not found
+                
+                # Track all valid fiber positions
+                all_fiber_positions.append((x, y))
+                
+                # Track dead fiber positions separately
+                if ifib in dead_fibers or not np.any(fiber_mask):
+                    dead_fiber_positions.append((x, y))
+                    logger.info(f'Marking fiber {ifib} as dead on bench {benchside}')
+                    continue  # Skip further processing for dead fibers
+                
             except Exception as e:
                 logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
                 logger.error(traceback.format_exc())
@@ -771,12 +783,12 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
             # Sum the flux directly from masked values in the data
             thisflux = np.nansum(data[fiber_mask])
             
-            # Record the position and flux
+            # Record the position and flux for valid fibers
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata, x)
             ydata = np.append(ydata, y)
     
-    # Create interpolated image
+    # Create interpolated image using only valid fibers
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
     
     # Define grid for interpolation
@@ -788,11 +800,112 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     # Generate white light image
     whitelight = flux_interpolator(x_grid, y_grid)
     
+    # Explicitly mask out dead fiber positions in the interpolated image
+    if dead_fiber_positions:
+        logger.info(f'Masking {len(dead_fiber_positions)} dead fibers in white light image')
+        for dead_x, dead_y in dead_fiber_positions:
+            # Find the closest grid points to the dead fiber
+            x_idx = np.argmin(np.abs(xx - dead_x))
+            y_idx = np.argmin(np.abs(yy - dead_y))
+            
+            # Create a mask around the dead fiber position (use a small radius)
+            mask_radius = 2  # Adjust as needed
+            for i in range(-mask_radius, mask_radius+1):
+                for j in range(-mask_radius, mask_radius+1):
+                    if 0 <= y_idx+i < whitelight.shape[0] and 0 <= x_idx+j < whitelight.shape[1]:
+                        whitelight[y_idx+i, x_idx+j] = np.nan  # Set to NaN to make dead fibers visible
+    
     # Optional DS9 plot
     if ds9plot:
         plot_ds9(whitelight)
     
     return whitelight, xdata, ydata, flux
+
+# def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
+#     """
+#     Generate a white light image by directly summing unmasked fiber values without extraction.
+    
+#     Parameters:
+#     -----------
+#     trace_list : list
+#         A list of TraceLlamas objects containing the fiber trace information.
+#     data_list : list
+#         A list of data arrays corresponding to each trace object.
+#     metadata : list, optional
+#         Optional metadata for each trace/data pair.
+#     ds9plot : bool, optional
+#         If True, display the resulting white light image using DS9. Default is False.
+    
+#     Returns:
+#     --------
+#     tuple
+#         A tuple containing:
+#         - whitelight (numpy.ndarray): The interpolated white light image.
+#         - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
+#         - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
+#         - flux (numpy.ndarray): The flux values for each fiber.
+#     """
+
+#     xdata = np.array([])
+#     ydata = np.array([])
+#     flux = np.array([])
+    
+#     for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
+#         # Get bench and side information
+#         bench = trace_obj.bench
+#         side = trace_obj.side
+#         channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
+        
+#         #attempt to handle dead fibers
+#         dead_fibers = trace_obj.dead_fibers if hasattr(trace_obj, 'dead_fibers') else []
+
+#         # Process each fiber
+#         for ifib in range(trace_obj.nfibers):
+#             # Get fiber mask from the trace object
+#             fiber_mask = trace_obj.fiberimg == ifib
+
+#             if not np.any(fiber_mask) or ifib in dead_fibers:
+#                 logger.info(f'Skipping fiber {ifib} on bench {bench}{side}')
+#                 continue  # Skip if no pixels for this fiber
+            
+#             # Get bench-side identifier
+#             benchside = f'{bench}{side}'
+            
+#             try:
+#                 # Map fiber to physical coordinates
+#                 x, y = FiberMap_LUT(benchside, ifib)
+#                 if x == -1 and y == -1:
+#                     continue  # Skip if fiber mapping not found
+#             except Exception as e:
+#                 logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+#                 logger.error(traceback.format_exc())
+#                 continue
+            
+#             # Sum the flux directly from masked values in the data
+#             thisflux = np.nansum(data[fiber_mask])
+            
+#             # Record the position and flux
+#             flux = np.append(flux, thisflux)
+#             xdata = np.append(xdata, x)
+#             ydata = np.append(ydata, y)
+    
+#     # Create interpolated image
+#     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
+    
+#     # Define grid for interpolation
+#     subsample = 1.5
+#     xx = 1.0/subsample * np.arange(53*subsample)
+#     yy = 1.0/subsample * np.arange(53*subsample)
+#     x_grid, y_grid = np.meshgrid(xx, yy)
+    
+#     # Generate white light image
+#     whitelight = flux_interpolator(x_grid, y_grid)
+    
+#     # Optional DS9 plot
+#     if ds9plot:
+#         plot_ds9(whitelight)
+    
+#     return whitelight, xdata, ydata, flux
 
 def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
         """

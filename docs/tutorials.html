@@ -1,0 +1,329 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tutorials &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Examples" href="examples.html" />
+    <link rel="prev" title="Quick Start Guide" href="quickstart.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#basic-tutorials">Basic Tutorials</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-1-basic-data-reduction">Tutorial 1: Basic Data Reduction</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#step-1-data-organization">Step 1: Data Organization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-2-load-required-modules">Step 2: Load Required Modules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-3-process-bias-frames">Step 3: Process Bias Frames</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-2-advanced-extraction-techniques">Tutorial 2: Advanced Extraction Techniques</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-3-wavelength-calibration">Tutorial 3: Wavelength Calibration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-4-white-light-image-generation">Tutorial 4: White Light Image Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#advanced-topics">Advanced Topics</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-5-custom-reduction-scripts">Tutorial 5: Custom Reduction Scripts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-6-parallel-processing">Tutorial 6: Parallel Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-7-quality-assurance-analysis">Tutorial 7: Quality Assurance Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tutorial-8-advanced-data-products">Tutorial 8: Advanced Data Products</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#interactive-notebooks">Interactive Notebooks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#sample-data">Sample Data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#common-issues-and-solutions">Common Issues and Solutions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#getting-help">Getting Help</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Tutorials</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/tutorials.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="tutorials">
+<h1>Tutorials<a class="headerlink" href="#tutorials" title="Link to this heading"></a></h1>
+<p>This section provides detailed tutorials for using LLAMAS Pyjamas in various scenarios.</p>
+<section id="basic-tutorials">
+<h2>Basic Tutorials<a class="headerlink" href="#basic-tutorials" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+</div>
+</section>
+<section id="tutorial-1-basic-data-reduction">
+<h2>Tutorial 1: Basic Data Reduction<a class="headerlink" href="#tutorial-1-basic-data-reduction" title="Link to this heading"></a></h2>
+<p>This tutorial covers the fundamental steps of LLAMAS data reduction from raw FITS files to extracted spectra.</p>
+<p><strong>Prerequisites:</strong>
+- Raw LLAMAS FITS files (bias, flat, science, arc)
+- LLAMAS Pyjamas installed and working</p>
+<p><strong>Learning Objectives:</strong>
+- Understand the LLAMAS data reduction pipeline
+- Learn to process bias and flat field frames
+- Perform fiber tracing and spectral extraction
+- Generate quality assurance plots</p>
+<p><strong>Tutorial Files:</strong>
+The tutorial uses sample data that can be downloaded from the LLAMAS data repository.</p>
+<section id="step-1-data-organization">
+<h3>Step 1: Data Organization<a class="headerlink" href="#step-1-data-organization" title="Link to this heading"></a></h3>
+<p>First, organize your data files:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>data/
+├──<span class="w"> </span>bias/
+│<span class="w">   </span>├──<span class="w"> </span>bias_001.fits
+│<span class="w">   </span>├──<span class="w"> </span>bias_002.fits
+│<span class="w">   </span>└──<span class="w"> </span>bias_003.fits
+├──<span class="w"> </span>flats/
+│<span class="w">   </span>├──<span class="w"> </span>flat_blue_001.fits
+│<span class="w">   </span>├──<span class="w"> </span>flat_green_001.fits
+│<span class="w">   </span>└──<span class="w"> </span>flat_red_001.fits
+├──<span class="w"> </span>science/
+│<span class="w">   </span>└──<span class="w"> </span>target_observation.fits
+└──<span class="w"> </span>arcs/
+<span class="w">    </span>└──<span class="w"> </span>thar_calibration.fits
+</pre></div>
+</div>
+</section>
+<section id="step-2-load-required-modules">
+<h3>Step 2: Load Required Modules<a class="headerlink" href="#step-2-load-required-modules" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="c1"># LLAMAS modules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Bias</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasBias</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.File</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasIO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace</span><span class="w"> </span><span class="kn">import</span> <span class="n">traceLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Extract</span><span class="w"> </span><span class="kn">import</span> <span class="n">extractLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.QA</span><span class="w"> </span><span class="kn">import</span> <span class="n">llamasQA</span>
+</pre></div>
+</div>
+</section>
+<section id="step-3-process-bias-frames">
+<h3>Step 3: Process Bias Frames<a class="headerlink" href="#step-3-process-bias-frames" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># List all bias files</span>
+<span class="n">bias_files</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;data/bias/bias_001.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;data/bias/bias_002.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;data/bias/bias_003.fits&#39;</span><span class="p">]</span>
+
+<span class="c1"># Create master bias</span>
+<span class="n">bias_processor</span> <span class="o">=</span> <span class="n">llamasBias</span><span class="o">.</span><span class="n">BiasLlamas</span><span class="p">()</span>
+<span class="n">master_bias</span> <span class="o">=</span> <span class="n">bias_processor</span><span class="o">.</span><span class="n">master_bias</span><span class="p">(</span><span class="n">bias_files</span><span class="p">)</span>
+
+<span class="c1"># Quality check: plot master bias</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">master_bias</span><span class="p">,</span> <span class="n">vmin</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s1">&#39;ADU&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Master Bias Frame&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Continue with the remaining steps…</p>
+</section>
+</section>
+<section id="tutorial-2-advanced-extraction-techniques">
+<h2>Tutorial 2: Advanced Extraction Techniques<a class="headerlink" href="#tutorial-2-advanced-extraction-techniques" title="Link to this heading"></a></h2>
+<p>This tutorial explores advanced spectral extraction methods and optimization techniques.</p>
+<p><strong>Topics Covered:</strong>
+- Optimal vs. boxcar extraction comparison
+- Profile fitting optimization
+- Handling problematic fibers
+- Parallel processing with Ray</p>
+</section>
+<section id="tutorial-3-wavelength-calibration">
+<h2>Tutorial 3: Wavelength Calibration<a class="headerlink" href="#tutorial-3-wavelength-calibration" title="Link to this heading"></a></h2>
+<p>Learn to perform precise wavelength calibration using ThAr arc lamps.</p>
+<p><strong>Topics Covered:</strong>
+- Arc line identification
+- Wavelength solution fitting
+- Quality assessment of calibrations
+- Troubleshooting calibration issues</p>
+</section>
+<section id="tutorial-4-white-light-image-generation">
+<h2>Tutorial 4: White Light Image Generation<a class="headerlink" href="#tutorial-4-white-light-image-generation" title="Link to this heading"></a></h2>
+<p>Create publication-quality white light images and fiber maps.</p>
+<p><strong>Topics Covered:</strong>
+- Generating white light FITS files
+- Creating fiber maps and overlays
+- Advanced visualization techniques
+- Exporting images for publication</p>
+</section>
+<section id="advanced-topics">
+<h2>Advanced Topics<a class="headerlink" href="#advanced-topics" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+</div>
+</section>
+<section id="tutorial-5-custom-reduction-scripts">
+<h2>Tutorial 5: Custom Reduction Scripts<a class="headerlink" href="#tutorial-5-custom-reduction-scripts" title="Link to this heading"></a></h2>
+<p>Learn to create custom reduction scripts for specific observing programs.</p>
+</section>
+<section id="tutorial-6-parallel-processing">
+<h2>Tutorial 6: Parallel Processing<a class="headerlink" href="#tutorial-6-parallel-processing" title="Link to this heading"></a></h2>
+<p>Optimize processing speed using Ray for large datasets.</p>
+</section>
+<section id="tutorial-7-quality-assurance-analysis">
+<h2>Tutorial 7: Quality Assurance Analysis<a class="headerlink" href="#tutorial-7-quality-assurance-analysis" title="Link to this heading"></a></h2>
+<p>Comprehensive QA analysis and problem diagnosis.</p>
+</section>
+<section id="tutorial-8-advanced-data-products">
+<h2>Tutorial 8: Advanced Data Products<a class="headerlink" href="#tutorial-8-advanced-data-products" title="Link to this heading"></a></h2>
+<p>Generate advanced data products and perform scientific analysis.</p>
+</section>
+<section id="interactive-notebooks">
+<h2>Interactive Notebooks<a class="headerlink" href="#interactive-notebooks" title="Link to this heading"></a></h2>
+<p>Interactive Jupyter notebooks are available in the <code class="docutils literal notranslate"><span class="pre">llamas_pyjamas/Tutorials/</span></code> directory:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">llamas_extraction_demo.ipynb</span></code> - Basic extraction walkthrough</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LUT_and_master_cals.ipynb</span></code> - Working with lookup tables and master calibrations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cal_plots.ipynb</span></code> - Calibration plotting and analysis</p></li>
+</ul>
+<p>To run these notebooks:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>llamas_pyjamas/Tutorials
+jupyter<span class="w"> </span>notebook
+</pre></div>
+</div>
+</section>
+<section id="sample-data">
+<h2>Sample Data<a class="headerlink" href="#sample-data" title="Link to this heading"></a></h2>
+<p>Sample datasets for tutorials can be downloaded from:</p>
+<ul class="simple">
+<li><p>Basic reduction dataset (500 MB): <code class="docutils literal notranslate"><span class="pre">tutorials/basic_reduction_data.tar.gz</span></code></p></li>
+<li><p>Advanced extraction dataset (1.2 GB): <code class="docutils literal notranslate"><span class="pre">tutorials/advanced_extraction_data.tar.gz</span></code></p></li>
+<li><p>Full observing sequence (3.5 GB): <code class="docutils literal notranslate"><span class="pre">tutorials/full_sequence_data.tar.gz</span></code></p></li>
+</ul>
+<p>Each dataset includes:
+- Raw FITS files
+- Expected output products
+- Validation scripts
+- Detailed README with observing conditions</p>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading"></a></h2>
+<section id="common-issues-and-solutions">
+<h3>Common Issues and Solutions<a class="headerlink" href="#common-issues-and-solutions" title="Link to this heading"></a></h3>
+<p><strong>Problem:</strong> Fiber tracing fails
+<strong>Solution:</strong> Check flat field quality and adjust detection thresholds</p>
+<p><strong>Problem:</strong> Poor wavelength calibration
+<strong>Solution:</strong> Verify arc lamp exposure time and line identification</p>
+<p><strong>Problem:</strong> Extraction artifacts
+<strong>Solution:</strong> Examine profile fits and adjust extraction parameters</p>
+<p><strong>Problem:</strong> Memory issues with large datasets
+<strong>Solution:</strong> Enable parallel processing or process subsets</p>
+</section>
+<section id="getting-help">
+<h3>Getting Help<a class="headerlink" href="#getting-help" title="Link to this heading"></a></h3>
+<p>If you encounter issues with the tutorials:</p>
+<ol class="arabic simple">
+<li><p>Check the troubleshooting section above</p></li>
+<li><p>Review the API documentation for function details</p></li>
+<li><p>Post questions on the GitHub issues page</p></li>
+<li><p>Contact the development team</p></li>
+</ol>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="quickstart.html" class="btn btn-neutral float-left" title="Quick Start Guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="examples.html" class="btn btn-neutral float-right" title="Examples" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
