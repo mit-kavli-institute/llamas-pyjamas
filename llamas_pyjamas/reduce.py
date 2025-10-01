@@ -70,9 +70,9 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
     assert os.path.exists(green_flat), "Green flat file does not exist."
     assert os.path.exists(blue_flat), "Blue flat file does not exist."
 
-    run_ray_tracing(red_flat, outpath=output_dir, channel='red', use_bias=bias)
-    run_ray_tracing(green_flat, outpath=output_dir, channel='green', use_bias=bias)
-    run_ray_tracing(blue_flat, outpath=output_dir, channel='blue', use_bias=bias)
+    run_ray_tracing(red_flat, outpath=output_dir, channel='red', use_bias=bias, is_master_calib=False)
+    run_ray_tracing(green_flat, outpath=output_dir, channel='green', use_bias=bias, is_master_calib=False)
+    run_ray_tracing(blue_flat, outpath=output_dir, channel='blue', use_bias=bias, is_master_calib=False)
     print(f"Traces generated and saved to {output_dir}")
 
     return
