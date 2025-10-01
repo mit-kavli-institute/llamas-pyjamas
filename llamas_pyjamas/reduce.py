@@ -877,7 +877,7 @@ def main(config_path):
         
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
-        if config.get('apply_flat_field_correction', True):  # Default to True
+        if config.get('apply_flat_field_correction', False):  # Default to True
             print("\n" + "="*60)
             print("FLAT FIELD PROCESSING")
             print("="*60)
