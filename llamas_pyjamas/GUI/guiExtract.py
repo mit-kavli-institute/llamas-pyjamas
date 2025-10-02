@@ -17,7 +17,10 @@ from pathlib import Path
 
 from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
-from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
+import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
+import sys
+sys.modules['traceLlamasMaster'] = traceLlamasMaster
 
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions, load_extractions
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, WhiteLightQuickLook
@@ -49,16 +52,16 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
         return None
     
     hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
-    print(hdu_trace_pairs)
+    logger.debug(f"HDU trace pairs: {hdu_trace_pairs}")
 
     extraction_list = []
 
-    print(f"Saving extractions to {extraction_file}")
+    logger.info(f"Saving extractions to {extraction_file}")
 
     counter = 1
     for hdu_index, file in hdu_trace_pairs:
 
-        print(f"Extracting extension number {counter} of 24")
+        logger.debug(f"Extracting extension number {counter} of 24")
         hdr = hdu[hdu_index].header 
         bias = np.nanmedian(hdu[hdu_index].data.astype(float))  
         
@@ -70,25 +73,61 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
             extraction_list.append(extraction)
             
         except Exception as e:
-            print(f"Error extracting trace from {file}")
-            print(traceback.format_exc())
+            logger.error(f"Error extracting trace from {file}")
+            logger.error(traceback.format_exc())
         counter += 1
         
-    print(f'Extraction list = {extraction_list}')        
+    logger.debug(f'Extraction list = {extraction_list}')        
     filename = save_extractions(extraction_list, savefile=extraction_file)
-    print(f'extraction saved filename = {filename}')
+    logger.info(f'extraction saved filename = {filename}')
 
     return None
+
+
+def get_trace_file(channel, bench, side, trace_dir):
+    """
+    Find trace file for specific camera configuration.
+
+    Args:
+        channel: Color channel (red/green/blue)
+        bench: Bench number
+        side: Side letter (A/B)
+        trace_dir: Directory containing trace files
+
+    Returns:
+        str: Path to trace file
+
+    Raises:
+        FileNotFoundError: If trace file not found
+    """
+    # Standard trace file naming: LLAMAS_master_{channel}_{bench}_{side}_traces.pkl
+    trace_filename = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+    trace_path = os.path.join(trace_dir, trace_filename)
+
+    if os.path.exists(trace_path):
+        return trace_path
+
+    # Try alternate naming without "master"
+    alt_filename = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+    alt_path = os.path.join(trace_dir, alt_filename)
+
+    if os.path.exists(alt_path):
+        return alt_path
+
+    raise FileNotFoundError(
+        f"Trace file not found for {channel}{bench}{side} in {trace_dir}\n"
+        f"  Tried: {trace_filename}, {alt_filename}"
+    )
 
 
 def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     """Match HDU extensions to their corresponding trace files"""
     matches = []
-    
+
     # Skip primary HDU (index 0)
     #### need to be super careful with this starting index
     for idx in range(start_idx, len(hdu_list)):
-        
+
         header = hdu_list[idx].header
 
         # Get color and benchside from header
@@ -104,10 +143,10 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
         benchside = f"{bench}{side}"
         pattern = f"{color}_{bench}_{side}_traces"
-        
+
         # Find matching trace file
         matching_trace = next(
-            (tf for tf in trace_files 
+            (tf for tf in trace_files
              if pattern in os.path.basename(tf)),
             None
         )
@@ -115,8 +154,8 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
         if matching_trace:
             matches.append((idx, matching_trace))
         else:
-            print(f"No matching trace found for HDU {idx}: {color} {benchside}")
-            
+            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}")
+
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
@@ -155,9 +194,9 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
         
         bias_data = bias.data #np.median(bias.data[20:50])
             
-        # Load the trace object from the pickle file.
+        # Load the trace object from the pickle file using cloudpickle for better compatibility
         with open(trace_file, mode='rb') as f:
-            tracer = pickle.load(f)
+            tracer = cloudpickle.load(f)
         # Create an ExtractLlamas object; note the subtraction of the bias.
         if (method == 'optimal'):
             extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
@@ -165,31 +204,43 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
             extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
         return extraction
     except Exception as e:
-        print(f"Error extracting trace from {trace_file}")
-        print(traceback.format_exc())
+        logger.error(f"Error extracting trace from {trace_file}")
+        logger.error(traceback.format_exc())
         return None
 
 
 def make_writable(extraction_obj):
     """Convert a Ray-returned extraction object to a writable version."""
     import copy
-    import pickle
     
-    # First approach: Deep copy
+    # First approach: Fix class references for TraceRay objects
+    try:
+        if hasattr(extraction_obj, 'tracer') and hasattr(extraction_obj.tracer, '__class__'):
+            tracer_class = extraction_obj.tracer.__class__
+            if tracer_class.__name__ == 'TraceRay' and tracer_class.__module__ == 'traceLlamasMaster':
+                # Replace the tracer with a corrected class reference
+                correct_class = sys.modules['traceLlamasMaster'].TraceRay
+                if tracer_class is not correct_class:
+                    # Create a new object with the correct class
+                    extraction_obj.tracer.__class__ = correct_class
+    except Exception as e:
+        logger.warning(f"Could not fix tracer class reference: {e}")
+    
+    # Second approach: Deep copy
     try:
         return copy.deepcopy(extraction_obj)
     except:
         pass
     
-    # Second approach: Pickle and unpickle
+    # Third approach: Cloudpickle and unpickle for better compatibility
     try:
         # This forces a complete serialization and deserialization
-        pickled = pickle.dumps(extraction_obj)
-        return pickle.loads(pickled)
+        pickled = cloudpickle.dumps(extraction_obj)
+        return cloudpickle.loads(pickled)
     except:
         pass
     
-    # Third approach: If the object has a to_dict method, use it
+    # Fourth approach: If the object has a to_dict method, use it
     if hasattr(extraction_obj, 'to_dict') and callable(extraction_obj.to_dict):
         try:
             obj_dict = extraction_obj.to_dict()
@@ -200,7 +251,7 @@ def make_writable(extraction_obj):
             pass
     
     # If all else fails, return the original object and log a warning
-    print(f"Warning: Could not make object of type {type(extraction_obj)} writable")
+    logger.warning(f"Could not make object of type {type(extraction_obj)} writable")
     return extraction_obj
 
 
@@ -208,17 +259,26 @@ def make_writable(extraction_obj):
 ##Main function currently used by the Quicklook for full extraction
 
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None, mastercalib_trace_dir=None) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
+
+    Supports hybrid trace selection: uses user traces for real camera data and
+    mastercalib traces for placeholder extensions (missing cameras).
+
     Parameters:
     file (str): Path to the FITS file to be processed. Must have a .fits extension.
     flatfiles (str, optional): Path to the flat files for generating new traces. Defaults to None.
-    biasfiles (str, optional): Path to the bias files for calibration. Defaults to None.
-    
+    output_dir (str, optional): Output directory for extraction files. Defaults to None.
+    use_bias (str, optional): Path to bias file for calibration. Defaults to None.
+    method (str, optional): Extraction method ('optimal' or 'boxcar'). Defaults to 'optimal'.
+    trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
+    mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
+                                           Defaults to CALIB_DIR if None.
+
     Returns:
-    None
+    Tuple[str, int]: (extraction_file_path, number_of_placeholder_extensions)
     """
     start_time = time.perf_counter()  # Start timer
     
@@ -255,9 +315,12 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         }
 
         # Initialize Ray
-        num_cpus = 8
+        num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
         ray.shutdown()
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
+
+        # Import placeholder detection utilities
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
 
         #opening the fitsfile
         hdu = process_fits_by_color(file)
@@ -283,18 +346,64 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         print(f'masterfile = {masterfile}')
         print(f'Bias file is {masterbiasfile}')
 
+        # Default mastercalib location
+        if mastercalib_trace_dir is None:
+            mastercalib_trace_dir = CALIB_DIR
+
+        # Set default user trace directory
         if not trace_dir:
-            trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+            trace_dir = CALIB_DIR
+            print(f'No trace_dir specified, using CALIB_DIR: {CALIB_DIR}')
         else:
-            trace_files = glob.glob(os.path.join(trace_dir, f'{masterfile}*traces.pkl'))
-        print(f'Using master traces {trace_files}')
-        
-        #Running the extract routine
-        #This code should isolate to only the traces for the given fitsfile
-        
+            print(f'Using specified trace_dir: {trace_dir}')
+
+        # Identify placeholder extensions
+        placeholder_indices = get_placeholder_extension_indices(file)
+
+        if placeholder_indices:
+            print(f"\n{'='*60}")
+            print(f"HYBRID TRACE EXTRACTION")
+            print(f"{'='*60}")
+            print(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
+            print(f"  Real extensions: Will use traces from {trace_dir}")
+            print(f"  Placeholder extensions: Will use mastercalib traces from {mastercalib_trace_dir}")
+            print(f"{'='*60}\n")
+
+        #Running the extract routine with hybrid trace selection
         extraction_list = []
-        
-        hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
+
+        # Build HDU-trace pairs with per-extension trace directory selection
+        hdu_trace_pairs = []
+        for idx in range(1, len(hdu)):
+            header = hdu[idx].header
+
+            # Get camera configuration
+            if 'COLOR' in header:
+                channel = header['COLOR'].lower()
+                bench = header['BENCH']
+                side = header['SIDE']
+            else:
+                camname = header['CAM_NAME']
+                channel = camname.split('_')[1].lower()
+                bench = camname.split('_')[0][0]
+                side = camname.split('_')[0][1]
+
+            # Select trace directory based on placeholder status
+            if idx in placeholder_indices:
+                active_trace_dir = mastercalib_trace_dir
+                trace_source = "mastercalib"
+            else:
+                active_trace_dir = trace_dir
+                trace_source = "user"
+
+            # Find trace file
+            try:
+                trace_file = get_trace_file(channel, bench, side, active_trace_dir)
+                hdu_trace_pairs.append((idx, trace_file))
+                print(f"  Extension {idx:2d} ({channel:5s}{bench}{side}): Using {trace_source:12s} trace")
+            except FileNotFoundError as e:
+                logger.error(f"  Extension {idx:2d} ({channel:5s}{bench}{side}): Trace file not found - {e}")
+                # Don't add to pairs - will skip this extension
         #print(hdu_trace_pairs)
 
         ### Testing ray usage
@@ -348,11 +457,22 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         outfile = basefile+'_whitelight.fits'
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
-    
+
+        # Summary statistics
+        if placeholder_indices:
+            real_count = len(hdu_trace_pairs) - len(placeholder_indices)
+            print(f"\n{'='*60}")
+            print(f"EXTRACTION SUMMARY")
+            print(f"{'='*60}")
+            print(f"Total extracted: {len(extraction_list)} spectra")
+            print(f"  Real camera data: {real_count} spectra (user traces)")
+            print(f"  Placeholder data: {len(placeholder_indices)} spectra (mastercalib traces)")
+            print(f"{'='*60}\n")
+
     except Exception as e:
         traceback.print_exc()
         return
-    
+
     end_time = time.perf_counter()  # End timer
     elapsed = end_time - start_time
     # Log or print out the elapsed time

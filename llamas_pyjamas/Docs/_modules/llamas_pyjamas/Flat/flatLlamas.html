@@ -1,0 +1,693 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Flat.flatLlamas &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Flat.flatLlamas</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Flat.flatLlamas</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Trace.traceLlamasMaster</span> <span class="kn">import</span> <span class="n">TraceLlamas</span>
+<span class="kn">from</span> <span class="nn">Image.WhiteLightModule</span> <span class="kn">import</span> <span class="n">WhiteLightFits</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span> <span class="nn">llamas_pyjamas.GUI.guiExtract</span> <span class="k">as</span> <span class="nn">ge</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.config</span> <span class="kn">import</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Flat.flatProcessing</span> <span class="kn">import</span> <span class="n">produce_flat_extractions</span>
+
+<span class="kn">from</span> <span class="nn">scipy.interpolate</span> <span class="kn">import</span> <span class="n">BSpline</span><span class="p">,</span> <span class="n">make_interp_spline</span>
+<span class="kn">from</span> <span class="nn">pypeit.core.fitting</span> <span class="kn">import</span> <span class="n">iterfit</span>
+<span class="kn">from</span> <span class="nn">pypeit</span> <span class="kn">import</span> <span class="n">bspline</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+
+<span class="c1"># Set up logging</span>
+<span class="n">log_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="s1">&#39;logs&#39;</span><span class="p">)</span>
+<span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="n">log_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;flatLlamas_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+
+<span class="c1"># Configure the logger</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;flatLlamas&#39;</span><span class="p">)</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+
+<span class="c1"># Create handlers</span>
+<span class="n">file_handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">FileHandler</span><span class="p">(</span><span class="n">log_file</span><span class="p">)</span>
+<span class="n">console_handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
+
+<span class="c1"># Set levels</span>
+<span class="n">file_handler</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+<span class="n">console_handler</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+
+<span class="c1"># Create formatters</span>
+<span class="n">file_formatter</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%(asctime)s</span><span class="s1"> - </span><span class="si">%(name)s</span><span class="s1"> - </span><span class="si">%(levelname)s</span><span class="s1"> - </span><span class="si">%(message)s</span><span class="s1">&#39;</span><span class="p">)</span>
+<span class="n">console_formatter</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%(levelname)s</span><span class="s1">: </span><span class="si">%(message)s</span><span class="s1">&#39;</span><span class="p">)</span>
+
+<span class="c1"># Add formatters to handlers</span>
+<span class="n">file_handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">file_formatter</span><span class="p">)</span>
+<span class="n">console_handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">console_formatter</span><span class="p">)</span>
+
+<span class="c1"># Add handlers to logger</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">file_handler</span><span class="p">)</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">console_handler</span><span class="p">)</span>
+
+<span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Logging initialized. Log file: </span><span class="si">{</span><span class="n">log_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="fit_spectrum_to_xshift">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.fit_spectrum_to_xshift">[docs]</a>
+<span class="k">def</span> <span class="nf">fit_spectrum_to_xshift</span><span class="p">(</span><span class="n">extraction</span><span class="p">,</span> <span class="n">fiber_index</span><span class="p">,</span> <span class="n">maxiter</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">bkspace</span><span class="o">=</span><span class="mf">0.5</span><span class="p">):</span>
+    <span class="c1"># Get the xshift and counts data for a specific fiber</span>
+    <span class="n">xshift</span> <span class="o">=</span> <span class="n">extraction</span><span class="o">.</span><span class="n">xshift</span><span class="p">[</span><span class="n">fiber_index</span><span class="p">,</span> <span class="p">:]</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">extraction</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">fiber_index</span><span class="p">,</span> <span class="p">:]</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Fitting fiber </span><span class="si">{</span><span class="n">fiber_index</span><span class="si">}</span><span class="s2"> with xshift shape </span><span class="si">{</span><span class="n">xshift</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Remove any NaN values that might cause fitting issues</span>
+    <span class="c1"># valid_indices = ~np.isnan(counts) &amp; ~np.isnan(xshift)</span>
+    <span class="c1"># xshift_clean = xshift[valid_indices]</span>
+    <span class="c1"># counts_clean = counts[valid_indices]</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;After NaN removal: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">xshift</span><span class="p">)</span><span class="si">}</span><span class="s2"> valid points&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Using pypeit&#39;s iterfit (more robust for spectral data)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">sset</span><span class="p">,</span> <span class="n">outmask</span> <span class="o">=</span> <span class="n">iterfit</span><span class="p">(</span>
+            <span class="n">xshift</span><span class="p">,</span> <span class="n">counts</span><span class="p">,</span> 
+            <span class="n">maxiter</span><span class="o">=</span><span class="n">maxiter</span><span class="p">,</span>
+            <span class="n">kwargs_bspline</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;bkspace&#39;</span><span class="p">:</span> <span class="n">bkspace</span><span class="p">}</span>  <span class="c1"># Adjust bkspace based on your data sampling</span>
+        <span class="p">)</span>
+        
+        <span class="c1"># Create an evaluation grid with finer sampling if needed</span>
+        <span class="n">xmodel</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">xshift</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">xshift</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">xshift</span><span class="p">))</span>
+
+        <span class="n">y_fit</span> <span class="o">=</span> <span class="n">sset</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="n">xmodel</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Fit successful for fiber </span><span class="si">{</span><span class="n">fiber_index</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;xshift_clean&#39;</span><span class="p">:</span> <span class="n">xshift</span><span class="p">,</span>
+            <span class="s1">&#39;counts_clean&#39;</span><span class="p">:</span> <span class="n">counts</span><span class="p">,</span>
+            <span class="s1">&#39;xmodel&#39;</span><span class="p">:</span> <span class="n">xmodel</span><span class="p">,</span>
+            <span class="s1">&#39;y_fit&#39;</span><span class="p">:</span> <span class="n">y_fit</span><span class="p">,</span>
+            <span class="s1">&#39;bspline_model&#39;</span><span class="p">:</span> <span class="n">sset</span>  <span class="c1"># The pypeit bspline model object</span>
+        <span class="p">}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error fitting fiber </span><span class="si">{</span><span class="n">fiber_index</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">raise</span></div>
+
+
+
+
+<div class="viewcode-block" id="LlamasFlatFielding">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding">[docs]</a>
+<span class="k">class</span> <span class="nc">LlamasFlatFielding</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Class for handling flat field processing in LLAMAS observations.</span>
+
+<span class="sd">    This class provides functionality for creating normalized flat field images</span>
+<span class="sd">    and applying flat field corrections to white light images.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+<div class="viewcode-block" id="LlamasFlatFielding.__init__">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">-&gt;</span><span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the LlamasFlatFielding object.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Initializing LlamasFlatFielding&quot;</span><span class="p">)</span>
+        <span class="k">pass</span></div>
+
+    
+    
+<div class="viewcode-block" id="LlamasFlatFielding.flatcube">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding.flatcube">[docs]</a>
+    <span class="k">def</span> <span class="nf">flatcube</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extraction_list</span><span class="p">:</span> <span class="nb">list</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">outputname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Produce a normalized flat field image using the WhiteLightFits class.</span>
+
+<span class="sd">        This method creates a normalized flat field cube by processing extracted </span>
+<span class="sd">        fiber data and normalizing each HDU by its maximum value.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            extraction_list (list, optional): List of extracted fibers from a flat </span>
+<span class="sd">                field image. Defaults to None.</span>
+<span class="sd">            outputname (str, optional): Name for the output FITS file. If None, </span>
+<span class="sd">                defaults to &#39;normalized_flat.fits&#39;. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str: Output filename of the saved normalized flat field.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Creating flat cube with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">extraction_list</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="mi">0</span><span class="si">}</span><span class="s2"> extractions&quot;</span><span class="p">)</span>
+        
+        <span class="n">hdul</span> <span class="o">=</span> <span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># Log HDU structure</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flat cube contains </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hdul</span><span class="p">)</span><span class="si">}</span><span class="s2"> HDUs&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">hdul</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HDU </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: Primary&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Extract key header information</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">bench</span> <span class="o">=</span> <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;BENCH&#39;</span><span class="p">,</span> <span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span>
+                    <span class="n">side</span> <span class="o">=</span> <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;SIDE&#39;</span><span class="p">,</span> <span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span>
+                    <span class="n">color</span> <span class="o">=</span> <span class="n">hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;COLOR&#39;</span><span class="p">,</span> <span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HDU </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Couldn&#39;t extract header info for HDU </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+        <span class="c1"># Normalize each image data in the HDU list</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">hdul</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">max_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">max_val</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">/</span> <span class="n">max_val</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Normalized HDU </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> with max value </span><span class="si">{</span><span class="n">max_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HDU </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> has max value of 0, skipping normalization&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Save the normalized HDU list as a new FITS file</span>
+        <span class="k">if</span> <span class="n">outputname</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">outputname</span> <span class="o">=</span> <span class="s1">&#39;normalized_flat.fits&#39;</span>
+            
+        <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outputname</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flat cube saved to </span><span class="si">{</span><span class="n">outputname</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">outputname</span></div>
+
+        
+    
+<div class="viewcode-block" id="LlamasFlatFielding.flatFieldImage">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding.flatFieldImage">[docs]</a>
+    <span class="k">def</span> <span class="nf">flatFieldImage</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">whitelight_fits</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">flatcube_fits</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">outputname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply flat field correction by dividing white light image by flat field.</span>
+
+<span class="sd">        This method performs flat field correction by dividing a white light image </span>
+<span class="sd">        by a corresponding flat field image, handling matching of bench sides and </span>
+<span class="sd">        colors, and protecting against division by zero.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            whitelight_fits (str): Path to the white light FITS image.</span>
+<span class="sd">            flatcube_fits (str): Path to the flat field FITS image.</span>
+<span class="sd">            outputname (str, optional): Filename for the normalized output image. </span>
+<span class="sd">                If None, defaults to &#39;normalized_whitelight.fits&#39;. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str: Path to the saved flat-fielded image.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flat-fielding </span><span class="si">{</span><span class="n">whitelight_fits</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="n">flatcube_fits</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Open the white light and flat field FITS files</span>
+        <span class="n">white_hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">whitelight_fits</span><span class="p">)</span>
+        <span class="n">flat_hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">flatcube_fits</span><span class="p">)</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;White light file has </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">white_hdul</span><span class="p">)</span><span class="si">}</span><span class="s2"> extensions&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flat field file has </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">flat_hdul</span><span class="p">)</span><span class="si">}</span><span class="s2"> extensions&quot;</span><span class="p">)</span>
+
+        <span class="n">new_hdus</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Loop over paired HDUs from both files</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">white_hdu</span><span class="p">,</span> <span class="n">flat_hdu</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">white_hdul</span><span class="p">,</span> <span class="n">flat_hdul</span><span class="p">)):</span>
+            <span class="n">bench_white</span> <span class="o">=</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BENCHSIDE&quot;</span><span class="p">)</span>
+            <span class="n">bench_flat</span> <span class="o">=</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BENCHSIDE&quot;</span><span class="p">)</span>
+            <span class="n">colour_white</span> <span class="o">=</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;COLOUR&quot;</span><span class="p">)</span>
+            <span class="n">colour_flat</span> <span class="o">=</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;COLOUR&quot;</span><span class="p">)</span>
+            
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: White=</span><span class="si">{</span><span class="n">bench_white</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">colour_white</span><span class="si">}</span><span class="s2">, Flat=</span><span class="si">{</span><span class="n">bench_flat</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">colour_flat</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Only process if both hdu&#39;s have matching benchside and colour keywords</span>
+            <span class="k">if</span> <span class="n">bench_white</span> <span class="o">!=</span> <span class="n">bench_flat</span> <span class="ow">or</span> <span class="n">colour_white</span> <span class="o">!=</span> <span class="n">colour_flat</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Skipping extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> due to mismatched benchside or color&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Ensure both have valid data arrays</span>
+            <span class="k">if</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Divide and protect against division by zero (assign NaN where flat data is zero)</span>
+                <span class="n">divided</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">divide</span><span class="p">(</span>
+                    <span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                    <span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                    <span class="n">out</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">),</span>
+                    <span class="n">where</span><span class="o">=</span><span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">!=</span> <span class="mi">0</span>
+                <span class="p">)</span>
+                
+                <span class="n">zero_count</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">zero_count</span><span class="si">}</span><span class="s2"> zero values in flat field&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Normalize the result: divide by the maximum value if it is nonzero</span>
+                <span class="n">max_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">divided</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">max_val</span> <span class="ow">and</span> <span class="n">max_val</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">divided</span> <span class="o">/=</span> <span class="n">max_val</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: Normalized with max value </span><span class="si">{</span><span class="n">max_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: Max value is 0 or NaN, skipping normalization&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Create a new Image HDU with the result using the white light header</span>
+                <span class="n">new_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">divided</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+                <span class="n">new_hdus</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_hdu</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: Added to output&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Package the new HDUs into a new HDUList.</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Created </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">new_hdus</span><span class="p">)</span><span class="si">}</span><span class="s2"> HDUs for output&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Use the first new HDU as PrimaryHDU</span>
+        <span class="k">if</span> <span class="n">new_hdus</span><span class="p">:</span>
+            <span class="n">primary</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">new_hdus</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">new_hdus</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">)</span>
+            <span class="n">hdulist</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">primary</span><span class="p">]</span> <span class="o">+</span> <span class="n">new_hdus</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;No valid HDUs were created, creating empty output&quot;</span><span class="p">)</span>
+            <span class="n">hdulist</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">()])</span>
+
+        <span class="k">if</span> <span class="n">outputname</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">outputname</span> <span class="o">=</span> <span class="s1">&#39;normalized_whitelight.fits&#39;</span>
+
+        <span class="n">hdulist</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outputname</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saved flat-fielded image to </span><span class="si">{</span><span class="n">outputname</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">white_hdul</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">flat_hdul</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">outputname</span></div>
+</div>
+
+        
+<div class="viewcode-block" id="Thresholding">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding">[docs]</a>
+<span class="k">class</span> <span class="nc">Thresholding</span><span class="p">():</span>
+
+<div class="viewcode-block" id="Thresholding.__init__">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">red_flat_file</span><span class="p">,</span> <span class="n">green_flat_file</span><span class="p">,</span> <span class="n">blue_flat_file</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">trace_dir</span><span class="o">=</span><span class="n">CALIB_DIR</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">red_flat_file</span> <span class="o">=</span> <span class="n">red_flat_file</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">green_flat_file</span> <span class="o">=</span> <span class="n">green_flat_file</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">blue_flat_file</span> <span class="o">=</span> <span class="n">blue_flat_file</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">use_bias</span> <span class="o">=</span> <span class="n">use_bias</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span> <span class="o">=</span> <span class="n">output_dir</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">trace_dir</span> <span class="o">=</span> <span class="n">trace_dir</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Initializing Thresholding with files:&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Red: </span><span class="si">{</span><span class="n">red_flat_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Green: </span><span class="si">{</span><span class="n">green_flat_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Blue: </span><span class="si">{</span><span class="n">blue_flat_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Use bias: </span><span class="si">{</span><span class="n">use_bias</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Output directory: </span><span class="si">{</span><span class="n">output_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Trace directory: </span><span class="si">{</span><span class="n">trace_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="kc">None</span></div>
+
+    
+
+    
+<div class="viewcode-block" id="Thresholding.calculate_fits_all_extensions">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding.calculate_fits_all_extensions">[docs]</a>
+    <span class="k">def</span> <span class="nf">calculate_fits_all_extensions</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extraction_file</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate pixel thresholds for flat fielding.</span>
+
+<span class="sd">        This method calculates the pixel thresholds based on the flat field data</span>
+<span class="sd">        and returns the threshold values.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list: List of threshold values for each pixel.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Calculating fits for all extensions in </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Load the extraction data</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">extraction_data</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Successfully loaded extraction data&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to load extraction data: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">raise</span>
+        
+        <span class="n">extract_objs</span> <span class="o">=</span> <span class="n">extraction_data</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">extraction_data</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">extract_objs</span><span class="p">)</span><span class="si">}</span><span class="s2"> extraction objects&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">meta</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">metadata</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extension </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bench&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span><span class="si">}{</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;side&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;channel&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Dictionary to store results</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+        
+        <span class="k">for</span> <span class="n">ext_idx</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">extract_objs</span><span class="p">):</span>
+            
+            <span class="c1"># Assuming item has a &#39;counts&#39; attribute which is a 2D array</span>
+            
+            <span class="n">ext_metadata</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="n">ext_idx</span><span class="p">]</span>
+            <span class="n">benchside</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ext_metadata</span><span class="p">[</span><span class="s1">&#39;bench&#39;</span><span class="p">]</span><span class="si">}{</span><span class="n">ext_metadata</span><span class="p">[</span><span class="s1">&#39;side&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">channel</span> <span class="o">=</span> <span class="n">ext_metadata</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span>
+            
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing extension </span><span class="si">{</span><span class="n">ext_idx</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Create a key for this combination</span>
+            <span class="n">ext_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">channel</span><span class="si">}{</span><span class="n">benchside</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">results</span><span class="p">[</span><span class="n">ext_key</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            
+            <span class="n">nfibers</span> <span class="o">=</span> <span class="n">item</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">nfibers</span><span class="si">}</span><span class="s2"> fibers for </span><span class="si">{</span><span class="n">ext_key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="k">for</span> <span class="n">fiber_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfibers</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing fiber </span><span class="si">{</span><span class="n">fiber_idx</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+                    <span class="c1"># Use fit_spectrum_to_xshift for this fiber</span>
+                    <span class="n">fiber_fit</span> <span class="o">=</span> <span class="n">fit_spectrum_to_xshift</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">fiber_idx</span><span class="p">)</span>
+                    
+                    <span class="c1"># Get the bspline model from the fit result</span>
+                    <span class="n">bspline_model</span> <span class="o">=</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;bspline_model&#39;</span><span class="p">]</span>
+                    
+                    <span class="c1"># Get the fitted values at the original x coordinates</span>
+                    <span class="n">y_predicted</span> <span class="o">=</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;y_fit&#39;</span><span class="p">]</span>
+                    
+                    <span class="c1"># Calculate residuals (actual - predicted)</span>
+                    <span class="n">residuals</span> <span class="o">=</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;counts_clean&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">y_predicted</span>
+
+                    <span class="c1"># Calculate statistics for thresholding</span>
+                    <span class="n">median_residual</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">residuals</span><span class="p">)</span>
+                    <span class="n">std_residual</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">residuals</span><span class="p">)</span>
+                    
+                    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Fiber </span><span class="si">{</span><span class="n">fiber_idx</span><span class="si">}</span><span class="s2">: median residual=</span><span class="si">{</span><span class="n">median_residual</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, std residual=</span><span class="si">{</span><span class="n">std_residual</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+                    <span class="c1"># Store results for this fiber</span>
+                    <span class="n">results</span><span class="p">[</span><span class="n">ext_key</span><span class="p">][</span><span class="n">fiber_idx</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                        <span class="s1">&#39;xshift_clean&#39;</span><span class="p">:</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;xshift_clean&#39;</span><span class="p">],</span>
+                        <span class="s1">&#39;counts_clean&#39;</span><span class="p">:</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;counts_clean&#39;</span><span class="p">],</span>
+                        <span class="s1">&#39;y_predicted&#39;</span><span class="p">:</span> <span class="n">y_predicted</span><span class="p">,</span>
+                        <span class="s1">&#39;residuals&#39;</span><span class="p">:</span> <span class="n">residuals</span><span class="p">,</span>
+                        <span class="s1">&#39;median_residual&#39;</span><span class="p">:</span> <span class="n">median_residual</span><span class="p">,</span>
+                        <span class="s1">&#39;std_residual&#39;</span><span class="p">:</span> <span class="n">std_residual</span><span class="p">,</span>
+                        <span class="s1">&#39;xmodel&#39;</span><span class="p">:</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;xmodel&#39;</span><span class="p">],</span>
+                        <span class="s1">&#39;y_fit&#39;</span><span class="p">:</span> <span class="n">fiber_fit</span><span class="p">[</span><span class="s1">&#39;y_fit&#39;</span><span class="p">],</span>
+                        <span class="s1">&#39;bspline_model&#39;</span><span class="p">:</span> <span class="n">bspline_model</span>
+                    <span class="p">}</span>
+                    
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing fiber </span><span class="si">{</span><span class="n">fiber_idx</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+            
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Completed processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="n">ext_key</span><span class="p">])</span><span class="si">}</span><span class="s2"> fibers for </span><span class="si">{</span><span class="n">ext_key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Save the results</span>
+        <span class="n">output_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;_fits.pkl&#39;</span>
+        <span class="n">output_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">output_file</span><span class="p">)</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saved fitting results to </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error saving results: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="k">return</span> <span class="n">results</span></div>
+
+    
+<div class="viewcode-block" id="Thresholding.generate_pixel_map">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding.generate_pixel_map">[docs]</a>
+    <span class="k">def</span> <span class="nf">generate_pixel_map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fit_results</span><span class="p">,</span> <span class="n">trace_object</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generate a map of predicted flat field values for each pixel based on the B-spline fits.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            fit_results (dict): Dictionary of B-spline fit results for each extension and fiber</span>
+<span class="sd">            trace_object (TraceLlamas): Trace object containing the fiber image map</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            dict: Dictionary of predicted flat field image arrays for each channel/benchside</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generating pixel map for </span><span class="si">{</span><span class="n">trace_object</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s2"> channel&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Initialize a dictionary to store the resulting maps for each channel/benchside</span>
+        <span class="n">pixel_maps</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="c1"># Get the fiber image from the trace object</span>
+        <span class="n">fiber_image</span> <span class="o">=</span> <span class="n">trace_object</span><span class="o">.</span><span class="n">fiberimg</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="n">trace_object</span><span class="o">.</span><span class="n">channel</span>
+        <span class="n">bench</span> <span class="o">=</span> <span class="n">trace_object</span><span class="o">.</span><span class="n">bench</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">trace_object</span><span class="o">.</span><span class="n">side</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Trace object: </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">bench</span><span class="si">}{</span><span class="n">side</span><span class="si">}</span><span class="s2">, fiber image shape: </span><span class="si">{</span><span class="n">fiber_image</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of fibers in trace: </span><span class="si">{</span><span class="n">trace_object</span><span class="o">.</span><span class="n">nfibers</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        
+        <span class="c1"># Loop through each extension in the fit results</span>
+        <span class="k">for</span> <span class="n">ext_key</span><span class="p">,</span> <span class="n">fibers</span> <span class="ow">in</span> <span class="n">fit_results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing fit results for </span><span class="si">{</span><span class="n">ext_key</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">fibers</span><span class="p">)</span><span class="si">}</span><span class="s2"> fibers&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Create an empty array matching the shape of the fiber image</span>
+            <span class="c1"># Initialize with NaN to easily identify unprocessed pixels</span>
+            <span class="n">pixel_map</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">fiber_image</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+
+            <span class="c1"># Process each fiber in this extension</span>
+            <span class="n">processed_count</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">fiber_idx</span><span class="p">,</span> <span class="n">fiber_data</span> <span class="ow">in</span> <span class="n">fibers</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="c1"># Get the B-spline model for this fiber</span>
+                <span class="n">bspline_model</span> <span class="o">=</span> <span class="n">fiber_data</span><span class="p">[</span><span class="s1">&#39;bspline_model&#39;</span><span class="p">]</span>
+
+                <span class="c1"># Find all pixels belonging to this fiber</span>
+                <span class="n">fiber_pixels</span> <span class="o">=</span> <span class="p">(</span><span class="n">fiber_image</span> <span class="o">==</span> <span class="n">fiber_idx</span><span class="p">)</span>
+                <span class="n">pixel_count</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">fiber_pixels</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">fiber_pixels</span><span class="p">):</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No pixels found for fiber </span><span class="si">{</span><span class="n">fiber_idx</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">ext_key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing fiber </span><span class="si">{</span><span class="n">fiber_idx</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="n">pixel_count</span><span class="si">}</span><span class="s2"> pixels&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># For each row in the image that contains this fiber</span>
+                <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">fiber_image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+                    <span class="c1"># Get the pixels in this row that belong to this fiber</span>
+                    <span class="n">row_pixels</span> <span class="o">=</span> <span class="n">fiber_pixels</span><span class="p">[</span><span class="n">row</span><span class="p">,</span> <span class="p">:]</span>
+
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">row_pixels</span><span class="p">):</span>
+                        <span class="k">continue</span>
+                    
+                    <span class="c1"># Get the column indices of the fiber pixels in this row</span>
+                    <span class="n">col_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">row_pixels</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+                    <span class="c1"># Get the range of x-shift values for this fiber</span>
+                    <span class="n">xshift_min</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">fiber_data</span><span class="p">[</span><span class="s1">&#39;xshift_clean&#39;</span><span class="p">])</span>
+                    <span class="n">xshift_max</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">fiber_data</span><span class="p">[</span><span class="s1">&#39;xshift_clean&#39;</span><span class="p">])</span>
+
+                    <span class="c1"># Map the column indices to x-shift values</span>
+                    <span class="n">xshift_values</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span>
+                        <span class="n">col_indices</span><span class="p">,</span>
+                        <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">fiber_image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span>
+                        <span class="p">[</span><span class="n">xshift_min</span><span class="p">,</span> <span class="n">xshift_max</span><span class="p">]</span>
+                    <span class="p">)</span>
+
+                    <span class="c1"># Evaluate the B-spline model at these x-shift values</span>
+                    <span class="n">predicted_values</span> <span class="o">=</span> <span class="n">bspline_model</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="n">xshift_values</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+                    <span class="c1"># Assign the predicted values to the pixel map</span>
+                    <span class="n">pixel_map</span><span class="p">[</span><span class="n">row</span><span class="p">,</span> <span class="n">col_indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">predicted_values</span>
+                
+                <span class="n">processed_count</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">processed_count</span> <span class="o">%</span> <span class="mi">50</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed </span><span class="si">{</span><span class="n">processed_count</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">fibers</span><span class="p">)</span><span class="si">}</span><span class="s2"> fibers&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Check for unassigned pixels</span>
+            <span class="n">nan_count</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">pixel_map</span><span class="p">))</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pixel map for </span><span class="si">{</span><span class="n">ext_key</span><span class="si">}</span><span class="s2"> has </span><span class="si">{</span><span class="n">nan_count</span><span class="si">}</span><span class="s2"> unassigned pixels out of </span><span class="si">{</span><span class="n">pixel_map</span><span class="o">.</span><span class="n">size</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Store the completed pixel map for this extension</span>
+            <span class="n">pixel_maps</span><span class="p">[</span><span class="n">ext_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">pixel_map</span>
+
+            <span class="c1"># # Save the pixel map as a FITS file for inspection</span>
+            <span class="c1"># hdu = fits.PrimaryHDU(data=pixel_map)</span>
+            <span class="c1"># hdu.header[&#39;EXTNAME&#39;] = ext_key</span>
+            <span class="c1"># hdu.header[&#39;COMMENT&#39;] = &#39;Predicted flat field values from B-spline fits&#39;</span>
+            <span class="c1"># output_file = os.path.join(self.output_dir, f&#39;predicted_flat_{channel}_{bench}{side}.fits&#39;)</span>
+            <span class="c1"># hdu.writeto(output_file, overwrite=True)</span>
+            <span class="c1"># logger.info(f&quot;Saved predicted flat field map for {ext_key} to {output_file}&quot;)</span>
+
+        <span class="k">return</span> <span class="n">pixel_maps</span></div>
+
+    
+    
+<div class="viewcode-block" id="Thresholding.generate_thresholds">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding.generate_thresholds">[docs]</a>
+    <span class="k">def</span> <span class="nf">generate_thresholds</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generate thresholds for flat fielding based on science data.</span>
+
+<span class="sd">        This method generates thresholds based on the provided science data,</span>
+<span class="sd">        which can be used to apply flat field corrections.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            science_data (list): List of science data to generate thresholds from.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list: List of generated threshold values.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Generating thresholds for flat fielding&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># extract flat field data</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Producing flat extractions&quot;</span><span class="p">)</span>
+        <span class="n">produce_flat_extractions</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">red_flat_file</span><span class="p">,</span> 
+            <span class="bp">self</span><span class="o">.</span><span class="n">green_flat_file</span><span class="p">,</span> 
+            <span class="bp">self</span><span class="o">.</span><span class="n">blue_flat_file</span><span class="p">,</span> 
+            <span class="n">tracedir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">trace_dir</span><span class="p">,</span> 
+            <span class="n">outpath</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span>
+        <span class="p">)</span>
+        
+        <span class="c1"># Assuming the extraction files are generated and available</span>
+        <span class="n">red_extraction_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;red_extractions_flat.pkl&#39;</span><span class="p">)</span>
+        <span class="n">green_extraction_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;green_extractions_flat.pkl&#39;</span><span class="p">)</span>
+        <span class="n">blue_extraction_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span><span class="p">,</span> <span class="s1">&#39;blue_extractions_flat.pkl&#39;</span><span class="p">)</span>
+        
+        <span class="c1"># Check if files exist</span>
+        <span class="k">for</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">red_extraction_file</span><span class="p">,</span> <span class="s1">&#39;red&#39;</span><span class="p">),</span>
+            <span class="p">(</span><span class="n">green_extraction_file</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">),</span>
+            <span class="p">(</span><span class="n">blue_extraction_file</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">)</span>
+        <span class="p">]:</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">file_path</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">color</span><span class="o">.</span><span class="n">capitalize</span><span class="p">()</span><span class="si">}</span><span class="s2"> extraction file found: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">color</span><span class="o">.</span><span class="n">capitalize</span><span class="p">()</span><span class="si">}</span><span class="s2"> extraction file not found: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Process each color</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">color</span> <span class="ow">in</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">red_extraction_file</span><span class="p">,</span> <span class="s1">&#39;red&#39;</span><span class="p">),</span>
+            <span class="p">(</span><span class="n">green_extraction_file</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">),</span>
+            <span class="p">(</span><span class="n">blue_extraction_file</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">)</span>
+        <span class="p">]:</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">file_path</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> extraction&quot;</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">color_results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calculate_fits_all_extensions</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+                    <span class="n">results</span><span class="p">[</span><span class="n">color</span><span class="p">]</span> <span class="o">=</span> <span class="n">color_results</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Completed </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> extraction processing&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> extraction: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Skipping </span><span class="si">{</span><span class="n">color</span><span class="si">}</span><span class="s2"> extraction (file not found)&quot;</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Threshold generation complete&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span></div>
+
+    
+<div class="viewcode-block" id="Thresholding.apply_thresholds">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.Thresholding.apply_thresholds">[docs]</a>
+    <span class="k">def</span> <span class="nf">apply_thresholds</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">science_data</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply calculated thresholds to the flat field data.</span>
+
+<span class="sd">        This method applies the provided thresholds to the flat field data,</span>
+<span class="sd">        modifying the data in place or returning a new modified dataset.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            thresholds (list): List of threshold values to apply.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: The method modifies the flat field data in place.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Applying thresholds to science data&quot;</span><span class="p">)</span>
+        <span class="c1"># Placeholder for actual threshold application logic</span>
+        <span class="c1"># This should be replaced with the actual implementation</span>
+        <span class="k">pass</span></div>
+</div>
+
+
+
+<span class="c1"># If run as a standalone script</span>
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;flatLlamas.py executed as standalone script&quot;</span><span class="p">)</span>
+    
+    
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
