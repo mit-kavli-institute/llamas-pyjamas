@@ -1,0 +1,633 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Extract.extractLlamas &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Extract.extractLlamas</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Extract.extractLlamas</h1><div class="highlight"><pre>
+<span></span>
+<span class="sd">&quot;&quot;&quot;Module for extracting data from LLAMAS observations.</span>
+
+<span class="sd">This module provides functionality for extracting data from LLAMAS (Large Lens Array </span>
+<span class="sd">Multi-Object Spectrograph) observations. It includes classes and functions for performing </span>
+<span class="sd">optimal and boxcar extractions, saving and loading extraction results, and parallel </span>
+<span class="sd">processing using Ray.</span>
+
+<span class="sd">Classes:</span>
+<span class="sd">    ExtractLlamas: A class for extracting data from LLAMAS observations using optimal </span>
+<span class="sd">        or boxcar methods.</span>
+<span class="sd">    ExtractLlamasRay: A Ray remote class for parallel processing of LLAMAS extractions.</span>
+
+<span class="sd">Functions:</span>
+<span class="sd">    save_extractions: Save multiple extraction objects to a single file.</span>
+<span class="sd">    load_extractions: Load a batch of extraction objects from a file.</span>
+<span class="sd">    parse_args: Parse command-line arguments for input pkl files.</span>
+
+<span class="sd">Example:</span>
+<span class="sd">    This module can be run as a script to process LLAMAS pkl files using parallel </span>
+<span class="sd">    processing with Ray::</span>
+
+<span class="sd">        python extractLlamas.py *.pkl</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">scipy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core.arc</span><span class="w"> </span><span class="kn">import</span> <span class="n">detect_peaks</span>
+<span class="kn">from</span><span class="w">   </span><span class="nn">pypeit.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">pydl</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span><span class="o">,</span><span class="w"> </span><span class="nn">cloudpickle</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span><span class="o">,</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ray</span><span class="o">,</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="o">,</span><span class="w"> </span><span class="nn">psutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tuple</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pkg_resources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="c1">####################################################################################</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">BASE_DIR</span><span class="p">,</span> <span class="n">OUTPUT_DIR</span><span class="p">,</span> <span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">CALIB_DIR</span><span class="p">,</span> <span class="n">LUT_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace.traceLlamas</span><span class="w"> </span><span class="kn">import</span> <span class="n">TraceLlamas</span>
+
+<span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="n">log_filename</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;extractLlamas_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ExtractLlamas">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.ExtractLlamas">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ExtractLlamas</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A class used to extract data from LLAMAS observations.</span>
+
+<span class="sd">    This class handles the extraction of spectral data from LLAMAS observations using </span>
+<span class="sd">    either optimal or boxcar extraction methods.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.</span>
+<span class="sd">        bench (str): The bench identifier from the trace.</span>
+<span class="sd">        side (str): The side identifier from the trace.</span>
+<span class="sd">        channel (str): The channel identifier from the trace.</span>
+<span class="sd">        fitsfile (str): The FITS file associated with the trace.</span>
+<span class="sd">        counts (np.ndarray): An array to store the extracted counts.</span>
+<span class="sd">        hdr (dict): Header information from the FITS file.</span>
+<span class="sd">        frame (np.ndarray): The data frame from the FITS file.</span>
+<span class="sd">        x (np.ndarray): An array representing the x-axis.</span>
+<span class="sd">        xshift (np.ndarray): An array to store x-axis shifts.</span>
+<span class="sd">        wave (np.ndarray): An array to store wavelength information.</span>
+<span class="sd">        ximage (np.ndarray): An array representing the x-axis image.</span>
+<span class="sd">        relative_throughput (np.ndarray): Array storing relative throughput for each fiber.</span>
+<span class="sd">        fiberid (np.ndarray): Array storing fiber IDs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">trace</span><span class="p">:</span> <span class="n">TraceLlamas</span><span class="p">,</span> <span class="n">hdu_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">hdr</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span><span class="n">optimal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the ExtractLlamas object.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.</span>
+<span class="sd">            hdu_data (np.ndarray): The HDU data array from the FITS file.</span>
+<span class="sd">            hdr (dict): Header information from the FITS file.</span>
+<span class="sd">            optimal (bool, optional): If True, use optimal extraction. If False, use boxcar extraction. </span>
+<span class="sd">                Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">trace</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">hdu_data</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">hdr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="c1"># Instantiate a blank object that can be used for a deep copy</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">trace</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bench</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">side</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span> <span class="o">=</span> <span class="kc">None</span>     
+            <span class="bp">self</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span>    <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame</span>  <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">x</span>      <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">xshift</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">wave</span>   <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ximage</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">relative_throughput</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">trace</span> <span class="o">=</span> <span class="n">trace</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bench</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">bench</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">side</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">side</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">channel</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fitsfile</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">fitsfile</span>
+            <span class="c1">##put in a check here for hdu against trace attributes when I have more brain capacity        </span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">,</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hdr</span>    <span class="o">=</span> <span class="n">hdr</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame</span>  <span class="o">=</span> <span class="n">hdu_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">x</span>      <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">)</span>
+            <span class="c1"># xshift and wave will be populated only after an arc solution</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">xshift</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">,</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">wave</span>   <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">,</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">,</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ximage</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis2</span><span class="p">),</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">relative_throughput</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fiberid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">))</span>
+
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Optimal </span><span class="si">{</span><span class="n">optimal</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;bench </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s1"> self.side </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1"> channel </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            
+            <span class="n">benchside</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="p">)</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="p">)</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">LUT_DIR</span><span class="p">,</span> <span class="s1">&#39;traceLUT.json&#39;</span><span class="p">),</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">LUT</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">LUT</span> <span class="o">=</span> <span class="n">LUT</span> 
+            
+            
+            <span class="c1"># Safely handle missing entries in the LUT</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="s1">&#39;dead_fibers&#39;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">LUT</span> <span class="ow">and</span> <span class="n">benchside</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">LUT</span><span class="p">[</span><span class="s1">&#39;dead_fibers&#39;</span><span class="p">]:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">LUT</span><span class="p">[</span><span class="s1">&#39;dead_fibers&#39;</span><span class="p">][</span><span class="n">benchside</span><span class="p">]</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Dead fibers: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># Default to empty list if entry doesn&#39;t exist</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No dead fibers entry found in LUT for bench=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s2">, side=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># Default to empty list if any error occurs</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error accessing dead fibers in LUT: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+            <span class="k">for</span> <span class="n">ifiber</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span><span class="p">):</span>    
+
+                <span class="k">if</span> <span class="p">(</span><span class="n">optimal</span> <span class="o">==</span> <span class="kc">True</span><span class="p">):</span>
+                    <span class="c1"># Optimally weighted extraction (a la Horne et al ~1986)</span>
+                    <span class="c1">#logger.info(&quot;..Optimally Extracting fiber #{}&quot;.format(ifiber))</span>
+                    <span class="n">x_spec</span><span class="p">,</span><span class="n">f_spec</span><span class="p">,</span><span class="n">weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">isolateProfile</span><span class="p">(</span><span class="n">ifiber</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">x_spec</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="k">continue</span>
+                
+                    <span class="n">extracted</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">):</span>
+                        <span class="n">thisx</span> <span class="o">=</span> <span class="p">(</span><span class="n">x_spec</span> <span class="o">==</span> <span class="n">i</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">thisx</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                            <span class="n">extracted</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">f_spec</span><span class="p">[</span><span class="n">thisx</span><span class="p">]</span><span class="o">*</span><span class="n">weights</span><span class="p">[</span><span class="n">thisx</span><span class="p">])</span><span class="o">/</span><span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">weights</span><span class="p">[</span><span class="n">thisx</span><span class="p">])</span>
+                        <span class="c1">#handles case where there are no elements</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">extracted</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+                    <span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">extracted</span>
+                
+                <span class="k">elif</span> <span class="n">optimal</span> <span class="o">==</span> <span class="kc">False</span><span class="p">:</span>
+                    <span class="c1"># Boxcar Extraction - fast!</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;..Boxcar extracting fiber #</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">ifiber</span><span class="p">))</span>
+                    <span class="n">x_spec</span><span class="p">,</span><span class="n">f_spec</span><span class="p">,</span><span class="n">weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">isolateProfile</span><span class="p">(</span><span class="n">ifiber</span><span class="p">,</span> <span class="n">boxcar</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                    
+                    <span class="k">if</span> <span class="n">x_spec</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="k">continue</span>
+                
+                    <span class="n">extracted</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">):</span>
+                        <span class="n">thisx</span> <span class="o">=</span> <span class="p">(</span><span class="n">x_spec</span> <span class="o">==</span> <span class="n">i</span><span class="p">)</span>
+                        
+                        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">thisx</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                            <span class="n">extracted</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">f_spec</span><span class="p">[</span><span class="n">thisx</span><span class="p">]</span><span class="o">*</span><span class="n">weights</span><span class="p">[</span><span class="n">thisx</span><span class="p">])</span><span class="o">/</span><span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">weights</span><span class="p">[</span><span class="n">thisx</span><span class="p">])</span>
+                        <span class="c1">#handles case where there are no elements</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">extracted</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+                    <span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">ifiber</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">extracted</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">old_count_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Benchside </span><span class="si">{</span><span class="n">benchside</span><span class="si">}</span><span class="s1"> counts shape </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="c1"># Process the dead fibers by inserting dummy arrays at specific indices</span>
+            <span class="c1"># if self.dead_fibers:</span>
+            <span class="c1">#     logger.info(f&#39;Processing dead fibers: {self.dead_fibers}&#39;)</span>
+                
+
+            <span class="c1">#     # Sort dead fibers in descending order to avoid index shifting</span>
+            <span class="c1">#     # when we insert multiple rows</span>
+            <span class="c1">#     for dead_idx in sorted(self.dead_fibers, reverse=True):</span>
+            <span class="c1">#         # Create a row of zeros for the dead fiber</span>
+            <span class="c1">#         dummy_counts = np.zeros(trace.naxis1)</span>
+                    
+            <span class="c1">#         self.counts = np.insert(self.counts, dead_idx, dummy_counts, axis=0)</span>
+            
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Processing dead fibers: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                
+                <span class="c1"># Create new array with space for dead fibers</span>
+                <span class="n">total_fibers</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span><span class="p">)</span>
+                <span class="n">new_counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">total_fibers</span><span class="p">,</span> <span class="n">trace</span><span class="o">.</span><span class="n">naxis1</span><span class="p">))</span>
+                
+                <span class="c1"># Copy data from original counts array to correct positions in new array</span>
+                <span class="n">current_idx</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">dead_set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dead_fibers</span><span class="p">)</span>  <span class="c1"># Convert to set for faster lookup</span>
+                
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">total_fibers</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">dead_set</span><span class="p">:</span>
+                        <span class="c1"># Leave zeros for dead fiber positions</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Inserting dead fiber at index </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># Copy data from original array if position exists</span>
+                        <span class="k">if</span> <span class="n">current_idx</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="p">):</span>
+                            <span class="n">new_counts</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="p">[</span><span class="n">current_idx</span><span class="p">]</span>
+                            <span class="n">current_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+                
+                <span class="c1"># Replace the counts array with the new one</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">counts</span> <span class="o">=</span> <span class="n">new_counts</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;New counts shape after dead fiber insertion: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+                    
+                
+                
+                    
+
+<div class="viewcode-block" id="ExtractLlamas.isolateProfile">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.ExtractLlamas.isolateProfile">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">isolateProfile</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">ifiber</span><span class="p">,</span> <span class="n">boxcar</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Isolate the profile for a given fiber.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            ifiber (int): The fiber index to isolate the profile for.</span>
+<span class="sd">            boxcar (bool, optional): If True, use boxcar extraction. If False, use profile </span>
+<span class="sd">                extraction. Defaults to False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:</span>
+<span class="sd">                - x_spec (np.ndarray or None): The x-coordinates of the spectrum for the given fiber.</span>
+<span class="sd">                - f_spec (np.ndarray or None): The flux values of the spectrum for the given fiber.</span>
+<span class="sd">                - weights (np.ndarray or None): The weights for the spectrum extraction, either </span>
+<span class="sd">                  boxcar or profile-based.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            If no profile is found for the given fiber, the function will return (None, None, None) </span>
+<span class="sd">            and log a warning.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1">#profile  = self.trace.profimg[ifiber]</span>
+        <span class="n">inprofile</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">fiberimg</span> <span class="o">==</span> <span class="n">ifiber</span>
+        <span class="n">profile</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">profimg</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">fiberimg</span> <span class="o">==</span> <span class="n">ifiber</span><span class="p">]</span>
+            
+        <span class="c1">#inprof = np.where(profile &gt; 0)</span>
+        <span class="k">if</span> <span class="n">inprofile</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;No profile for fiber #</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">ifiber</span><span class="p">))</span>
+            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span><span class="kc">None</span><span class="p">,</span><span class="kc">None</span>
+        
+        <span class="n">x_spec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ximage</span><span class="p">[</span><span class="n">inprofile</span><span class="p">]</span>
+        <span class="n">f_spec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="p">[</span><span class="n">inprofile</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">boxcar</span> <span class="o">==</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">inprofile</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)[</span><span class="n">inprofile</span><span class="p">]</span><span class="c1">#[weights]</span>
+            
+        <span class="k">elif</span> <span class="n">boxcar</span> <span class="o">==</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">profimg</span><span class="p">[</span><span class="n">inprofile</span><span class="p">]</span><span class="c1">#self.trace.profimg[inprofile]</span>
+        
+        <span class="k">return</span> <span class="n">x_spec</span><span class="p">,</span><span class="n">f_spec</span><span class="p">,</span><span class="n">weights</span></div>
+
+
+
+<div class="viewcode-block" id="ExtractLlamas.saveExtraction">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.ExtractLlamas.saveExtraction">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">saveExtraction</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span><span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Save the current extraction object to a file in the specified directory.</span>
+
+<span class="sd">        This method constructs the output file path using the object&#39;s attributes</span>
+<span class="sd">        (channel, side, bench) and saves the object using cloudpickle.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            save_dir (str): The directory where the extraction file will be saved.</span>
+<span class="sd">                Note that this argument is overridden and the file is always saved </span>
+<span class="sd">                in the &#39;output&#39; directory relative to the script&#39;s location.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">save_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)),</span> <span class="s1">&#39;output&#39;</span><span class="p">)</span>
+        <span class="n">outfile</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;LLAMASExtract_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">side</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">bench</span><span class="si">}</span><span class="s1">.pkl&#39;</span>
+        <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">save_dir</span><span class="p">,</span> <span class="n">outfile</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;outpath </span><span class="si">{</span><span class="n">outpath</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span><span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="n">cloudpickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fp</span><span class="p">)</span>
+        <span class="k">return</span></div>
+
+
+<div class="viewcode-block" id="ExtractLlamas.loadExtraction">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.ExtractLlamas.loadExtraction">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">loadExtraction</span><span class="p">(</span><span class="n">infile</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load an object from a pickle file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            infile (str): The path to the input file containing the pickled object.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            object: The object loaded from the pickle file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">infile</span><span class="p">,</span><span class="s1">&#39;r+b&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="nb">object</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span>
+        <span class="k">return</span><span class="p">(</span><span class="nb">object</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="save_extractions">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.save_extractions">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">save_extractions</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">,</span> <span class="n">savefile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">save_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;LLAMASExtract_batch&#39;</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Save multiple extraction objects to single file.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        extraction_list (list): List of extraction objects to save.</span>
+<span class="sd">        savefile (str, optional): Specific filename to use. If None, a timestamped </span>
+<span class="sd">            filename will be generated. Defaults to None.</span>
+<span class="sd">        save_dir (str, optional): Directory to save the file. If None, uses the </span>
+<span class="sd">            default output directory. Defaults to None.</span>
+<span class="sd">        prefix (str, optional): Prefix for the filename when savefile is None. </span>
+<span class="sd">            Defaults to &#39;LLAMASExtract_batch&#39;.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        str: Path to the saved file.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">save_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">save_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)),</span> <span class="s1">&#39;output&#39;</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">save_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    
+    <span class="c1"># Create metadata for each extraction</span>
+    <span class="n">batch_data</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;extractions&#39;</span><span class="p">:</span> <span class="n">extraction_list</span><span class="p">,</span>
+        <span class="s1">&#39;metadata&#39;</span><span class="p">:</span> <span class="p">[{</span>
+            <span class="s1">&#39;channel&#39;</span><span class="p">:</span> <span class="n">ext</span><span class="o">.</span><span class="n">channel</span><span class="p">,</span>
+            <span class="s1">&#39;bench&#39;</span><span class="p">:</span> <span class="n">ext</span><span class="o">.</span><span class="n">bench</span><span class="p">,</span>
+            <span class="s1">&#39;side&#39;</span><span class="p">:</span> <span class="n">ext</span><span class="o">.</span><span class="n">side</span><span class="p">,</span>
+            <span class="s1">&#39;nfibers&#39;</span><span class="p">:</span> <span class="n">ext</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">nfibers</span>
+        <span class="p">}</span> <span class="k">for</span> <span class="n">ext</span> <span class="ow">in</span> <span class="n">extraction_list</span><span class="p">]</span>
+    <span class="p">}</span>
+    
+    <span class="c1"># Save with timestamp</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+    <span class="n">outfile</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.pkl&#39;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">savefile</span> <span class="o">!=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">save_dir</span><span class="p">,</span> <span class="n">savefile</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>   
+        <span class="n">outpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">save_dir</span><span class="p">,</span> <span class="n">outfile</span><span class="p">)</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Saving batch extraction to: </span><span class="si">{</span><span class="n">outpath</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+        <span class="n">cloudpickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">batch_data</span><span class="p">,</span> <span class="n">fp</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">outpath</span></div>
+
+
+<div class="viewcode-block" id="load_extractions">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.load_extractions">[docs]</a>
+<span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_extractions</span><span class="p">(</span><span class="n">infile</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load batch of extraction objects.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        infile (str): Path to the file containing the batch extraction data.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple[list, list]: A tuple containing:</span>
+<span class="sd">            - extractions (list): List of extraction objects.</span>
+<span class="sd">            - metadata (list): List of metadata dictionaries for each extraction.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">infile</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+        <span class="n">batch_data</span> <span class="o">=</span> <span class="n">cloudpickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loaded </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">batch_data</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> extractions&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">batch_data</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">],</span> <span class="n">batch_data</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span></div>
+
+
+<span class="nd">@ray</span><span class="o">.</span><span class="n">remote</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ExtractLlamasRay</span><span class="p">(</span><span class="n">ExtractLlamas</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Ray remote class for parallel processing of LLAMAS extractions.</span>
+
+<span class="sd">    ExtractLlamasRay is a subclass of ExtractLlamas that handles the extraction </span>
+<span class="sd">    process for LLAMAS data using Ray for parallel processing.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        files (list): A list of files to be processed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the ExtractLlamasRay instance.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            files (list): A list of files to be processed.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span> <span class="o">=</span> <span class="n">files</span>
+        <span class="k">pass</span>
+        
+   
+    <span class="k">def</span><span class="w"> </span><span class="nf">process_extractions</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tracepkl</span><span class="p">:</span> <span class="s2">&quot;TraceLlamas&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Process the extraction of LLAMAS traces from a given pickle file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tracepkl (TraceLlamas): The path to the pickle file containing the LLAMAS trace data.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">tracepkl</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">tracer</span><span class="p">:</span>
+            <span class="n">trace</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">tracer</span><span class="p">)</span>
+        
+        <span class="n">extraction</span> <span class="o">=</span> <span class="nb">super</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">trace</span><span class="p">)</span>
+        <span class="n">extraction</span><span class="o">.</span><span class="n">saveExtraction</span><span class="p">()</span>
+        <span class="k">return</span>
+
+<div class="viewcode-block" id="parse_args">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Extract.html#llamas_pyjamas.Extract.parse_args">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_args</span><span class="p">()</span><span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse command-line arguments to process LLAMAS pkl files.</span>
+
+<span class="sd">    This function sets up an argument parser to accept one or more file paths</span>
+<span class="sd">    (with support for wildcards like *.pkl), expands the wildcards, validates</span>
+<span class="sd">    the files, and returns a list of valid .pkl files.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        list: A list of valid .pkl file paths.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ValueError: If no .pkl files are found.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s1">&#39;Process LLAMAS pkl files.&#39;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;files&#39;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s1">&#39;+&#39;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Path to input pkl files (supports wildcards like *.pkl)&#39;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    
+    <span class="c1"># Expand wildcards and validate files</span>
+    <span class="n">pkl_files</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
+        <span class="n">matched_files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">matched_files</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: No files found matching pattern </span><span class="si">{</span><span class="n">pattern</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">pkl_files</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">matched_files</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.pkl&#39;</span><span class="p">)])</span>
+    
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">pkl_files</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No .pkl files found!&quot;</span><span class="p">)</span>
+        
+    <span class="k">return</span> <span class="n">pkl_files</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="c1"># Example of how to run the extraction</span>
+
+   <span class="c1">##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+    
+    <span class="n">NUMBER_OF_CORES</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> 
+    <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">num_cpus</span><span class="o">=</span><span class="n">NUMBER_OF_CORES</span><span class="p">)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Starting with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores available&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="n">extraction_processors</span> <span class="o">=</span> <span class="p">[</span><span class="n">ExtractLlamasRay</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">file</span><span class="p">)</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">files</span><span class="p">]</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">)</span><span class="si">}</span><span class="s2"> files with </span><span class="si">{</span><span class="n">NUMBER_OF_CORES</span><span class="si">}</span><span class="s2"> cores&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">processor</span> <span class="ow">in</span> <span class="n">extraction_processors</span><span class="p">:</span>
+        <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">processor</span><span class="o">.</span><span class="n">process_extractions</span><span class="o">.</span><span class="n">remote</span><span class="p">())</span>
+    
+    <span class="c1">#Monitor processing</span>
+    <span class="n">total_jobs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+    <span class="n">completed</span> <span class="o">=</span> <span class="mi">0</span>
+        
+    <span class="c1"># Monitor processing</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Processing Status:&quot;</span><span class="p">)</span>
+    <span class="k">while</span> <span class="n">futures</span><span class="p">:</span>
+        
+        <span class="c1"># Print current CPU usage every 5 seconds</span>
+        <span class="k">if</span> <span class="n">completed</span> <span class="o">%</span> <span class="mi">5</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Progress: </span><span class="si">{</span><span class="n">completed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+        
+        
+        <span class="n">done_id</span><span class="p">,</span> <span class="n">futures</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">futures</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">done_id</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="n">completed</span> <span class="o">+=</span> <span class="mi">1</span>
+        
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">All </span><span class="si">{</span><span class="n">total_jobs</span><span class="si">}</span><span class="s2"> jobs complete&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final CPU Usage: </span><span class="si">{</span><span class="n">psutil</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">(</span><span class="n">percpu</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    
+    <span class="n">ray</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+    
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

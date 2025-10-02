@@ -1,0 +1,354 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.File package &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=8d563738"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="llamas_pyjamas.Image package" href="llamas_pyjamas.Image.html" />
+    <link rel="prev" title="llamas_pyjamas.Bias package" href="llamas_pyjamas.Bias.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">llamas_pyjamas.File package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-llamas_pyjamas.File.llamasIO">llamas_pyjamas.File.llamasIO module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.File.llamasIO.llamasOneCamera"><code class="docutils literal notranslate"><span class="pre">llamasOneCamera</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#llamas_pyjamas.File.llamasIO.llamasOneCamera.readhdu"><code class="docutils literal notranslate"><span class="pre">llamasOneCamera.readhdu()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.File.llamasIO.llamasAllCameras"><code class="docutils literal notranslate"><span class="pre">llamasAllCameras</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.File.llamasIO.getBenchSideChannel"><code class="docutils literal notranslate"><span class="pre">getBenchSideChannel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llamas_pyjamas.File.llamasIO.process_fits_by_color"><code class="docutils literal notranslate"><span class="pre">process_fits_by_color()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.File package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/llamas_pyjamas.File.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="llamas-pyjamas-file-package">
+<h1>llamas_pyjamas.File package<a class="headerlink" href="#llamas-pyjamas-file-package" title="Link to this heading"></a></h1>
+<p>The File module handles FITS file I/O operations and data management for LLAMAS
+observations. It provides utilities for reading, writing, and organizing FITS files.</p>
+<section id="submodules">
+<span id="module-llamas_pyjamas.File"></span><h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-llamas_pyjamas.File.llamasIO">
+<span id="llamas-pyjamas-file-llamasio-module"></span><h2>llamas_pyjamas.File.llamasIO module<a class="headerlink" href="#module-llamas_pyjamas.File.llamasIO" title="Link to this heading"></a></h2>
+<p>This module provides classes and functions to handle FITS files for the llamas-pyjamas project.
+It includes functionality to read and process data from multiple cameras stored in a FITS file.
+Classes:</p>
+<blockquote>
+<div><p>llamasOneCamera: Represents a single camera’s data and metadata.
+llamasAllCameras: Represents all cameras’ data and metadata from a FITS file.</p>
+</div></blockquote>
+<dl>
+<dt>Functions:</dt><dd><p>getBenchSideChannel(fitsfile, bench, side, channel): Retrieves data for a specific bench, side, and channel from a FITS file.</p>
+<p>Represents a single camera’s data and metadata.
+Attributes:</p>
+<blockquote>
+<div><p>header (str): The header information from the FITS file.
+data (numpy.ndarray): The data from the FITS file.
+bench (int): The bench number from the header.
+side (str): The side information from the header.
+channel (str): The channel information from the header.</p>
+<p>Initializes a new instance of the llamasOneCamera class.</p>
+<p>self.header = ‘’
+self.data = 0
+self.bench = -1
+self.side = ‘’
+self.channel = ‘’</p>
+<p>Reads data and metadata from a given HDU (Header/Data Unit).
+Args:</p>
+<blockquote>
+<div><p>hdu (astropy.io.fits.HDUList): The HDU to read data from.</p>
+</div></blockquote>
+<p>self.data = hdu.data
+self.bench = self.header[‘BENCH’]
+self.side = self.header[‘SIDE’]
+self.index = -1</p>
+</div></blockquote>
+<p>Represents all cameras’ data and metadata from a FITS file.
+Attributes:</p>
+<blockquote>
+<div><p>header (str): The primary header information from the FITS file.
+Next (int): The number of extensions in the FITS file.
+extensions (list): A list of llamasOneCamera instances for each extension in the FITS file.</p>
+<p>Initializes a new instance of the llamasAllCameras class and reads data from the given FITS file.
+Args:</p>
+<blockquote>
+<div><p>fitsfile (str): The path to the FITS file to read.</p>
+<p>self.header = hdulist[0].header
+self.Next = len(hdulist) - 1</p>
+</div></blockquote>
+</div></blockquote>
+<p>Retrieves data for a specific bench, side, and channel from a FITS file.
+Args:</p>
+<blockquote>
+<div><p>fitsfile (str): The path to the FITS file to read.
+bench (int): The bench number to filter by.
+side (str): The side information to filter by.
+channel (str): The channel information to filter by.</p>
+</div></blockquote>
+<dl class="simple">
+<dt>Returns:</dt><dd><dl class="simple">
+<dt>numpy.ndarray: The data for the specified bench, side, and channel.</dt><dd><dl class="simple">
+<dt>if (hdu.header[‘COLOR’] == ‘Color’):</dt><dd><p>return hdu.data</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="py class">
+<dt class="sig sig-object py" id="llamas_pyjamas.File.llamasIO.llamasOneCamera">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.File.llamasIO.</span></span><span class="sig-name descname"><span class="pre">llamasOneCamera</span></span><a class="reference internal" href="_modules/llamas_pyjamas/File/llamasIO.html#llamasOneCamera"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.File.llamasIO.llamasOneCamera" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A class to represent a single camera in the llamas system.
+Attributes
+———-
+header : str</p>
+<blockquote>
+<div><p>The header information of the camera.</p>
+</div></blockquote>
+<dl class="simple">
+<dt>data<span class="classifier">int</span></dt><dd><p>The data associated with the camera.</p>
+</dd>
+<dt>bench<span class="classifier">int</span></dt><dd><p>The bench number of the camera.</p>
+</dd>
+<dt>side<span class="classifier">str</span></dt><dd><p>The side of the camera.</p>
+</dd>
+<dt>channel<span class="classifier">str</span></dt><dd><p>The color channel of the camera.</p>
+</dd>
+</dl>
+<section id="methods">
+<h3>Methods<a class="headerlink" href="#methods" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>__init__():</dt><dd><p>Initializes the llamasOneCamera with default values.</p>
+</dd>
+<dt>readhdu(hdu):</dt><dd><p>Reads the header and data from the given HDU (Header Data Unit).</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="llamas_pyjamas.File.llamasIO.llamasOneCamera.readhdu">
+<span class="sig-name descname"><span class="pre">readhdu</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdu</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/File/llamasIO.html#llamasOneCamera.readhdu"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.File.llamasIO.llamasOneCamera.readhdu" title="Link to this definition"></a></dt>
+<dd><p>Reads the header and data from the given HDU (Header Data Unit) and assigns
+them to the instance variables. Additionally, extracts specific header
+information such as ‘BENCH’, ‘SIDE’, and ‘COLOR’.
+Parameters:
+hdu (astropy.io.fits.HDUList): The HDU object from which to read the header and data.
+Attributes:
+header (astropy.io.fits.Header): The header of the HDU.
+data (numpy.ndarray): The data of the HDU.
+bench (str): The ‘BENCH’ value from the header.
+side (str): The ‘SIDE’ value from the header.
+channel (str): The ‘COLOR’ value from the header.
+index (int): An index initialized to -1.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>hdu</strong> (<a class="reference external" href="https://docs.astropy.org/en/stable/io/fits/api/hdulists.html#astropy.io.fits.HDUList" title="(in Astropy v7.1)"><em>HDUList</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="llamas_pyjamas.File.llamasIO.llamasAllCameras">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.File.llamasIO.</span></span><span class="sig-name descname"><span class="pre">llamasAllCameras</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fitsfile</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/File/llamasIO.html#llamasAllCameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.File.llamasIO.llamasAllCameras" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A class to handle multiple camera data from a FITS file.
+Attributes:
+———–
+header : astropy.io.fits.header.Header</p>
+<blockquote>
+<div><p>The header of the primary HDU in the FITS file.</p>
+</div></blockquote>
+<dl class="simple">
+<dt>Next<span class="classifier">int</span></dt><dd><p>The number of extensions (HDUs) in the FITS file.</p>
+</dd>
+<dt>extensions<span class="classifier">list</span></dt><dd><p>A list of llamasOneCamera objects, each representing an extension in the FITS file.</p>
+</dd>
+</dl>
+<section id="id1">
+<h3>Methods:<a class="headerlink" href="#id1" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>__init__(fitsfile)</dt><dd><p>Initializes the llamasAllCameras object by reading the FITS file and storing the header and extensions.</p>
+</dd>
+</dl>
+</section>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>fitsfile</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.File.llamasIO.getBenchSideChannel">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.File.llamasIO.</span></span><span class="sig-name descname"><span class="pre">getBenchSideChannel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fitsfile</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bench</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">side</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">channel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/File/llamasIO.html#getBenchSideChannel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.File.llamasIO.getBenchSideChannel" title="Link to this definition"></a></dt>
+<dd><p>Extracts and returns the data from a FITS file for a specific bench, side, and channel.
+Parameters:
+fitsfile (str): The path to the FITS file.
+bench (str): The bench identifier to match in the FITS file header.
+side (str): The side identifier to match in the FITS file header.
+channel (str): The channel identifier to match in the FITS file header.
+Returns:
+numpy.ndarray: The data from the FITS file that matches the specified bench, side, and channel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>fitsfile</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p></li>
+<li><p><strong>bench</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p></li>
+<li><p><strong>side</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p></li>
+<li><p><strong>channel</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="llamas_pyjamas.File.llamasIO.process_fits_by_color">
+<span class="sig-prename descclassname"><span class="pre">llamas_pyjamas.File.llamasIO.</span></span><span class="sig-name descname"><span class="pre">process_fits_by_color</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fits_file</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/llamas_pyjamas/File/llamasIO.html#process_fits_by_color"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#llamas_pyjamas.File.llamasIO.process_fits_by_color" title="Link to this definition"></a></dt>
+<dd><p>Process a FITS file, transform image data based on color attribute, and return a table of HDUs.</p>
+<p>The function applies the following transformations:
+- Blue: Flip both x and y axes
+- Green: Flip only x axis (horizontally)
+- Red: No transformation</p>
+<section id="parameters">
+<h3>Parameters:<a class="headerlink" href="#parameters" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>fits_file<span class="classifier">str</span></dt><dd><p>Path to the FITS file</p>
+</dd>
+</dl>
+</section>
+<section id="returns">
+<h3>Returns:<a class="headerlink" href="#returns" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>astropy.io.fits.HDUList</dt><dd><p>HDUList with color-based transformations applied</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="llamas_pyjamas.Bias.html" class="btn btn-neutral float-left" title="llamas_pyjamas.Bias package" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="llamas_pyjamas.Image.html" class="btn btn-neutral float-right" title="llamas_pyjamas.Image package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

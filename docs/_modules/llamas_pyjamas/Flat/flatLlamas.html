@@ -1,0 +1,253 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.Flat.flatLlamas &mdash; LLAMAS Pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            LLAMAS Pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Trace.html">llamas_pyjamas.Trace package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Extract.html">llamas_pyjamas.Extract package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Arc.html">llamas_pyjamas.Arc package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flat.html">llamas_pyjamas.Flat package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Bias.html">llamas_pyjamas.Bias package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.File.html">llamas_pyjamas.File package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Image.html">llamas_pyjamas.Image package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.QA.html">llamas_pyjamas.QA package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Flux.html">llamas_pyjamas.Flux package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Utils.html">llamas_pyjamas.Utils package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.Postprocessing.html">llamas_pyjamas.Postprocessing package</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../llamas_pyjamas.GUI.html">llamas_pyjamas.GUI package</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">LLAMAS Pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.Flat.flatLlamas</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.Flat.flatLlamas</h1><div class="highlight"><pre>
+<span></span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Trace.traceLlamasMaster</span><span class="w"> </span><span class="kn">import</span> <span class="n">TraceLlamas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llamas_pyjamas.Image.WhiteLight</span><span class="w"> </span><span class="kn">import</span> <span class="n">WhiteLightFits</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">fits</span>
+
+<div class="viewcode-block" id="LlamasFlatFielding">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LlamasFlatFielding</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Class for handling flat field processing in LLAMAS observations.</span>
+
+<span class="sd">    This class provides functionality for creating normalized flat field images</span>
+<span class="sd">    and applying flat field corrections to white light images.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">-&gt;</span><span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the LlamasFlatFielding object.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+    
+    
+<div class="viewcode-block" id="LlamasFlatFielding.flatcube">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding.flatcube">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flatcube</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extraction_list</span><span class="p">:</span> <span class="nb">list</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">outputname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Produce a normalized flat field image using the WhiteLightFits class.</span>
+
+<span class="sd">        This method creates a normalized flat field cube by processing extracted </span>
+<span class="sd">        fiber data and normalizing each HDU by its maximum value.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            extraction_list (list, optional): List of extracted fibers from a flat </span>
+<span class="sd">                field image. Defaults to None.</span>
+<span class="sd">            outputname (str, optional): Name for the output FITS file. If None, </span>
+<span class="sd">                defaults to &#39;normalized_flat.fits&#39;. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str: Output filename of the saved normalized flat field.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">hdul</span> <span class="o">=</span> <span class="n">WhiteLightFits</span><span class="p">(</span><span class="n">extraction_list</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># Normalize each image data in the HDU list</span>
+        <span class="k">for</span> <span class="n">hdu</span> <span class="ow">in</span> <span class="n">hdul</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">max_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">hdu</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">max_val</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">/</span> <span class="n">max_val</span>
+
+        <span class="c1"># Save the normalized HDU list as a new FITS file</span>
+        <span class="k">if</span> <span class="n">outputname</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">outputname</span> <span class="o">=</span> <span class="s1">&#39;normalized_flat.fits&#39;</span>
+            
+        <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outputname</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">outputname</span></div>
+
+        
+    
+<div class="viewcode-block" id="LlamasFlatFielding.flatFieldImage">
+<a class="viewcode-back" href="../../../llamas_pyjamas.Flat.html#llamas_pyjamas.Flat.flatLlamas.LlamasFlatFielding.flatFieldImage">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flatFieldImage</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">whitelight_fits</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">flatcube_fits</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">outputname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span><span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply flat field correction by dividing white light image by flat field.</span>
+
+<span class="sd">        This method performs flat field correction by dividing a white light image </span>
+<span class="sd">        by a corresponding flat field image, handling matching of bench sides and </span>
+<span class="sd">        colors, and protecting against division by zero.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            whitelight_fits (str): Path to the white light FITS image.</span>
+<span class="sd">            flatcube_fits (str): Path to the flat field FITS image.</span>
+<span class="sd">            outputname (str, optional): Filename for the normalized output image. </span>
+<span class="sd">                If None, defaults to &#39;normalized_whitelight.fits&#39;. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str: Path to the saved flat-fielded image.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Open the white light and flat field FITS files</span>
+        <span class="n">white_hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">whitelight_fits</span><span class="p">)</span>
+        <span class="n">flat_hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">flatcube_fits</span><span class="p">)</span>
+
+        <span class="n">new_hdus</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Loop over paired HDUs from both files</span>
+        <span class="k">for</span> <span class="n">white_hdu</span><span class="p">,</span> <span class="n">flat_hdu</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">white_hdul</span><span class="p">,</span> <span class="n">flat_hdul</span><span class="p">):</span>
+            <span class="n">bench_white</span> <span class="o">=</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BENCHSIDE&quot;</span><span class="p">)</span>
+            <span class="n">bench_flat</span> <span class="o">=</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BENCHSIDE&quot;</span><span class="p">)</span>
+            <span class="n">colour_white</span> <span class="o">=</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;COLOUR&quot;</span><span class="p">)</span>
+            <span class="n">colour_flat</span> <span class="o">=</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;COLOUR&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Only process if both hdu&#39;s have matching benchside and colour keywords</span>
+            <span class="k">if</span> <span class="n">bench_white</span> <span class="o">!=</span> <span class="n">bench_flat</span> <span class="ow">or</span> <span class="n">colour_white</span> <span class="o">!=</span> <span class="n">colour_flat</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Ensure both have valid data arrays</span>
+            <span class="k">if</span> <span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Divide and protect against division by zero (assign NaN where flat data is zero)</span>
+                <span class="n">divided</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">divide</span><span class="p">(</span>
+                    <span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                    <span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                    <span class="n">out</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">white_hdu</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">),</span>
+                    <span class="n">where</span><span class="o">=</span><span class="n">flat_hdu</span><span class="o">.</span><span class="n">data</span> <span class="o">!=</span> <span class="mi">0</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Normalize the result: divide by the maximum value if it is nonzero</span>
+                <span class="n">max_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">divided</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">max_val</span> <span class="ow">and</span> <span class="n">max_val</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">divided</span> <span class="o">/=</span> <span class="n">max_val</span>
+
+                <span class="c1"># Create a new Image HDU with the result using the white light header</span>
+                <span class="n">new_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">divided</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">white_hdu</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+                <span class="n">new_hdus</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_hdu</span><span class="p">)</span>
+
+        <span class="c1"># Package the new HDUs into a new HDUList.</span>
+        <span class="c1"># Use the first new HDU as PrimaryHDU</span>
+        <span class="k">if</span> <span class="n">new_hdus</span><span class="p">:</span>
+            <span class="n">primary</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">new_hdus</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">new_hdus</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">header</span><span class="p">)</span>
+            <span class="n">hdulist</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">primary</span><span class="p">]</span> <span class="o">+</span> <span class="n">new_hdus</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">hdulist</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">([</span><span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">()])</span>
+
+        <span class="k">if</span> <span class="n">outputname</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">outputname</span> <span class="o">=</span> <span class="s1">&#39;normalized_whitelight.fits&#39;</span>
+
+        <span class="n">hdulist</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">outputname</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="n">white_hdul</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">flat_hdul</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">outputname</span></div>
+</div>
+
+        
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, LLAMAS Development Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

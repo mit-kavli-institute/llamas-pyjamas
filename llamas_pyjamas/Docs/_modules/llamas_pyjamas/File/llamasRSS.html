@@ -1,0 +1,499 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llamas_pyjamas.File.llamasRSS &mdash; llamas-pyjamas 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llamas-pyjamas
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llamas-pyjamas</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llamas_pyjamas.File.llamasRSS</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llamas_pyjamas.File.llamasRSS</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">cloudpickle</span> <span class="k">as</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">fits</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">astropy.coordinates</span> <span class="kn">import</span> <span class="n">SkyCoord</span>
+<span class="kn">from</span> <span class="nn">astropy</span> <span class="kn">import</span> <span class="n">units</span> <span class="k">as</span> <span class="n">u</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span> <span class="nn">llamas_pyjamas.Utils.utils</span> <span class="kn">import</span> <span class="n">setup_logger</span>
+
+
+<div class="viewcode-block" id="RSSgeneration">
+<a class="viewcode-back" href="../../../llamas_pyjamas.File.html#llamas_pyjamas.File.llamasRSS.RSSgeneration">[docs]</a>
+<span class="k">class</span> <span class="nc">RSSgeneration</span><span class="p">:</span>
+<div class="viewcode-block" id="RSSgeneration.__init__">
+<a class="viewcode-back" href="../../../llamas_pyjamas.File.html#llamas_pyjamas.File.llamasRSS.RSSgeneration.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the RSSgeneration class.</span>
+<span class="sd">        </span>
+<span class="sd">        Parameters:</span>
+<span class="sd">            logger (Logger, optional): Logger instance. If None, creates a new one.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Set up logging</span>
+        <span class="k">if</span> <span class="n">logger</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;RSSgeneration_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span> <span class="o">=</span> <span class="n">logger</span>
+            
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;RSSgeneration initialized successfully&quot;</span><span class="p">)</span>
+        <span class="k">return</span></div>
+
+
+
+<div class="viewcode-block" id="RSSgeneration.generate_rss">
+<a class="viewcode-back" href="../../../llamas_pyjamas.File.html#llamas_pyjamas.File.llamasRSS.RSSgeneration.generate_rss">[docs]</a>
+    <span class="k">def</span> <span class="nf">generate_rss</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extraction_file</span><span class="p">,</span> <span class="n">output_file</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generate a row-stacked spectra (RSS) FITS file with the following structure:</span>
+<span class="sd">        Extension 0 - PRIMARY: primary header only, no data</span>
+<span class="sd">        Extension 1 - FLUX: extracted fiber flux in units of 10(-17) erg/s/cm2/Ang/fiber [NWAVE x NFIBER]</span>
+<span class="sd">        Extension 2 - ERROR: the error array, sigma of above, for each fiber [NWAVE x NFIBER]</span>
+<span class="sd">        Extension 3 - MASK: the pixel mask array for each fiber [NWAVE x NFIBER]</span>
+<span class="sd">        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]</span>
+<span class="sd">        Extension 5 - FWHM: the full width half max array for each fiber [NWAVE x NFIBER]</span>
+<span class="sd">        Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]</span>
+<span class="sd">        </span>
+<span class="sd">        Parameters:</span>
+<span class="sd">        -----------</span>
+<span class="sd">        extraction_file : str</span>
+<span class="sd">            Path to the extraction pickle file</span>
+<span class="sd">        output_file : str</span>
+<span class="sd">            Path to save the output RSS FITS file</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generating RSS file from </span><span class="si">{</span><span class="n">extraction_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">new_rss_filenames</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">extraction_file</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">_data</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            <span class="n">primary_hdr</span> <span class="o">=</span> <span class="n">_data</span><span class="p">[</span><span class="s1">&#39;primary_header&#39;</span><span class="p">]</span>    
+            <span class="n">extraction_objects</span> <span class="o">=</span> <span class="n">_data</span><span class="p">[</span><span class="s1">&#39;extractions&#39;</span><span class="p">]</span>
+            <span class="n">_metadata</span> <span class="o">=</span> <span class="n">_data</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loaded extraction file with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">extraction_objects</span><span class="p">)</span><span class="si">}</span><span class="s2"> extraction objects&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Group by channel</span>
+            <span class="n">channel_groups</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">meta_groups</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">meta</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">extraction_objects</span><span class="p">,</span> <span class="n">_metadata</span><span class="p">):</span>
+                <span class="n">channel</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;channel&#39;</span><span class="p">,</span> <span class="s1">&#39;UNKNOWN&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">channel</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">channel_groups</span><span class="p">:</span>
+                    <span class="n">channel_groups</span><span class="p">[</span><span class="n">channel</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+                    <span class="n">meta_groups</span><span class="p">[</span><span class="n">channel</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">channel_groups</span><span class="p">[</span><span class="n">channel</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+                <span class="n">meta_groups</span><span class="p">[</span><span class="n">channel</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+            
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found channels: </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">channel_groups</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Process each channel separately - we&#39;ll create one RSS file per channel</span>
+            <span class="k">for</span> <span class="n">channel</span><span class="p">,</span> <span class="n">obj_list</span> <span class="ow">in</span> <span class="n">channel_groups</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">meta_list</span> <span class="o">=</span> <span class="n">meta_groups</span><span class="p">[</span><span class="n">channel</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">obj_list</span><span class="p">)</span><span class="si">}</span><span class="s2"> extraction objects&quot;</span><span class="p">)</span>
+                
+                <span class="n">channel_output_file</span> <span class="o">=</span> <span class="n">output_file</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">channel_groups</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="c1"># If multiple channels, append channel name to output file</span>
+                    <span class="n">base</span><span class="p">,</span> <span class="n">ext</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">output_file</span><span class="p">)</span>
+                    <span class="n">channel_output_file</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">channel</span><span class="si">}{</span><span class="n">ext</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">new_rss_filenames</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">channel_output_file</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Creating channel-specific output file: </span><span class="si">{</span><span class="n">channel_output_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Create HDU list with primary header (Extension 0 - PRIMARY)</span>
+                <span class="n">hdul</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">HDUList</span><span class="p">()</span>
+                <span class="n">primary_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">PrimaryHDU</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="n">primary_hdr</span><span class="p">)</span>
+                <span class="n">primary_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;CHANNEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">channel</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">primary_hdu</span><span class="p">)</span>
+                
+                <span class="c1"># Collect data for all fibers in this channel</span>
+                <span class="n">all_flux</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">all_errors</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">all_waves</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">all_dq</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">all_fwhm</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">fiber_ids</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">benchsides</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">fiber_types</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">fiber_ras</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">fiber_decs</span> <span class="o">=</span> <span class="p">[]</span>
+                
+                <span class="c1"># Process each extraction object</span>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">meta</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">obj_list</span><span class="p">,</span> <span class="n">meta_list</span><span class="p">)):</span>
+                    <span class="c1"># Get the counts (flux)</span>
+                    <span class="n">counts</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="n">counts</span>
+                    <span class="n">n_fibers</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    
+                    <span class="c1"># Get or create error arrays</span>
+                    <span class="n">errors</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;errors&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">errors</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">errors</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No valid error data for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. Creating zero array.&quot;</span><span class="p">)</span>
+                        <span class="n">errors</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+                    
+                    <span class="c1"># Get or create data quality (mask) arrays</span>
+                    <span class="n">dq</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;dq&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">dq</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">dq</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No valid DQ data for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. Creating zero array.&quot;</span><span class="p">)</span>
+                        <span class="n">dq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+                    
+                    <span class="c1"># Get wavelength arrays</span>
+                    <span class="n">waves</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;wave&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">waves</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">waves</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No valid wavelength data for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. Using NaN arrays.&quot;</span><span class="p">)</span>
+                        <span class="n">waves</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+                    
+                    <span class="c1"># Get or create FWHM arrays (may not exist in all extractions)</span>
+                    <span class="n">fwhm</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;fwhm&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">fwhm</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">fwhm</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No valid FWHM data for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. Creating default array.&quot;</span><span class="p">)</span>
+                        <span class="n">fwhm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="mf">2.5</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>  <span class="c1"># Default FWHM of 2.5 pixels</span>
+                    
+                    <span class="c1"># Handle dead fibers</span>
+                    <span class="n">dead_fibers</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;dead_fibers&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">dead_fibers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> has dead fibers: </span><span class="si">{</span><span class="n">dead_fibers</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                        <span class="c1"># Validate each dead fiber</span>
+                        <span class="n">valid_dead_fibers</span> <span class="o">=</span> <span class="p">[]</span>
+                        <span class="k">for</span> <span class="n">dead_fiber</span> <span class="ow">in</span> <span class="n">dead_fibers</span><span class="p">:</span>
+                            <span class="c1"># Verify that the dead fiber index is valid</span>
+                            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">dead_fiber</span> <span class="o">&lt;</span> <span class="n">n_fibers</span><span class="p">:</span>
+                                <span class="c1"># Check if all values in the row are zero (or close to zero)</span>
+                                <span class="n">is_zero_row</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">counts</span><span class="p">[</span><span class="n">dead_fiber</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">)</span>
+                                <span class="k">if</span> <span class="n">is_zero_row</span><span class="p">:</span>
+                                    <span class="n">valid_dead_fibers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dead_fiber</span><span class="p">)</span>
+                                <span class="k">else</span><span class="p">:</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Dead fiber </span><span class="si">{</span><span class="n">dead_fiber</span><span class="si">}</span><span class="s2"> in object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> has non-zero values - not removing&quot;</span><span class="p">)</span>
+                            <span class="k">else</span><span class="p">:</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Dead fiber index </span><span class="si">{</span><span class="n">dead_fiber</span><span class="si">}</span><span class="s2"> is out of range for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="n">n_fibers</span><span class="si">}</span><span class="s2"> fibers&quot;</span><span class="p">)</span>
+                        
+                        <span class="c1"># Remove the valid dead fibers</span>
+                        <span class="k">if</span> <span class="n">valid_dead_fibers</span><span class="p">:</span>
+                            <span class="c1"># Sort in descending order if there are multiple fibers to avoid index shifting</span>
+                            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid_dead_fibers</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                                <span class="n">valid_dead_fibers</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                            
+                            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Removing confirmed dead fibers </span><span class="si">{</span><span class="n">valid_dead_fibers</span><span class="si">}</span><span class="s2"> from object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                            <span class="k">for</span> <span class="n">dead_fiber</span> <span class="ow">in</span> <span class="n">valid_dead_fibers</span><span class="p">:</span>
+                                <span class="c1"># Double check as a sanity check that the row is all zeros</span>
+                                <span class="n">is_zero_row</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">counts</span><span class="p">[</span><span class="n">dead_fiber</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">)</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sanity check for fiber </span><span class="si">{</span><span class="n">dead_fiber</span><span class="si">}</span><span class="s2">: all zeros = </span><span class="si">{</span><span class="n">is_zero_row</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                                <span class="k">if</span> <span class="ow">not</span> <span class="n">is_zero_row</span><span class="p">:</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Skipping removal of fiber </span><span class="si">{</span><span class="n">dead_fiber</span><span class="si">}</span><span class="s2"> as it contains non-zero values&quot;</span><span class="p">)</span>
+                                    <span class="k">continue</span>
+                                    
+                                <span class="c1"># Remove the dead fiber from all arrays</span>
+                                <span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="n">dead_fiber</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                                <span class="n">errors</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">errors</span><span class="p">,</span> <span class="n">dead_fiber</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                                <span class="n">waves</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">waves</span><span class="p">,</span> <span class="n">dead_fiber</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                                <span class="n">dq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">dq</span><span class="p">,</span> <span class="n">dead_fiber</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                                <span class="n">fwhm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">fwhm</span><span class="p">,</span> <span class="n">dead_fiber</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                                
+                            <span class="c1"># Log the final shape after all removals</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;New arrays shape after removal: </span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                            <span class="n">n_fibers</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Update fiber count</span>
+                    
+                    <span class="c1"># Log wavelength stats if available</span>
+                    <span class="k">if</span> <span class="n">waves</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">nan_count</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">waves</span><span class="p">))</span>
+                        <span class="n">nan_percentage</span> <span class="o">=</span> <span class="p">(</span><span class="n">nan_count</span> <span class="o">/</span> <span class="n">waves</span><span class="o">.</span><span class="n">size</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wavelength array for object </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: shape=</span><span class="si">{</span><span class="n">waves</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">, &quot;</span> <span class="o">+</span>
+                                        <span class="sa">f</span><span class="s2">&quot;NaN count=</span><span class="si">{</span><span class="n">nan_count</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">nan_percentage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">%), &quot;</span> <span class="o">+</span>
+                                        <span class="sa">f</span><span class="s2">&quot;valid range=</span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmin</span><span class="p">(</span><span class="n">waves</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">waves</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+                    <span class="c1"># Add data for each fiber</span>
+                    <span class="n">all_flux</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">counts</span><span class="p">)</span>
+                    <span class="n">all_errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">errors</span><span class="p">)</span>
+                    <span class="n">all_waves</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">waves</span><span class="p">)</span>
+                    <span class="n">all_dq</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dq</span><span class="p">)</span>
+                    <span class="n">all_fwhm</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">fwhm</span><span class="p">)</span>
+                    
+                    <span class="c1"># Add metadata for fiber map</span>
+                    <span class="n">benchside_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bench&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}{</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;side&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="n">fiber_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fiber_type&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;UNKNOWN&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    <span class="n">fiber_ra</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fiber_ra&#39;</span><span class="p">,</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    <span class="n">fiber_dec</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fiber_dec&#39;</span><span class="p">,</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    
+                    <span class="n">benchsides</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">benchside_str</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    <span class="n">fiber_ids</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_fibers</span><span class="p">))</span>
+                    <span class="n">fiber_types</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">fiber_type</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">fiber_type</span><span class="p">)</span> <span class="o">==</span> <span class="n">n_fibers</span> <span class="k">else</span> <span class="p">[</span><span class="s1">&#39;UNKNOWN&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    <span class="n">fiber_ras</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">fiber_ra</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">fiber_ra</span><span class="p">)</span> <span class="o">==</span> <span class="n">n_fibers</span> <span class="k">else</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                    <span class="n">fiber_decs</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">fiber_dec</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">fiber_dec</span><span class="p">)</span> <span class="o">==</span> <span class="n">n_fibers</span> <span class="k">else</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_fibers</span><span class="p">)</span>
+                
+                <span class="c1"># Stack all arrays</span>
+                <span class="n">flux_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">all_flux</span><span class="p">)</span>
+                <span class="n">error_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">all_errors</span><span class="p">)</span>
+                <span class="n">wave_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">all_waves</span><span class="p">)</span>
+                <span class="n">dq_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">all_dq</span><span class="p">)</span>
+                <span class="n">fwhm_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">all_fwhm</span><span class="p">)</span>
+                
+                <span class="c1"># Get array dimensions</span>
+                <span class="n">n_total_fibers</span><span class="p">,</span> <span class="n">n_pixels</span> <span class="o">=</span> <span class="n">flux_stack</span><span class="o">.</span><span class="n">shape</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> stacked data shape: </span><span class="si">{</span><span class="n">flux_stack</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">n_total_fibers</span><span class="si">}</span><span class="s2"> fibers, </span><span class="si">{</span><span class="n">n_pixels</span><span class="si">}</span><span class="s2"> pixels)&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Log some statistics</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Flux stack min/max: </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmin</span><span class="p">(</span><span class="n">flux_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">flux_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wavelength stack min/max: </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmin</span><span class="p">(</span><span class="n">wave_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">wave_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error stack min/max: </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmin</span><span class="p">(</span><span class="n">error_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">error_stack</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Create common header for data extensions</span>
+                <span class="n">common_header</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">Header</span><span class="p">()</span>
+                <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;CHANNEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">channel</span>
+                <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;NFIBERS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">n_total_fibers</span>
+                <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;NWAVE&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">n_pixels</span>
+                
+                <span class="c1"># Try to determine wavelength range if available</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">valid_waves</span> <span class="o">=</span> <span class="n">wave_stack</span><span class="p">[</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">wave_stack</span><span class="p">)]</span>
+                    <span class="n">valid_count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid_waves</span><span class="p">)</span>
+                    <span class="n">total_count</span> <span class="o">=</span> <span class="n">wave_stack</span><span class="o">.</span><span class="n">size</span>
+                    <span class="n">valid_percentage</span> <span class="o">=</span> <span class="p">(</span><span class="n">valid_count</span> <span class="o">/</span> <span class="n">total_count</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+                    
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> has </span><span class="si">{</span><span class="n">valid_count</span><span class="si">}</span><span class="s2"> valid wavelength points &quot;</span> <span class="o">+</span>
+                                    <span class="sa">f</span><span class="s2">&quot;out of </span><span class="si">{</span><span class="n">total_count</span><span class="si">}</span><span class="s2"> total points (</span><span class="si">{</span><span class="n">valid_percentage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+                    
+                    <span class="k">if</span> <span class="n">valid_count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="n">min_wave</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">valid_waves</span><span class="p">)</span>
+                        <span class="n">max_wave</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">valid_waves</span><span class="p">)</span>
+                        <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;WAVEMIN&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">min_wave</span>
+                        <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;WAVEMAX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">max_wave</span>
+                        <span class="n">common_header</span><span class="p">[</span><span class="s1">&#39;COMMENT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;Wavelength range: </span><span class="si">{</span><span class="n">min_wave</span><span class="si">:</span><span class="s1">.2f</span><span class="si">}</span><span class="s1">-</span><span class="si">{</span><span class="n">max_wave</span><span class="si">:</span><span class="s1">.2f</span><span class="si">}</span><span class="s1"> Angstroms&#39;</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Channel </span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2"> wavelength range: </span><span class="si">{</span><span class="n">min_wave</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">max_wave</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> Angstroms&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not determine wavelength range: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 1 - FLUX: extracted fiber flux [NWAVE x NFIBER]</span>
+                <span class="c1"># Transpose the array to make it [NWAVE x NFIBER]</span>
+                <span class="n">flux_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">flux_stack</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">common_header</span><span class="p">)</span>
+                <span class="n">flux_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;FLUX&#39;</span>
+                <span class="n">flux_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BUNIT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;10^(-17) erg/s/cm2/Ang/fiber&#39;</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flux_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added FLUX extension with shape </span><span class="si">{</span><span class="n">flux_stack</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 2 - ERROR: the error array [NWAVE x NFIBER]</span>
+                <span class="n">error_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">error_stack</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">common_header</span><span class="p">)</span>
+                <span class="n">error_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;ERROR&#39;</span>
+                <span class="n">error_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BUNIT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;10^(-17) erg/s/cm2/Ang/fiber&#39;</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">error_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added ERROR extension with shape </span><span class="si">{</span><span class="n">error_stack</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 3 - MASK: the pixel mask array [NWAVE x NFIBER]</span>
+                <span class="n">mask_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">dq_stack</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">common_header</span><span class="p">)</span>
+                <span class="n">mask_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;MASK&#39;</span>
+                <span class="n">mask_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COMMENT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Pixel mask: 0=good, &gt;0=various issues&#39;</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mask_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added MASK extension with shape </span><span class="si">{</span><span class="n">dq_stack</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]</span>
+                <span class="c1"># Use the actual wavelength solution from each fiber in the extraction file</span>
+                
+                <span class="c1"># Note: this directly uses the wavelength arrays from the extraction objects</span>
+                <span class="c1"># which were stacked as wave_stack</span>
+                
+                <span class="c1"># Transpose the array to make it [NWAVE x NFIBER] to match other extensions</span>
+                <span class="n">wave_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">wave_stack</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">common_header</span><span class="p">)</span>
+                <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;WAVE&#39;</span>
+                <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BUNIT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Angstrom&#39;</span>
+                
+                <span class="c1"># Add information about wavelength data quality</span>
+                <span class="k">if</span> <span class="n">valid_count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;WAVESTAT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;GOOD&#39;</span>
+                    <span class="n">valid_percentage</span> <span class="o">=</span> <span class="p">(</span><span class="n">valid_count</span> <span class="o">/</span> <span class="n">total_count</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+                    <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COMMENT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;Wavelength data: </span><span class="si">{</span><span class="n">valid_percentage</span><span class="si">:</span><span class="s1">.2f</span><span class="si">}</span><span class="s1">% valid points&#39;</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;WAVESTAT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;POOR&#39;</span>
+                    <span class="n">wave_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;COMMENT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Warning: Limited or no valid wavelength data&#39;</span>
+                
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">wave_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added WAVE extension with shape </span><span class="si">{</span><span class="n">wave_stack</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 5 - FWHM: the full width half max array [NWAVE x NFIBER]</span>
+                <span class="n">fwhm_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">ImageHDU</span><span class="p">(</span><span class="n">fwhm_stack</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="n">common_header</span><span class="p">)</span>
+                <span class="n">fwhm_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;FWHM&#39;</span>
+                <span class="n">fwhm_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;BUNIT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Pixels&#39;</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">fwhm_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added FWHM extension with shape </span><span class="si">{</span><span class="n">fwhm_stack</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Extension 6 - FIBERMAP: binary table with fiber information</span>
+                <span class="n">fibermap_cols</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FIBER_ID&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;J&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fiber_ids</span><span class="p">)),</span>
+                    <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;BENCHSIDE&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;10A&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">benchsides</span><span class="p">)),</span>
+                    <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;FIBER_TYPE&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;10A&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fiber_types</span><span class="p">)),</span>
+                    <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;RA&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;D&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fiber_ras</span><span class="p">)),</span>
+                    <span class="n">fits</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;DEC&#39;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;D&#39;</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fiber_decs</span><span class="p">))</span>
+                <span class="p">]</span>
+                
+                <span class="n">fibermap_hdu</span> <span class="o">=</span> <span class="n">fits</span><span class="o">.</span><span class="n">BinTableHDU</span><span class="o">.</span><span class="n">from_columns</span><span class="p">(</span><span class="n">fibermap_cols</span><span class="p">)</span>
+                <span class="n">fibermap_hdu</span><span class="o">.</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;EXTNAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;FIBERMAP&#39;</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">fibermap_hdu</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added FIBERMAP binary table with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">fiber_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> entries&quot;</span><span class="p">)</span>
+                
+                <span class="c1"># Write to file</span>
+                <span class="n">hdul</span><span class="o">.</span><span class="n">writeto</span><span class="p">(</span><span class="n">channel_output_file</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RSS file written to: </span><span class="si">{</span><span class="n">channel_output_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error generating RSS file: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">raise</span>
+        
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">new_rss_filenames</span></div>
+</div>
+
+
+
+
+
+<span class="c1">#############</span>
+<div class="viewcode-block" id="update_ra_dec_in_fits">
+<a class="viewcode-back" href="../../../llamas_pyjamas.File.html#llamas_pyjamas.File.llamasRSS.update_ra_dec_in_fits">[docs]</a>
+<span class="k">def</span> <span class="nf">update_ra_dec_in_fits</span><span class="p">(</span><span class="n">fits_file</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Update RA and DEC values in a FITS file header using HIERARCH TEL values if needed.</span>
+<span class="sd">    </span>
+<span class="sd">    Parameters:</span>
+<span class="sd">    -----------</span>
+<span class="sd">    fits_file : str</span>
+<span class="sd">        Path to the FITS file to update</span>
+<span class="sd">    logger : Logger, optional</span>
+<span class="sd">        Logger instance. If None, creates a new one.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Set up logging if not provided</span>
+    <span class="k">if</span> <span class="n">logger</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">_%H%M%S&#39;</span><span class="p">)</span>
+        <span class="n">logger</span> <span class="o">=</span> <span class="n">setup_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;update_ra_dec_</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s1">.log&#39;</span><span class="p">)</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Updating RA/DEC in FITS file: </span><span class="si">{</span><span class="n">fits_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">fits</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">fits_file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;update&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">hdul</span><span class="p">:</span>
+            <span class="n">primary_hdr</span> <span class="o">=</span> <span class="n">hdul</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">header</span>
+
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">primary_hdr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;RA&#39;</span><span class="p">)</span>
+            <span class="n">dec</span> <span class="o">=</span> <span class="n">primary_hdr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;DEC&#39;</span><span class="p">)</span>
+
+            <span class="n">missing_ra</span> <span class="o">=</span> <span class="p">(</span><span class="n">ra</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">str</span><span class="p">(</span><span class="n">ra</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="n">missing_dec</span> <span class="o">=</span> <span class="p">(</span><span class="n">dec</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">str</span><span class="p">(</span><span class="n">dec</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">missing_ra</span> <span class="ow">or</span> <span class="n">missing_dec</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Missing RA=</span><span class="si">{</span><span class="n">missing_ra</span><span class="si">}</span><span class="s2"> or DEC=</span><span class="si">{</span><span class="n">missing_dec</span><span class="si">}</span><span class="s2">, attempting to use HIERARCH TEL values&quot;</span><span class="p">)</span>
+                <span class="n">tel_ra</span> <span class="o">=</span> <span class="n">primary_hdr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HIERARCH TEL RA&#39;</span><span class="p">)</span>
+                <span class="n">tel_dec</span> <span class="o">=</span> <span class="n">primary_hdr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HIERARCH TEL DEC&#39;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">tel_ra</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">tel_dec</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">error_msg</span> <span class="o">=</span> <span class="s2">&quot;Primary header missing HIERARCH TEL RA and/or HIERARCH TEL DEC&quot;</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">error_msg</span><span class="p">)</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">error_msg</span><span class="p">)</span>
+
+                <span class="c1"># Convert telescope coordinates from sexagesimal to decimal assuming both are in degrees.</span>
+                <span class="n">c</span> <span class="o">=</span> <span class="n">SkyCoord</span><span class="p">(</span><span class="n">ra</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">tel_ra</span><span class="p">),</span> <span class="n">dec</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">tel_dec</span><span class="p">),</span> <span class="n">unit</span><span class="o">=</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">))</span>
+                
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Converted HIERARCH TEL coordinates: RA=</span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">ra</span><span class="o">.</span><span class="n">deg</span><span class="si">}</span><span class="s2">, DEC=</span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">dec</span><span class="o">.</span><span class="n">deg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">missing_ra</span><span class="p">:</span>
+                    <span class="n">primary_hdr</span><span class="p">[</span><span class="s1">&#39;RA&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">ra</span><span class="o">.</span><span class="n">deg</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Updated RA value to </span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">ra</span><span class="o">.</span><span class="n">deg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">missing_dec</span><span class="p">:</span>
+                    <span class="n">primary_hdr</span><span class="p">[</span><span class="s1">&#39;DEC&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">dec</span><span class="o">.</span><span class="n">deg</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Updated DEC value to </span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">dec</span><span class="o">.</span><span class="n">deg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="n">hdul</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Primary header updated in </span><span class="si">{</span><span class="n">fits_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error updating RA/DEC in FITS file: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">raise</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, LLAMAS Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
