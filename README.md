@@ -25,6 +25,7 @@ For instructions on installation, compilation, and runtime, please see below and
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 <details>
+  <summary>Commissioning files</summary>
   A different set of master traces and wavelength solutions are required to reduce the 2024 data due to changes made to the LLAMAS camera positions. They should be in the same locations of the repository described at the end of the README.
   
   The master traces required to run your framework are here: https://mit-kavli.box.com/s/sawx4silf56uh00fziilygx7uppaaqz0
