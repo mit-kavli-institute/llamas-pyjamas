@@ -24,6 +24,16 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
+<details>
+  A different set of master traces and wavelength solutions are required to reduce the 2024 data due to changes made to the LLAMAS camera positions. They should be in the same locations of the repository described at the end of the README.
+  
+  The master traces required to run your framework are here: https://mit-kavli.box.com/s/sawx4silf56uh00fziilygx7uppaaqz0
+  
+  The wavelength solution required is here: https://mit-kavli.box.com/s/5d1eaz073ilrnwviaw9b2ufusgzqfqub
+  
+</details>
+
+
 
 **If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
 
