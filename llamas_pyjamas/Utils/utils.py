@@ -38,7 +38,7 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import cloudpickle
+import cloudpickle as pickle
 
 def setup_logger(name, log_filename=None)-> logging.Logger:
     """Setup logger with file and console handlers.
