@@ -1061,8 +1061,6 @@ def main(config_path):
             
             if flat_pixel_maps:
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
-                for flat_file in flat_pixel_maps:
-                    print(f"  - {os.path.basename(flat_file)}")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
         
@@ -1121,7 +1119,7 @@ def main(config_path):
                         flat_pixel_maps, 
                         flat_output_dir,
                         validate_matching=config.get('validate_flat_matching', True),
-                        require_all_matches=config.get('require_all_flat_matches', False)
+                        require_all_matches=config.get('require_all_flat_matches', True)
                     )
                     
                     if corrected_file:
