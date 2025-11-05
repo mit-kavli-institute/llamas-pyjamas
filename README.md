@@ -10,9 +10,59 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
 **Users of this pipeline are requested to cite Hughes et al. (in prep)**.
 
+<details>
+<summary>Citation</summary>
+```bibtex
+@unpublished{Hughes2025,
+  author       = {Hughes, Sarah and others},
+  title        = {{The LLAMAS data reduction pipeline}},
+  note         = {in preparation},
+  year         = {2025}}
+```
+</details>
+
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
+<details>
+  <summary>Commissioning files</summary>
+  A different set of master traces and wavelength solutions are required to reduce the 2024 data due to changes made to the LLAMAS camera positions. They should be in the same locations of the repository described at the end of the README.
+  
+  The master traces required to run your framework are here: https://mit-kavli.box.com/s/sawx4silf56uh00fziilygx7uppaaqz0
+  
+  The wavelength solution required is here: https://mit-kavli.box.com/s/5d1eaz073ilrnwviaw9b2ufusgzqfqub
+  
+</details>
+
+
+
+**If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
+
+<details>
+<summary>Missing camera command line steps</summary>
+
+Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
+
+## Create a corrected copy
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits
+```
+
+## With verbose logging to see what's happening
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits -v
+```
+
+## Direct module execution
+```bash
+# From the validate.py directory
+python validate.py original_science.fits -o science_fixed.fits -v
+```
+
+</details>
+
+
+
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 

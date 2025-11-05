@@ -42,7 +42,7 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import cloudpickle
+import cloudpickle as pickle
 
 # Module-level logger for utility functions
 # This logger can be used by all functions in this module

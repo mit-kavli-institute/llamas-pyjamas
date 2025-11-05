@@ -4,7 +4,7 @@ This module provides utilities to validate and fix FITS files with missing camer
 extensions to ensure compatibility with the LLAMAS data reduction pipeline.
 
 The LLAMAS instrument expects science images with a primary HDU plus 24 extensions,
-representing 4 benches × 2 sides × 3 channels. When cameras fail, this module can
+representing 4 benches x 2 sides x 3 channels. When cameras fail, this module can
 fill in missing extensions with placeholder data to prevent pipeline failures.
 
 Functions:
@@ -47,11 +47,9 @@ def get_expected_camera_list() -> List[Tuple[str, str, str]]:
         List of tuples containing (channel, bench, side) for all 24 expected cameras.
 
     Example:
-        >>> cameras = get_expected_camera_list()
-        >>> len(cameras)
-        24
-        >>> cameras[0]
-        ('red', '1', 'A')
+        cameras = get_expected_camera_list()
+        len(cameras) == 24
+        cameras[0] == ('red', '1', 'A')
     """
     return list(idx_lookup.keys())
 
