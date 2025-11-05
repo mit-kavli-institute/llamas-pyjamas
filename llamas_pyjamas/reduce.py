@@ -843,9 +843,11 @@ def main(config_path):
 
         
     # Parse CRR cube configuration (defaults to True if not specified)
-    use_crr_cube = config.get('CRR_cube', True)  # Default to True
+    use_crr_cube = config.get('CRR_cube', False)  # Default to True
     if isinstance(use_crr_cube, str):
         use_crr_cube = use_crr_cube.lower() == 'true'
+        
+    _gen_cubes = config.get('generate_cubes', True)  # Default to True
 
     print(f"CRR cube reconstruction: {'enabled' if use_crr_cube else 'disabled'}")
 
@@ -1264,7 +1266,7 @@ def main(config_path):
         os.makedirs(cube_output_dir, exist_ok=True)
 
 
-        if rss_files:
+        if rss_files and _gen_cubes:
             cube_files = construct_cube(
                 rss_files, 
                 cube_output_dir,
