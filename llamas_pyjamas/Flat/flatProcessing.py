@@ -6,7 +6,6 @@ import ray
 import pkg_resources
 from pathlib import Path
 import logging
-# from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
@@ -19,9 +18,13 @@ from typing import List, Tuple
 from astropy.io import fits
 import numpy as np
 
-from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
+import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 
 from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS
+
+# Set up logger
+logger = logging.getLogger('flatProcessing')
 
 def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
@@ -40,17 +43,21 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
     package_root = os.path.dirname(package_path)
     runtime_env = {
-            "py_modules": [package_root],
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
+            "py_modules": [package_path],  # Use package_path instead of package_root
+            "env_vars": {"PYTHONPATH": f"{package_path}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
-                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
                 "**/*.fits",                 # Exclude all FITS files anywhere
-                "**/*.pkl",                  # Exclude all pickle files anywhere
+                "**/*.pkl",                  # Exclude all pickle files anywhere (too large for Ray)
                 "**/.git/**",               # Exclude git directory
-                "**/*.zip/**",
-                "**/*.tar.gz/**",
-                "**/mastercalib*/**",
-                
+                "**/*.zip",
+                "**/*.tar.gz",
+                "**/mastercalib/**",
+                "**/Test/**",               # Exclude test data directory
+                "**/Docs/**",               # Exclude documentation builds
+                "**/arc_testing/**",        # Exclude testing directories
+                "**/Bias/**",               # Exclude bias files
+                "**/__pycache__/**",        # Exclude Python cache
+                "**/*.pyc",                 # Exclude compiled Python files
             ]
         }
 
@@ -61,9 +68,9 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     
     
     _extractions = []
-    print(f'Processing {filename} with indices {idxs}')
+    logger.debug(f'Processing {filename} with indices {idxs}')
     _hdus = process_fits_by_color(filename)
-    print(f'Length of _hdus: {len(_hdus)}')
+    logger.debug(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     
     masterfile = 'LLAMAS_master'
@@ -74,12 +81,13 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
         
     if not tracedir:
         trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        logger.info(f'No tracedir specified, using CALIB_DIR: {CALIB_DIR}')
     else:
-        print('Currently only using mastercalib files to implement this...check again later')
-        trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        trace_files = glob.glob(os.path.join(tracedir, f'{masterfile}*traces.pkl'))
+        logger.info(f'Using specified tracedir: {tracedir}')
     
     _hdu_trace_pairs = match_hdu_to_traces(channel_hdus, trace_files, start_idx=0)
-    print("HDU-Trace pairs:", _hdu_trace_pairs)
+    logger.debug(f"HDU-Trace pairs: {_hdu_trace_pairs}")
     futures = []
     for hdu_index, trace_file in _hdu_trace_pairs:
         logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')   
@@ -98,13 +106,13 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
             writable_ex = make_writable(ex)
             extraction_list.append(writable_ex)    
 
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file)
-    print(f'Extractions saved to {extracted_filename}')
+    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+    logger.info(f'Extractions saved to {extracted_filename}')
     
     return 
 
 
-def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None) -> Tuple[List, List]:
+def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, verbose=False) -> Tuple[List, List]:
     """Produce flat field extractions for each color channel.
 
     :param red_flat: file to use for red channel flat field extraction
@@ -115,7 +123,25 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     :type blue_flat: str
     :param tracedir: Directory to use find the trace files, defaults to None
     :type tracedir: str, optional
+    :param outpath: Directory to save the extraction files, defaults to None (uses OUTPUT_DIR)
+    :type outpath: str, optional
+    :param verbose: Enable verbose console output, defaults to False
+    :type verbose: bool, optional
     """
+    
+    # Set up logger verbosity
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(logging.INFO)
+
+    # Determine the output directory
+    output_directory = outpath if outpath else OUTPUT_DIR
+    
+    # Ensure the output directory exists
+    os.makedirs(output_directory, exist_ok=True)
+    logger.info(f'Using output directory: {output_directory}')
 
     # Reduce the red flat field image
     reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red')
@@ -124,29 +150,62 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     # Reduce the blue flat field image
     reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue')
     
-    print('Flat field extractions complete.')
+    logger.info('Flat field extractions complete.')
 
-
-    red_extraction, green_extraction, blue_extraction = None, None, None
-    if outpath:
-        red_extraction = os.path.join(outpath, 'red_extractions_flat.pkl')
-        green_extraction = os.path.join(outpath, 'green_extractions_flat.pkl')
-        blue_extraction = os.path.join(outpath, 'blue_extractions_flat.pkl')
-    else:
-        red_extraction = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
-        green_extraction = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
-        blue_extraction = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+    # Build paths to extraction files - use OUTPUT_DIR for where files are actually saved
+    # but move them to outpath if specified
+    red_extraction_source = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
+    green_extraction_source = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
+    blue_extraction_source = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+    
+    # Final paths where files should be located
+    red_extraction = os.path.join(output_directory, 'red_extractions_flat.pkl')
+    green_extraction = os.path.join(output_directory, 'green_extractions_flat.pkl')
+    blue_extraction = os.path.join(output_directory, 'blue_extractions_flat.pkl')
+    
+    # If outpath is specified and different from OUTPUT_DIR, copy files to the correct location
+    if outpath and outpath != OUTPUT_DIR:
+        import shutil
+        for source, dest in [(red_extraction_source, red_extraction),
+                           (green_extraction_source, green_extraction),
+                           (blue_extraction_source, blue_extraction)]:
+            if os.path.exists(source):
+                shutil.copy2(source, dest)
+                logger.info(f'Copied {source} to {dest}')
+            else:
+                logger.warning(f'Source file {source} does not exist')
 
     all_extractions = []
     all_metadata = []
+    missing_files = []
+    
+    for fname in [red_extraction, green_extraction, blue_extraction]:
+        if not os.path.exists(fname):
+            missing_files.append(fname)
+            logger.error(f'File {fname} does not exist. Flat field extraction may have failed.')
+        else:
+            logger.debug(f'Found flat field file: {fname}')
+            
+    if missing_files:
+        error_msg = (
+            f"Missing required flat field files: {missing_files}\n"
+            f"Expected location: {output_directory}\n"
+            f"Available files in {output_directory}: {os.listdir(output_directory) if os.path.exists(output_directory) else 'Directory does not exist'}\n"
+            f"Please ensure flat field processing completed successfully before running reduction."
+        )
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
     for fname in [red_extraction, green_extraction, blue_extraction]:
         with open(fname, 'rb') as f:
             data = pickle.load(f)
         all_extractions.extend(data.get('extractions', []))
         all_metadata.extend(data.get('metadata', []))
-    print("Total extractions:", len(all_extractions))
-    print("Total metadata entries:", len(all_metadata))
-    print(f"All metadata is {all_metadata}")
+    
+    logger.info(f"Successfully loaded flat field data:")
+    logger.info(f"  Total extractions: {len(all_extractions)}")
+    logger.info(f"  Total metadata entries: {len(all_metadata)}")
+    logger.debug(f"All metadata is {all_metadata}")
 
     return all_extractions, all_metadata
 
@@ -158,7 +217,7 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
 
     outfile = 'flat_whitelight.fits'
     white_light_file = WhiteLightFits(extraction_list, metadata, outfile=outfile)
-    print(f'white_light_file = {white_light_file}')
+    logger.debug(f'white_light_file = {white_light_file}')
 
     hdu = fits.open(os.path.join(OUTPUT_DIR, outfile), mode='update')
     # Indices of HDUs containing image data to normalize
@@ -167,7 +226,7 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
         if index == 0:
             continue
         elif index in image_extensions:
-            print(f'HDU {index}: {item}')
+            logger.debug(f'HDU {index}: {item}')
             image = hdu[index].data
             max_val = np.nanmax(image)
             if np.isnan(image).all() or np.isnan(max_val):
@@ -176,11 +235,11 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
             elif max_val != 0:
                 normalized_image = image / max_val
             else:
-                print(f'All values are zero for HDU {index}. Skipping normalization.')
+                logger.warning(f'All values are zero for HDU {index}. Skipping normalization.')
                 normalized_image = image
 
             hdu[index].data = normalized_image
-            print(f'Normalized image; new max value: {np.nanmax(normalized_image)}')
+            logger.debug(f'Normalized image; new max value: {np.nanmax(normalized_image)}')
     # Saving the normalised image
     hdu.flush()  # ensure changes are written to disk
     hdu.close()
@@ -223,15 +282,15 @@ def apply_flat_field(science_file, flat_file, output_file):
                 # Use the science header (or you can update it accordingly)
                 new_hdu = fits.ImageHDU(data=corrected_data, header=sci_hdus[idx].header)
             else:
-                print(f'warning: HDU {idx} in science or flat file is None. Skipping this HDU.')
+                logger.warning(f'HDU {idx} in science or flat file is None. Skipping this HDU.')
             new_hdus.append(new_hdu)
         # Add the primary header HDU to the beginning of the list
         new_hdus.insert(0, new_primary)
-        print(f'Length of new_hdus: {len(new_hdus)}')
+        logger.debug(f'Length of new_hdus: {len(new_hdus)}')
         # Assemble the new HDU list and write to file.
         new_hdul = fits.HDUList(new_hdus)
         new_hdul.writeto(output_file, overwrite=True)
-        print(f"Flat-field corrected FITS file saved as: {output_file}")
+        logger.info(f"Flat-field corrected FITS file saved as: {output_file}")
 
 
 if __name__ == '__main__':
@@ -263,7 +322,7 @@ if __name__ == '__main__':
     )
     
     args = parser.parse_args()
-    print(f'args.filenames {args.filenames}')
+    logger.debug(f'args.filenames {args.filenames}')
     # Multiple files provided: use produce_flat_extractions if exactly three files given.
     if len(args.filenames) > 1:
         if len(args.filenames) != 3:
@@ -286,7 +345,7 @@ if __name__ == '__main__':
             # Process all channels for the single file.
             if len(args.filenames) != 1:
                 parser.error("When using --all, only one file should be provided.")
-            print("Processing all channels for the single file...")
+            logger.info("Processing all channels for the single file...")
             reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red')
             reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green')
             reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue')

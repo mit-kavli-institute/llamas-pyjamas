@@ -27,4 +27,5 @@ cube_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fres
 
 # Ray parallelization control (optional, defaults to all CPU cores)
 ray_num_cpus = 8
+#generate_cubes = False use this if onkly faster 2D data products are needed
 
