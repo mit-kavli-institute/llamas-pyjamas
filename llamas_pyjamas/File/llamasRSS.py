@@ -109,6 +109,7 @@ class RSSgeneration:
                     # Get the counts (flux)
                     counts = obj.counts
                     n_fibers = counts.shape[0]
+                    original_n_fibers = n_fibers  # Track original count before any removals
                     
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
@@ -136,6 +137,7 @@ class RSSgeneration:
                     
                     # Handle dead fibers
                     dead_fibers = getattr(obj, 'dead_fibers', None)
+                    removed_dead_fibers = []  # Track which fibers were actually removed
                     if dead_fibers is not None:
                         self.logger.info(f"Object {i} has dead fibers: {dead_fibers}")
                         # Validate each dead fiber
@@ -166,14 +168,15 @@ class RSSgeneration:
                                 if not is_zero_row:
                                     self.logger.warning(f"Skipping removal of fiber {dead_fiber} as it contains non-zero values")
                                     continue
-                                    
+
                                 # Remove the dead fiber from all arrays
                                 counts = np.delete(counts, dead_fiber, axis=0)
                                 errors = np.delete(errors, dead_fiber, axis=0)
                                 waves = np.delete(waves, dead_fiber, axis=0)
                                 dq = np.delete(dq, dead_fiber, axis=0)
                                 fwhm = np.delete(fwhm, dead_fiber, axis=0)
-                                
+                                removed_dead_fibers.append(dead_fiber)  # Track removed fibers
+
                             # Log the final shape after all removals
                             self.logger.info(f"New arrays shape after removal: {counts.shape}")
                             n_fibers = counts.shape[0]  # Update fiber count
@@ -198,9 +201,26 @@ class RSSgeneration:
                     fiber_type = meta.get('fiber_type', ['UNKNOWN'] * n_fibers)
                     fiber_ra = meta.get('fiber_ra', [np.nan] * n_fibers)
                     fiber_dec = meta.get('fiber_dec', [np.nan] * n_fibers)
-                    
+
                     benchsides.extend([benchside_str] * n_fibers)
-                    fiber_ids.extend(np.arange(n_fibers))
+
+                    # Generate fiber IDs that preserve original fiber indices (skip dead fibers)
+                    if removed_dead_fibers:
+                        # Build list of alive fiber IDs by skipping dead ones
+                        fibers = []
+                        counter = 0
+                        while len(fibers) < n_fibers:
+                            if counter in removed_dead_fibers:
+                                counter += 1
+                            else:
+                                fibers.append(counter)
+                                counter += 1
+                        fiber_ids.extend(fibers)
+                        self.logger.info(f"Object {i}: Generated fiber IDs {fibers} (skipped dead fibers {removed_dead_fibers})")
+                    else:
+                        # No dead fibers removed, use sequential IDs
+                        fiber_ids.extend(np.arange(n_fibers))
+
                     fiber_types.extend(fiber_type if len(fiber_type) == n_fibers else ['UNKNOWN'] * n_fibers)
                     fiber_ras.extend(fiber_ra if len(fiber_ra) == n_fibers else [np.nan] * n_fibers)
                     fiber_decs.extend(fiber_dec if len(fiber_dec) == n_fibers else [np.nan] * n_fibers)

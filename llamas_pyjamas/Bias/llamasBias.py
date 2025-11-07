@@ -44,41 +44,50 @@ from llamas_pyjamas.config import CALIB_DIR
 
 
 class BiasLlamas:
-    """
-    A class to handle the creation of a master bias frame from a directory of bias images or a list of files.
-    Attributes:
-    -----------
-    bias_path : str
-        The directory path containing bias images.
-    files : list
-        A list of bias image files.
-    Methods:
-    --------
-    __init__(input_data):
-        Initializes the BiasLlamas object with a directory path or a list of files.
-    master_bias():
-        Creates a master bias frame by combining bias images using sigma clipping and saves the result.
-    """
-
     def __init__(self, input_data) -> None:
-        
-        if isinstance(input_data, str):
-            if not os.path.isdir(input_data):
-                raise ValueError(f"The directory {input_data} does not exist.")
-            self.bias_path = input_data
-            self.files = [f for f in os.listdir(input_data) if f.endswith('.fits')]
-            
-        elif isinstance(input_data, list):
-            self.files = input_data
-            self.bias_path = CALIB_DIR
-        
+        """
+        Initializes the BiasLlamas object with either a directory path, a file path, or a list of file paths.
+
+        Parameters
+        ----------
+        input_data : str or list
+            If a string, it is treated as either a directory (from which all .fits files are grabbed)
+            or a full file path. If a list, it should contain file paths to .fits files.
+        """
+        from llamas_pyjamas.config import CALIB_DIR  # ensure CALIB_DIR is available
+
+        # Case when a list is provided
+        if isinstance(input_data, list):
+            # Keep only files ending with '.fits'
+            self.files = [file for file in input_data if str(file).endswith('.fits')]
+            if not self.files:
+                raise ValueError("No .fits files found in the provided list.")
+            # Use the directory of the first file if available, else default to CALIB_DIR
+            self.bias_path = os.path.dirname(self.files[0]) if os.path.dirname(self.files[0]) else CALIB_DIR
+
+        # Case when a string is provided
+        elif isinstance(input_data, str):
+            # If it's an existing file, use it directly
+            if os.path.isfile(input_data):
+                self.files = [input_data]
+                self.bias_path = os.path.dirname(input_data)
+            # If it's an existing directory, search for .fits files
+            elif os.path.isdir(input_data):
+                self.bias_path = input_data
+                self.files = [os.path.join(input_data, f) for f in os.listdir(input_data) if f.endswith('.fits')]
+            else:
+                # If the string is just a filename without path, assume it resides in CALIB_DIR
+                potential = os.path.join(CALIB_DIR, input_data)
+                if os.path.isfile(potential):
+                    self.files = [potential]
+                    self.bias_path = os.path.dirname(potential)
+                else:
+                    raise ValueError("Provided input_data does not exist as a file or a directory.")
+            if not self.files:
+                raise ValueError("No .fits files found in the provided input_data.")
+
         else:
-            raise TypeError("Input must be a string (directory path) or a list of files.")
-        
-        if not self.files:
-            raise ValueError("No .fits files found in the provided directory or list.")
-        
-        return
+            raise TypeError("input_data must be a string (file or directory path) or a list of file paths.")
 
         
     def master_bias(self) -> None:
@@ -147,5 +156,7 @@ class BiasLlamas:
         hdul_out = fits.HDUList(combined_hdus)
         out_filename = os.path.join(self.bias_path, 'combined_bias.fits')
         hdul_out.writeto(out_filename, overwrite=True)
+
+        return out_filename
 
  

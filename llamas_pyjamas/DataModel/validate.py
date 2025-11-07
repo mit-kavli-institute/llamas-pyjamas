@@ -4,7 +4,7 @@ This module provides utilities to validate and fix FITS files with missing camer
 extensions to ensure compatibility with the LLAMAS data reduction pipeline.
 
 The LLAMAS instrument expects science images with a primary HDU plus 24 extensions,
-representing 4 benches × 2 sides × 3 channels. When cameras fail, this module can
+representing 4 benches x 2 sides x 3 channels. When cameras fail, this module can
 fill in missing extensions with placeholder data to prevent pipeline failures.
 
 Functions:
@@ -47,11 +47,9 @@ def get_expected_camera_list() -> List[Tuple[str, str, str]]:
         List of tuples containing (channel, bench, side) for all 24 expected cameras.
 
     Example:
-        >>> cameras = get_expected_camera_list()
-        >>> len(cameras)
-        24
-        >>> cameras[0]
-        ('red', '1', 'A')
+        cameras = get_expected_camera_list()
+        len(cameras) == 24
+        cameras[0] == ('red', '1', 'A')
     """
     return list(idx_lookup.keys())
 
@@ -150,6 +148,91 @@ def get_reference_dimensions(fits_file: str) -> Tuple[int, int]:
     except Exception as e:
         logger.error(f"Error determining reference dimensions: {e}")
         raise
+
+def is_placeholder_extension(hdu: fits.ImageHDU) -> bool:
+    """Check if an HDU is a placeholder for a missing camera extension.
+
+    Detects placeholder extensions created by the validation module by checking:
+    1. Header COMMENT field for placeholder marker
+    2. Data array for uniform 1.0 values (fallback detection)
+
+    Args:
+        hdu: FITS ImageHDU to check.
+
+    Returns:
+        bool: True if HDU is a placeholder, False otherwise.
+
+    Example:
+        >>> with fits.open('science.fits') as hdul:
+        ...     if is_placeholder_extension(hdul[5]):
+        ...         print("Extension 5 is a placeholder")
+    """
+    # Check for placeholder marker in header comments
+    if 'COMMENT' in hdu.header:
+        for comment in hdu.header['COMMENT']:
+            if 'Placeholder extension created for missing camera' in str(comment):
+                return True
+
+    # Fallback: Check for uniform 1.0 data (characteristic of placeholders)
+    if hdu.data is not None:
+        try:
+            unique_vals = np.unique(hdu.data)
+            if len(unique_vals) == 1 and np.isclose(unique_vals[0], 1.0):
+                return True
+        except Exception:
+            # If we can't analyze the data, assume not a placeholder
+            pass
+
+    return False
+
+
+def get_placeholder_extension_indices(fits_file: str) -> List[int]:
+    """Get list of extension indices that are placeholders.
+
+    Scans through all extensions in a FITS file and identifies which ones
+    are placeholders for missing camera data.
+
+    Args:
+        fits_file: Path to FITS file to scan.
+
+    Returns:
+        List of extension indices (1-based) that are placeholders.
+
+    Raises:
+        FileNotFoundError: If FITS file does not exist.
+
+    Example:
+        >>> placeholder_indices = get_placeholder_extension_indices('science.fits')
+        >>> print(f"Found {len(placeholder_indices)} placeholder extensions")
+        Found 4 placeholder extensions
+    """
+    if not os.path.exists(fits_file):
+        raise FileNotFoundError(f"FITS file not found: {fits_file}")
+
+    placeholder_indices = []
+
+    try:
+        with fits.open(fits_file) as hdul:
+            for i in range(1, len(hdul)):  # Skip primary HDU
+                if is_placeholder_extension(hdul[i]):
+                    placeholder_indices.append(i)
+
+                    # Log camera info if available
+                    if logger.isEnabledFor(logging.DEBUG):
+                        channel = hdul[i].header.get('COLOR', '?')
+                        bench = hdul[i].header.get('BENCH', '?')
+                        side = hdul[i].header.get('SIDE', '?')
+                        logger.debug(f"Extension {i} ({channel}{bench}{side}) is a placeholder")
+
+        if placeholder_indices:
+            logger.info(f"Found {len(placeholder_indices)} placeholder extensions in {os.path.basename(fits_file)}")
+
+    except Exception as e:
+        logger.error(f"Error scanning for placeholder extensions: {e}")
+        raise
+
+    return placeholder_indices
+
 
 def create_placeholder_hdu(camera_config: Tuple[str, str, str],
                           reference_shape: Tuple[int, int],
