@@ -220,7 +220,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
         
         pixel_map_files = results.get('output_files', [])
         print(f"Successfully generated {len(pixel_map_files)} flat field pixel maps")
-        
+        # This should be using the normalised fits image
         return pixel_map_files
         
     except Exception as e:
@@ -453,7 +453,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     print(f"Applying flat field correction to: {os.path.basename(science_file)}")
     
     # Step 1: Build flat field mapping with cross-checking
-    flat_map = build_flat_field_map(flat_pixel_maps, science_file)
+    flat_map = build_flat_field_map(flat_pixel_maps, science_file) # this doesn't seem righ
     
     if not flat_map:
         print("ERROR: Could not build flat field mapping")
