@@ -328,8 +328,13 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         arc_calib_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
     
     if not os.path.exists(arc_calib_file):
-        logger.error(f"Arc calibration file not found: {arc_calib_file}")
-        raise FileNotFoundError(f"Missing arc calibration file: {arc_calib_file}")
+        try:
+            logger.error(f"Arc calibration file not found: {arc_calib_file}, using default")
+            # raise FileNotFoundError(f"Missing arc calibration file: {arc_calib_file}")
+            arc_calib_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+        except Exception as e:
+            logger.critical(f"CRITICAL ERROR: Arc calibration file not found: {str(e)}")
+            raise
     
     # Load the combined flat extractions
     logger.info(f"Loading combined flat extractions from {combined_flat_file}")
@@ -345,7 +350,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     
     # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
-    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated)
+    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated) #why is this here?
     with open(calibrated_flat_file, 'wb') as f:
         pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")

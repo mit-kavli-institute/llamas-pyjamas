@@ -42,8 +42,7 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import cloudpickle as pickle
-
+import cloudpickle as pickle 
 # Module-level logger for utility functions
 # This logger can be used by all functions in this module
 logger = logging.getLogger(__name__)
@@ -127,14 +126,14 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
     
     for pkl_file in pkl_files:
         with open(pkl_file, 'rb') as f:
-            data = cloudpickle.load(f)
+            data = pickle.load(f)
             if 'extractions' in data:
                 combined_data['extractions'].extend(data['extractions'])
             if 'metadata' in data:
                 combined_data['metadata'].extend(data['metadata'])
     
     with open(outfile, 'wb') as f:
-        cloudpickle.dump(combined_data, f)
+        pickle.dump(combined_data, f)
     
     return
 

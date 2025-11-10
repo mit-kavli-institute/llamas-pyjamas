@@ -21,12 +21,12 @@ import numpy as np
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 
-from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS
+from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
-def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
+def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 
     :param filename: the flat field image to reduce, must be of type FITS
@@ -72,25 +72,85 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
     _hdus = process_fits_by_color(filename)
     logger.debug(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
-    
-    masterfile = 'LLAMAS_master'
+    print(len(channel_hdus))
+    masterfile = 'LLAMAS'  # Changed from 'LLAMAS_master' to match both LLAMAS and LLAMAS_master files
     extraction_file = os.path.splitext(filename)[0] + '_extractions_flat.pkl'
-    
+
     if type(channel) == str:
         extraction_file = f'{channel}_extractions_flat.pkl'
-        
-    if not tracedir:
-        trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
-        logger.info(f'No tracedir specified, using CALIB_DIR: {CALIB_DIR}')
-    else:
-        trace_files = glob.glob(os.path.join(tracedir, f'{masterfile}*traces.pkl'))
-        logger.info(f'Using specified tracedir: {tracedir}')
+
+    # Determine expected color from channel parameter or indices
     
+    try:
+        expected_color = channel.lower()
+        logger.info(f'Using channel parameter: {expected_color}')
+    except Exception as e:
+        logger.error(f'No channel parameter provided, inferring from indices. Error: {e}')
+        return None
+
+    # Load all trace files first, then filter by color
+    if tracedir:
+        all_trace_files = glob.glob(os.path.join(tracedir, f'{masterfile}*traces.pkl'))
+        logger.info(f'Using specified tracedir: {tracedir}')
+        logger.debug(f'Found {len(all_trace_files)} total trace files')
+        
+        if len(all_trace_files) != N_det:
+            logger.warning(f'Expected {N_det} trace files but found {len(all_trace_files)} in {tracedir}. Falling back to CALIB_DIR.')
+            all_trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+            logger.warning(f'Found {len(all_trace_files)} trace files in {CALIB_DIR}')
+
+    else:
+        all_trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        logger.info(f'No tracedir specified, using CALIB_DIR: {CALIB_DIR}')
+        logger.debug(f'Found {len(all_trace_files)} total trace files')
+        
+
+    print(f"\nDEBUG: Glob pattern: {os.path.join(tracedir if tracedir else CALIB_DIR, f'{masterfile}*traces.pkl')}")
+    print(f"DEBUG: Found {len(all_trace_files)} total trace files before filtering:")
+    for tf in all_trace_files[:5]:  # Show first 5
+        print(f"  {os.path.basename(tf)}")
+    if len(all_trace_files) > 5:
+        print(f"  ... and {len(all_trace_files) - 5} more")
+
+    # Filter to expected color if known
+    try:
+        trace_files = [tf for tf in all_trace_files if f'_{expected_color}_' in os.path.basename(tf).lower()]
+        logger.info(f'Filtered to {len(trace_files)} {expected_color} trace files')
+        print(f"Using {expected_color} trace files:")
+        for tf in trace_files:
+            print(f"  {os.path.basename(tf)}")
+        if len(trace_files) == 0:
+            logger.warning(f'No trace files found for color {expected_color}. Available files: {[os.path.basename(tf) for tf in all_trace_files]}')
+    except Exception as e:
+        logger.error(f'Error filtering trace files: {e}')
+        trace_files = all_trace_files
+        logger.warning('Could not determine expected color, using all trace files')
+        print(f"Using all {len(trace_files)} trace files")
+    
+    # Debug: Print HDU headers to see what colors are being detected
+    print(f"\nDEBUG: Checking HDU headers for color information:")
+    for i, hdu in enumerate(channel_hdus):
+        if 'COLOR' in hdu.header:
+            color = hdu.header['COLOR']
+            bench = hdu.header.get('BENCH', 'N/A')
+            side = hdu.header.get('SIDE', 'N/A')
+            print(f"  HDU {i}: COLOR={color}, BENCH={bench}, SIDE={side}")
+        elif 'CAM_NAME' in hdu.header:
+            camname = hdu.header['CAM_NAME']
+            print(f"  HDU {i}: CAM_NAME={camname}")
+        else:
+            print(f"  HDU {i}: No color information found")
+
     _hdu_trace_pairs = match_hdu_to_traces(channel_hdus, trace_files, start_idx=0)
     logger.debug(f"HDU-Trace pairs: {_hdu_trace_pairs}")
+    print(f"\nDEBUG: Found {len(_hdu_trace_pairs)} HDU-trace pairs")
+    if len(_hdu_trace_pairs) == 0:
+        print("WARNING: No HDU-trace pairs were matched! This will result in empty extractions.")
+
     futures = []
     for hdu_index, trace_file in _hdu_trace_pairs:
-        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')   
+        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
+        print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
@@ -105,8 +165,8 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
         if ex is not None:
             writable_ex = make_writable(ex)
             extraction_list.append(writable_ex)    
-
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+    print(len(extraction_list))
+    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')
     
     return 
@@ -144,36 +204,36 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     logger.info(f'Using output directory: {output_directory}')
 
     # Reduce the red flat field image
-    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red')
+    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red', save_dir=output_directory)
     # Reduce the green flat field image
-    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green')
+    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green', save_dir=output_directory)
     # Reduce the blue flat field image
-    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue')
-    
+    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue', save_dir=output_directory)
+
     logger.info('Flat field extractions complete.')
 
     # Build paths to extraction files - use OUTPUT_DIR for where files are actually saved
     # but move them to outpath if specified
-    red_extraction_source = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
-    green_extraction_source = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
-    blue_extraction_source = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
+    # red_extraction_source = os.path.join(OUTPUT_DIR, 'red_extractions_flat.pkl')
+    # green_extraction_source = os.path.join(OUTPUT_DIR, 'green_extractions_flat.pkl')
+    # blue_extraction_source = os.path.join(OUTPUT_DIR, 'blue_extractions_flat.pkl')
     
     # Final paths where files should be located
     red_extraction = os.path.join(output_directory, 'red_extractions_flat.pkl')
     green_extraction = os.path.join(output_directory, 'green_extractions_flat.pkl')
     blue_extraction = os.path.join(output_directory, 'blue_extractions_flat.pkl')
     
-    # If outpath is specified and different from OUTPUT_DIR, copy files to the correct location
-    if outpath and outpath != OUTPUT_DIR:
-        import shutil
-        for source, dest in [(red_extraction_source, red_extraction),
-                           (green_extraction_source, green_extraction),
-                           (blue_extraction_source, blue_extraction)]:
-            if os.path.exists(source):
-                shutil.copy2(source, dest)
-                logger.info(f'Copied {source} to {dest}')
-            else:
-                logger.warning(f'Source file {source} does not exist')
+    # # If outpath is specified and different from OUTPUT_DIR, copy files to the correct location
+    # if outpath and outpath != OUTPUT_DIR:
+    #     import shutil
+    #     for source, dest in [(red_extraction_source, red_extraction),
+    #                        (green_extraction_source, green_extraction),
+    #                        (blue_extraction_source, blue_extraction)]:
+    #         if os.path.exists(source):
+    #             shutil.copy2(source, dest)
+    #             logger.info(f'Copied {source} to {dest}')
+    #         else:
+    #             logger.warning(f'Source file {source} does not exist')
 
     all_extractions = []
     all_metadata = []

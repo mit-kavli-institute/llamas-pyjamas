@@ -150,11 +150,12 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
              if pattern in os.path.basename(tf)),
             None
         )
-        #print(f'HDU {idx}: {color} {benchside} -> {matching_trace}')
+        print(f'HDU {idx}: Looking for pattern "{pattern}" -> {os.path.basename(matching_trace) if matching_trace else "NOT FOUND"}')
         if matching_trace:
             matches.append((idx, matching_trace))
         else:
-            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}")
+            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}, pattern: {pattern}")
+            print(f"  Available trace files: {[os.path.basename(tf) for tf in trace_files]}")
 
     return matches
 
