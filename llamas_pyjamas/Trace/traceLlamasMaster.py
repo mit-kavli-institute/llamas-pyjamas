@@ -872,30 +872,66 @@ class TraceRay(TraceLlamas):
         if result["status"] != "success":
                 return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None, is_master_calib: bool = True) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None, is_master_calib: bool = True, skip_extension_indices: List[int] = None) -> None:
+    """
+    Run fiber tracing on a FITS file using Ray multiprocessing.
 
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
+    Args:
+        fitsfile: Path to FITS file to process
+        channel: Optional channel filter ('red', 'green', 'blue')
+        outpath: Output directory for trace files
+        use_bias: Optional path to bias file for correction
+        is_master_calib: Whether this is master calibration (affects output naming)
+        skip_extension_indices: Optional list of extension indices to skip (for placeholder extensions)
+
+    Returns:
+        None
+    """
+
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
     # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
     # Initialize Ray with logging config
     ray.shutdown()  # Clear any existing Ray instances
     ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
-    
+
     futures = []
-    results = []    
-    
+    results = []
+
     hdul = process_fits_by_color(fitsfile)
+
+    # Filter HDUs based on channel and exclude placeholders
     if channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)  # Track extension index
+            if hdu.data is not None
+            and hdu.header['COLOR'].lower() == channel.lower()
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
     elif channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)
+            if hdu.data is not None
+            and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
     else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
-        
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)
+            if hdu.data is not None
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
+
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
+
+    if skip_extension_indices:
+        print(f"Skipping {len(skip_extension_indices)} placeholder extension(s): {skip_extension_indices}")
         
     #hdu_processor = TraceRay.remote(fitsfile)
         
@@ -930,7 +966,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     return
     
     
-if __name__ == "__main__":  
+if __name__ == "__main__":
     os.environ["RAY_RUNTIME_ENV_TEMPORARY_REFERENCE_EXPIRATION_S"] = "1200"
     parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
     parser.add_argument('filename', type=str, help='Path to input FITS file')
@@ -938,62 +974,25 @@ if __name__ == "__main__":
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
     parser.add_argument('--outpath', type=str, help='Path to save output files')
     parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
+    parser.add_argument('--skip-placeholders', action='store_true', help='Skip placeholder extensions')
     args = parser.parse_args()
-      
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
-    print(f"\nStarting with {NUMBER_OF_CORES} cores available")
-    print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
-    
-    futures = []
-    results = []    
-    
-    fitsfile = args.filename
-    
-    hdul = process_fits_by_color(fitsfile)
-    if args.channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
-    elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
-    else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
-        
-        
-    hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
-    print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
-        
-    #hdu_processor = TraceRay.remote(fitsfile)
-        
-    for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath, use_bias=args.bias)
-        futures.append(future)
-    
-    # Monitor processing
-    total_jobs = len(futures)
-    completed = 0
-        
-    # Monitor processing
-    print("\nProcessing Status:")
-    while futures:
-        
-        # Print current CPU usage every 5 seconds
-        if completed % 5 == 0:
-            print(f"CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-            print(f"Progress: {completed}/{total_jobs} jobs complete")
-        
-        
-        done_id, futures = ray.wait(futures)
-        result = ray.get(done_id[0])
-        results.append(result)
-        completed += 1
-        
-    print(f"\nAll {total_jobs} jobs complete")
-    print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
+
+    # Use the refactored run_ray_tracing function
+    skip_indices = None
+    if args.skip_placeholders:
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
+        skip_indices = get_placeholder_extension_indices(args.filename)
+        if skip_indices:
+            print(f"Found {len(skip_indices)} placeholder extensions to skip")
+
+    run_ray_tracing(
+        args.filename,
+        channel=args.channel,
+        outpath=args.outpath if args.outpath else CALIB_DIR,
+        use_bias=args.bias,
+        is_master_calib=args.mastercalib,
+        skip_extension_indices=skip_indices
+    )
     
     
     
