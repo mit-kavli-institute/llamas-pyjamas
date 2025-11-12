@@ -107,6 +107,46 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     
     return logger
 
+
+def check_header(fits_file, color=None, bench=None, side=None) -> bool:
+    """
+    Check the FITS file header for color, bench, and side values.
+
+    Args:
+        fits_file (str): Path to the FITS file.
+        color (str, optional): Expected color value. Defaults to None.
+        bench (str, optional): Expected bench value. Defaults to None.
+        side (str, optional): Expected side value. Defaults to None.
+
+    Returns:
+        bool: True if all specified checks pass, False otherwise.
+    """
+    hdu = fits.open(fits_file)
+    primary = hdu[0].header
+
+    if 'CAM_NAME' in primary:
+        cam_name = primary['CAM_NAME']
+        bench_h = cam_name.split('_')[0][0]
+        side_h = cam_name.split('_')[0][1]
+        color_h = cam_name.split('_')[1].lower()
+    else:
+        bench_h = primary.get('BENCH')
+        side_h = primary.get('SIDE')
+        color_h = primary.get('COLOR', '').lower()
+
+    if bench is not None and bench_h != bench:
+        logger.error(f'Bench mismatch in {fits_file}: header {bench_h} vs expected {bench}')
+        return False
+    if side is not None and side_h != side:
+        logger.error(f'Side mismatch in {fits_file}: header {side_h} vs expected {side}')
+        return False
+    if color is not None and color_h != color:
+        logger.error(f'Color mismatch in {fits_file}: header {color_h} vs expected {color}')
+        return False
+
+    return True
+
+
 def concat_extractions(pkl_files: list, outfile: str) -> None:
     """Concatenate multiple pickle files containing extraction data.
 

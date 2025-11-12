@@ -35,7 +35,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
+from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -43,38 +43,186 @@ from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine
 from astropy.io import fits
 import numpy as np
 
+import shutil
+
+from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices
 
 _linefile = os.path.join(LUT_DIR, '')
 
 
+def validate_input_files(file_list):
+
+    for file in file_list:
+        assert os.path.exists(file), f"Input file does not exist: {file}"
+        validate_and_fix_extensions(file, 
+                                    output_file=None, backup=True)
+
+    return True
+
+def get_input_files_from_config(config, file_keys=None):
+      """
+      Extract all input file paths from a configuration dictionary.
+      
+      Parameters
+      ----------
+      config : dict
+          Configuration dictionary with file paths
+      file_keys : list, optional
+          List of config keys that contain file paths. If None, uses default keys.
+          
+      Returns
+      -------
+      list
+          List of all file paths found in the config
+      """
+      if file_keys is None:
+          file_keys = ['science_files', 'bias_file', 'red_flat_file',
+                       'green_flat_file', 'blue_flat_file']
+
+      input_files = []
+
+      for key in file_keys:
+          if key in config:
+              value = config[key]
+              # If it's a list, extend the input_files list
+              if isinstance(value, list):
+                  input_files.extend(value)
+              # If it's a single string, append it
+              elif isinstance(value, str):
+                  input_files.append(value)
+
+      return input_files
+
+
+def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
+    """
+    Copy mastercalib traces for placeholder extensions identified in a flat file.
+
+    Args:
+        flat_file: Path to flat field FITS file
+        trace_dir: Directory where traces should be copied to
+        channel: Channel name ('red', 'green', 'blue')
+        placeholder_indices: Optional list of placeholder indices (will detect if None)
+
+    Returns:
+        int: Number of traces copied
+    """
+    if placeholder_indices is None:
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+    if len(placeholder_indices) == 0:
+        return 0  # No placeholders to handle
+
+    print(f"Copying {len(placeholder_indices)} mastercalib traces for missing {channel} cameras")
+
+    traces_copied = 0
+    with fits.open(flat_file) as hdul:
+        for idx in placeholder_indices:
+            hdu = hdul[idx]
+
+            # Extract camera metadata
+            bench = hdu.header['BENCH']
+            side = hdu.header['SIDE']
+            cam_channel = hdu.header['COLOR'].lower()
+
+            # Only copy if the channel matches
+            if cam_channel != channel.lower():
+                continue
+
+            # Determine mastercalib trace filename
+            master_trace_file = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+            master_trace_path = os.path.join(CALIB_DIR, master_trace_file)
+
+            # Target filename (user trace naming convention)
+            user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+            user_trace_path = os.path.join(trace_dir, user_trace_file)
+
+            # Copy mastercalib trace to user trace directory
+            if os.path.exists(master_trace_path):
+                shutil.copy2(master_trace_path, user_trace_path)
+                print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
+                traces_copied += 1
+            else:
+                print(f"  ✗ WARNING: Mastercalib trace not found: {master_trace_file}")
+
+    return traces_copied
 
 
 
-def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
+def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, missing_cams=False):
     """Generate fiber traces from flat field observations for all three channels.
-    
+
+    This function intelligently handles missing camera extensions by:
+    1. Detecting placeholder extensions in each flat field file
+    2. Running trace generation only for real camera data
+    3. Copying mastercalib traces for placeholder extensions
+
     Args:
         red_flat: Path to red flat field FITS file.
-        green_flat: Path to green flat field FITS file. 
+        green_flat: Path to green flat field FITS file.
         blue_flat: Path to blue flat field FITS file.
         output_dir: Directory to save trace files.
         bias: Optional bias frame for correction.
-        
+        missing_cams: Deprecated parameter, kept for backwards compatibility.
+
     Raises:
         AssertionError: If any of the flat field files do not exist.
     """
-    
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
+
     assert os.path.exists(red_flat), "Red flat file does not exist."
     assert os.path.exists(green_flat), "Green flat file does not exist."
     assert os.path.exists(blue_flat), "Blue flat file does not exist."
 
-    run_ray_tracing(red_flat, outpath=output_dir, channel='red', use_bias=bias, is_master_calib=False)
-    run_ray_tracing(green_flat, outpath=output_dir, channel='green', use_bias=bias, is_master_calib=False)
-    run_ray_tracing(blue_flat, outpath=output_dir, channel='blue', use_bias=bias, is_master_calib=False)
-    print(f"Traces generated and saved to {output_dir}")
+    print("\n" + "="*60)
+    print("TRACE GENERATION WITH PLACEHOLDER DETECTION")
+    print("="*60)
+
+    # Process each channel with placeholder detection
+    channels = [
+        ('red', red_flat),
+        ('green', green_flat),
+        ('blue', blue_flat)
+    ]
+
+    for channel, flat_file in channels:
+        print(f"\n--- Processing {channel.upper()} channel ---")
+
+        # Detect placeholder extensions
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+        if placeholder_indices:
+            print(f"Found {len(placeholder_indices)} placeholder extensions in {os.path.basename(flat_file)}")
+            print(f"Will skip trace generation for placeholder indices: {placeholder_indices}")
+        else:
+            print(f"No placeholder extensions found in {os.path.basename(flat_file)}")
+
+        # Run trace generation, skipping placeholder extensions
+        run_ray_tracing(
+            flat_file,
+            outpath=output_dir,
+            channel=channel,
+            use_bias=bias,
+            is_master_calib=False,
+            skip_extension_indices=placeholder_indices
+        )
+
+        # Copy mastercalib traces for placeholder extensions
+        if placeholder_indices:
+            traces_copied = copy_mastercalib_traces_for_placeholders(
+                flat_file,
+                output_dir,
+                channel,
+                placeholder_indices
+            )
+            if traces_copied > 0:
+                print(f"Successfully copied {traces_copied} mastercalib traces for {channel} placeholders")
+
+    print("\n" + "="*60)
+    print(f"All traces generated and saved to {output_dir}")
+    print("="*60)
 
     return
 
@@ -798,6 +946,11 @@ def main(config_path):
         
     print("Configuration:", config)
 
+    input_files = get_input_files_from_config(config)
+    validate_input_files(input_files)
+
+
+
     #code to handle bias file input
     if 'bias_file' not in config:
         raise ValueError("No bias file provided in the configuration.")
@@ -957,7 +1110,7 @@ def main(config_path):
             print("Generating new traces...")
 
             # Validate flat field files before trace generation
-            from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+            
 
             print("Validating flat field files...")
             red_flat_validated = validate_and_fix_extensions(
@@ -1068,7 +1221,7 @@ def main(config_path):
         
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
-        from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+        # from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")
