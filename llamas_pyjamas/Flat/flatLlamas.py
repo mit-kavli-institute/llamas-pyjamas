@@ -859,34 +859,43 @@ class Thresholding():
     def _generate_single_pixel_map(self, fiber_fits, trace_obj):
         """
         Generate a single pixel map for one extension using B-spline fits and trace object.
-        
+
+        FIXED: Uses interpolation to map 2D image columns to extraction wavelengths.
+        Previously, direct indexing assumed col_indices could index xshift array,
+        which caused incorrect wavelength mapping.
+
         Args:
             fiber_fits (dict): Dictionary of B-spline fits for each fiber
             trace_obj: Trace object containing fiberimg and other trace information
-            
+
         Returns:
             np.ndarray: 2D pixel map with flat field values
         """
         logger.debug(f"Generating pixel map for {trace_obj.channel} {trace_obj.bench}{trace_obj.side}")
-        
+
         # Get the fiber image from the trace object
         fiber_image = trace_obj.fiberimg
-        
+
         # Create an empty array matching the shape of the fiber image
         pixel_map = np.full_like(fiber_image, np.nan, dtype=float)
-        
+
         processed_fibers = 0
         for fiber_idx, fiber_data in fiber_fits.items():
             # Get the B-spline model for this fiber
             bspline_model = fiber_data['bspline_model']
-            
+            xshift_1d = fiber_data['xshift']  # 1D wavelength array from extraction
+
+            # Create extraction column positions
+            # The extraction produces one value per spectral pixel
+            extraction_cols = np.arange(len(xshift_1d))
+
             # Find all pixels belonging to this fiber
             fiber_pixels = (fiber_image == fiber_idx)
-            
+
             if not np.any(fiber_pixels):
                 logger.debug(f"No pixels found for fiber {fiber_idx}")
                 continue
-            
+
             # For each row in the image that contains this fiber
             for row in range(fiber_image.shape[0]):
                 row_pixels = fiber_pixels[row, :]
@@ -894,39 +903,40 @@ class Thresholding():
                 if not np.any(row_pixels):
                     continue
 
-                # Get the column indices of the fiber pixels in this row
+                # Get the column indices of the fiber pixels in this row (2D image columns)
                 col_indices = np.where(row_pixels)[0]
 
-                # Get the actual xshift values at these column positions
-                xshift_values = fiber_data['xshift'][col_indices]
+                # FIX: Interpolate xshift values at actual image column positions
+                # This maps: 2D image columns → extraction positions → wavelengths
+                xshift_at_cols = np.interp(col_indices, extraction_cols, xshift_1d)
 
-                # Evaluate the B-spline model at these x-shift values
+                # Evaluate the B-spline model at interpolated wavelength positions
                 try:
-                    predicted_values = bspline_model.value(xshift_values)[0]
+                    predicted_values = bspline_model.value(xshift_at_cols)[0]
                     # Assign the predicted values to the pixel map
                     pixel_map[row, col_indices] = predicted_values
                 except Exception as e:
                     logger.debug(f"Error evaluating B-spline for fiber {fiber_idx}, row {row}: {str(e)}")
                     continue
-            
+
             processed_fibers += 1
-            
+
             if processed_fibers % 50 == 0:
                 logger.debug(f"Processed {processed_fibers}/{len(fiber_fits)} fibers")
-        
+
         # Set unassigned pixels (outside fiber traces) to 1.0 for proper flat field normalization
         nan_mask = np.isnan(pixel_map)
         pixel_map[nan_mask] = 1.0
-        
+
         # Check statistics
         nan_count = np.sum(nan_mask)  # Count of pixels that were NaN (now set to 1.0)
         total_pixels = pixel_map.size
         traced_pixels = total_pixels - nan_count
-        
+
         logger.info(f"Pixel map normalization: {traced_pixels}/{total_pixels} traced pixels, "
                    f"{nan_count}/{total_pixels} untraced pixels set to 1.0 "
                    f"({100*nan_count/total_pixels:.1f}% untraced)")
-        
+
         return pixel_map
     
     
