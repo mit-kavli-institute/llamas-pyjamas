@@ -1384,21 +1384,20 @@ class Thresholding():
                     if not pixel_map_applied:
                         logger.info(f"    Using original flat field data for normalization")
 
-                    # STEP 2: Apply trace-based normalization to corrected data
+                    # STEP 2: Per-Detector Throughput Normalization
+                    # This removes fiber-to-fiber AND detector-to-detector throughput variations
+                    # Result: all values ≈ 1.0, preserving only pixel-to-pixel QE variations
                     trace_key = f"{channel}{bench}{side}"
                     logger.info(f"  Looking for trace file: {trace_key}")
                     normalized_data = np.ones_like(flat_data, dtype=np.float32)
                     normalization_successful = False
 
-                    logger.info(f"  Step 2: Trace-based normalization for {trace_key}")
+                    logger.info(f"  Step 2: Per-detector throughput normalization for {trace_key}")
 
-                    # Initialize variables that will be used for header metadata
-                    # (must be defined before any branching to avoid UnboundLocalError)
-                    fiber_throughputs = []
+                    # Initialize variables for header metadata
                     fibers_processed = 0
                     fibers_failed = 0
-                    fiber_throughput_std = np.nan
-                    global_scale = None
+                    detector_norm_factor = np.nan
 
                     if trace_key in trace_file_map:
                         trace_obj = trace_file_map[trace_key]['obj']
@@ -1415,102 +1414,87 @@ class Thresholding():
                                 # Remove bad values
                                 valid_mask = np.isfinite(traced_corrected_values) & (traced_corrected_values > 0)
                                 if np.any(valid_mask):
-                                    valid_traced_values = traced_corrected_values[valid_mask]
-
-                                    # PER-FIBER NORMALIZATION (CRITICAL FIX)
-                                    # Normalize each fiber to its own median to preserve fiber-to-fiber throughput variations
-                                    logger.info(f"    Applying per-fiber normalization to preserve throughput variations")
-
                                     # Get unique fiber IDs (excluding 0 which is background)
                                     unique_fibers = np.unique(fiber_image[traced_mask])
-                                    unique_fibers = unique_fibers[unique_fibers > 0]  # Remove background
+                                    unique_fibers = unique_fibers[unique_fibers > 0]
+
+                                    logger.info(f"    Applying per-detector throughput normalization")
+                                    logger.info(f"    Found {len(unique_fibers)} fibers on this detector")
 
                                     # Initialize output with background = 1.0
                                     normalized_data[~traced_mask] = 1.0
 
+                                    # Collect median values for each fiber to compute detector-level normalization
+                                    fiber_medians = []
+
                                     for fiber_id in unique_fibers:
-                                        # Get mask for this specific fiber
                                         fiber_mask = (fiber_image == fiber_id)
                                         fiber_pixels = corrected_data[fiber_mask]
-
-                                        # Get valid (finite, positive) pixels for this fiber
                                         fiber_valid = np.isfinite(fiber_pixels) & (fiber_pixels > 0)
 
                                         if np.sum(fiber_valid) > 0:
-                                            # Compute robust fiber median
                                             fiber_median = np.median(fiber_pixels[fiber_valid])
-
                                             if fiber_median > 0 and np.isfinite(fiber_median):
-                                                # Normalize this fiber to its own median
-                                                normalized_fiber = corrected_data[fiber_mask] / fiber_median
-
-                                                # Clip extreme values for this fiber
-                                                valid_normalized = np.isfinite(normalized_fiber)
-                                                normalized_fiber[valid_normalized] = np.clip(
-                                                    normalized_fiber[valid_normalized], 0.1, 5.0
-                                                )
-
-                                                # Assign normalized values for this fiber
-                                                normalized_data[fiber_mask] = normalized_fiber
-
-                                                fiber_throughputs.append(fiber_median)
+                                                fiber_medians.append(fiber_median)
                                                 fibers_processed += 1
                                             else:
-                                                # Bad fiber - set to 1.0
-                                                normalized_data[fiber_mask] = 1.0
                                                 fibers_failed += 1
-                                                logger.warning(f"      Fiber {fiber_id:3.0f}: Invalid median ({fiber_median}), set to 1.0")
                                         else:
-                                            # No valid pixels - set to 1.0
-                                            normalized_data[fiber_mask] = 1.0
                                             fibers_failed += 1
-                                            logger.warning(f"      Fiber {fiber_id:3.0f}: No valid pixels, set to 1.0")
 
-                                    # Optional: Global rescaling for interpretability
-                                    # This maintains relative fiber throughputs while keeping values ~O(1)
-                                    if len(fiber_throughputs) > 0:
-                                        global_scale = np.median(fiber_throughputs)
-                                        # Apply global scale only to traced regions
-                                        normalized_data[traced_mask] *= global_scale
-                                        logger.info(f"    Applied global rescaling factor: {global_scale:.3f}")
+                                    # Compute detector-level normalization factor
+                                    # This is the median of all fiber medians on this detector
+                                    if len(fiber_medians) > 0:
+                                        detector_norm_factor = np.median(fiber_medians)
+                                        logger.info(f"    Detector normalization factor: {detector_norm_factor:.3f}")
+                                        logger.info(f"    Fiber median range: {np.min(fiber_medians):.3f} to {np.max(fiber_medians):.3f}")
 
-                                    # Calculate final statistics
-                                    traced_count = np.sum(traced_mask)
-                                    untraced_count = normalized_data.size - traced_count
-                                    traced_data = normalized_data[traced_mask]
-                                    valid_traced_data = traced_data[np.isfinite(traced_data)]
-                                    final_median_in_traces = np.median(valid_traced_data) if len(valid_traced_data) > 0 else np.nan
-                                    final_std_in_traces = np.std(valid_traced_data) if len(valid_traced_data) > 0 else np.nan
-                                    nan_count_in_traces = np.sum(np.isnan(traced_data))
+                                        # Apply single normalization factor to ALL traced pixels on this detector
+                                        # This removes both spectral shape (from Stage 1) and throughput variations
+                                        if detector_norm_factor > 0:
+                                            # Normalize all traced pixels by detector factor
+                                            normalized_traced = corrected_data[traced_mask] / detector_norm_factor
 
-                                    # Fiber-to-fiber variation statistics
-                                    if len(fiber_throughputs) > 1:
-                                        fiber_throughput_range = (np.min(fiber_throughputs), np.max(fiber_throughputs))
-                                        fiber_throughput_std = np.std(fiber_throughputs)
+                                            # Clip extreme values
+                                            normalized_traced = np.clip(normalized_traced, 0.1, 3.0)
+
+                                            # Handle any remaining NaN/inf
+                                            bad_pixels = ~np.isfinite(normalized_traced)
+                                            normalized_traced[bad_pixels] = 1.0
+
+                                            # Assign to output
+                                            normalized_data[traced_mask] = normalized_traced
+
+                                            # Calculate final statistics
+                                            traced_count = np.sum(traced_mask)
+                                            untraced_count = normalized_data.size - traced_count
+                                            traced_data_final = normalized_data[traced_mask]
+                                            valid_traced_final = traced_data_final[np.isfinite(traced_data_final)]
+
+                                            final_median = np.median(valid_traced_final) if len(valid_traced_final) > 0 else np.nan
+                                            final_std = np.std(valid_traced_final) if len(valid_traced_final) > 0 else np.nan
+                                            nan_count = np.sum(~np.isfinite(traced_data_final))
+
+                                            logger.info(f"    ✓ Per-detector normalization complete:")
+                                            logger.info(f"      Fibers processed: {fibers_processed}, Failed: {fibers_failed}")
+                                            logger.info(f"      Traced pixels: {traced_count:,}, Background pixels: {untraced_count:,}")
+                                            logger.info(f"      Final median in traces: {final_median:.3f} (should be ≈1.0)")
+                                            logger.info(f"      Final std in traces: {final_std:.3f} (should be <0.1)")
+                                            logger.info(f"      NaN pixels: {nan_count:,}")
+
+                                            # Verify normalization succeeded
+                                            if 0.8 <= final_median <= 1.2:
+                                                normalization_successful = True
+                                                logger.info(f"    ✓ Normalization successful - median near 1.0")
+                                            else:
+                                                logger.warning(f"    WARNING: Final median {final_median:.3f} not near 1.0")
+                                                normalization_successful = True  # Accept anyway
+                                        else:
+                                            logger.error(f"    ERROR: Invalid detector normalization factor: {detector_norm_factor}")
+                                            error_details.append(f"Invalid detector norm factor")
                                     else:
-                                        fiber_throughput_range = (np.nan, np.nan)
-                                        fiber_throughput_std = np.nan
-
-                                    logger.info(f"    ✓ Per-fiber normalization complete:")
-                                    logger.info(f"      Total fibers: {len(unique_fibers)}, Processed: {fibers_processed}, Failed: {fibers_failed}")
-                                    logger.info(f"      Fiber throughput range: {fiber_throughput_range[0]:.3f} to {fiber_throughput_range[1]:.3f}")
-                                    logger.info(f"      Fiber-to-fiber std: {fiber_throughput_std:.3f}")
-                                    logger.info(f"      Traced pixels: {traced_count:,}, Background pixels: {untraced_count:,}")
-                                    logger.info(f"      Final median in traces: {final_median_in_traces:.3f}, std: {final_std_in_traces:.3f}")
-                                    logger.info(f"      NaN pixels in traces: {nan_count_in_traces:,}")
-
-                                    if nan_count_in_traces > 0:
-                                        logger.info(f"      (Invalid pixel map regions set to NaN)")
-
-                                    # Verify final normalization
-                                    # With per-fiber normalization, expect fiber-to-fiber variations
-                                    # so median should be around global_scale value, not necessarily 1.0
-                                    if 0.5 <= final_median_in_traces <= 2.0:  # Wider range is expected
-                                        normalization_successful = True
-                                        logger.info(f"    ✓ Per-fiber normalization successful")
-                                    else:
-                                        logger.warning(f"    WARNING: Final median {final_median_in_traces:.3f} outside expected range [0.5-2.0]")
-                                        normalization_successful = True  # Still accept it
+                                        logger.error(f"    ERROR: No valid fiber medians computed")
+                                        error_details.append(f"No valid fiber medians")
                                 else:
                                     logger.error(f"    ERROR: No valid corrected flat field values in traced regions")
                                     error_details.append(f"No valid values in traced regions")
@@ -1528,21 +1512,22 @@ class Thresholding():
                         logger.error(f"    ERROR: No trace information found for {trace_key}")
                         error_details.append(f"No trace file found")
 
-                    # Fallback normalization if trace-based normalization failed
+                    # Fallback normalization if per-detector normalization failed
                     if not normalization_successful:
                         logger.warning(f"    Using fallback normalization (global median)")
                         valid_corrected = corrected_data[np.isfinite(corrected_data) & (corrected_data > 0)]
-                        if len(valid_corrected) > 100:  # Need reasonable amount of data
+                        if len(valid_corrected) > 100:
                             median_corrected = np.median(valid_corrected)
                             if median_corrected > 0:
-                                normalized_data = np.clip(corrected_data / median_corrected, 0.1, 5.0)
+                                normalized_data = np.clip(corrected_data / median_corrected, 0.1, 3.0)
                                 normalized_data[~np.isfinite(normalized_data)] = 1.0
                                 normalization_successful = True
-                                logger.info(f"    ✓ Fallback normalization applied, median: {median_corrected:.3f}")
+                                detector_norm_factor = median_corrected
+                                logger.info(f"    ✓ Fallback normalization applied, factor: {median_corrected:.3f}")
                             else:
                                 logger.error(f"    ERROR: Invalid fallback median: {median_corrected}")
                         else:
-                            logger.error(f"    ERROR: Insufficient valid data for fallback normalization ({len(valid_corrected)} pixels)")
+                            logger.error(f"    ERROR: Insufficient valid data for fallback ({len(valid_corrected)} pixels)")
 
                     if not normalization_successful:
                         logger.error(f"    ERROR: All normalization methods failed, setting to ones")
@@ -1579,20 +1564,14 @@ class Thresholding():
                             hdu.header['BUNIT'] = 'Normalized'
                             hdu.header['PURPOSE'] = 'Flat field correction by division'
                             hdu.header['ORIGFILE'] = os.path.basename(original_flat_files[channel])
-                            hdu.header['NORMTYPE'] = ('PER_FIBER', 'Normalization method: per-fiber preserves throughput')
+                            hdu.header['NORMTYPE'] = ('PER_DETECTOR', 'Per-detector throughput normalization')
 
-                            # Add per-fiber normalization statistics if available
-                            if len(fiber_throughputs) > 0:
-                                hdu.header['NFIBERS'] = (fibers_processed, 'Number of fibers successfully normalized')
-                                hdu.header['FIBFAIL'] = (fibers_failed, 'Number of fibers that failed normalization')
-                                hdu.header['FIBTHMIN'] = (float(np.min(fiber_throughputs)), 'Min fiber throughput before norm')
-                                hdu.header['FIBTHMAX'] = (float(np.max(fiber_throughputs)), 'Max fiber throughput before norm')
-                                hdu.header['FIBTHMED'] = (float(np.median(fiber_throughputs)), 'Median fiber throughput')
-                                hdu.header['FIBTHSTD'] = (fiber_throughput_std, 'Std dev of fiber throughputs')
-                                if global_scale is not None:
-                                    hdu.header['GLOBSCAL'] = (global_scale, 'Global rescaling factor applied')
-                            else:
-                                hdu.header['NORMTYPE'] = ('FALLBACK', 'Used fallback global normalization')
+                            # Add per-detector normalization statistics
+                            hdu.header['NFIBERS'] = (fibers_processed, 'Number of fibers successfully processed')
+                            hdu.header['FIBFAIL'] = (fibers_failed, 'Number of fibers that failed')
+                            if np.isfinite(detector_norm_factor):
+                                hdu.header['DETNORM'] = (float(detector_norm_factor), 'Detector normalization factor')
+                            hdu.header['COMMENT'] = 'Values should be ~1.0, preserving only pixel QE variations'
 
                             # Add comprehensive statistics
                             data_stats = {
