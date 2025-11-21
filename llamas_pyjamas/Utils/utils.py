@@ -505,7 +505,7 @@ def flip_positions()-> None:
 def copy_mastercalib_trace(channel: str, bench: str, side: str,
                           mastercalib_dir: str, target_dir: str) -> str:
     """
-    Copy mastercalib trace to target directory with clear naming.
+    Copy mastercalib trace to target directory, replacing the invalid user trace.
 
     Args:
         channel: Color channel (red/green/blue)
@@ -522,7 +522,7 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
 
     Example:
         >>> copy_mastercalib_trace('green', '4', 'B', '/calib', '/user/traces')
-        '/user/traces/LLAMAS_master_green_4_B_traces.pkl'
+        '/user/traces/LLAMAS_green_4_B_traces.pkl'
     """
     import shutil
 
@@ -533,12 +533,14 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
     if not os.path.exists(mastercalib_path):
         raise FileNotFoundError(f"Mastercalib trace not found: {mastercalib_path}")
 
-    # Copy to target directory with same naming convention
-    target_path = os.path.join(target_dir, mastercalib_filename)
+    # Copy to target directory using USER naming convention (without "master_" prefix)
+    # This replaces the invalid user trace file
+    user_filename = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+    target_path = os.path.join(target_dir, user_filename)
 
     # Use shutil.copy2 to preserve metadata
     shutil.copy2(mastercalib_path, target_path)
-    logger.info(f"Copied mastercalib trace {mastercalib_filename} to {target_dir}")
+    logger.info(f"Replaced invalid trace with mastercalib: {user_filename}")
 
     return target_path
 
@@ -592,7 +594,7 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
         try:
             # Load trace object
             with open(pkl_file, "rb") as file:
-                traceobj = cloudpickle.load(file)
+                traceobj = pickle.load(file)
 
             # Extract trace information
             shape = traceobj.traces.shape[0]
@@ -663,7 +665,7 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
 
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
-            traceobj = cloudpickle.load(file)
+            traceobj = pickle.load(file)
         shape = traceobj.traces.shape[0]
         channel = traceobj.channel
         benchside = f"{traceobj.bench}{traceobj.side}"

@@ -175,54 +175,73 @@ def correct_wavelengths(science_extraction_file, soln=None):
     std_wvcal = arc.arcTransfer(_science, arcdict,)
     
     print(f'std_wvcal: {std_wvcal}')
-    print(f'std_wvcal metadata: {std_wvcal.get('metadata', {})}')
-    
+    print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
+
     return std_wvcal, primary_hdr
 
 
-def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir, 
-                                  arc_calib_file=None, verbose=False):
+def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
+                                  arc_calib_file=None, verbose=False, flat_method='standard'):
     """Generate flat field pixel maps for science frame correction.
-    
+
     Args:
         red_flat (str): Path to red flat field FITS file
-        green_flat (str): Path to green flat field FITS file  
+        green_flat (str): Path to green flat field FITS file
         blue_flat (str): Path to blue flat field FITS file
         trace_dir (str): Directory containing trace files
         output_dir (str): Output directory for flat field products
         arc_calib_file (str, optional): Path to arc calibration file
         verbose (bool): Enable verbose output
-        
+        flat_method (str): Flat fielding method - 'standard' or 'pypeit' (default: 'standard')
+
     Returns:
         list: List of flat field pixel map FITS file paths
     """
-    from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
-    
     # Use flat field output directory directly (no nested pixel_maps subdirectory)
     flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
-    
-    print(f"Processing flat field calibration...")
+
+    print(f"Processing flat field calibration using method: {flat_method}")
     print(f"  Red flat: {os.path.basename(red_flat)}")
     print(f"  Green flat: {os.path.basename(green_flat)}")
     print(f"  Blue flat: {os.path.basename(blue_flat)}")
     print(f"  Output directory: {flat_output_dir}")
-    
-    # Run the complete flat field workflow
+
+    # Run the appropriate flat field workflow based on method
     try:
-        results = process_flat_field_complete(
-            red_flat, green_flat, blue_flat,
-            arc_calib_file=arc_calib_file,
-            output_dir=flat_output_dir,
-            trace_dir=trace_dir,
-            verbose=verbose
-        )
-        
+        if flat_method == 'pypeit':
+            # Use PypeIt-style flat fielding with full detector integration
+            from llamas_pyjamas.Flat.pypeit_integration import process_flat_with_pypeit
+
+            print("Using PypeIt-style flat fielding approach")
+            print("Processing 24 detector extensions (Red/Green/Blue for benches 1A-4B)")
+
+            results = process_flat_with_pypeit(
+                red_flat, green_flat, blue_flat,
+                trace_dir=trace_dir,
+                output_dir=flat_output_dir,
+                arc_calib_file=arc_calib_file,
+                reference_fiber=150,
+                verbose=verbose
+            )
+        else:
+            # Use standard flat fielding method
+            from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
+
+            print("Using standard flat fielding approach")
+            results = process_flat_field_complete(
+                red_flat, green_flat, blue_flat,
+                arc_calib_file=arc_calib_file,
+                output_dir=flat_output_dir,
+                trace_dir=trace_dir,
+                verbose=verbose
+            )
+
         pixel_map_files = results.get('output_files', [])
         print(f"Successfully generated {len(pixel_map_files)} flat field pixel maps")
         # This should be using the normalised fits image
         return pixel_map_files
-        
+
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
         import traceback
@@ -1050,13 +1069,14 @@ def main(config_path):
             os.makedirs(flat_field_dir, exist_ok=True)
             
             flat_pixel_maps = process_flat_field_calibration(
-                config.get('red_flat_file'), 
-                config.get('green_flat_file'), 
+                config.get('red_flat_file'),
+                config.get('green_flat_file'),
                 config.get('blue_flat_file'),
                 config.get('trace_output_dir'),
                 flat_field_dir,
                 arc_calib_file=config.get('arc_calib_file'),
-                verbose=config.get('verbose_flat_processing', False)
+                verbose=config.get('verbose_flat_processing', False),
+                flat_method=config.get('flat_method', 'standard')
             )
             
             if flat_pixel_maps:
