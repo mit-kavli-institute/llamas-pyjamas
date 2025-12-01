@@ -1061,23 +1061,38 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
         print("🐌 Using serial processing for arc wavelength solution...")
         return arcSolve_original(arc_extraction_shifted_pickle, autoid)
 
-def arcTransfer(scidict, arcdict):
-    """Transfer wavelength calibration from arc to science spectra.
+def arcTransfer(scidict, arcdict, enable_validation=True):
+    """Transfer wavelength calibration from arc to science spectra with optional validation.
 
-    This function transfers the wavelength solution, x-shift information, and 
+    This function transfers the wavelength solution, x-shift information, and
     relative throughput data from arc calibration spectra to science spectra.
+
+    NEW: Includes optional wavelength quality validation to catch common issues
+    like missing calibration, NaN values, or out-of-range wavelengths.
 
     Args:
         scidict (dict): Dictionary containing science extraction data.
         arcdict (dict): Dictionary containing arc extraction data with wavelength solution.
+        enable_validation (bool): Enable wavelength quality validation (default: True).
+            Set to False to use original behavior without validation.
 
     Returns:
         dict: Updated science dictionary with transferred calibration data.
     """
     from llamas_pyjamas.constants import idx_lookup
+    from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
 
     scispec = scidict['extractions']
     arcspec = arcdict['extractions']
+
+    # Track validation statistics across all extensions
+    total_validation_stats = {
+        'n_fibers_total': 0,
+        'n_fibers_valid': 0,
+        'n_fibers_invalid': 0,
+        'n_fibers_warned': 0,
+        'failed_fibers': []
+    }
 
     # Loop over the extensions
     for fits_ext in range(len(scispec)):
@@ -1085,7 +1100,7 @@ def arcTransfer(scidict, arcdict):
         channel = scidict['metadata'][fits_ext]['channel']
         bench = str(scidict['metadata'][fits_ext]['bench'])
         side = scidict['metadata'][fits_ext]['side']
-        
+
         key = (channel, bench, side)
 
         # Use the lookup table to get the correct arc extension index
@@ -1095,32 +1110,115 @@ def arcTransfer(scidict, arcdict):
         arc_meta_channel, arc_meta_bench, arc_meta_side = arcdict['metadata'][arc_idx]['channel'], str(arcdict['metadata'][arc_idx]['bench']), arcdict['metadata'][arc_idx]['side']
 
         if (sci_meta_channel != arc_meta_channel) or (sci_meta_bench != arc_meta_bench) or (sci_meta_side != arc_meta_side):
-            print(f"Error: Metadata mismatch between science and arc for extension {fits_ext}")
-            print(f"Science metadata: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}")
-            print(f"Arc metadata: Channel={arc_meta_channel}, Bench={arc_meta_bench}, Side={arc_meta_side}")
+            logger.error(f"Metadata mismatch between science and arc for extension {fits_ext}")
+            logger.error(f"Science metadata: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}")
+            logger.error(f"Arc metadata: Channel={arc_meta_channel}, Bench={arc_meta_bench}, Side={arc_meta_side}")
             continue
 
-        
+
         # Get number of fibers in both science and arc spectra
         sci_nfibers = scidict['metadata'][fits_ext]['nfibers']
         arc_nfibers = arcdict['metadata'][arc_idx]['nfibers']
         if sci_nfibers != arc_nfibers:
-            print(f"Warning: Number of fibers mismatch for {key} - Science: {sci_nfibers}, Arc: {arc_nfibers}")
-            ### add in comparison of metadata here as I need to check the index matching is correct with the new fix
+            logger.warning(f"Number of fibers mismatch for {key} - Science: {sci_nfibers}, Arc: {arc_nfibers}")
 
         # Use the minimum number of fibers to avoid index errors
         min_nfibers = min(sci_nfibers, arc_nfibers)
-        
+
         if sci_nfibers != arc_nfibers:
-            print(f"Warning: Number of fibers mismatch for {key} - Science: {sci_nfibers}, Arc: {arc_nfibers}")
-            print(f"Using the first {min_nfibers} fibers for calibration transfer")
-        
+            logger.warning(f"Using the first {min_nfibers} fibers for calibration transfer")
+
+        # Per-extension validation statistics
+        ext_validation_stats = {
+            'n_fibers_total': 0,
+            'n_fibers_valid': 0,
+            'n_fibers_invalid': 0,
+            'n_fibers_warned': 0
+        }
+
         # Loop over the fibers (only up to the minimum number present in both)
         for ifiber in range(min_nfibers):
+            ext_validation_stats['n_fibers_total'] += 1
+            total_validation_stats['n_fibers_total'] += 1
+
+            # NEW: Validate arc wavelength data before transfer (if enabled)
+            if enable_validation:
+                validation = validate_wavelength_solution(arcspec[arc_idx], channel, ifiber)
+
+                if not validation['valid']:
+                    ext_validation_stats['n_fibers_invalid'] += 1
+                    total_validation_stats['n_fibers_invalid'] += 1
+
+                    # Log detailed error
+                    logger.error(f"Extension {fits_ext} ({channel} {bench}{side}), Fiber {ifiber} failed validation:")
+                    for error in validation['errors']:
+                        logger.error(f"  - {error}")
+
+                    # Store failed fiber info
+                    total_validation_stats['failed_fibers'].append({
+                        'extension': fits_ext,
+                        'fiber': ifiber,
+                        'channel': channel,
+                        'bench': bench,
+                        'side': side,
+                        'errors': validation['errors']
+                    })
+
+                    # Set to NaN to mark as invalid (downstream code should handle this)
+                    scispec[fits_ext].wave[ifiber, :] = np.nan
+                    scispec[fits_ext].xshift[ifiber, :] = np.nan
+                    scispec[fits_ext].relative_throughput[ifiber] = np.nan
+                    continue
+
+                if len(validation['warnings']) > 0:
+                    ext_validation_stats['n_fibers_warned'] += 1
+                    total_validation_stats['n_fibers_warned'] += 1
+                    logger.warning(f"Extension {fits_ext} ({channel} {bench}{side}), Fiber {ifiber}:")
+                    for warning in validation['warnings']:
+                        logger.warning(f"  - {warning}")
+
+                ext_validation_stats['n_fibers_valid'] += 1
+                total_validation_stats['n_fibers_valid'] += 1
+
+            # Transfer wavelength data (original code)
             x = scispec[fits_ext].xshift[ifiber,:]
             scispec[fits_ext].wave[ifiber,:] = arcspec[arc_idx].wave[ifiber,:]
             scispec[fits_ext].xshift[ifiber,:] = arcspec[arc_idx].xshift[ifiber,:]
             scispec[fits_ext].relative_throughput[ifiber] = arcspec[arc_idx].relative_throughput[ifiber]
+
+        # Log per-extension validation summary
+        if enable_validation and ext_validation_stats['n_fibers_total'] > 0:
+            logger.info(f"\nExtension {fits_ext} ({channel} {bench}{side}) validation summary:")
+            logger.info(f"  Total fibers: {ext_validation_stats['n_fibers_total']}")
+            logger.info(f"  Valid: {ext_validation_stats['n_fibers_valid']}")
+            logger.info(f"  Invalid: {ext_validation_stats['n_fibers_invalid']}")
+            logger.info(f"  Warnings: {ext_validation_stats['n_fibers_warned']}")
+
+    # Log overall validation summary
+    if enable_validation and total_validation_stats['n_fibers_total'] > 0:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Overall wavelength transfer validation summary:")
+        logger.info(f"  Total fibers processed: {total_validation_stats['n_fibers_total']}")
+        logger.info(f"  Valid: {total_validation_stats['n_fibers_valid']}")
+        logger.info(f"  Invalid: {total_validation_stats['n_fibers_invalid']}")
+        logger.info(f"  Warnings: {total_validation_stats['n_fibers_warned']}")
+
+        if total_validation_stats['n_fibers_invalid'] > 0:
+            logger.warning(f"\n{total_validation_stats['n_fibers_invalid']} fibers failed validation!")
+            logger.warning(f"These fibers have been set to NaN and should be excluded from analysis.")
+
+            # Log first few failed fibers
+            n_to_show = min(5, len(total_validation_stats['failed_fibers']))
+            logger.warning(f"\nFirst {n_to_show} failed fibers:")
+            for failed in total_validation_stats['failed_fibers'][:n_to_show]:
+                logger.warning(f"  Extension {failed['extension']}, Fiber {failed['fiber']} "
+                             f"({failed['channel']} {failed['bench']}{failed['side']})")
+                for error in failed['errors']:
+                    logger.warning(f"    - {error}")
+
+            if len(total_validation_stats['failed_fibers']) > n_to_show:
+                logger.warning(f"  ... and {len(total_validation_stats['failed_fibers']) - n_to_show} more")
+        logger.info(f"{'='*60}\n")
 
     return(scidict)
 
