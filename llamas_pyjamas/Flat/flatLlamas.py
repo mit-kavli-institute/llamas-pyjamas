@@ -883,7 +883,12 @@ class Thresholding():
         for fiber_idx, fiber_data in fiber_fits.items():
             # Get the B-spline model for this fiber
             bspline_model = fiber_data['bspline_model']
-            xshift_1d = fiber_data['xshift']  # 1D wavelength array from extraction
+            xshift_1d = fiber_data['xshift']  # 1D wavelength array from extraction (may include NaN)
+            xshift_clean = fiber_data['xshift_clean']  # Cleaned wavelength array used for B-spline fitting
+
+            # Get the valid domain of the B-spline (where it was fitted)
+            xshift_min = xshift_clean.min()
+            xshift_max = xshift_clean.max()
 
             # Create extraction column positions
             # The extraction produces one value per spectral pixel
@@ -906,15 +911,24 @@ class Thresholding():
                 # Get the column indices of the fiber pixels in this row (2D image columns)
                 col_indices = np.where(row_pixels)[0]
 
-                # FIX: Interpolate xshift values at actual image column positions
+                # Interpolate xshift values at actual image column positions
                 # This maps: 2D image columns → extraction positions → wavelengths
                 xshift_at_cols = np.interp(col_indices, extraction_cols, xshift_1d)
 
-                # Evaluate the B-spline model at interpolated wavelength positions
+                # Check which pixels are within the B-spline's valid domain
+                valid_domain = (xshift_at_cols >= xshift_min) & (xshift_at_cols <= xshift_max) & np.isfinite(xshift_at_cols)
+
+                if not np.any(valid_domain):
+                    continue
+
+                # Only evaluate B-spline for pixels within valid domain
                 try:
-                    predicted_values = bspline_model.value(xshift_at_cols)[0]
-                    # Assign the predicted values to the pixel map
-                    pixel_map[row, col_indices] = predicted_values
+                    valid_xshift = xshift_at_cols[valid_domain]
+                    predicted_values = bspline_model.value(valid_xshift)[0]
+
+                    # Assign predicted values only to valid pixels
+                    valid_col_indices = col_indices[valid_domain]
+                    pixel_map[row, valid_col_indices] = predicted_values
                 except Exception as e:
                     logger.debug(f"Error evaluating B-spline for fiber {fiber_idx}, row {row}: {str(e)}")
                     continue
