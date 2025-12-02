@@ -179,7 +179,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             )
             
             # Create evaluation grid
-            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift_clean))  # was 2* for Higher resolution
+            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))  # was 2* for Higher resolution
             y_fit = sset.value(xmodel)[0]
             
             # Evaluate fit quality
@@ -582,18 +582,28 @@ class LlamasFlatFielding():
         
 class Thresholding():
 
-    def __init__(self, red_flat_file, green_flat_file, blue_flat_file, use_bias=None, output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR) -> None:
-        self.red_flat_file = red_flat_file
-        self.green_flat_file = green_flat_file
-        self.blue_flat_file = blue_flat_file
+    def __init__(self, combined_flat_file, use_bias=None, output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR) -> None:
+        """Initialize Thresholding class with combined flat extractions file.
+
+        Parameters
+        ----------
+        combined_flat_file : str
+            Path to combined_flat_extractions.pkl or combined_flat_extractions_calibrated.pkl
+            containing 24 ExtractLlamas objects (3 colors × 4 benches × 2 sides) with metadata.
+        use_bias : str, optional
+            Path to bias file if needed for processing.
+        output_dir : str, optional
+            Directory for output files.
+        trace_dir : str, optional
+            Directory containing trace files for fiber mapping.
+        """
+        self.combined_flat_file = combined_flat_file
         self.use_bias = use_bias
         self.output_dir = output_dir
         self.trace_dir = trace_dir
-        
-        logger.info(f"Initializing Thresholding with files:")
-        logger.info(f"  Red: {red_flat_file}")
-        logger.info(f"  Green: {green_flat_file}")
-        logger.info(f"  Blue: {blue_flat_file}")
+
+        logger.info(f"Initializing Thresholding with combined flat file:")
+        logger.info(f"  Combined flat: {combined_flat_file}")
         logger.info(f"  Use bias: {use_bias}")
         logger.info(f"  Output directory: {output_dir}")
         logger.info(f"  Trace directory: {trace_dir}")
