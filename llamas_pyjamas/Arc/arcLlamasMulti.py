@@ -1060,8 +1060,122 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
     if not use_ray:
         print("🐌 Using serial processing for arc wavelength solution...")
         return arcSolve_original(arc_extraction_shifted_pickle, autoid)
+    
+def arcTransfer(scidict, arcdict, verbose=True):
+    """Transfer wavelength calibration from arc to science spectra.
 
-def arcTransfer(scidict, arcdict, enable_validation=True):
+    This function transfers the wavelength solution, x-shift information, and 
+    relative throughput data from arc calibration spectra to science spectra.
+    The function searches through arc extensions to find matching metadata
+    regardless of extension ordering.
+
+    Args:
+        scidict (dict): Dictionary containing science extraction data.
+        arcdict (dict): Dictionary containing arc extraction data with wavelength solution.
+        verbose (bool): If True, print detailed debugging information.
+
+    Returns:
+        dict: Updated science dictionary with transferred calibration data.
+    """
+    
+    scispec = scidict['extractions']
+    arcspec = arcdict['extractions']
+
+    # Loop over the science extensions
+    for sci_ext in range(len(scispec)):
+        # Get channel, bench, and side from science metadata
+        sci_meta_channel = scidict['metadata'][sci_ext]['channel']
+        sci_meta_bench = str(scidict['metadata'][sci_ext]['bench'])
+        sci_meta_side = scidict['metadata'][sci_ext]['side']
+        
+        if verbose:
+            print(f"\n=== Looking for match for sci_ext {sci_ext}: "
+                  f"Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side} ===")
+        
+        # Search for matching arc extension
+        arc_idx = None
+        for arc_ext in range(len(arcspec)):
+            arc_meta_channel = arcdict['metadata'][arc_ext]['channel']
+            arc_meta_bench = str(arcdict['metadata'][arc_ext]['bench'])
+            arc_meta_side = arcdict['metadata'][arc_ext]['side']
+            
+            if verbose:
+                match_status = "✓ MATCH" if (sci_meta_channel == arc_meta_channel and 
+                                             sci_meta_bench == arc_meta_bench and 
+                                             sci_meta_side == arc_meta_side) else "✗ no match"
+                print(f"  arc_ext {arc_ext}: Channel={arc_meta_channel}, Bench={arc_meta_bench}, "
+                      f"Side={arc_meta_side} ... {match_status}")
+            
+            # Check if metadata matches
+            if (sci_meta_channel == arc_meta_channel and 
+                sci_meta_bench == arc_meta_bench and 
+                sci_meta_side == arc_meta_side):
+                arc_idx = arc_ext
+                break  # Found a match, stop searching
+        
+        # If no matching arc extension found, print error and skip THIS science extension
+        if arc_idx is None:
+            print(f"ERROR: No matching arc extension found for science extension {sci_ext}")
+            print(f"  Science metadata: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}")
+            print(f"  Available arc extensions:")
+            for arc_ext in range(len(arcspec)):
+                print(f"    arc_ext {arc_ext}: Channel={arcdict['metadata'][arc_ext]['channel']}, "
+                      f"Bench={arcdict['metadata'][arc_ext]['bench']}, "
+                      f"Side={arcdict['metadata'][arc_ext]['side']}")
+            continue  # Skip to next science extension
+        
+        # Debug: Check arc xshift values before transfer
+        if verbose:
+            arc_xshift_nonzero = np.count_nonzero(arcspec[arc_idx].xshift)
+            print(f"\n--- Transferring: sci_ext {sci_ext} <- arc_idx {arc_idx} ---")
+            print(f"Arc xshift non-zero values: {arc_xshift_nonzero}/{arcspec[arc_idx].xshift.size}")
+            if arc_xshift_nonzero > 0:
+                print(f"Arc xshift range: [{np.min(arcspec[arc_idx].xshift):.4f}, {np.max(arcspec[arc_idx].xshift):.4f}]")
+            else:
+                print(f"WARNING: Arc xshift array is all zeros!")
+        
+        # Get number of fibers in both science and arc spectra
+        sci_nfibers = scidict['metadata'][sci_ext]['nfibers']
+        arc_nfibers = arcdict['metadata'][arc_idx]['nfibers']
+        
+        # Use the minimum number of fibers to avoid index errors
+        min_nfibers = min(sci_nfibers, arc_nfibers)
+        
+        if sci_nfibers != arc_nfibers:
+            print(f"Warning: Number of fibers mismatch for extension {sci_ext}")
+            print(f"  Science: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}, Fibers={sci_nfibers}")
+            print(f"  Arc: Channel={arc_meta_channel}, Bench={arc_meta_bench}, Side={arc_meta_side}, Fibers={arc_nfibers}")
+            print(f"  Using the first {min_nfibers} fibers for calibration transfer")
+        
+        # Loop over the fibers (only up to the minimum number present in both)
+        for ifiber in range(min_nfibers):
+            # Store before values for debugging
+            if verbose and ifiber == 0:
+                arc_xshift = arcspec[arc_idx].xshift[ifiber,:].copy()
+            
+            scispec[sci_ext].wave[ifiber,:] = arcspec[arc_idx].wave[ifiber,:]
+            scispec[sci_ext].xshift[ifiber,:] = arcspec[arc_idx].xshift[ifiber,:]
+            scispec[sci_ext].relative_throughput[ifiber] = arcspec[arc_idx].relative_throughput[ifiber]
+            
+            # Debug first fiber
+            if verbose and ifiber == 0:
+                sci_xshift_after = scispec[sci_ext].xshift[ifiber,:]
+                print(f"Fiber 0 transfer check:")
+                print(f"  Arc xshift non-zero: {np.count_nonzero(arc_xshift)}/{arc_xshift.size}")
+                print(f"  Sci xshift after non-zero: {np.count_nonzero(sci_xshift_after)}/{sci_xshift_after.size}")
+                if np.count_nonzero(arc_xshift) > 0:
+                    print(f"  Arc xshift sample: {arc_xshift[:5]}")
+                    print(f"  Sci xshift sample: {sci_xshift_after[:5]}")
+                else:
+                    print(f"  Arc xshift is all zeros - nothing to transfer!")
+        
+        if verbose:
+            print(f"✓ Successfully transferred calibration for science ext {sci_ext} from arc ext {arc_idx}")
+
+    return scidict
+
+### backup version of the function, edits were made so I don't know how well it works
+def prev_arcTransfer(scidict, arcdict, enable_validation=True):
     """Transfer wavelength calibration from arc to science spectra with optional validation.
 
     This function transfers the wavelength solution, x-shift information, and
@@ -1080,7 +1194,7 @@ def arcTransfer(scidict, arcdict, enable_validation=True):
         dict: Updated science dictionary with transferred calibration data.
     """
     from llamas_pyjamas.constants import idx_lookup
-    from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
+    # from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
 
     scispec = scidict['extractions']
     arcspec = arcdict['extractions']
