@@ -707,48 +707,25 @@ def main(config_path):
         # function to extract them all
         # process to apply wvln solution to the combined extractions
         # function to generate pixel maps from the combined extractions
+        if config.get('apply_flat_field_correction', False):
+            try:
+                # I might need to check the arc file being used here
+                flat_pixel_maps = process_flat_field_complete(red_flat_file=config.get('red_flat_file'),
+                                            green_flat_file=config.get('green_flat_file'),
+                                            blue_flat_file=config.get('blue_flat_file'),
+                                            arc_calib_file=config.get('arc_calib_file'),
+                                            output_dir=os.path.join(extraction_path, 'flat_temp'),
+                                            trace_dir=config.get('trace_output_dir'),
+                                            verbose=False)
+            except Exception as e:
+                print(f"Error during preliminary flat field processing: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
-        try:
-            # I might need to check the arc file being used here
-            process_flat_field_complete(red_flat_file=config.get('red_flat_file'),
-                                        green_flat_file=config.get('green_flat_file'),
-                                        blue_flat_file=config.get('blue_flat_file'),
-                                        arc_calib_file=config.get('arc_calib_file'),
-                                        output_dir=os.path.join(extraction_path, 'flat_temp'),
-                                        trace_dir=config.get('trace_output_dir'),
-                                        verbose=False)
-        except Exception as e:
-            print(f"Error during preliminary flat field processing: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-
-        # Generate flat field pixel maps if flat correction is enabled
-        flat_pixel_maps = []
-        if config.get('apply_flat_field_correction', False):  # Default to True
-            print("\n" + "="*60)
-            print("FLAT FIELD PROCESSING")
-            print("="*60)
-            
-            # Create proper flat field directory structure: extractions/flat/
-            flat_field_dir = config.get('flat_field_output_dir', os.path.join(extraction_path, 'flat'))
-            os.makedirs(flat_field_dir, exist_ok=True)
-            
-            flat_pixel_maps = process_flat_field_calibration(
-                config.get('red_flat_file'),
-                config.get('green_flat_file'),
-                config.get('blue_flat_file'),
-                config.get('trace_output_dir'),
-                flat_field_dir,
-                arc_calib_file=config.get('arc_calib_file'),
-                verbose=config.get('verbose_flat_processing', False),
-                flat_method=config.get('flat_method', 'standard')
-            )
-            
-            if flat_pixel_maps:
-                print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
-            else:
-                print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
+        if flat_pixel_maps:
+            print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
+        else:
+            print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
         
 
         
@@ -800,13 +777,13 @@ def main(config_path):
                     if not os.path.exists(science_file):
                         raise FileNotFoundError(f"Science file {science_file} does not exist.")
                     
-                    corrected_file, stats = apply_flat_field_correction(
-                        science_file, 
-                        flat_pixel_maps, 
-                        flat_output_dir,
-                        validate_matching=config.get('validate_flat_matching', True),
-                        require_all_matches=config.get('require_all_flat_matches', True)
-                    )
+                    # corrected_file, stats = apply_flat_field_correction(
+                    #     science_file, 
+                    #     flat_pixel_maps, 
+                    #     flat_output_dir,
+                    #     validate_matching=config.get('validate_flat_matching', True),
+                    #     require_all_matches=config.get('require_all_flat_matches', True)
+                    # )
                     
                     if corrected_file:
                         flat_corrected_files.append(corrected_file)
@@ -827,13 +804,13 @@ def main(config_path):
                     raise FileNotFoundError(f"Science file {science_file} does not exist.")
                 
                 print(f"\nFlat-correcting science file: {os.path.basename(science_file)}")
-                corrected_file, stats = apply_flat_field_correction(
-                    science_file,
-                    flat_pixel_maps,
-                    flat_output_dir,
-                    validate_matching=config.get('validate_flat_matching', True),
-                    require_all_matches=config.get('require_all_flat_matches', False)
-                )
+                # corrected_file, stats = apply_flat_field_correction(
+                #     science_file,
+                #     flat_pixel_maps,
+                #     flat_output_dir,
+                #     validate_matching=config.get('validate_flat_matching', True),
+                #     require_all_matches=config.get('require_all_flat_matches', False)
+                # )
                 
                 if corrected_file:
                     science_files_to_process = corrected_file
