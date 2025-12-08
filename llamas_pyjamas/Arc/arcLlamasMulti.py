@@ -1061,11 +1061,13 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
         print("🐌 Using serial processing for arc wavelength solution...")
         return arcSolve_original(arc_extraction_shifted_pickle, autoid)
 
-def arcTransfer(scidict, arcdict, enable_validation=True):
+def arcTransfer(scidict, arcdict, enable_validation=True, verbose=False):
     """Transfer wavelength calibration from arc to science spectra with optional validation.
 
     This function transfers the wavelength solution, x-shift information, and
     relative throughput data from arc calibration spectra to science spectra.
+    Uses dynamic extension matching by metadata (channel/bench/side) instead of
+    hardcoded lookup tables.
 
     NEW: Includes optional wavelength quality validation to catch common issues
     like missing calibration, NaN values, or out-of-range wavelengths.
@@ -1075,11 +1077,11 @@ def arcTransfer(scidict, arcdict, enable_validation=True):
         arcdict (dict): Dictionary containing arc extraction data with wavelength solution.
         enable_validation (bool): Enable wavelength quality validation (default: True).
             Set to False to use original behavior without validation.
+        verbose (bool): Enable verbose debugging output (default: False).
 
     Returns:
         dict: Updated science dictionary with transferred calibration data.
     """
-    from llamas_pyjamas.constants import idx_lookup
     from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
 
     scispec = scidict['extractions']
@@ -1094,26 +1096,58 @@ def arcTransfer(scidict, arcdict, enable_validation=True):
         'failed_fibers': []
     }
 
-    # Loop over the extensions
+    # Loop over the science extensions
     for fits_ext in range(len(scispec)):
-        # Get channel, bench, and side from metadata
+        # Get channel, bench, and side from science metadata
         channel = scidict['metadata'][fits_ext]['channel']
         bench = str(scidict['metadata'][fits_ext]['bench'])
         side = scidict['metadata'][fits_ext]['side']
 
-        key = (channel, bench, side)
+        if verbose:
+            logger.info(f"\n=== Looking for match for sci_ext {fits_ext}: "
+                       f"Channel={channel}, Bench={bench}, Side={side} ===")
 
-        # Use the lookup table to get the correct arc extension index
-        arc_idx = idx_lookup[key] -1
+        # Search for matching arc extension (dynamic search instead of idx_lookup)
+        arc_idx = None
+        for arc_ext in range(len(arcspec)):
+            arc_meta_channel = arcdict['metadata'][arc_ext]['channel']
+            arc_meta_bench = str(arcdict['metadata'][arc_ext]['bench'])
+            arc_meta_side = arcdict['metadata'][arc_ext]['side']
 
-        sci_meta_channel, sci_meta_bench, sci_meta_side = scidict['metadata'][fits_ext]['channel'], str(scidict['metadata'][fits_ext]['bench']), scidict['metadata'][fits_ext]['side']
-        arc_meta_channel, arc_meta_bench, arc_meta_side = arcdict['metadata'][arc_idx]['channel'], str(arcdict['metadata'][arc_idx]['bench']), arcdict['metadata'][arc_idx]['side']
+            if verbose:
+                match_status = "✓ MATCH" if (channel == arc_meta_channel and
+                                             bench == arc_meta_bench and
+                                             side == arc_meta_side) else "✗ no match"
+                logger.info(f"  arc_ext {arc_ext}: Channel={arc_meta_channel}, Bench={arc_meta_bench}, "
+                           f"Side={arc_meta_side} ... {match_status}")
 
-        if (sci_meta_channel != arc_meta_channel) or (sci_meta_bench != arc_meta_bench) or (sci_meta_side != arc_meta_side):
-            logger.error(f"Metadata mismatch between science and arc for extension {fits_ext}")
-            logger.error(f"Science metadata: Channel={sci_meta_channel}, Bench={sci_meta_bench}, Side={sci_meta_side}")
-            logger.error(f"Arc metadata: Channel={arc_meta_channel}, Bench={arc_meta_bench}, Side={arc_meta_side}")
+            # Check if metadata matches
+            if (channel == arc_meta_channel and
+                bench == arc_meta_bench and
+                side == arc_meta_side):
+                arc_idx = arc_ext
+                break  # Found a match, stop searching
+
+        # If no matching arc extension found, log error and skip this science extension
+        if arc_idx is None:
+            logger.error(f"ERROR: No matching arc extension found for science extension {fits_ext}")
+            logger.error(f"  Science metadata: Channel={channel}, Bench={bench}, Side={side}")
+            logger.error(f"  Available arc extensions:")
+            for arc_ext in range(len(arcspec)):
+                logger.error(f"    arc_ext {arc_ext}: Channel={arcdict['metadata'][arc_ext]['channel']}, "
+                           f"Bench={arcdict['metadata'][arc_ext]['bench']}, "
+                           f"Side={arcdict['metadata'][arc_ext]['side']}")
             continue
+
+        # Debug: Check arc xshift values before transfer
+        if verbose:
+            arc_xshift_nonzero = np.count_nonzero(arcspec[arc_idx].xshift)
+            logger.info(f"\n--- Transferring: sci_ext {fits_ext} <- arc_idx {arc_idx} ---")
+            logger.info(f"Arc xshift non-zero values: {arc_xshift_nonzero}/{arcspec[arc_idx].xshift.size}")
+            if arc_xshift_nonzero > 0:
+                logger.info(f"Arc xshift range: [{np.min(arcspec[arc_idx].xshift):.4f}, {np.max(arcspec[arc_idx].xshift):.4f}]")
+            else:
+                logger.warning(f"WARNING: Arc xshift array is all zeros!")
 
 
         # Get number of fibers in both science and arc spectra
@@ -1181,10 +1215,26 @@ def arcTransfer(scidict, arcdict, enable_validation=True):
                 total_validation_stats['n_fibers_valid'] += 1
 
             # Transfer wavelength data (original code)
+            if verbose and ifiber == 0:
+                # Store before values for debugging first fiber
+                arc_xshift = arcspec[arc_idx].xshift[ifiber,:].copy()
+
             x = scispec[fits_ext].xshift[ifiber,:]
             scispec[fits_ext].wave[ifiber,:] = arcspec[arc_idx].wave[ifiber,:]
             scispec[fits_ext].xshift[ifiber,:] = arcspec[arc_idx].xshift[ifiber,:]
             scispec[fits_ext].relative_throughput[ifiber] = arcspec[arc_idx].relative_throughput[ifiber]
+
+            # Debug first fiber transfer
+            if verbose and ifiber == 0:
+                sci_xshift_after = scispec[fits_ext].xshift[ifiber,:]
+                logger.info(f"Fiber 0 transfer check:")
+                logger.info(f"  Arc xshift non-zero: {np.count_nonzero(arc_xshift)}/{arc_xshift.size}")
+                logger.info(f"  Sci xshift after non-zero: {np.count_nonzero(sci_xshift_after)}/{sci_xshift_after.size}")
+                if np.count_nonzero(arc_xshift) > 0:
+                    logger.info(f"  Arc xshift sample: {arc_xshift[:5]}")
+                    logger.info(f"  Sci xshift sample: {sci_xshift_after[:5]}")
+                else:
+                    logger.warning(f"  Arc xshift is all zeros - nothing to transfer!")
 
         # Log per-extension validation summary
         if enable_validation and ext_validation_stats['n_fibers_total'] > 0:
@@ -1193,6 +1243,9 @@ def arcTransfer(scidict, arcdict, enable_validation=True):
             logger.info(f"  Valid: {ext_validation_stats['n_fibers_valid']}")
             logger.info(f"  Invalid: {ext_validation_stats['n_fibers_invalid']}")
             logger.info(f"  Warnings: {ext_validation_stats['n_fibers_warned']}")
+
+        if verbose:
+            logger.info(f"✓ Successfully transferred calibration for science ext {fits_ext} from arc ext {arc_idx}")
 
     # Log overall validation summary
     if enable_validation and total_validation_stats['n_fibers_total'] > 0:

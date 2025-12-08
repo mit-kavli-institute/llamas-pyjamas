@@ -7,7 +7,7 @@ from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
 from llamas_pyjamas.Utils.utils import concat_extractions
-from llamas_pyjamas.Arc.arcLlamas import arcTransfer
+from llamas_pyjamas.Arc.arcLlamasMulti import arcTransfer
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
 from pypeit.core.fitting import iterfit
@@ -346,8 +346,25 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     
     # Apply wavelength solution transfer
     logger.info("Transferring wavelength calibration to flat field extractions")
-    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict)
-    
+    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict, enable_validation=True, verbose=True)
+    logger.info("Wavelength calibration transferred to flat field extractions")
+
+    # Validate transfer success
+    transfer_failures = []
+    for ext_idx in range(len(flat_dict_calibrated['extractions'])):
+        ext = flat_dict_calibrated['extractions'][ext_idx]
+        xshift_valid = np.count_nonzero(ext.xshift) > 0
+        wave_valid = np.any(ext.wave > 0)
+        if not (xshift_valid and wave_valid):
+            meta = flat_dict_calibrated['metadata'][ext_idx]
+            transfer_failures.append(f"{meta['channel']}{meta['bench']}{meta['side']}")
+            logger.error(f"Extension {ext_idx} wavelength transfer validation failed!")
+
+    if transfer_failures:
+        raise ValueError(f"Wavelength transfer failed for extensions: {transfer_failures}")
+
+    logger.info("✓ All extensions passed wavelength transfer validation")
+
     # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
     sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated) #why is this here?
@@ -373,38 +390,24 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     pixel_map_results = threshold_processor.generate_complete_pixel_maps(fit_results)
     pixel_map_mef_file = pixel_map_results['output_file']
 
-    # Step 6: Create normalized flat field FITS file for reduce.py pipeline
-    logger.info("Step 6: Creating normalized flat field FITS file for reduce.py pipeline")
-
-    # Convert all flat file paths to absolute paths to ensure they can be found
-    original_flat_files = {
-        'red': os.path.abspath(red_flat_file),
-        'green': os.path.abspath(green_flat_file),
-        'blue': os.path.abspath(blue_flat_file)
-    }
-
-    # Debug: Log the original flat file paths being passed
-    logger.info(f"Original flat files dictionary:")
-    for channel, filepath in original_flat_files.items():
-        logger.info(f"  {channel}: {filepath}")
-        logger.info(f"  {channel} exists: {os.path.exists(filepath)}")
-        logger.info(f"  {channel} absolute: {os.path.abspath(filepath)}")
+    # Step 6: Create normalized flat field FITS file using notebook method
+    logger.info("Step 6: Creating normalized flat field FITS file using B-spline division method")
 
     try:
         logger.info("Starting normalized flat field creation...")
-        normalized_flat_field_file = threshold_processor.create_normalized_flat_field_fits(
-            original_flat_files=original_flat_files,
-            pixel_map_mef_file=pixel_map_mef_file,  # Pass the combined MEF file
-            output_filename=None  # Will use default naming in output_dir
+        normalized_flat_field_file = threshold_processor.generate_normalized_flat_from_bspline_fits(
+            flat_dict_calibrated=flat_dict_calibrated,
+            fit_results=fit_results,
+            trace_dir=trace_dir
         )
-        logger.info(f"Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
-        
+        logger.info(f"✓ Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
+
     except Exception as e:
         logger.error(f"CRITICAL ERROR: Failed to create normalized flat field: {str(e)}")
         import traceback
         logger.error(f"Full traceback: {traceback.format_exc()}")
         normalized_flat_field_file = None
-        
+
         # Also raise the exception to ensure calling code knows about the failure
         raise
     
@@ -948,8 +951,162 @@ class Thresholding():
                    f"({100*nan_count/total_pixels:.1f}% untraced)")
 
         return pixel_map
-    
-    
+
+    def generate_normalized_flat_from_bspline_fits(self, flat_dict_calibrated, fit_results, trace_dir):
+        """Generate normalized flat field maps using notebook method.
+
+        Creates a 24-extension MEF file where each extension contains:
+            normalized_flat = flat_counts / bspline_predictions
+
+        This removes the spectral shape while preserving pixel-to-pixel variations.
+
+        Args:
+            flat_dict_calibrated: Dictionary with wavelength-calibrated flat extractions
+            fit_results: Dictionary from calculate_fits_all_extensions with B-spline fits
+            trace_dir: Directory containing trace files with fiberimg
+
+        Returns:
+            str: Path to normalized flat field MEF file
+        """
+        logger.info("Generating normalized flat field maps using B-spline division method")
+
+        # Create output MEF file
+        output_file = os.path.join(self.output_dir, 'normalized_flat_field.fits')
+
+        # Create primary HDU
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['OBJECT'] = 'Normalized Flat Field'
+        primary_hdu.header['METHOD'] = 'Bspline Division'
+        primary_hdu.header['COMMENT'] = 'Flat counts divided by B-spline fit'
+        primary_hdu.header['NEXTEN'] = (24, 'Number of extensions')
+
+        hdu_list = [primary_hdu]
+
+        # Process each of 24 extensions
+        extensions = list(idx_lookup.keys())  # List of (channel, bench, side) tuples
+
+        for ext_idx, (channel, bench, side) in enumerate(sorted(extensions, key=lambda x: idx_lookup[x])):
+            ext_key = f"{channel}{bench}{side}"
+            logger.info(f"Processing extension {ext_idx+1}/24: {ext_key}")
+
+            try:
+                # Find matching extraction in flat_dict_calibrated
+                extraction_idx = None
+                for i, meta in enumerate(flat_dict_calibrated['metadata']):
+                    if (meta['channel'] == channel and
+                        str(meta['bench']) == str(bench) and
+                        meta['side'] == side):
+                        extraction_idx = i
+                        break
+
+                if extraction_idx is None:
+                    logger.error(f"No extraction found for {ext_key}")
+                    # Create empty extension filled with 1.0
+                    normalized_data = np.ones((4112, 4096), dtype=np.float32)
+                else:
+                    # Load trace file for this extension
+                    trace_file = os.path.join(trace_dir, f'LLAMAS_{channel}_{bench}_{side}_traces.pkl')
+                    if not os.path.exists(trace_file):
+                        logger.error(f"Trace file not found: {trace_file}")
+                        normalized_data = np.ones((4112, 4096), dtype=np.float32)
+                    else:
+                        with open(trace_file, 'rb') as f:
+                            traces = pickle.load(f)
+                        fib_img = traces.fiberimg
+
+                        # Get flat extraction data
+                        flat_data = flat_dict_calibrated['extractions'][extraction_idx]
+
+                        # Get B-spline fit results for this extension
+                        ext_results = fit_results.get(ext_key, {})
+
+                        # Initialize normalized image to 1.0 (no correction)
+                        normalized_data = np.ones_like(fib_img, dtype=np.float32)
+
+                        # Track bad pixels
+                        bad_pixel_count = 0
+
+                        # Iterate over all fibers in this extension
+                        for fiber_idx in ext_results.keys():
+                            # Get B-spline predictions (smooth continuum)
+                            y_predicted = ext_results[fiber_idx]['y_predicted']
+
+                            # Get actual flat counts
+                            fiber_counts = flat_data.counts[fiber_idx]
+
+                            # Normalize: divide counts by B-spline fit
+                            # This removes spectral shape, keeps pixel-to-pixel variations
+                            normalized_flat_1d = fiber_counts / y_predicted
+
+                            # Get pixels belonging to this fiber from trace
+                            fiber_mask = fib_img == fiber_idx
+                            fiber_rows, fiber_cols = np.where(fiber_mask)
+
+                            # Get unique columns (spectral direction)
+                            unique_cols = np.unique(fiber_cols)
+
+                            # Map 1D spectral data to 2D image columns
+                            for spectral_idx, col in enumerate(unique_cols):
+                                # Find all rows in this column for this fiber
+                                rows_in_col = fiber_rows[fiber_cols == col]
+
+                                # Assign normalized value
+                                if spectral_idx < len(normalized_flat_1d):
+                                    value = normalized_flat_1d[spectral_idx]
+
+                                    # Handle NaN/Inf
+                                    if np.isnan(value) or np.isinf(value):
+                                        normalized_data[rows_in_col, col] = 1.0
+                                        bad_pixel_count += len(rows_in_col)
+                                    else:
+                                        normalized_data[rows_in_col, col] = value
+
+                        logger.info(f"  {ext_key}: Bad pixels = {bad_pixel_count}")
+
+                # Create HDU for this extension
+                hdu = fits.ImageHDU(data=normalized_data)
+                hdu.header['EXTNAME'] = ext_key
+                hdu.header['CHANNEL'] = channel.upper()
+                hdu.header['BENCH'] = str(bench)
+                hdu.header['SIDE'] = side
+                hdu.header['EXTVER'] = ext_idx + 1
+
+                # Add statistics
+                traced_mask = normalized_data != 1.0
+                if np.any(traced_mask):
+                    traced_values = normalized_data[traced_mask]
+                    hdu.header['DATAMEAN'] = float(np.mean(traced_values))
+                    hdu.header['DATAMED'] = float(np.median(traced_values))
+                    hdu.header['DATAMIN'] = float(np.min(traced_values))
+                    hdu.header['DATAMAX'] = float(np.max(traced_values))
+                    hdu.header['NPIX'] = int(np.sum(traced_mask))
+                    n_bad = int(bad_pixel_count if 'bad_pixel_count' in locals() else 0)
+                    hdu.header['NBADFPIX'] = n_bad
+
+                hdu_list.append(hdu)
+
+            except Exception as e:
+                logger.error(f"Error processing {ext_key}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Add empty extension
+                empty_data = np.ones((4112, 4096), dtype=np.float32)
+                hdu = fits.ImageHDU(data=empty_data)
+                hdu.header['EXTNAME'] = ext_key
+                hdu.header['CHANNEL'] = channel.upper()
+                hdu.header['BENCH'] = str(bench)
+                hdu.header['SIDE'] = side
+                hdu.header['EXTVER'] = ext_idx + 1
+                hdu.header['ERROR'] = str(e)[:68]  # FITS header value limit
+                hdu_list.append(hdu)
+
+        # Write MEF file
+        hdul = fits.HDUList(hdu_list)
+        hdul.writeto(output_file, overwrite=True)
+        logger.info(f"✓ Normalized flat field saved: {output_file}")
+
+        return output_file
+
     def generate_thresholds(self):
         """Generate thresholds for flat fielding based on science data.
 
