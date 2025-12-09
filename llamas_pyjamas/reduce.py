@@ -41,6 +41,7 @@ from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
+from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
 from astropy.io import fits
 import numpy as np
 
@@ -731,7 +732,7 @@ def main(config_path):
         
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
-        from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+        
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")

@@ -138,7 +138,10 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
     return
 
 
-
+def is_wavelength_solution_useable(wvln_solution_dict, extraction_idx=0):
+    """Check if wavelength solution xshift has any non-zero values."""
+    xshifts = wvln_solution_dict['extractions'][extraction_idx].xshift
+    return not np.all(xshifts == 0)
 
 
 def create_peak_lookup(peaks: list) -> dict:

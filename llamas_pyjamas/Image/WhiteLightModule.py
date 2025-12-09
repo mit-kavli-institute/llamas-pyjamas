@@ -936,13 +936,13 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
         trace_objs = []
 
         # Open the science FITS file and create the output HDU list
-        science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
+        science_hdul, _ = process_fits_by_color(science_file) #fits.open(science_file)
 
         if not bias:
-            bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
+            bias_hdul, _ = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
         else:
             try:
-                bias_hdul = process_fits_by_color(bias)
+                bias_hdul, _ = process_fits_by_color(bias)
             except Exception as e:
                 logger.error(f"Error processing bias file {bias}: {e}")
                 raise ValueError(f"Could not process bias file {bias}. Ensure it is a valid FITS file.")

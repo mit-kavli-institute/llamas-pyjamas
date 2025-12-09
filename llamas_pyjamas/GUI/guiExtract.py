@@ -38,9 +38,9 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 def ExtractLlamasCube(infits, tracefits, optimal=True):
 
-    assert infits.endswith('.fits'), 'File must be a .fits file'  
+    assert infits.endswith('.fits'), 'File must be a .fits file'
     # hdu = fits.open(infits)
-    hdu = process_fits_by_color(infits)
+    hdu, _ = process_fits_by_color(infits)
 
     # Find the trace files
     basefile = os.path.basename(tracefits).split('.fits')[0]
@@ -160,7 +160,7 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote
+@ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
 
 def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
     """
@@ -324,7 +324,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
 
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         primary_hdr = hdu[0].header
 
@@ -523,7 +523,7 @@ def box_extract(file, flat=False):
         ray.init(runtime_env=runtime_env)
 
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]

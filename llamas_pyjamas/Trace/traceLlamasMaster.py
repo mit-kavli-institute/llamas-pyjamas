@@ -92,7 +92,7 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.pat
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    bias_hdus = process_fits_by_color(dir)
+    bias_hdus, _ = process_fits_by_color(dir)
     
     try:
         bias_idx = idx_lookup.get((color.lower(), str(bench), side.upper()))
@@ -886,7 +886,9 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     futures = []
     results = []    
     
-    hdul = process_fits_by_color(fitsfile)
+    hdul, _ = process_fits_by_color(fitsfile)
+    if hdul is None:
+        raise ValueError(f"Failed to process FITS file: {fitsfile}")
     if channel is not None and 'COLOR' in hdul[1].header:
         hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == channel.lower()]
     elif channel is not None and 'CAM_NAME' in hdul[1].header:
@@ -952,8 +954,10 @@ if __name__ == "__main__":
     results = []    
     
     fitsfile = args.filename
-    
-    hdul = process_fits_by_color(fitsfile)
+
+    hdul, _ = process_fits_by_color(fitsfile)
+    if hdul is None:
+        raise ValueError(f"Failed to process FITS file: {fitsfile}")
     if args.channel is not None and 'COLOR' in hdul[1].header:
         hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
     elif args.channel is not None and 'CAM_NAME' in hdul[1].header:

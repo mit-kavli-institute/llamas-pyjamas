@@ -63,13 +63,21 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
 
     # Initialize Ray
     num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
+    # Limit object store memory to prevent OOM (2 GB default)
+    object_store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB', 2048))
+    object_store_memory = object_store_mb * 1024 * 1024
+
     ray.shutdown()
-    ray.init(num_cpus=num_cpus, runtime_env=runtime_env)    
+    ray.init(
+        num_cpus=num_cpus,
+        runtime_env=runtime_env,
+        object_store_memory=object_store_memory
+    )    
     
     
     _extractions = []
     logger.debug(f'Processing {filename} with indices {idxs}')
-    _hdus = process_fits_by_color(filename)
+    _hdus, _ = process_fits_by_color(filename)
     logger.debug(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     print(len(channel_hdus))
@@ -147,24 +155,38 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     if len(_hdu_trace_pairs) == 0:
         print("WARNING: No HDU-trace pairs were matched! This will result in empty extractions.")
 
-    futures = []
-    for hdu_index, trace_file in _hdu_trace_pairs:
-        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
-        print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
-        hdu_data = channel_hdus[hdu_index].data
-        hdr = channel_hdus[hdu_index].header
-       
-        future = process_trace.remote(hdu_data, hdr, trace_file)
-        futures.append(future)
-    
-    _extractions = ray.get(futures)
-    ray.shutdown()
-    # Post-process to make objects writable
+    # Process in batches to avoid memory exhaustion
+    # Batch size can be configured via environment variable
+    BATCH_SIZE = int(os.environ.get('LLAMAS_RAY_BATCH_SIZE', 2))  # Process 2 HDUs at a time by default
+
     extraction_list = []
-    for ex in _extractions:
-        if ex is not None:
-            writable_ex = make_writable(ex)
-            extraction_list.append(writable_ex)    
+
+    # Process HDU-trace pairs in batches
+    for batch_start in range(0, len(_hdu_trace_pairs), BATCH_SIZE):
+        batch = _hdu_trace_pairs[batch_start:batch_start + BATCH_SIZE]
+        batch_futures = []
+
+        print(f"\nProcessing batch {batch_start//BATCH_SIZE + 1}/{(len(_hdu_trace_pairs)-1)//BATCH_SIZE + 1}")
+
+        for hdu_index, trace_file in batch:
+            logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
+            print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
+            hdu_data = channel_hdus[hdu_index].data
+            hdr = channel_hdus[hdu_index].header
+
+            future = process_trace.remote(hdu_data, hdr, trace_file)
+            batch_futures.append(future)
+
+        # Wait for batch to complete
+        batch_extractions = ray.get(batch_futures)
+
+        # Immediately process results to free Ray object store
+        for ex in batch_extractions:
+            if ex is not None:
+                writable_ex = make_writable(ex)
+                extraction_list.append(writable_ex)
+
+    ray.shutdown()    
     print(len(extraction_list))
     extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')

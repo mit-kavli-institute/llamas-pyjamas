@@ -504,6 +504,160 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info("Complete flat field processing workflow finished successfully")
     return results
 
+def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
+    """
+    Apply flat field correction by dividing science frame by pixel map.
+    
+    This function validates that the science file and pixel map file have the same
+    number of extensions in the same order, then performs the division to create
+    a flat-fielded science frame.
+    
+    The science frame extensions are identified by COLOR, BENCH, and SIDE header keywords.
+    The pixel map extensions are identified by EXTNAME header keyword.
+    These must match in order.
+    
+    Parameters
+    ----------
+    science_file : str
+        Path to the science FITS file to be corrected
+    pixel_map_file : str
+        Path to the pixel map FITS file (flat field correction map)
+    output_dir : str, optional
+        Directory to save the corrected file. If None, saves in same directory
+        as science_file.
+    
+    Returns
+    -------
+    str
+        Path to the output flat-fielded FITS file
+        
+    Raises
+    ------
+    ValueError
+        If the files have mismatched extensions or ordering
+    FileNotFoundError
+        If input files don't exist
+    """
+    from astropy.io import fits
+    import os
+    import numpy as np
+    # Validate input files exist
+    if not os.path.exists(science_file):
+        raise FileNotFoundError(f"Science file not found: {science_file}")
+    if not os.path.exists(pixel_map_file):
+        raise FileNotFoundError(f"Pixel map file not found: {pixel_map_file}")
+    logger.info(f"Applying flat field correction to {science_file}")
+    logger.info(f"Using pixel map: {pixel_map_file}")
+    # Open both FITS files
+    with fits.open(science_file) as science_hdul, fits.open(pixel_map_file) as pixmap_hdul:
+        # Get image extensions (skip primary HDU which is typically header-only)
+        science_exts = [hdu for hdu in science_hdul if isinstance(hdu, fits.ImageHDU)]
+        pixmap_exts = [hdu for hdu in pixmap_hdul if isinstance(hdu, fits.ImageHDU)]
+        # Check number of extensions match
+        n_science = len(science_exts)
+        n_pixmap = len(pixmap_exts)
+        if n_science != n_pixmap:
+            # Print all extension names for debugging
+            science_names = []
+            for i, hdu in enumerate(science_exts):
+                color = hdu.header.get('COLOR', 'UNKNOWN')
+                bench = hdu.header.get('BENCH', '?')
+                side = hdu.header.get('SIDE', '?')
+                science_names.append(f"{color}{bench}{side}")
+            pixmap_names = [hdu.header.get('EXTNAME', f'EXT{i}') for i, hdu in enumerate(pixmap_exts)]
+            print(f"\nExtension count mismatch!")
+            print(f"Science file has {n_science} extensions: {science_names}")
+            print(f"Pixel map has {n_pixmap} extensions: {pixmap_names}")
+            raise ValueError(
+                f"Extension count mismatch: science file has {n_science} extensions, "
+                f"pixel map has {n_pixmap} extensions"
+            )
+        logger.info(f"Found {n_science} image extensions in both files")
+        # Validate extension names and ordering
+        for i, (sci_hdu, pix_hdu) in enumerate(zip(science_exts, pixmap_exts)):
+            # Get science frame identifier from COLOR, BENCH, SIDE headers
+            color = sci_hdu.header.get('COLOR', 'UNKNOWN')
+            bench = sci_hdu.header.get('BENCH', '?')
+            side = sci_hdu.header.get('SIDE', '?')
+            sci_name = f"{color}{bench}{side}"
+            # Get pixel map identifier from EXTNAME
+            pix_name = pix_hdu.header.get('EXTNAME', f'EXT{i}')
+            # Compare (case-insensitive)
+            if sci_name.lower() != pix_name.lower():
+                # Print full comparison of all extensions
+                print(f"\nExtension ordering mismatch at position {i}!")
+                print(f"Expected: {sci_name} (from science COLOR={color}, BENCH={bench}, SIDE={side})")
+                print(f"Got:      {pix_name} (from pixel map EXTNAME)")
+                print(f"\nFull extension comparison:")
+                print(f"{'Index':<8} {'Science File':<20} {'Pixel Map File':<20} {'Match':<10}")
+                print("-" * 60)
+                for j, (s_hdu, p_hdu) in enumerate(zip(science_exts, pixmap_exts)):
+                    s_color = s_hdu.header.get('COLOR', 'UNKNOWN')
+                    s_bench = s_hdu.header.get('BENCH', '?')
+                    s_side = s_hdu.header.get('SIDE', '?')
+                    s_name = f"{s_color}{s_bench}{s_side}"
+                    p_name = p_hdu.header.get('EXTNAME', f'EXT{j}')
+                    match = "✓" if s_name.lower() == p_name.lower() else "✗"
+                    print(f"{j:<8} {s_name:<20} {p_name:<20} {match:<10}")
+                raise ValueError(
+                    f"Extension name mismatch at position {i}: "
+                    f"science has '{sci_name}', pixel map has '{pix_name}'. "
+                    f"Extensions must be in the same order."
+                )
+            logger.debug(f"Extension {i}: {sci_name} - validated")
+        logger.info("All extension names and ordering validated successfully")
+        # Create output HDU list starting with primary header
+        output_hdul = fits.HDUList()
+        # Copy primary header from science file
+        primary_hdu = fits.PrimaryHDU(header=science_hdul[0].header.copy())
+        primary_hdu.header['FLATCORR'] = (True, 'Flat field correction applied')
+        primary_hdu.header['FLATFILE'] = (os.path.basename(pixel_map_file), 'Flat field file used')
+        output_hdul.append(primary_hdu)
+        # Process each extension
+        for i, (sci_hdu, pix_hdu) in enumerate(zip(science_exts, pixmap_exts)):
+            color = sci_hdu.header.get('COLOR', 'UNKNOWN')
+            bench = sci_hdu.header.get('BENCH', '?')
+            side = sci_hdu.header.get('SIDE', '?')
+            ext_name = f"{color}{bench}{side}"
+            logger.info(f"Processing extension {i}: {ext_name}")
+            # Get the data
+            science_data = sci_hdu.data
+            pixmap_data = pix_hdu.data
+            # Check dimensions match
+            if science_data.shape != pixmap_data.shape:
+                raise ValueError(
+                    f"Shape mismatch in extension {ext_name}: "
+                    f"science {science_data.shape} vs pixel map {pixmap_data.shape}"
+                )
+            # Perform flat field correction (divide science by pixel map)
+            # Handle potential division by zero or invalid values
+            with np.errstate(divide='ignore', invalid='ignore'):
+                corrected_data = science_data / pixmap_data
+                # Replace inf and nan with original values (or zeros)
+                # You may want to adjust this behavior
+                corrected_data = np.where(np.isfinite(corrected_data),
+                                         corrected_data,
+                                         science_data)
+            # Create output HDU with corrected data
+            output_hdu = fits.ImageHDU(data=corrected_data.astype(np.float32),
+                                      header=sci_hdu.header.copy())
+            output_hdu.header['FLATCORR'] = (True, 'Flat field correction applied')
+            output_hdul.append(output_hdu)
+            logger.debug(f"Completed flat field correction for {ext_name}")
+        # Generate output filename
+        science_basename = os.path.basename(science_file)
+        science_name, science_ext = os.path.splitext(science_basename)
+        output_filename = f"{science_name}_flat_corrected{science_ext}"
+        # Determine output directory
+        if output_dir is None:
+            output_dir = os.path.dirname(science_file)
+        output_path = os.path.join(output_dir, output_filename)
+        # Write the corrected file
+        output_hdul.writeto(output_path, overwrite=True)
+        logger.info(f"Flat-fielded science frame saved to: {output_path}")
+    return output_path
+
+
 
 
         
