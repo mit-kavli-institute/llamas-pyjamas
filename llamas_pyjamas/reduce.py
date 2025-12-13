@@ -40,6 +40,7 @@ from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
+from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
 from astropy.io import fits
 import numpy as np
 
@@ -735,25 +736,34 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
 
 
-def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75, use_crr=True, crr_config=None, parallel=False):
+def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
+                   use_crr=True, crr_config=None, parallel=False, cube_method='simple',
+                   cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
+                   cube_radius=1.5, cube_min_weight=0.01):
     """
-    Construct IFU data cubes from RSS files using either traditional or CRR method.
-    
+    Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
+
     This function can handle both:
     1. Single RSS files with multiple channels
     2. Multiple channel-specific RSS files with names like:
        "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
-    
+
     Parameters:
         rss_files (str or list): Path to RSS FITS file(s) or base paths
         output_dir (str): Directory to save output cubes
         wavelength_range (tuple, optional): Min/max wavelength range for output cubes
-        dispersion (float): Wavelength dispersion in Angstroms/pixel
-        spatial_sampling (float): Spatial sampling in arcsec/pixel
-        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method
+        dispersion (float): Wavelength dispersion in Angstroms/pixel (legacy, for traditional/CRR)
+        spatial_sampling (float): Spatial sampling in arcsec/pixel (legacy, for traditional/CRR)
+        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
         crr_config (CRRCubeConfig, optional): CRR configuration parameters
         parallel (bool): Use parallel processing for CRR method
-        
+        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
+        cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
+        cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
+        cube_wave_sampling (float): Wavelength sampling factor (for simple method)
+        cube_radius (float): Interpolation radius in arcsec (for simple method)
+        cube_min_weight (float): Minimum weight threshold (for simple method)
+
     Returns:
         list: Paths to constructed cube files
     """
@@ -799,7 +809,77 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
         else:
             print(f"Processing RSS file (no specific channel detected): {base_name}")
-            
+
+        # Determine which method to use
+        # CRR flag overrides cube_method for backward compatibility
+        use_simple = (cube_method == 'simple') and not use_crr
+        use_traditional = (cube_method == 'traditional') and not use_crr
+
+        if use_simple:
+            # Use SimpleCubeConstructor (MUSE-like method)
+            logger.info(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+            print(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+
+            try:
+                # Initialize simple cube constructor
+                constructor = SimpleCubeConstructor(
+                    fiber_pitch=cube_fiber_pitch,
+                    pixel_size=cube_pixel_size,
+                    wave_sampling=cube_wave_sampling
+                )
+
+                # Load fibermap
+                fibermap_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
+                constructor.load_fibermap(fibermap_path)
+
+                # Load RSS file
+                constructor.load_rss_file(rss_file)
+
+                # Create wavelength grid
+                wave_min, wave_max = None, None
+                if wavelength_range is not None:
+                    wave_min, wave_max = wavelength_range
+                constructor.create_wavelength_grid(wave_min=wave_min, wave_max=wave_max)
+
+                # Create spatial grid
+                constructor.create_spatial_grid()
+
+                # Construct cube
+                constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
+
+                # Create WCS (use default RA/Dec = 0 for now, could be enhanced later)
+                constructor.create_wcs(ra_center=0.0, dec_center=0.0)
+
+                # Save cube
+                if channel:
+                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                else:
+                    cube_filename = f"{base_name}_cube.fits"
+
+                cube_path = os.path.join(output_dir, cube_filename)
+                constructor.save_cube(cube_path, overwrite=True)
+                cube_files.append(cube_path)
+
+                print(f"  - Simple cube saved: {cube_path}")
+                logger.info(f"Simple cube saved: {cube_path}")
+
+                # Log quality metrics
+                valid_spaxels = np.sum(np.any(constructor.cube_weight > 0, axis=0))
+                total_spaxels = constructor.cube_weight.shape[1] * constructor.cube_weight.shape[2]
+                coverage = valid_spaxels / total_spaxels if total_spaxels > 0 else 0
+                print(f"  - Coverage: {coverage:.1%} ({valid_spaxels}/{total_spaxels} spaxels)")
+                logger.info(f"Simple cube quality: {coverage:.1%} coverage ({valid_spaxels}/{total_spaxels} spaxels)")
+
+            except Exception as e:
+                logger.error(f"Simple cube construction failed: {e}")
+                print(f"  ERROR: Simple cube construction failed: {e}")
+                print("  Falling back to traditional cube construction...")
+                traceback.print_exc()
+
+                # Fall back to traditional method
+                use_simple = False
+                use_traditional = True
+
         if use_crr:
             # Use CRR (Covariance-regularized Reconstruction) method
             logger.info(f"Constructing CRR cube from RSS file: {rss_file}")
@@ -853,8 +933,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 
                 # Fall back to traditional method
                 use_crr = False
-        
-        if not use_crr:
+                use_traditional = True
+
+        if use_traditional or (not use_simple and not use_crr):
             # Use traditional cube construction method
             logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
             print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
@@ -1419,13 +1500,19 @@ def main(config_path):
 
         if rss_files and _gen_cubes:
             cube_files = construct_cube(
-                rss_files, 
+                rss_files,
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
                 spatial_sampling=config.get('spatial_sampling', 0.75),
                 use_crr=use_crr_cube,
-                parallel=config.get('CRR_parallel', False)
+                parallel=config.get('CRR_parallel', False),
+                cube_method=config.get('cube_method', 'simple'),
+                cube_pixel_size=float(config.get('cube_pixel_size', 0.3)),
+                cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
+                cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
+                cube_radius=float(config.get('cube_radius', 1.5)),
+                cube_min_weight=float(config.get('cube_min_weight', 0.01))
             )
             print(f"Cubes constructed: {cube_files}")
         else:
