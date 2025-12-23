@@ -113,11 +113,11 @@ def extract_fiber_positions(fibermap: Table,
 def estimate_seeing_from_fwhm(fwhm_data: np.ndarray,
                             percentile: float = 50) -> float:
     """Estimate atmospheric seeing from RSS FWHM measurements.
-    
+
     Args:
-        fwhm_data: FWHM array (n_wavelengths, n_fibers)
+        fwhm_data: FWHM array [NFIBER x NWAVE] (n_fibers, n_wavelengths)
         percentile: Percentile to use for seeing estimate
-        
+
     Returns:
         Seeing FWHM in arcsec
     """
@@ -195,35 +195,36 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
     # Validate required data
     if flux_data is None:
         raise ValueError("No FLUX extension found in RSS file")
-    
-    n_wave, n_fiber = flux_data.shape
-    logger.info(f"RSS data dimensions: {n_wave} wavelengths, {n_fiber} fibers")
-    
+
+    # RSS format is now [NFIBER x NWAVE] - rows are fibers, columns are wavelengths
+    n_fiber, n_wave = flux_data.shape
+    logger.info(f"RSS data dimensions: {n_fiber} fibers, {n_wave} wavelengths [NFIBER x NWAVE format]")
+
     # Create error data if missing
     if error_data is None:
         logger.warning("No ERROR extension found - creating uniform errors")
         error_data = np.ones_like(flux_data) * 0.1 * np.median(flux_data[flux_data > 0])
-    
+
     # Create mask if missing
     if mask_data is None:
         logger.warning("No MASK extension found - creating mask from finite flux")
         mask_data = np.isfinite(flux_data) & (flux_data != 0)
-    
+
     # Handle wavelength data
     if wave_data is None:
         logger.warning("No WAVE extension found - creating default wavelength grid")
         wavelength = np.linspace(3500, 9000, n_wave)
     else:
         if wave_data.ndim == 2:
-            # Take wavelength from first fiber (should be same for all)
-            wavelength = wave_data[:, 0]
+            # Take wavelength from first fiber (row 0) in [NFIBER x NWAVE] format
+            wavelength = wave_data[0, :]
         else:
             wavelength = wave_data
-    
-    # Convert to CRR format (transpose from LLAMAS [n_wave, n_fiber] to CRR [n_fiber, n_wave])
-    flux_crr = flux_data.T  # Shape: (n_fiber, n_wave)
-    error_crr = error_data.T
-    mask_crr = mask_data.T
+
+    # RSS format is already [n_fiber, n_wave] - no transpose needed
+    flux_crr = flux_data  # Shape: (n_fiber, n_wave)
+    error_crr = error_data
+    mask_crr = mask_data
     
     # Convert error to inverse variance
     ivar_crr = np.zeros_like(error_crr)
