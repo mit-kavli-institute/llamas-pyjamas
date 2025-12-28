@@ -26,7 +26,7 @@ from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
-def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
+def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 
     :param filename: the flat field image to reduce, must be of type FITS
@@ -106,7 +106,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
             writable_ex = make_writable(ex)
             extraction_list.append(writable_ex)    
 
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+    if save_dir == None:
+        extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=OUTPUT_DIR)
+    else:
+        extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')
     
     return 

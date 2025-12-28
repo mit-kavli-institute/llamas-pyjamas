@@ -1064,9 +1064,6 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
 def arcTransfer(scidict, arcdict, verbose=True):
     """Transfer wavelength calibration from arc to science spectra.
 
-<<<<<<< HEAD
-def arcTransfer(scidict, arcdict, enable_validation=True, verbose=False):
-=======
     This function transfers the wavelength solution, x-shift information, and 
     relative throughput data from arc calibration spectra to science spectra.
     The function searches through arc extensions to find matching metadata
@@ -1179,7 +1176,6 @@ def arcTransfer(scidict, arcdict, enable_validation=True, verbose=False):
 
 ### backup version of the function, edits were made so I don't know how well it works
 def prev_arcTransfer(scidict, arcdict, enable_validation=True):
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
     """Transfer wavelength calibration from arc to science spectra with optional validation.
 
     This function transfers the wavelength solution, x-shift information, and
@@ -1200,12 +1196,8 @@ def prev_arcTransfer(scidict, arcdict, enable_validation=True):
     Returns:
         dict: Updated science dictionary with transferred calibration data.
     """
-<<<<<<< HEAD
-    from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
-=======
     from llamas_pyjamas.constants import idx_lookup
     # from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
 
     scispec = scidict['extractions']
     arcspec = arcdict['extractions']
