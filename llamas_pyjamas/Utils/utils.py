@@ -31,6 +31,16 @@ Functions:
         Check wavelength ranges in the LLAMAS reference arc calibration file.
     check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
         Check wavelength ranges in extraction file and compare to reference arc.
+    pixel_to_fiber(pixel_x, pixel_y, subsample=1.5, max_distance=None):
+        Convert whitelight image pixel coordinates to fiber ID and detector.
+    pixel_to_fiber_batch(pixel_coords, subsample=1.5, max_distance=None):
+        Convert multiple pixel coordinates to fiber IDs in batch.
+    get_detector_from_benchside(bench_side, color):
+        Get the full detector name from bench/side and color channel.
+    pixel_to_detector_and_fiber(pixel_x, pixel_y, color, subsample=1.5, max_distance=None):
+        Convert pixel coordinates and color channel to detector name and fiber ID.
+    get_fiber_info(bench_side, fiber_id):
+        Get detailed information about a specific fiber from the fiber map.
 """
 import os
 import logging
@@ -1483,4 +1493,271 @@ def _bspline_diagnostic_usage_examples():
     "
     """
     pass
-    
+
+
+# =============================================================================
+# Whitelight Image Pixel to Fiber Mapping Functions
+# =============================================================================
+
+def pixel_to_fiber(pixel_x: float, pixel_y: float, subsample: float = 1.5,
+                   max_distance: float = None):
+    """
+    Convert pixel coordinates in a whitelight image to fiber ID and detector information.
+
+    The whitelight image is created using LinearNDInterpolator with fiber positions from
+    the rev_04.dat fiber map. This function performs the reverse lookup to find which
+    fiber corresponds to a given pixel coordinate.
+
+    Parameters
+    ----------
+    pixel_x : float
+        The x-coordinate of the pixel in the whitelight image (0-indexed).
+    pixel_y : float
+        The y-coordinate of the pixel in the whitelight image (0-indexed).
+    subsample : float, optional
+        The subsampling factor used when creating the whitelight image. Default is 1.5,
+        which matches the default in WhiteLightModule.WhiteLight().
+    max_distance : float, optional
+        Maximum distance to search for the nearest fiber. If None, returns the closest
+        fiber regardless of distance. If specified, returns None if no fiber is within
+        this distance. Units are in fiber map coordinates.
+
+    Returns
+    -------
+    tuple or None
+        If a fiber is found: (bench_side, fiber_id, detector_name)
+        - bench_side (str): Bench and side identifier (e.g., '1A', '2B')
+        - fiber_id (int): Fiber number (0-indexed)
+        - detector_name (str): Bench/side identifier (same as bench_side)
+        If no fiber is found within max_distance: None
+
+    Notes
+    -----
+    - The whitelight image grid is created with dimensions:
+      xx = (1.0/subsample) * np.arange(53*subsample)
+      yy = (1.0/subsample) * np.arange(53*subsample)
+    - The fiber map coordinates (xpos, ypos) are in the range [0, ~45] typically
+    - This function finds the closest fiber to the given pixel coordinate
+
+    Examples
+    --------
+    >>> # Find fiber at pixel (40, 35)
+    >>> bench_side, fiber_id, detector = pixel_to_fiber(40, 35)
+    >>> print(f"Fiber {fiber_id} on detector {bench_side}")
+
+    >>> # With maximum distance threshold
+    >>> result = pixel_to_fiber(40, 35, max_distance=0.5)
+    >>> if result is None:
+    ...     print("No fiber found within 0.5 units")
+    """
+    from astropy.table import Table
+
+    # Load the fiber map lookup table
+    fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
+    fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
+    # Convert pixel coordinates back to fiber map coordinates
+    # The whitelight grid uses: x_grid, y_grid = np.meshgrid(xx/subsample, yy/subsample)
+    # where xx = 1.0/subsample * np.arange(53*subsample)
+    # So pixel coordinates map directly: fiber_x = pixel_x / subsample
+    fiber_x = pixel_x / subsample
+    fiber_y = pixel_y / subsample
+
+    # Calculate distances to all fibers
+    distances = np.sqrt((fibermap_lut['xpos'] - fiber_x)**2 +
+                       (fibermap_lut['ypos'] - fiber_y)**2)
+
+    # Find the closest fiber
+    min_idx = np.argmin(distances)
+    min_distance = distances[min_idx]
+
+    # Check if the closest fiber is within the maximum distance threshold
+    if max_distance is not None and min_distance > max_distance:
+        return None
+
+    # Get the fiber information
+    closest_fiber = fibermap_lut[min_idx]
+    bench_side = closest_fiber['bench'].decode() if isinstance(closest_fiber['bench'], bytes) else closest_fiber['bench']
+    fiber_id = int(closest_fiber['fiber'])
+
+    # Extract bench and side for detector information
+    bench = bench_side[0]
+    side = bench_side[1]
+
+    # Return bench_side, fiber_id, and basic detector info
+    # Note: Color channel info would need to come from the specific whitelight image being queried
+    return bench_side, fiber_id, f"{bench_side}"
+
+
+def pixel_to_fiber_batch(pixel_coords: list,
+                         subsample: float = 1.5,
+                         max_distance: float = None):
+    """
+    Convert multiple pixel coordinates to fiber IDs in batch.
+
+    Parameters
+    ----------
+    pixel_coords : list of tuple
+        List of (pixel_x, pixel_y) coordinate pairs.
+    subsample : float, optional
+        The subsampling factor used when creating the whitelight image. Default is 1.5.
+    max_distance : float, optional
+        Maximum distance to search for the nearest fiber.
+
+    Returns
+    -------
+    list
+        List of results, each either (bench_side, fiber_id, detector_name) or None.
+
+    Examples
+    --------
+    >>> coords = [(40, 35), (20, 10), (50, 45)]
+    >>> results = pixel_to_fiber_batch(coords)
+    >>> for coord, result in zip(coords, results):
+    ...     if result:
+    ...         print(f"Pixel {coord} -> Fiber {result[1]} on {result[0]}")
+    """
+    results = []
+    for pixel_x, pixel_y in pixel_coords:
+        result = pixel_to_fiber(pixel_x, pixel_y, subsample, max_distance)
+        results.append(result)
+    return results
+
+
+def get_detector_from_benchside(bench_side: str, color: str):
+    """
+    Get the full detector name from bench/side and color channel.
+
+    Parameters
+    ----------
+    bench_side : str
+        Bench and side identifier (e.g., '1A', '2B').
+    color : str
+        Color channel ('red', 'green', or 'blue').
+
+    Returns
+    -------
+    str
+        Full detector name in format used by LLAMAS (e.g., '1A_Red').
+
+    Examples
+    --------
+    >>> get_detector_from_benchside('1A', 'red')
+    '1A_Red'
+    >>> get_detector_from_benchside('2B', 'blue')
+    '2B_Blue'
+    """
+    color_cap = color.capitalize()
+    return f"{bench_side}_{color_cap}"
+
+
+def pixel_to_detector_and_fiber(pixel_x: float, pixel_y: float,
+                                 color: str,
+                                 subsample: float = 1.5,
+                                 max_distance: float = None):
+    """
+    Convert pixel coordinates and color channel to detector name and fiber ID.
+
+    This is a convenience function that combines pixel_to_fiber() with detector
+    name generation.
+
+    Parameters
+    ----------
+    pixel_x : float
+        The x-coordinate of the pixel in the whitelight image.
+    pixel_y : float
+        The y-coordinate of the pixel in the whitelight image.
+    color : str
+        The color channel of the whitelight image ('red', 'green', or 'blue').
+    subsample : float, optional
+        The subsampling factor used when creating the whitelight image. Default is 1.5.
+    max_distance : float, optional
+        Maximum distance to search for the nearest fiber.
+
+    Returns
+    -------
+    tuple or None
+        If a fiber is found: (detector_name, fiber_id)
+        - detector_name (str): Full detector name (e.g., '1A_Red')
+        - fiber_id (int): Fiber number (0-indexed)
+        If no fiber is found: None
+
+    Examples
+    --------
+    >>> # Query a pixel in the blue whitelight image
+    >>> detector, fiber = pixel_to_detector_and_fiber(40, 35, 'blue')
+    >>> print(f"Fiber {fiber} on detector {detector}")
+    Fiber 123 on detector 1A_Blue
+    """
+    result = pixel_to_fiber(pixel_x, pixel_y, subsample, max_distance)
+    if result is None:
+        return None
+
+    bench_side, fiber_id, _ = result
+    detector_name = get_detector_from_benchside(bench_side, color)
+
+    return detector_name, fiber_id
+
+
+def get_fiber_info(bench_side: str, fiber_id: int):
+    """
+    Get detailed information about a specific fiber.
+
+    Parameters
+    ----------
+    bench_side : str
+        Bench and side identifier (e.g., '1A', '2B').
+    fiber_id : int
+        Fiber number (0-indexed).
+
+    Returns
+    -------
+    dict or None
+        Dictionary containing fiber information:
+        - 'bench': Bench/side identifier
+        - 'fiber': Fiber ID
+        - 'xindex': X index in fiber map
+        - 'yindex': Y index in fiber map
+        - 'xpos': X position in fiber map coordinates
+        - 'ypos': Y position in fiber map coordinates
+        Returns None if fiber not found.
+
+    Examples
+    --------
+    >>> info = get_fiber_info('1A', 42)
+    >>> print(f"Fiber at position ({info['xpos']}, {info['ypos']})")
+    """
+    from astropy.table import Table
+
+    # Load the fiber map lookup table
+    fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
+    fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
+    # Convert bench_side to bytes if needed for comparison
+    if isinstance(fibermap_lut['bench'][0], bytes):
+        bench_side_cmp = bench_side.encode()
+    else:
+        bench_side_cmp = bench_side
+
+    # Find the fiber in the lookup table
+    mask = np.logical_and(fibermap_lut['bench'] == bench_side_cmp,
+                         fibermap_lut['fiber'] == fiber_id)
+
+    matches = fibermap_lut[mask]
+
+    if len(matches) == 0:
+        return None
+
+    fiber_row = matches[0]
+
+    # Decode bytes if necessary
+    bench = fiber_row['bench'].decode() if isinstance(fiber_row['bench'], bytes) else fiber_row['bench']
+
+    return {
+        'bench': bench,
+        'fiber': int(fiber_row['fiber']),
+        'xindex': int(fiber_row['xindex']),
+        'yindex': int(fiber_row['yindex']),
+        'xpos': float(fiber_row['xpos']),
+        'ypos': float(fiber_row['ypos'])
+    }
