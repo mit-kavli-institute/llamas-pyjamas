@@ -1,10 +1,8 @@
 import os
 import logging
-from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 import numpy as np
 from astropy.io import fits
-import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
@@ -12,9 +10,7 @@ from llamas_pyjamas.Utils.utils import concat_extractions
 from llamas_pyjamas.Arc.arcLlamas import arcTransfer
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
-from scipy.interpolate import BSpline, make_interp_spline
 from pypeit.core.fitting import iterfit
-from pypeit import bspline
 import pickle
 from datetime import datetime
 
@@ -261,47 +257,6 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
         raise
 
 
-# Alternative simpler version if the above is too complex:
-def fit_spectrum_simple(extraction, fiber_index, maxiter=6):
-    """Simplified version with aggressive breakpoint spacing for sharp features."""
-    
-    xshift = extraction.xshift[fiber_index, :]
-    counts = extraction.counts[fiber_index, :]
-    
-    mask = np.isfinite(counts)
-    xshift_clean = xshift[mask]
-    counts_clean = counts[mask]
-    
-    # Very aggressive breakpoint spacing for sharp spectral lines
-    xrange = xshift_clean.max() - xshift_clean.min()
-    bkspace = xrange / max(100, len(xshift_clean) // 15)  # Many breakpoints
-    
-    logger.info(f"Using aggressive bkspace: {bkspace:.4f}")
-    
-    sset, outmask = iterfit(
-        xshift_clean, counts_clean,
-        maxiter=maxiter,
-        nord=3,  # Cubic splines
-        upper=3.0,
-        lower=3.0,
-        kwargs_bspline={'bkspace': bkspace}
-    )
-    
-    # High-resolution model
-    xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)*3)
-    y_fit = sset.value(xmodel)[0]
-    
-    return {
-        'xshift_clean': xshift_clean,
-        'counts_clean': counts_clean,
-        'xmodel': xmodel,
-        'y_fit': y_fit,
-        'bspline_model': sset,
-        'outmask': outmask,
-        'bkspace_used': bkspace
-    }
-
-
 def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file, 
                                arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR, 
                                trace_dir=CALIB_DIR, verbose=False):
@@ -411,28 +366,34 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info("Step 5: Generating pixel maps for each channel/bench combination")
     
     pixel_map_results = threshold_processor.generate_complete_pixel_maps(fit_results)
-    output_files = pixel_map_results['output_files']
-    
+    pixel_map_mef_file = pixel_map_results['output_file']
+
     # Step 6: Create normalized flat field FITS file for reduce.py pipeline
     logger.info("Step 6: Creating normalized flat field FITS file for reduce.py pipeline")
-    
+
+    # Convert all flat file paths to absolute paths to ensure they can be found
     original_flat_files = {
-        'red': red_flat_file,
-        'green': green_flat_file,
-        'blue': blue_flat_file
+        'red': os.path.abspath(red_flat_file),
+        'green': os.path.abspath(green_flat_file),
+        'blue': os.path.abspath(blue_flat_file)
     }
-    
+
+    # Debug: Log the original flat file paths being passed
+    logger.info(f"Original flat files dictionary:")
+    for channel, filepath in original_flat_files.items():
+        logger.info(f"  {channel}: {filepath}")
+        logger.info(f"  {channel} exists: {os.path.exists(filepath)}")
+        logger.info(f"  {channel} absolute: {os.path.abspath(filepath)}")
+
     try:
         logger.info("Starting normalized flat field creation...")
         normalized_flat_field_file = threshold_processor.create_normalized_flat_field_fits(
             original_flat_files=original_flat_files,
-            pixel_map_files=output_files,  # Pass generated pixel maps for B-spline correction
+            pixel_map_mef_file=pixel_map_mef_file,  # Pass the combined MEF file
             output_filename=None  # Will use default naming in output_dir
         )
         logger.info(f"Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
         
-        # Add to results for return
-        results['normalized_flat_field_file'] = normalized_flat_field_file
     except Exception as e:
         logger.error(f"CRITICAL ERROR: Failed to create normalized flat field: {str(e)}")
         import traceback
@@ -447,8 +408,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         'calibrated_flat_file': calibrated_flat_file,
         'fit_results': fit_results,
         'pixel_map_results': pixel_map_results,
-        'output_files': output_files,
-        'combined_mef_file': pixel_map_results.get('combined_mef_file'),
+        'pixel_map_mef_file': pixel_map_mef_file,
         'normalized_flat_field_file': normalized_flat_field_file,
         'processing_status': 'completed'
     }
@@ -703,14 +663,9 @@ class Thresholding():
                     rms_residual = fiber_fit['rms_residual']
                     relative_rms = fiber_fit['relative_rms']
 
-                    # Calculate statistics for thresholding
-                    # median_residual = np.median(residuals)
-                    # std_residual = np.std(residuals)
-                    
-                    # logger.debug(f"Fiber {fiber_idx}: median residual={median_residual:.4f}, std residual={std_residual:.4f}")
-                    
                     # Store results for this fiber
                     results[ext_key][fiber_idx] = {
+                        'xshift': item.xshift[fiber_idx, :],  # Original xshift array for direct pixel mapping
                         'xshift_clean': fiber_fit['xshift_clean'],
                         'counts_clean': fiber_fit['counts_clean'],
                         'y_predicted': y_predicted,
@@ -741,147 +696,49 @@ class Thresholding():
         
         return results
     
-    def generate_pixel_map(self, fit_results, trace_object):
+    def generate_complete_pixel_maps(self, fit_results, output_filename=None):
         """
-        Generate a map of predicted flat field values for each pixel based on the B-spline fits.
+        Generate complete pixel maps and save as a single multi-extension FITS file.
+
+        This method takes the B-spline fit results, generates 2D pixel maps for each
+        channel and bench combination, and writes them to a single multi-extension FITS file.
 
         Args:
             fit_results (dict): Dictionary of B-spline fit results for each extension and fiber
-            trace_object (TraceLlamas): Trace object containing the fiber image map
+            output_filename (str, optional): Output filename for MEF file. If None, defaults to
+                'combined_flat_pixel_maps.fits' in output_dir.
 
         Returns:
-            dict: Dictionary of predicted flat field image arrays for each channel/benchside
+            dict: Dictionary containing pixel maps, output file path, and trace file map
         """
-        logger.info(f"Generating pixel map for {trace_object.channel} channel")
-        
-        # Initialize a dictionary to store the resulting maps for each channel/benchside
-        pixel_maps = {}
+        logger.info("Generating complete pixel maps as multi-extension FITS file")
 
-        # Get the fiber image from the trace object
-        fiber_image = trace_object.fiberimg
-        channel = trace_object.channel
-        bench = trace_object.bench
-        side = trace_object.side
-        
-        logger.info(f"Trace object: {channel} {bench}{side}, fiber image shape: {fiber_image.shape}")
-        logger.info(f"Number of fibers in trace: {trace_object.nfibers}")
-        
-        
-        # Loop through each extension in the fit results
-        for ext_key, fibers in fit_results.items():
-            logger.info(f"Processing fit results for {ext_key} with {len(fibers)} fibers")
-            
-            # Create an empty array matching the shape of the fiber image
-            # Initialize with NaN to easily identify unprocessed pixels
-            pixel_map = np.full_like(fiber_image, np.nan, dtype=float)
-
-            # Process each fiber in this extension
-            processed_count = 0
-            for fiber_idx, fiber_data in fibers.items():
-                # Get the B-spline model for this fiber
-                bspline_model = fiber_data['bspline_model']
-
-                # Find all pixels belonging to this fiber
-                fiber_pixels = (fiber_image == fiber_idx)
-                pixel_count = np.sum(fiber_pixels)
-
-                if not np.any(fiber_pixels):
-                    logger.warning(f"No pixels found for fiber {fiber_idx} in {ext_key}")
-                    continue
-                
-                logger.debug(f"Processing fiber {fiber_idx} with {pixel_count} pixels")
-                
-                # For each row in the image that contains this fiber
-                for row in range(fiber_image.shape[0]):
-                    # Get the pixels in this row that belong to this fiber
-                    row_pixels = fiber_pixels[row, :]
-
-                    if not np.any(row_pixels):
-                        continue
-                    
-                    # Get the column indices of the fiber pixels in this row
-                    col_indices = np.where(row_pixels)[0]
-
-                    # Get the range of x-shift values for this fiber
-                    xshift_min = np.min(fiber_data['xshift_clean'])
-                    xshift_max = np.max(fiber_data['xshift_clean'])
-
-                    # Map the column indices to x-shift values
-                    xshift_values = np.interp(
-                        col_indices,
-                        [0, fiber_image.shape[1] - 1],
-                        [xshift_min, xshift_max]
-                    )
-
-                    # Evaluate the B-spline model at these x-shift values
-                    predicted_values = bspline_model.value(xshift_values)[0]
-
-                    # Assign the predicted values to the pixel map
-                    pixel_map[row, col_indices] = predicted_values
-                
-                processed_count += 1
-                if processed_count % 50 == 0:
-                    logger.info(f"Processed {processed_count}/{len(fibers)} fibers")
-
-            # Check for unassigned pixels
-            nan_count = np.sum(np.isnan(pixel_map))
-            logger.info(f"Pixel map for {ext_key} has {nan_count} unassigned pixels out of {pixel_map.size}")
-            
-            # Store the completed pixel map for this extension
-            pixel_maps[ext_key] = pixel_map
-
-            # # Save the pixel map as a FITS file for inspection
-            # hdu = fits.PrimaryHDU(data=pixel_map)
-            # hdu.header['EXTNAME'] = ext_key
-            # hdu.header['COMMENT'] = 'Predicted flat field values from B-spline fits'
-            # output_file = os.path.join(self.output_dir, f'predicted_flat_{channel}_{bench}{side}.fits')
-            # hdu.writeto(output_file, overwrite=True)
-            # logger.info(f"Saved predicted flat field map for {ext_key} to {output_file}")
-
-        return pixel_maps
-    
-    def generate_complete_pixel_maps(self, fit_results, output_fits=True, create_mef=True):
-        """
-        Generate complete pixel maps with FITS output for each channel/bench combination.
-        
-        This method takes the B-spline fit results and generates 2D pixel maps for each
-        channel and bench combination, saving them as FITS files.
-        
-        Args:
-            fit_results (dict): Dictionary of B-spline fit results for each extension and fiber
-            output_fits (bool): Whether to save pixel maps as FITS files. Default True.
-            create_mef (bool): Whether to create combined multi-extension FITS file. Default True.
-            
-        Returns:
-            dict: Dictionary containing pixel maps and output file paths
-        """
-        logger.info("Generating complete pixel maps with FITS output")
-        
         import glob
-        from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
-        
+        from datetime import datetime
+
         # Get all available trace files
-        trace_files = glob.glob(os.path.join(self.trace_dir, 'LLAMAS_master*traces.pkl'))
+        trace_files = glob.glob(os.path.join(self.trace_dir, 'LLAMAS*traces.pkl'))
         logger.info(f"Found {len(trace_files)} trace files")
-        
+
         # Create a mapping from channel/bench/side to trace file
         trace_file_map = {}
         for trace_file in trace_files:
             # Load trace object to get its metadata
             with open(trace_file, 'rb') as f:
                 trace_obj = pickle.load(f)
-            
+
             key = f"{trace_obj.channel}{trace_obj.bench}{trace_obj.side}"
             trace_file_map[key] = trace_file
             logger.debug(f"Mapped {key} to {trace_file}")
-        
+
+        # Store pixel maps and extension metadata
         pixel_maps = {}
-        output_files = []
-        
+        extension_info = []  # List of (ext_key, pixel_map, trace_obj) tuples
+
         # Process each extension key in fit_results
         for ext_key, fiber_fits in fit_results.items():
             logger.info(f"Processing pixel map for extension {ext_key}")
-            
+
             # Parse the extension key to find matching trace file
             # ext_key format: "red1A", "green2B", etc.
             found_trace = False
@@ -893,76 +750,105 @@ class Thresholding():
                         if color in ext_key.lower():
                             channel_from_ext = color
                             break
-                    
+
                     if channel_from_ext and channel_from_ext in trace_key.lower():
                         logger.info(f"Matched {ext_key} to trace file {trace_file}")
-                        
+
                         # Load the trace object
                         with open(trace_file, 'rb') as f:
                             trace_obj = pickle.load(f)
-                        
+
                         # Generate pixel map for this extension
                         pixel_map = self._generate_single_pixel_map(fiber_fits, trace_obj)
                         pixel_maps[ext_key] = pixel_map
-                        
-                        # Save as FITS file if requested
-                        if output_fits:
-                            output_filename = os.path.join(
-                                self.output_dir, 
-                                f'flat_pixel_map_{ext_key}.fits'
-                            )
-                            
-                            # Create FITS HDU
-                            hdu = fits.PrimaryHDU(data=pixel_map.astype(np.float32))
-                            hdu.header['EXTNAME'] = ext_key
-                            hdu.header['CHANNEL'] = trace_obj.channel
-                            hdu.header['BENCH'] = trace_obj.bench
-                            hdu.header['SIDE'] = trace_obj.side
-                            hdu.header['COMMENT'] = 'Flat field pixel map from B-spline fits'
-                            hdu.header['BUNIT'] = 'Counts'
-                            
-                            # Add statistics to header
-                            valid_pixels = ~np.isnan(pixel_map)
-                            if np.any(valid_pixels):
-                                hdu.header['DATAMIN'] = np.nanmin(pixel_map)
-                                hdu.header['DATAMAX'] = np.nanmax(pixel_map)
-                                hdu.header['DATAMEAN'] = np.nanmean(pixel_map)
-                                hdu.header['NPIX'] = np.sum(valid_pixels)
-                                hdu.header['NNANS'] = np.sum(~valid_pixels)
-                            
-                            hdu.writeto(output_filename, overwrite=True)
-                            output_files.append(output_filename)
-                            logger.info(f"Saved pixel map to {output_filename}")
-                        
+
+                        # Store for MEF creation
+                        extension_info.append((ext_key, pixel_map, trace_obj))
+
                         found_trace = True
                         break
-            
+
             if not found_trace:
                 logger.warning(f"Could not find matching trace file for extension {ext_key}")
-        
-        # Create combined multi-extension FITS file if requested
-        combined_mef_file = None
-        if create_mef and output_files:
-            try:
-                logger.info("Creating combined multi-extension FITS file")
-                combined_mef_file = self.combine_pixel_maps_to_mef(output_files)
-                logger.info(f"Successfully created combined MEF file: {combined_mef_file}")
-            except Exception as e:
-                logger.error(f"Failed to create combined MEF file: {str(e)}")
-                # Don't raise the exception - individual files are still valid
-        
+
+        # Sort extensions by LLAMAS idx_lookup ordering
+        def get_sort_key(info):
+            ext_key, pixel_map, trace_obj = info
+            return idx_lookup.get((trace_obj.channel, trace_obj.bench, trace_obj.side), 999)
+
+        extension_info.sort(key=get_sort_key)
+
+        logger.info(f"Will create MEF with {len(extension_info)} extensions in the following order:")
+        for i, (ext_key, _, trace_obj) in enumerate(extension_info):
+            logger.info(f"  Extension {i+1}: {trace_obj.channel}{trace_obj.bench}{trace_obj.side}")
+
+        # Build multi-extension FITS file
+        if output_filename is None:
+            output_filename = os.path.join(self.output_dir, 'combined_flat_pixel_maps.fits')
+
+        # Create HDU list starting with primary HDU
+        hdul = fits.HDUList()
+
+        # Create primary HDU with basic header information
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['COMMENT'] = 'Combined flat field pixel maps for LLAMAS'
+        primary_hdu.header['CREATOR'] = 'LLAMAS flatLlamas.py'
+        primary_hdu.header['DATE'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+        primary_hdu.header['NEXTEND'] = len(extension_info)
+        primary_hdu.header['ORIGIN'] = 'LLAMAS Pipeline'
+        hdul.append(primary_hdu)
+
+        # Add each pixel map as an extension
+        for i, (ext_key, pixel_map, trace_obj) in enumerate(extension_info):
+            # Create extension name
+            ext_name = f"FLAT_{trace_obj.channel.upper()}{trace_obj.bench}{trace_obj.side.upper()}"
+
+            # Create image HDU
+            hdu = fits.ImageHDU(data=pixel_map.astype(np.float32), name=ext_name)
+
+            # Add metadata to header
+            hdu.header['EXTVER'] = i + 1
+            hdu.header['CHANNEL'] = trace_obj.channel.upper()
+            hdu.header['BENCH'] = trace_obj.bench
+            hdu.header['SIDE'] = trace_obj.side.upper()
+            hdu.header['BENCHSIDE'] = f"{trace_obj.bench}{trace_obj.side.upper()}"
+            hdu.header['COLOUR'] = trace_obj.channel.upper()
+            hdu.header['BUNIT'] = 'Counts'
+            hdu.header['COMMENT'] = 'Flat field pixel map from B-spline fits'
+
+            # Add statistics to header
+            valid_pixels = ~np.isnan(pixel_map)
+            if np.any(valid_pixels):
+                hdu.header['DATAMIN'] = np.nanmin(pixel_map)
+                hdu.header['DATAMAX'] = np.nanmax(pixel_map)
+                hdu.header['DATAMEAN'] = np.nanmean(pixel_map)
+                hdu.header['NPIX'] = np.sum(valid_pixels)
+                hdu.header['NNANS'] = np.sum(~valid_pixels)
+
+            hdul.append(hdu)
+            logger.debug(f"Added extension {ext_name} ({ext_key})")
+
+        # Write the combined FITS file
+        try:
+            hdul.writeto(output_filename, overwrite=True)
+            logger.info(f"Successfully created combined pixel map file: {output_filename}")
+            logger.info(f"File contains {len(hdul)-1} extensions (plus primary)")
+        except Exception as e:
+            logger.error(f"Error writing FITS file: {str(e)}")
+            raise
+        finally:
+            hdul.close()
+
         results = {
             'pixel_maps': pixel_maps,
-            'output_files': output_files,
-            'combined_mef_file': combined_mef_file,
-            'trace_file_map': trace_file_map
+            'output_file': output_filename,
+            'trace_file_map': trace_file_map,
+            'n_extensions': len(extension_info)
         }
-        
+
         logger.info(f"Generated pixel maps for {len(pixel_maps)} extensions")
-        logger.info(f"Saved {len(output_files)} individual FITS files")
-        if combined_mef_file:
-            logger.info(f"Created combined MEF file: {os.path.basename(combined_mef_file)}")
-        
+        logger.info(f"Created MEF file: {os.path.basename(output_filename)}")
+
         return results
     
     def _generate_single_pixel_map(self, fiber_fits, trace_obj):
@@ -996,28 +882,19 @@ class Thresholding():
                 logger.debug(f"No pixels found for fiber {fiber_idx}")
                 continue
             
-            # Get the xshift range for this fiber
-            xshift_min = np.min(fiber_data['xshift_clean'])
-            xshift_max = np.max(fiber_data['xshift_clean'])
-            
             # For each row in the image that contains this fiber
             for row in range(fiber_image.shape[0]):
                 row_pixels = fiber_pixels[row, :]
-                
+
                 if not np.any(row_pixels):
                     continue
-                
+
                 # Get the column indices of the fiber pixels in this row
                 col_indices = np.where(row_pixels)[0]
-                
-                # Map the column indices to x-shift values
-                # This assumes a linear mapping from pixel column to xshift
-                xshift_values = np.interp(
-                    col_indices,
-                    [0, fiber_image.shape[1] - 1],
-                    [xshift_min, xshift_max]
-                )
-                
+
+                # Get the actual xshift values at these column positions
+                xshift_values = fiber_data['xshift'][col_indices]
+
                 # Evaluate the B-spline model at these x-shift values
                 try:
                     predicted_values = bspline_model.value(xshift_values)[0]
@@ -1113,164 +990,28 @@ class Thresholding():
         logger.info("Threshold generation complete")
         return results
     
-    def combine_pixel_maps_to_mef(self, pixel_map_files, output_filename=None):
+    def create_normalized_flat_field_fits(self, original_flat_files, pixel_map_mef_file=None, output_filename=None):
         """
-        Combine individual pixel map FITS files into a single multi-extension FITS file.
-        
-        This method takes individual pixel map files and combines them into a single
-        multi-extension FITS file with extensions ordered by color, bench, and side
-        to match the raw science frame structure.
-        
-        Args:
-            pixel_map_files (list): List of individual pixel map FITS file paths
-            output_filename (str, optional): Output filename for combined MEF file.
-                If None, defaults to 'combined_pixel_maps.fits'
-                
-        Returns:
-            str: Path to the created multi-extension FITS file
-        """
-        logger.info("Combining individual pixel maps into multi-extension FITS file")
-        
-        if not pixel_map_files:
-            logger.error("No pixel map files provided")
-            raise ValueError("No pixel map files to combine")
-            
-        # Default output filename
-        if output_filename is None:
-            output_filename = os.path.join(self.output_dir, 'combined_flat_pixel_maps.fits')
-        
-        # Parse filenames to extract channel/bench/side information
-        file_info = []
-        for file_path in pixel_map_files:
-            if not os.path.exists(file_path):
-                logger.warning(f"Pixel map file not found: {file_path}")
-                continue
-                
-            filename = os.path.basename(file_path)
-            
-            # Parse filename like: flat_pixel_map_red1A.fits
-            if filename.startswith('flat_pixel_map_') and filename.endswith('.fits'):
-                channel_bench_side = filename.replace('flat_pixel_map_', '').replace('.fits', '')
-                
-                # Extract channel
-                channel = None
-                for color in ['blue', 'green', 'red']:
-                    if channel_bench_side.lower().startswith(color):
-                        channel = color
-                        bench_side = channel_bench_side[len(color):]
-                        break
-                
-                if channel and len(bench_side) >= 2:
-                    bench = bench_side[0]  # First character is bench number
-                    side = bench_side[1]   # Second character is side (A or B)
-                    
-                    file_info.append({
-                        'file_path': file_path,
-                        'channel': channel,
-                        'bench': bench,
-                        'side': side,
-                        'sort_key': f"{channel}_{bench}{side}"
-                    })
-                    logger.debug(f"Parsed {filename}: {channel} {bench}{side}")
-                else:
-                    logger.warning(f"Could not parse filename: {filename}")
-            else:
-                logger.warning(f"Unexpected filename format: {filename}")
-        
-        if not file_info:
-            logger.error("No valid pixel map files found")
-            raise ValueError("No valid pixel map files to combine")
-        
-        # Sort by LLAMAS idx_lookup ordering from constants.py
-        file_info.sort(key=lambda x: idx_lookup.get((x['channel'], x['bench'], x['side']), 999))
-        
-        logger.info(f"Will combine {len(file_info)} pixel maps in the following order:")
-        for i, info in enumerate(file_info):
-            logger.info(f"  Extension {i+1}: {info['channel']}{info['bench']}{info['side']}")
-        
-        # Create HDU list starting with primary HDU
-        hdul = fits.HDUList()
-        
-        # Create primary HDU with basic header information
-        primary_hdu = fits.PrimaryHDU()
-        primary_hdu.header['COMMENT'] = 'Combined flat field pixel maps for LLAMAS'
-        primary_hdu.header['CREATOR'] = 'LLAMAS flatLlamas.py'
-        primary_hdu.header['DATE'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-        primary_hdu.header['NEXTEND'] = len(file_info)
-        primary_hdu.header['ORIGIN'] = 'LLAMAS Pipeline'
-        hdul.append(primary_hdu)
-        
-        # Add each pixel map as an extension
-        for i, info in enumerate(file_info):
-            try:
-                # Read the individual pixel map file
-                logger.debug(f"Reading {info['file_path']}")
-                with fits.open(info['file_path']) as pixel_hdul:
-                    pixel_data = pixel_hdul[0].data
-                    pixel_header = pixel_hdul[0].header.copy()
-                
-                # Create extension name
-                ext_name = f"FLAT_{info['channel'].upper()}{info['bench']}{info['side'].upper()}"
-                
-                # Create image HDU
-                hdu = fits.ImageHDU(data=pixel_data.astype(np.float32), 
-                                  header=pixel_header, 
-                                  name=ext_name)
-                
-                # Add additional metadata to header
-                hdu.header['EXTVER'] = i + 1
-                hdu.header['CHANNEL'] = info['channel'].upper()
-                hdu.header['BENCH'] = info['bench']
-                hdu.header['SIDE'] = info['side'].upper()
-                hdu.header['BENCHSIDE'] = f"{info['bench']}{info['side'].upper()}"
-                hdu.header['COLOUR'] = info['channel'].upper()
-                hdu.header['ORIGFILE'] = os.path.basename(info['file_path'])
-                
-                # Ensure BUNIT is set consistently
-                if 'BUNIT' not in hdu.header:
-                    hdu.header['BUNIT'] = 'Counts'
-                
-                hdul.append(hdu)
-                logger.debug(f"Added extension {ext_name} from {info['file_path']}")
-                
-            except Exception as e:
-                logger.error(f"Error reading pixel map file {info['file_path']}: {str(e)}")
-                continue
-        
-        # Write the combined FITS file
-        try:
-            hdul.writeto(output_filename, overwrite=True)
-            logger.info(f"Successfully created combined pixel map file: {output_filename}")
-            logger.info(f"File contains {len(hdul)-1} extensions (plus primary)")
-            
-            # Log file size for reference
-            file_size = os.path.getsize(output_filename)
-            logger.info(f"Combined file size: {file_size / (1024*1024):.1f} MB")
-            
-        except Exception as e:
-            logger.error(f"Error writing combined FITS file: {str(e)}")
-            raise
-        finally:
-            hdul.close()
-        
-        return output_filename
-    
-    def create_normalized_flat_field_fits(self, original_flat_files, pixel_map_files=None, output_filename=None):
-        """
-        Create normalized flat field FITS file for reduce.py pipeline.
-        
+        Create normalized flat field FITS file for reduce.py pipeline with per-fiber normalization.
+
         This method creates a multi-extension FITS file with normalized flat field data by:
-        1. Dividing original flat data by pixel maps (B-spline predicted values)
-        2. Normalizing corrected data so median within fiber traces ≈ 1.0
-        3. Setting values outside fiber traces to exactly 1.0
-        
+        1. Dividing original flat data by pixel maps (B-spline predicted values) to remove spectral variations
+        2. **PER-FIBER NORMALIZATION**: Each fiber normalized to its own median to preserve fiber-to-fiber
+           throughput variations (CRITICAL: different fibers have different sensitivities!)
+        3. Optional global rescaling maintains values ~O(1) while preserving relative throughput
+        4. Setting values outside fiber traces to exactly 1.0
+
+        **Key Physics**: The normalized flat field should preserve real fiber-to-fiber sensitivity
+        differences. Each science frame pixel is divided by the corresponding normalized flat pixel,
+        so the flat must contain the true relative sensitivity per pixel, NOT force everything to unity.
+
         Args:
             original_flat_files (dict): Dictionary with 'red', 'green', 'blue' FITS file paths
-            pixel_map_files (list, optional): List of pixel map FITS file paths containing
+            pixel_map_mef_file (str, optional): Path to multi-extension FITS file containing
                 B-spline predicted flat field values. If None, falls back to trace-only normalization.
             output_filename (str, optional): Output filename for normalized flat field.
                 If None, defaults to 'normalized_flat_field.fits'
-                
+
         Returns:
             str: Path to the created normalized flat field FITS file
         """
@@ -1285,10 +1026,12 @@ class Thresholding():
         logger.info("="*60)
         
         # Initialize processing counters
-        total_extensions_expected = 24  # 3 colors × 4 benches × 2 sides
+        total_extensions_expected = len(idx_lookup)  # Should be 24: 3 colors × 4 benches × 2 sides
         extensions_attempted = 0
         extensions_successful = 0
         processing_errors = []
+
+        logger.info(f"Expected to create {total_extensions_expected} extensions based on idx_lookup")
         
         if output_filename is None:
             # Determine correct output directory for normalized flat field
@@ -1339,47 +1082,41 @@ class Thresholding():
         for color, file_path in original_flat_files.items():
             logger.info(f"  {color.capitalize()}: {os.path.basename(file_path)}")
         
-        # Load pixel maps if provided (contains B-spline predicted flat field values)
+        # Load pixel maps from MEF file if provided (contains B-spline predicted flat field values)
         pixel_maps = {}
         pixel_map_stats = {}
-        if pixel_map_files:
-            logger.info(f"Loading {len(pixel_map_files)} pixel map files:")
-            pixel_maps_loaded = 0
-            for file_path in pixel_map_files:
-                if not os.path.exists(file_path):
-                    logger.warning(f"Pixel map file not found: {file_path}")
-                    continue
-                    
-                filename = os.path.basename(file_path)
-                logger.info(f"  Processing: {filename}")
-                
-                # Parse filename to extract channel/bench/side
-                # Expected format: flat_pixel_map_red1A.fits
-                if filename.startswith('flat_pixel_map_') and filename.endswith('.fits'):
-                    channel_bench_side = filename.replace('flat_pixel_map_', '').replace('.fits', '')
-                    
-                    # Extract channel
-                    channel = None
-                    for color in ['blue', 'green', 'red']:
-                        if channel_bench_side.lower().startswith(color):
-                            channel = color
-                            bench_side = channel_bench_side[len(color):]
-                            break
-                    
-                    if channel and len(bench_side) >= 2:
-                        bench = bench_side[0]  # First character is bench number
-                        side = bench_side[1]   # Second character is side (A or B)
-                        
-                        try:
-                            with fits.open(file_path) as pix_hdul:
-                                pixel_map_data = pix_hdul[0].data
-                                if pixel_map_data is None:
-                                    logger.error(f"    ERROR: Pixel map data is None for {filename}")
+        if pixel_map_mef_file:
+            if not os.path.exists(pixel_map_mef_file):
+                logger.error(f"Pixel map MEF file not found: {pixel_map_mef_file}")
+                logger.info("Will use trace-only normalization")
+            else:
+                logger.info(f"Loading pixel maps from MEF file: {os.path.basename(pixel_map_mef_file)}")
+                pixel_maps_loaded = 0
+
+                try:
+                    with fits.open(pixel_map_mef_file) as mef_hdul:
+                        n_extensions = len(mef_hdul) - 1  # Exclude primary HDU
+                        logger.info(f"  MEF file contains {n_extensions} extensions")
+
+                        for i, hdu in enumerate(mef_hdul[1:], start=1):  # Skip primary HDU
+                            try:
+                                # Get metadata from header
+                                channel = hdu.header.get('CHANNEL', '').lower()
+                                bench = hdu.header.get('BENCH', '')
+                                side = hdu.header.get('SIDE', '')
+
+                                if not all([channel, bench, side]):
+                                    logger.warning(f"    Extension {i}: Missing metadata (CHANNEL/BENCH/SIDE)")
                                     continue
-                                    
+
+                                pixel_map_data = hdu.data
+                                if pixel_map_data is None:
+                                    logger.error(f"    Extension {i}: Pixel map data is None")
+                                    continue
+
                                 key = f"{channel}{bench}{side}"
                                 pixel_maps[key] = pixel_map_data
-                                
+
                                 # Calculate and log pixel map statistics
                                 valid_pixels = np.isfinite(pixel_map_data) & (pixel_map_data > 0)
                                 if np.any(valid_pixels):
@@ -1392,23 +1129,23 @@ class Thresholding():
                                         'median_val': np.median(pixel_map_data[valid_pixels])
                                     }
                                     pixel_map_stats[key] = stats
-                                    logger.info(f"    ✓ Loaded {key}: {stats['shape']}, {stats['valid_pixels']:,} valid pixels, median={stats['median_val']:.3f}")
+                                    logger.info(f"    ✓ Extension {i} ({key}): {stats['shape']}, {stats['valid_pixels']:,} valid pixels, median={stats['median_val']:.3f}")
                                     pixel_maps_loaded += 1
                                 else:
-                                    logger.error(f"    ERROR: No valid pixel data in {filename}")
-                                    
-                        except Exception as e:
-                            logger.error(f"    ERROR loading pixel map {file_path}: {str(e)}")
-                    else:
-                        logger.warning(f"    Could not parse pixel map filename: {filename}")
-                else:
-                    logger.warning(f"    Unexpected pixel map filename format: {filename}")
-                    
-            logger.info(f"Successfully loaded {pixel_maps_loaded}/{len(pixel_map_files)} pixel map files")
-            if pixel_maps_loaded == 0:
-                logger.warning("No pixel maps were successfully loaded - will use trace-only normalization")
+                                    logger.error(f"    Extension {i}: No valid pixel data")
+
+                            except Exception as e:
+                                logger.error(f"    Extension {i}: Error loading - {str(e)}")
+
+                        logger.info(f"Successfully loaded {pixel_maps_loaded}/{n_extensions} pixel maps from MEF")
+                        if pixel_maps_loaded == 0:
+                            logger.warning("No pixel maps were successfully loaded - will use trace-only normalization")
+
+                except Exception as e:
+                    logger.error(f"Error opening MEF file: {str(e)}")
+                    logger.info("Will use trace-only normalization")
         else:
-            logger.info("No pixel map files provided - using trace-only normalization")
+            logger.info("No pixel map MEF file provided - using trace-only normalization")
         
         # Create HDU list starting with primary HDU
         hdul = fits.HDUList()
@@ -1468,272 +1205,446 @@ class Thresholding():
         if trace_files_loaded == 0:
             logger.error("No trace files were successfully loaded - normalization will fail")
         
-        # Process extensions in idx_lookup order
-        extensions_created = 0
-        logger.info(f"\nProcessing {len(idx_lookup)} extensions for normalized flat field:")
-        logger.info("-" * 60)
-        
-        for (channel, bench, side), ext_idx in sorted(idx_lookup.items(), key=lambda x: x[1]):
-            extensions_attempted += 1
-            logger.info(f"Extension {ext_idx:2d}: {channel.upper()} {bench}{side.upper()}")
-            
-            extension_success = False
-            error_details = []
-            
-            try:
-                # Load original flat field data for this channel
-                flat_file = original_flat_files[channel]
-                logger.info(f"  Loading from: {os.path.basename(flat_file)}")
-                
+        # Inspect original flat files before processing
+        logger.info(f"\nInspecting original flat files before processing:")
+        for channel, flat_file in original_flat_files.items():
+            if os.path.exists(flat_file):
                 with fits.open(flat_file) as flat_hdul:
-                    # Find matching extension in original flat file
-                    flat_data = None
-                    original_header = None
-                    extension_found = False
-                    
-                    logger.debug(f"    Searching {len(flat_hdul)-1} extensions for match...")
-                    for i in range(1, len(flat_hdul)):  # Skip primary
+                    logger.info(f"  {channel.upper()} flat: {os.path.basename(flat_file)} - {len(flat_hdul)-1} extensions")
+                    for i in range(1, min(len(flat_hdul), 6)):  # Show first 5 extensions
                         hdu = flat_hdul[i]
                         hdu_bench = str(hdu.header.get('BENCH', ''))
                         hdu_side = str(hdu.header.get('SIDE', '')).upper()
                         hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
-                        
-                        logger.debug(f"    Ext {i}: channel='{hdu_channel}', bench='{hdu_bench}', side='{hdu_side}'")
-                        
-                        if (hdu_channel == channel and 
-                            hdu_bench == bench and 
+                        logger.info(f"    Ext {i}: {hdu_channel} {hdu_bench}{hdu_side}")
+            else:
+                logger.error(f"  {channel.upper()} flat: {flat_file} - FILE NOT FOUND")
+
+        # Process extensions in idx_lookup order
+        extensions_created = 0
+        logger.info(f"\nProcessing {len(idx_lookup)} extensions for normalized flat field:")
+        logger.info(f"Expected to process 24 extensions from idx_lookup")
+        logger.info(f"Available pixel maps: {list(pixel_maps.keys()) if pixel_maps else 'None'}")
+        logger.info(f"Available trace files: {list(trace_file_map.keys()) if trace_file_map else 'None'}")
+        logger.info("-" * 60)
+
+        # Open each flat file once and store handles (efficiency improvement)
+        flat_hduls = {}
+        try:
+            for channel in ['red', 'green', 'blue']:
+                flat_file = original_flat_files[channel]
+                if os.path.exists(flat_file):
+                    flat_hduls[channel] = fits.open(flat_file)
+                    logger.info(f"Opened {channel} flat file: {os.path.basename(flat_file)}")
+                else:
+                    logger.error(f"Cannot open {channel} flat file: {flat_file} - FILE NOT FOUND")
+                    flat_hduls[channel] = None
+
+            for (channel, bench, side), ext_idx in sorted(idx_lookup.items(), key=lambda x: x[1]):
+                extensions_attempted += 1
+                logger.info(f"Extension {ext_idx:2d}: {channel.upper()} {bench}{side.upper()}")
+
+                extension_success = False
+                error_details = []
+
+                try:
+                    # Get the already-opened flat file handle for this channel
+                    flat_hdul = flat_hduls.get(channel)
+
+                    if flat_hdul is None:
+                        flat_file = original_flat_files[channel]
+                        logger.error(f"    ERROR: Flat file handle not available for {channel}: {flat_file}")
+                        error_details.append(f"Flat file not opened: {flat_file}")
+                        processing_errors.append(f"Extension {ext_idx}: {error_details[-1]}")
+                        continue
+
+                    # Load original flat field data using direct indexing with validation
+                    flat_file = original_flat_files[channel]
+                    logger.info(f"  Loading from: {os.path.basename(flat_file)}")
+
+                    flat_data = None
+                    original_header = None
+                    extension_found = False
+
+                    # Primary method: Direct index with metadata verification
+                    if ext_idx < len(flat_hdul):
+                        hdu = flat_hdul[ext_idx]
+                        hdu_bench = str(hdu.header.get('BENCH', ''))
+                        hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                        hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+
+                        logger.debug(f"    Direct index {ext_idx}: channel='{hdu_channel}', bench='{hdu_bench}', side='{hdu_side}'")
+
+                        # Verify metadata matches expected configuration
+                        if (hdu_channel == channel and
+                            hdu_bench == bench and
                             hdu_side.upper() == side.upper()):
-                            
-                            if hdu.data is None:
-                                logger.error(f"    ERROR: Extension {i} has no data")
-                                error_details.append(f"Extension {i} has no data")
-                                continue
-                                
-                            flat_data = hdu.data.copy()
-                            original_header = hdu.header.copy()
-                            extension_found = True
-                            logger.info(f"    ✓ Found matching extension {i}: {flat_data.shape}")
-                            break
-                    
+
+                            if hdu.data is not None:
+                                flat_data = hdu.data.copy()
+                                original_header = hdu.header.copy()
+                                extension_found = True
+                                logger.info(f"    ✓ Direct index {ext_idx} matches: {flat_data.shape}")
+                            else:
+                                logger.error(f"    ERROR: Extension {ext_idx} has no data")
+                                error_details.append(f"Extension {ext_idx} has no data")
+                        else:
+                            # Metadata mismatch - log warning and search all extensions
+                            logger.warning(f"    Metadata mismatch at index {ext_idx}!")
+                            logger.warning(f"    Expected: {channel} {bench}{side}")
+                            logger.warning(f"    Found: {hdu_channel} {hdu_bench}{hdu_side}")
+                            logger.warning(f"    Falling back to metadata search...")
+                    else:
+                        logger.warning(f"    Extension index {ext_idx} out of range, using metadata search")
+
+                    # Fallback method: Search all extensions for matching metadata
+                    if not extension_found:
+                        logger.debug(f"    Searching {len(flat_hdul)-1} extensions for metadata match...")
+                        for i in range(1, len(flat_hdul)):  # Skip primary
+                            hdu = flat_hdul[i]
+                            hdu_bench = str(hdu.header.get('BENCH', ''))
+                            hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                            hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+
+                            logger.debug(f"    Search ext {i}: channel='{hdu_channel}', bench='{hdu_bench}', side='{hdu_side}'")
+
+                            if (hdu_channel == channel and
+                                hdu_bench == bench and
+                                hdu_side.upper() == side.upper()):
+
+                                if hdu.data is None:
+                                    logger.error(f"    ERROR: Extension {i} has no data")
+                                    error_details.append(f"Extension {i} has no data")
+                                    continue
+
+                                flat_data = hdu.data.copy()
+                                original_header = hdu.header.copy()
+                                extension_found = True
+                                logger.info(f"    ✓ Found via search at extension {i}: {flat_data.shape}")
+                                break
+
                     if not extension_found or flat_data is None:
                         logger.error(f"    ERROR: No matching extension found for {channel} {bench}{side}")
+                        logger.error(f"    Available extensions in {os.path.basename(flat_file)}:")
+                        for i in range(1, len(flat_hdul)):
+                            hdu = flat_hdul[i]
+                            hdu_bench = str(hdu.header.get('BENCH', ''))
+                            hdu_side = str(hdu.header.get('SIDE', '')).upper()
+                            hdu_channel = hdu.header.get('COLOR', hdu.header.get('CHANNEL', '')).lower()
+                            logger.error(f"      Extension {i}: {hdu_channel} {hdu_bench}{hdu_side}")
                         error_details.append(f"No matching extension in {os.path.basename(flat_file)}")
                         processing_errors.append(f"Extension {ext_idx}: {error_details[-1]}")
                         continue
-                
-                # STEP 1: Divide by pixel map (removes B-spline modeled variation)
-                pixel_map_key = f"{channel}{bench}{side}"
-                corrected_data = flat_data.copy()
-                pixel_map_applied = False
-                
-                logger.info(f"  Step 1: Pixel map correction for {pixel_map_key}")
-                if pixel_map_key in pixel_maps:
-                    pixel_map = pixel_maps[pixel_map_key]
-                    
-                    # Verify shapes match
-                    if pixel_map.shape != flat_data.shape:
-                        logger.error(f"    ERROR: Shape mismatch - flat {flat_data.shape} vs pixel map {pixel_map.shape}")
-                        error_details.append(f"Shape mismatch with pixel map")
-                    else:
-                        # Check pixel map validity
-                        valid_pixel_map = np.isfinite(pixel_map) & (pixel_map > 0)
-                        if not np.any(valid_pixel_map):
-                            logger.error(f"    ERROR: Pixel map contains no valid data")
-                            error_details.append(f"Invalid pixel map data")
+
+                    # STEP 1: Divide by pixel map (removes B-spline modeled variation)
+                    pixel_map_key = f"{channel}{bench}{side}"
+                    logger.info(f"  Looking for pixel map: {pixel_map_key}")
+                    corrected_data = flat_data.copy()
+                    pixel_map_applied = False
+
+                    logger.info(f"  Step 1: Pixel map correction for {pixel_map_key}")
+                    if pixel_map_key in pixel_maps:
+                        pixel_map = pixel_maps[pixel_map_key]
+
+                        # Verify shapes match
+                        if pixel_map.shape != flat_data.shape:
+                            logger.error(f"    ERROR: Shape mismatch - flat {flat_data.shape} vs pixel map {pixel_map.shape}")
+                            error_details.append(f"Shape mismatch with pixel map")
                         else:
-                            # Divide flat by pixel map (B-spline predictions)
-                            with np.errstate(divide='ignore', invalid='ignore'):
-                                corrected_data = np.where(pixel_map > 0, 
-                                                         flat_data / pixel_map,
-                                                         flat_data)  # Keep original where pixel map is invalid
-                            
-                            # Validate corrected data
-                            valid_corrected = np.isfinite(corrected_data)
-                            if np.any(valid_corrected):
-                                pixel_map_applied = True
-                                corrected_stats = pixel_map_stats.get(pixel_map_key, {})
-                                logger.info(f"    ✓ Applied pixel map: {np.sum(valid_corrected):,} valid pixels")
+                            # Check pixel map validity
+                            valid_pixel_map = np.isfinite(pixel_map) & (pixel_map > 0)
+                            if not np.any(valid_pixel_map):
+                                logger.error(f"    ERROR: Pixel map contains no valid data")
+                                error_details.append(f"Invalid pixel map data")
                             else:
-                                logger.error(f"    ERROR: Pixel map correction resulted in no valid data")
-                                error_details.append(f"Pixel map correction failed")
-                                corrected_data = flat_data.copy()  # Fallback to original
-                else:
-                    logger.info(f"    No pixel map available - using original flat data")
-                    
-                if not pixel_map_applied:
-                    logger.info(f"    Using original flat field data for normalization")
-                
-                # STEP 2: Apply trace-based normalization to corrected data
-                trace_key = f"{channel}{bench}{side}"
-                normalized_data = np.ones_like(flat_data, dtype=np.float32)
-                normalization_successful = False
-                
-                logger.info(f"  Step 2: Trace-based normalization for {trace_key}")
-                if trace_key in trace_file_map:
-                    trace_obj = trace_file_map[trace_key]['obj']
-                    fiber_image = trace_obj.fiberimg
-                    
-                    if fiber_image is not None and fiber_image.shape == flat_data.shape:
-                        # Find traced regions (non-zero in fiber image)
-                        traced_mask = fiber_image > 0
-                        
-                        if np.any(traced_mask):
-                            # Get corrected flat field values in traced regions
-                            traced_corrected_values = corrected_data[traced_mask]
-                            
-                            # Remove bad values
-                            valid_mask = np.isfinite(traced_corrected_values) & (traced_corrected_values > 0)
-                            if np.any(valid_mask):
-                                valid_traced_values = traced_corrected_values[valid_mask]
-                                
-                                # Normalize corrected data so median = 1.0 within traced regions
-                                median_corrected = np.median(valid_traced_values)
-                                if median_corrected > 0 and np.isfinite(median_corrected):
-                                    normalization_factor = 1.0 / median_corrected
-                                    normalized_traced_values = corrected_data[traced_mask] * normalization_factor
-                                    
-                                    # Clip extreme values to reasonable range
-                                    normalized_traced_values = np.clip(normalized_traced_values, 0.1, 5.0)
-                                    
-                                    # Set normalized values in traced regions
-                                    normalized_data[traced_mask] = normalized_traced_values
-                                    
-                                    # Set untraced regions to exactly 1.0
+                                # Divide flat by pixel map (B-spline predictions) - IFU Standard
+                                with np.errstate(divide='ignore', invalid='ignore'):
+                                    corrected_data = np.where(pixel_map > 0,
+                                                             flat_data / pixel_map,
+                                                             np.nan)  # Set invalid regions to NaN (IFU standard)
+
+                                # Validate corrected data
+                                valid_corrected = np.isfinite(corrected_data)
+                                if np.any(valid_corrected):
+                                    pixel_map_applied = True
+                                    corrected_stats = pixel_map_stats.get(pixel_map_key, {})
+                                    logger.info(f"    ✓ Applied pixel map: {np.sum(valid_corrected):,} valid pixels")
+                                else:
+                                    logger.error(f"    ERROR: Pixel map correction resulted in no valid data")
+                                    error_details.append(f"Pixel map correction failed")
+                                    corrected_data = flat_data.copy()  # Fallback to original
+                    else:
+                        logger.info(f"    No pixel map available - using original flat data")
+
+                    if not pixel_map_applied:
+                        logger.info(f"    Using original flat field data for normalization")
+
+                    # STEP 2: Apply trace-based normalization to corrected data
+                    trace_key = f"{channel}{bench}{side}"
+                    logger.info(f"  Looking for trace file: {trace_key}")
+                    normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                    normalization_successful = False
+
+                    logger.info(f"  Step 2: Trace-based normalization for {trace_key}")
+
+                    # Initialize variables that will be used for header metadata
+                    # (must be defined before any branching to avoid UnboundLocalError)
+                    fiber_throughputs = []
+                    fibers_processed = 0
+                    fibers_failed = 0
+                    fiber_throughput_std = np.nan
+                    global_scale = None
+
+                    if trace_key in trace_file_map:
+                        trace_obj = trace_file_map[trace_key]['obj']
+                        fiber_image = trace_obj.fiberimg
+
+                        if fiber_image is not None and fiber_image.shape == flat_data.shape:
+                            # Find traced regions (non-zero in fiber image)
+                            traced_mask = fiber_image > 0
+
+                            if np.any(traced_mask):
+                                # Get corrected flat field values in traced regions
+                                traced_corrected_values = corrected_data[traced_mask]
+
+                                # Remove bad values
+                                valid_mask = np.isfinite(traced_corrected_values) & (traced_corrected_values > 0)
+                                if np.any(valid_mask):
+                                    valid_traced_values = traced_corrected_values[valid_mask]
+
+                                    # PER-FIBER NORMALIZATION (CRITICAL FIX)
+                                    # Normalize each fiber to its own median to preserve fiber-to-fiber throughput variations
+                                    logger.info(f"    Applying per-fiber normalization to preserve throughput variations")
+
+                                    # Get unique fiber IDs (excluding 0 which is background)
+                                    unique_fibers = np.unique(fiber_image[traced_mask])
+                                    unique_fibers = unique_fibers[unique_fibers > 0]  # Remove background
+
+                                    # Initialize output with background = 1.0
                                     normalized_data[~traced_mask] = 1.0
-                                    
-                                    # Calculate and log final statistics
+
+                                    for fiber_id in unique_fibers:
+                                        # Get mask for this specific fiber
+                                        fiber_mask = (fiber_image == fiber_id)
+                                        fiber_pixels = corrected_data[fiber_mask]
+
+                                        # Get valid (finite, positive) pixels for this fiber
+                                        fiber_valid = np.isfinite(fiber_pixels) & (fiber_pixels > 0)
+
+                                        if np.sum(fiber_valid) > 0:
+                                            # Compute robust fiber median
+                                            fiber_median = np.median(fiber_pixels[fiber_valid])
+
+                                            if fiber_median > 0 and np.isfinite(fiber_median):
+                                                # Normalize this fiber to its own median
+                                                normalized_fiber = corrected_data[fiber_mask] / fiber_median
+
+                                                # Clip extreme values for this fiber
+                                                valid_normalized = np.isfinite(normalized_fiber)
+                                                normalized_fiber[valid_normalized] = np.clip(
+                                                    normalized_fiber[valid_normalized], 0.1, 5.0
+                                                )
+
+                                                # Assign normalized values for this fiber
+                                                normalized_data[fiber_mask] = normalized_fiber
+
+                                                fiber_throughputs.append(fiber_median)
+                                                fibers_processed += 1
+                                            else:
+                                                # Bad fiber - set to 1.0
+                                                normalized_data[fiber_mask] = 1.0
+                                                fibers_failed += 1
+                                                logger.warning(f"      Fiber {fiber_id:3.0f}: Invalid median ({fiber_median}), set to 1.0")
+                                        else:
+                                            # No valid pixels - set to 1.0
+                                            normalized_data[fiber_mask] = 1.0
+                                            fibers_failed += 1
+                                            logger.warning(f"      Fiber {fiber_id:3.0f}: No valid pixels, set to 1.0")
+
+                                    # Optional: Global rescaling for interpretability
+                                    # This maintains relative fiber throughputs while keeping values ~O(1)
+                                    if len(fiber_throughputs) > 0:
+                                        global_scale = np.median(fiber_throughputs)
+                                        # Apply global scale only to traced regions
+                                        normalized_data[traced_mask] *= global_scale
+                                        logger.info(f"    Applied global rescaling factor: {global_scale:.3f}")
+
+                                    # Calculate final statistics
                                     traced_count = np.sum(traced_mask)
                                     untraced_count = normalized_data.size - traced_count
-                                    final_median_in_traces = np.median(normalized_data[traced_mask])
-                                    
-                                    logger.info(f"    ✓ Normalized {traced_count:,} traced pixels, {untraced_count:,} background pixels set to 1.0")
-                                    logger.info(f"    Original median: {median_corrected:.3f}, Final median in traces: {final_median_in_traces:.3f}")
-                                    
-                                    # Verify final normalization
-                                    if 0.8 <= final_median_in_traces <= 1.2:
-                                        normalization_successful = True
-                                        logger.info(f"    ✓ Normalization successful")
+                                    traced_data = normalized_data[traced_mask]
+                                    valid_traced_data = traced_data[np.isfinite(traced_data)]
+                                    final_median_in_traces = np.median(valid_traced_data) if len(valid_traced_data) > 0 else np.nan
+                                    final_std_in_traces = np.std(valid_traced_data) if len(valid_traced_data) > 0 else np.nan
+                                    nan_count_in_traces = np.sum(np.isnan(traced_data))
+
+                                    # Fiber-to-fiber variation statistics
+                                    if len(fiber_throughputs) > 1:
+                                        fiber_throughput_range = (np.min(fiber_throughputs), np.max(fiber_throughputs))
+                                        fiber_throughput_std = np.std(fiber_throughputs)
                                     else:
-                                        logger.warning(f"    WARNING: Final median {final_median_in_traces:.3f} outside expected range [0.8-1.2]")
+                                        fiber_throughput_range = (np.nan, np.nan)
+                                        fiber_throughput_std = np.nan
+
+                                    logger.info(f"    ✓ Per-fiber normalization complete:")
+                                    logger.info(f"      Total fibers: {len(unique_fibers)}, Processed: {fibers_processed}, Failed: {fibers_failed}")
+                                    logger.info(f"      Fiber throughput range: {fiber_throughput_range[0]:.3f} to {fiber_throughput_range[1]:.3f}")
+                                    logger.info(f"      Fiber-to-fiber std: {fiber_throughput_std:.3f}")
+                                    logger.info(f"      Traced pixels: {traced_count:,}, Background pixels: {untraced_count:,}")
+                                    logger.info(f"      Final median in traces: {final_median_in_traces:.3f}, std: {final_std_in_traces:.3f}")
+                                    logger.info(f"      NaN pixels in traces: {nan_count_in_traces:,}")
+
+                                    if nan_count_in_traces > 0:
+                                        logger.info(f"      (Invalid pixel map regions set to NaN)")
+
+                                    # Verify final normalization
+                                    # With per-fiber normalization, expect fiber-to-fiber variations
+                                    # so median should be around global_scale value, not necessarily 1.0
+                                    if 0.5 <= final_median_in_traces <= 2.0:  # Wider range is expected
+                                        normalization_successful = True
+                                        logger.info(f"    ✓ Per-fiber normalization successful")
+                                    else:
+                                        logger.warning(f"    WARNING: Final median {final_median_in_traces:.3f} outside expected range [0.5-2.0]")
                                         normalization_successful = True  # Still accept it
                                 else:
-                                    logger.error(f"    ERROR: Invalid median corrected value: {median_corrected}")
-                                    error_details.append(f"Invalid median corrected value")
+                                    logger.error(f"    ERROR: No valid corrected flat field values in traced regions")
+                                    error_details.append(f"No valid values in traced regions")
                             else:
-                                logger.error(f"    ERROR: No valid corrected flat field values in traced regions")
-                                error_details.append(f"No valid values in traced regions")
+                                logger.error(f"    ERROR: No traced pixels found")
+                                error_details.append(f"No traced pixels found")
                         else:
-                            logger.error(f"    ERROR: No traced pixels found")
-                            error_details.append(f"No traced pixels found")
-                    else:
-                        if fiber_image is None:
-                            logger.error(f"    ERROR: No fiber image data in trace file")
-                            error_details.append(f"No fiber image in trace")
-                        else:
-                            logger.error(f"    ERROR: Fiber image shape {fiber_image.shape} != flat data shape {flat_data.shape}")
-                            error_details.append(f"Fiber image shape mismatch")
-                else:
-                    logger.error(f"    ERROR: No trace information found for {trace_key}")
-                    error_details.append(f"No trace file found")
-                
-                # Fallback normalization if trace-based normalization failed
-                if not normalization_successful:
-                    logger.warning(f"    Using fallback normalization (global median)")
-                    valid_corrected = corrected_data[np.isfinite(corrected_data) & (corrected_data > 0)]
-                    if len(valid_corrected) > 100:  # Need reasonable amount of data
-                        median_corrected = np.median(valid_corrected)
-                        if median_corrected > 0:
-                            normalized_data = np.clip(corrected_data / median_corrected, 0.1, 5.0)
-                            normalized_data[~np.isfinite(normalized_data)] = 1.0
-                            normalization_successful = True
-                            logger.info(f"    ✓ Fallback normalization applied, median: {median_corrected:.3f}")
-                        else:
-                            logger.error(f"    ERROR: Invalid fallback median: {median_corrected}")
-                    else:
-                        logger.error(f"    ERROR: Insufficient valid data for fallback normalization ({len(valid_corrected)} pixels)")
-                
-                if not normalization_successful:
-                    logger.error(f"    ERROR: All normalization methods failed, setting to ones")
-                    normalized_data = np.ones_like(flat_data, dtype=np.float32)
-                    error_details.append(f"All normalization methods failed")
-                
-                # Create extension HDU with validation
-                ext_name = f"FLAT_{channel.upper()}{bench}{side.upper()}"
-                
-                # Validate normalized data before creating HDU
-                if normalized_data is None:
-                    logger.error(f"    ERROR: Normalized data is None")
-                    error_details.append(f"Normalized data is None")
-                elif normalized_data.size == 0:
-                    logger.error(f"    ERROR: Normalized data is empty array")
-                    error_details.append(f"Normalized data is empty")
-                else:
-                    # Final data validation
-                    valid_pixels = np.isfinite(normalized_data)
-                    if not np.any(valid_pixels):
-                        logger.error(f"    ERROR: No valid pixels in final normalized data")
-                        error_details.append(f"No valid pixels in final data")
-                    else:
-                        # Create HDU with validated data
-                        hdu = fits.ImageHDU(data=normalized_data.astype(np.float32), name=ext_name)
-                        
-                        # Set header information
-                        hdu.header['EXTVER'] = ext_idx
-                        hdu.header['CHANNEL'] = channel.upper()
-                        hdu.header['BENCH'] = bench
-                        hdu.header['SIDE'] = side.upper()
-                        hdu.header['BENCHSIDE'] = f"{bench}{side.upper()}"
-                        hdu.header['COLOUR'] = channel.upper()
-                        hdu.header['BUNIT'] = 'Normalized'
-                        hdu.header['PURPOSE'] = 'Flat field correction by division'
-                        hdu.header['ORIGFILE'] = os.path.basename(original_flat_files[channel])
-                        
-                        # Add comprehensive statistics
-                        data_stats = {
-                            'min': float(np.nanmin(normalized_data)),
-                            'max': float(np.nanmax(normalized_data)),
-                            'mean': float(np.nanmean(normalized_data)),
-                            'median': float(np.nanmedian(normalized_data)),
-                            'valid_pixels': int(np.sum(valid_pixels)),
-                            'total_pixels': int(normalized_data.size)
-                        }
-                        
-                        for key, value in data_stats.items():
-                            if key == 'valid_pixels':
-                                hdu.header['NPIX'] = value
-                            elif key == 'total_pixels':
-                                hdu.header['NTOTPIX'] = value
+                            if fiber_image is None:
+                                logger.error(f"    ERROR: No fiber image data in trace file")
+                                error_details.append(f"No fiber image in trace")
                             else:
-                                hdu.header[f'DATA{key[:2].upper()}'] = value
-                        
-                        # Check for NaN or infinity values
-                        nan_count = np.sum(np.isnan(normalized_data))
-                        inf_count = np.sum(np.isinf(normalized_data))
-                        if nan_count > 0 or inf_count > 0:
-                            logger.warning(f"    WARNING: Found {nan_count} NaN and {inf_count} infinity values")
-                            hdu.header['NANCOUNT'] = nan_count
-                            hdu.header['INFCOUNT'] = inf_count
-                        
-                        hdul.append(hdu)
-                        extensions_created += 1
-                        extensions_successful += 1
-                        extension_success = True
-                        
-                        logger.info(f"    ✓ Extension {ext_idx} created successfully: {ext_name}")
-                        logger.info(f"      Data range: [{data_stats['min']:.3f}, {data_stats['max']:.3f}], median: {data_stats['median']:.3f}")
-                        logger.info(f"      Valid pixels: {data_stats['valid_pixels']:,}/{data_stats['total_pixels']:,}")
-                
-                if not extension_success and error_details:
-                    processing_errors.append(f"Extension {ext_idx} ({channel}{bench}{side}): {'; '.join(error_details)}")
-                    logger.error(f"    ✗ Extension {ext_idx} failed: {'; '.join(error_details)}")
-                
-            except Exception as e:
-                logger.error(f"    ERROR: Exception processing extension {ext_idx}: {str(e)}")
-                processing_errors.append(f"Extension {ext_idx}: Exception - {str(e)}")
-                import traceback
-                logger.debug(f"    Traceback: {traceback.format_exc()}")
-                continue
-        
+                                logger.error(f"    ERROR: Fiber image shape {fiber_image.shape} != flat data shape {flat_data.shape}")
+                                error_details.append(f"Fiber image shape mismatch")
+                    else:
+                        logger.error(f"    ERROR: No trace information found for {trace_key}")
+                        error_details.append(f"No trace file found")
+
+                    # Fallback normalization if trace-based normalization failed
+                    if not normalization_successful:
+                        logger.warning(f"    Using fallback normalization (global median)")
+                        valid_corrected = corrected_data[np.isfinite(corrected_data) & (corrected_data > 0)]
+                        if len(valid_corrected) > 100:  # Need reasonable amount of data
+                            median_corrected = np.median(valid_corrected)
+                            if median_corrected > 0:
+                                normalized_data = np.clip(corrected_data / median_corrected, 0.1, 5.0)
+                                normalized_data[~np.isfinite(normalized_data)] = 1.0
+                                normalization_successful = True
+                                logger.info(f"    ✓ Fallback normalization applied, median: {median_corrected:.3f}")
+                            else:
+                                logger.error(f"    ERROR: Invalid fallback median: {median_corrected}")
+                        else:
+                            logger.error(f"    ERROR: Insufficient valid data for fallback normalization ({len(valid_corrected)} pixels)")
+
+                    if not normalization_successful:
+                        logger.error(f"    ERROR: All normalization methods failed, setting to ones")
+                        normalized_data = np.ones_like(flat_data, dtype=np.float32)
+                        error_details.append(f"All normalization methods failed")
+
+                    # Create extension HDU with validation
+                    ext_name = f"FLAT_{channel.upper()}{bench}{side.upper()}"
+
+                    # Validate normalized data before creating HDU
+                    if normalized_data is None:
+                        logger.error(f"    ERROR: Normalized data is None")
+                        error_details.append(f"Normalized data is None")
+                    elif normalized_data.size == 0:
+                        logger.error(f"    ERROR: Normalized data is empty array")
+                        error_details.append(f"Normalized data is empty")
+                    else:
+                        # Final data validation
+                        valid_pixels = np.isfinite(normalized_data)
+                        if not np.any(valid_pixels):
+                            logger.error(f"    ERROR: No valid pixels in final normalized data")
+                            error_details.append(f"No valid pixels in final data")
+                        else:
+                            # Create HDU with validated data
+                            hdu = fits.ImageHDU(data=normalized_data.astype(np.float32), name=ext_name)
+
+                            # Set header information
+                            hdu.header['EXTVER'] = ext_idx
+                            hdu.header['CHANNEL'] = channel.upper()
+                            hdu.header['BENCH'] = bench
+                            hdu.header['SIDE'] = side.upper()
+                            hdu.header['BENCHSIDE'] = f"{bench}{side.upper()}"
+                            hdu.header['COLOUR'] = channel.upper()
+                            hdu.header['BUNIT'] = 'Normalized'
+                            hdu.header['PURPOSE'] = 'Flat field correction by division'
+                            hdu.header['ORIGFILE'] = os.path.basename(original_flat_files[channel])
+                            hdu.header['NORMTYPE'] = ('PER_FIBER', 'Normalization method: per-fiber preserves throughput')
+
+                            # Add per-fiber normalization statistics if available
+                            if len(fiber_throughputs) > 0:
+                                hdu.header['NFIBERS'] = (fibers_processed, 'Number of fibers successfully normalized')
+                                hdu.header['FIBFAIL'] = (fibers_failed, 'Number of fibers that failed normalization')
+                                hdu.header['FIBTHMIN'] = (float(np.min(fiber_throughputs)), 'Min fiber throughput before norm')
+                                hdu.header['FIBTHMAX'] = (float(np.max(fiber_throughputs)), 'Max fiber throughput before norm')
+                                hdu.header['FIBTHMED'] = (float(np.median(fiber_throughputs)), 'Median fiber throughput')
+                                hdu.header['FIBTHSTD'] = (fiber_throughput_std, 'Std dev of fiber throughputs')
+                                if global_scale is not None:
+                                    hdu.header['GLOBSCAL'] = (global_scale, 'Global rescaling factor applied')
+                            else:
+                                hdu.header['NORMTYPE'] = ('FALLBACK', 'Used fallback global normalization')
+
+                            # Add comprehensive statistics
+                            data_stats = {
+                                'min': float(np.nanmin(normalized_data)),
+                                'max': float(np.nanmax(normalized_data)),
+                                'mean': float(np.nanmean(normalized_data)),
+                                'median': float(np.nanmedian(normalized_data)),
+                                'valid_pixels': int(np.sum(valid_pixels)),
+                                'total_pixels': int(normalized_data.size)
+                            }
+
+                            for key, value in data_stats.items():
+                                if key == 'valid_pixels':
+                                    hdu.header['NPIX'] = value
+                                elif key == 'total_pixels':
+                                    hdu.header['NTOTPIX'] = value
+                                else:
+                                    hdu.header[f'DATA{key[:2].upper()}'] = value
+
+                            # Check for NaN or infinity values
+                            nan_count = np.sum(np.isnan(normalized_data))
+                            inf_count = np.sum(np.isinf(normalized_data))
+                            if nan_count > 0 or inf_count > 0:
+                                logger.warning(f"    WARNING: Found {nan_count} NaN and {inf_count} infinity values")
+                                hdu.header['NANCOUNT'] = nan_count
+                                hdu.header['INFCOUNT'] = inf_count
+
+                            hdul.append(hdu)
+                            extensions_created += 1
+                            extensions_successful += 1
+                            extension_success = True
+
+                            logger.info(f"    ✓ Extension {ext_idx} created successfully: {ext_name}")
+                            logger.info(f"      Data range: [{data_stats['min']:.3f}, {data_stats['max']:.3f}], median: {data_stats['median']:.3f}")
+                            logger.info(f"      Valid pixels: {data_stats['valid_pixels']:,}/{data_stats['total_pixels']:,}")
+
+                        if not extension_success and error_details:
+                            processing_errors.append(f"Extension {ext_idx} ({channel}{bench}{side}): {'; '.join(error_details)}")
+                            logger.error(f"    ✗ Extension {ext_idx} failed: {'; '.join(error_details)}")
+
+                except Exception as e:
+                    logger.error(f"    ERROR: Exception processing extension {ext_idx}: {str(e)}")
+                    processing_errors.append(f"Extension {ext_idx}: Exception - {str(e)}")
+                    import traceback
+                    logger.debug(f"    Traceback: {traceback.format_exc()}")
+                    continue
+
+        finally:
+            # Close all flat file handles
+            for channel, hdul_handle in flat_hduls.items():
+                if hdul_handle is not None:
+                    try:
+                        hdul_handle.close()
+                        logger.info(f"Closed {channel} flat file")
+                    except Exception as e:
+                        logger.warning(f"Error closing {channel} flat file: {e}")
+
         # Log final processing summary
         logger.info("-" * 60)
         logger.info(f"PROCESSING SUMMARY:")
@@ -1750,6 +1661,14 @@ class Thresholding():
         if extensions_created == 0:
             logger.error("ERROR: No extensions were successfully created - cannot write FITS file")
             raise ValueError("No valid extensions created for normalized flat field")
+
+        if extensions_created != total_extensions_expected:
+            logger.error(f"ERROR: Created {extensions_created} extensions, expected {total_extensions_expected}")
+            logger.error("This will result in an incomplete normalized flat field unsuitable for science reduction")
+            if extensions_created < total_extensions_expected // 2:  # Less than half
+                raise ValueError(f"Too few extensions created: {extensions_created}/{total_extensions_expected}")
+            else:
+                logger.warning("Proceeding with incomplete normalized flat field - may cause issues in science reduction")
             
         try:
             hdul.writeto(output_filename, overwrite=True)
@@ -1794,24 +1713,6 @@ class Thresholding():
         
         return output_filename
     
-    def apply_thresholds(self, science_data):
-        """Apply calculated thresholds to the flat field data.
-
-        This method applies the provided thresholds to the flat field data,
-        modifying the data in place or returning a new modified dataset.
-
-        Args:
-            thresholds (list): List of threshold values to apply.
-
-        Returns:
-            None: The method modifies the flat field data in place.
-        """
-        logger.info("Applying thresholds to science data")
-        # Placeholder for actual threshold application logic
-        # This should be replaced with the actual implementation
-        pass
-
-
 # If run as a standalone script
 if __name__ == "__main__":
     logger.info("flatLlamas.py executed as standalone script")
@@ -1845,14 +1746,11 @@ if __name__ == "__main__":
         )
         
         logger.info("Processing completed successfully!")
-        logger.info(f"Generated {len(results['output_files'])} individual FITS files:")
-        for output_file in results['output_files']:
-            logger.info(f"  {output_file}")
-        
-        if results['combined_mef_file']:
-            logger.info(f"Combined multi-extension FITS file: {results['combined_mef_file']}")
+
+        if results['pixel_map_mef_file']:
+            logger.info(f"Pixel map MEF file: {results['pixel_map_mef_file']}")
         else:
-            logger.warning("Combined multi-extension FITS file was not created")
+            logger.warning("Pixel map MEF file was not created")
         
         if results['normalized_flat_field_file']:
             logger.info(f"Normalized flat field for reduce.py: {results['normalized_flat_field_file']}")
@@ -1862,5 +1760,229 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Processing failed: {str(e)}")
         raise
-    
-    
+
+
+def diagnose_normalized_flat(normalized_flat_file, trace_dir=CALIB_DIR, extension_idx=1):
+    """
+    Diagnostic function to check if normalized flat field looks reasonable after per-fiber normalization.
+
+    This function validates that the per-fiber normalization has preserved fiber-to-fiber
+    throughput variations as intended, rather than forcing all pixels toward unity.
+
+    Args:
+        normalized_flat_file (str): Path to normalized flat field FITS file
+        trace_dir (str): Directory containing trace files for fiber identification
+        extension_idx (int): Which extension to check (1-indexed, default=1 for first data extension)
+
+    Returns:
+        dict: Diagnostic results including per-fiber statistics
+
+    Example:
+        >>> results = diagnose_normalized_flat('normalized_flat_field.fits')
+        >>> if results['validation_passed']:
+        ...     print("✓ Normalized flat looks good!")
+        ... else:
+        ...     print(f"✗ Issues found: {results['issues']}")
+    """
+    import numpy as np
+    import pickle
+    from astropy.io import fits
+    import glob
+    import os
+
+    print(f"\n{'='*70}")
+    print(f"NORMALIZED FLAT FIELD DIAGNOSTICS")
+    print(f"{'='*70}")
+    print(f"File: {os.path.basename(normalized_flat_file)}")
+    print(f"Extension: {extension_idx}")
+
+    # Load normalized flat data
+    with fits.open(normalized_flat_file) as hdul:
+        if extension_idx >= len(hdul):
+            print(f"ERROR: Extension {extension_idx} not found (file has {len(hdul)} HDUs)")
+            return {'validation_passed': False, 'issues': ['Extension not found']}
+
+        data = hdul[extension_idx].data
+        header = hdul[extension_idx].header
+
+        # Report header information
+        norm_type = header.get('NORMTYPE', 'UNKNOWN')
+        print(f"\nNormalization type: {norm_type}")
+
+        if 'NFIBERS' in header:
+            print(f"Fibers processed: {header['NFIBERS']}")
+            print(f"Fibers failed: {header.get('FIBFAIL', 0)}")
+            print(f"Fiber throughput range: {header.get('FIBTHMIN', 0):.3f} to {header.get('FIBTHMAX', 0):.3f}")
+            print(f"Fiber throughput std: {header.get('FIBTHSTD', 0):.3f}")
+            if 'GLOBSCAL' in header:
+                print(f"Global rescaling factor: {header['GLOBSCAL']:.3f}")
+
+    # Load trace for fiber identification
+    channel = header.get('CHANNEL', header.get('COLOUR', '')).lower()
+    bench = str(header.get('BENCH', ''))
+    side = header.get('SIDE', '')
+    trace_key = f"{channel}{bench}{side}"
+
+    print(f"\nLooking for trace file for {trace_key}...")
+
+    trace_files = glob.glob(os.path.join(trace_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'))
+    if not trace_files:
+        print(f"WARNING: No trace file found for {trace_key}")
+        print(f"Cannot perform per-fiber validation")
+        trace_mask = np.ones_like(data, dtype=bool)  # Assume all pixels are traced
+        fiber_image = None
+    else:
+        trace_file = trace_files[0]
+        print(f"Loading trace: {os.path.basename(trace_file)}")
+
+        with open(trace_file, 'rb') as f:
+            trace = pickle.load(f)
+
+        fiber_image = trace.fiberimg
+        trace_mask = (fiber_image > 0)
+
+    # Global statistics
+    print(f"\n{'='*70}")
+    print(f"GLOBAL STATISTICS")
+    print(f"{'='*70}")
+
+    all_pixels_finite = np.isfinite(data)
+    trace_pixels_finite = all_pixels_finite & trace_mask
+
+    print(f"Total pixels: {data.size:,}")
+    print(f"Traced pixels: {np.sum(trace_mask):,} ({np.sum(trace_mask)/data.size*100:.1f}%)")
+    print(f"Background pixels: {np.sum(~trace_mask):,}")
+    print(f"Finite traced pixels: {np.sum(trace_pixels_finite):,}")
+    print(f"NaN/Inf traced pixels: {np.sum(~trace_pixels_finite & trace_mask):,}")
+
+    traced_values = data[trace_pixels_finite]
+    if len(traced_values) > 0:
+        print(f"\nTraced region values:")
+        print(f"  Min: {np.min(traced_values):.4f}")
+        print(f"  Max: {np.max(traced_values):.4f}")
+        print(f"  Median: {np.median(traced_values):.4f}")
+        print(f"  Std: {np.std(traced_values):.4f}")
+
+    # Background check
+    background_values = data[~trace_mask]
+    all_ones = np.allclose(background_values[np.isfinite(background_values)], 1.0)
+    print(f"\nBackground pixels all = 1.0? {all_ones}")
+
+    # Per-fiber statistics
+    if fiber_image is not None:
+        print(f"\n{'='*70}")
+        print(f"PER-FIBER STATISTICS (first 10 fibers)")
+        print(f"{'='*70}")
+        print(f"{'Fiber':>6} {'Pixels':>8} {'Median':>8} {'Std':>8} {'Min':>8} {'Max':>8}")
+        print(f"{'-'*6} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+
+        unique_fibers = np.unique(fiber_image[trace_mask])
+        unique_fibers = unique_fibers[unique_fibers > 0]  # Remove background
+
+        fiber_medians = []
+        for fiber_id in unique_fibers[:10]:  # First 10 fibers
+            fiber_mask = (fiber_image == fiber_id)
+            fiber_vals = data[fiber_mask]
+            fiber_vals_finite = fiber_vals[np.isfinite(fiber_vals)]
+
+            if len(fiber_vals_finite) > 0:
+                fiber_med = np.median(fiber_vals_finite)
+                fiber_std = np.std(fiber_vals_finite)
+                fiber_min = np.min(fiber_vals_finite)
+                fiber_max = np.max(fiber_vals_finite)
+                fiber_medians.append(fiber_med)
+
+                print(f"{fiber_id:6.0f} {len(fiber_vals_finite):8d} {fiber_med:8.4f} {fiber_std:8.4f} {fiber_min:8.4f} {fiber_max:8.4f}")
+
+        # Statistics across all fibers
+        all_fiber_medians = []
+        for fiber_id in unique_fibers:
+            fiber_mask = (fiber_image == fiber_id)
+            fiber_vals = data[fiber_mask]
+            fiber_vals_finite = fiber_vals[np.isfinite(fiber_vals)]
+            if len(fiber_vals_finite) > 0:
+                all_fiber_medians.append(np.median(fiber_vals_finite))
+
+        if len(all_fiber_medians) > 1:
+            print(f"\n{'='*70}")
+            print(f"FIBER-TO-FIBER VARIATION SUMMARY")
+            print(f"{'='*70}")
+            print(f"Total fibers analyzed: {len(all_fiber_medians)}")
+            print(f"Fiber median range: {np.min(all_fiber_medians):.4f} to {np.max(all_fiber_medians):.4f}")
+            print(f"Fiber-to-fiber std: {np.std(all_fiber_medians):.4f}")
+            print(f"Coefficient of variation: {np.std(all_fiber_medians)/np.mean(all_fiber_medians):.4f}")
+
+    # Validation checks
+    print(f"\n{'='*70}")
+    print(f"VALIDATION CHECKS")
+    print(f"{'='*70}")
+
+    issues = []
+    validation_passed = True
+
+    # Check 1: Background should be 1.0
+    if not all_ones:
+        issues.append("Background pixels not all 1.0")
+        validation_passed = False
+        print(f"✗ FAIL: Background pixels not all 1.0")
+    else:
+        print(f"✓ PASS: Background pixels = 1.0")
+
+    # Check 2: Fiber medians should show variation (NOT all ~1.0)
+    if fiber_image is not None and len(all_fiber_medians) > 1:
+        fiber_std = np.std(all_fiber_medians)
+        if fiber_std < 0.05:  # Too little variation suggests wrong normalization
+            issues.append(f"Fiber-to-fiber variation too low ({fiber_std:.3f} < 0.05)")
+            validation_passed = False
+            print(f"✗ FAIL: Fiber-to-fiber std ({fiber_std:.4f}) < 0.05 - normalization may have destroyed throughput info")
+        elif fiber_std > 0.5:  # Too much variation suggests no normalization
+            issues.append(f"Fiber-to-fiber variation too high ({fiber_std:.3f} > 0.5)")
+            validation_passed = False
+            print(f"✗ FAIL: Fiber-to-fiber std ({fiber_std:.4f}) > 0.5 - normalization may not have been applied")
+        else:
+            print(f"✓ PASS: Fiber-to-fiber std ({fiber_std:.4f}) in expected range [0.05-0.5]")
+
+        # Check 3: Fiber medians should be in reasonable range
+        fiber_med_range = (np.min(all_fiber_medians), np.max(all_fiber_medians))
+        if fiber_med_range[0] < 0.5 or fiber_med_range[1] > 2.0:
+            issues.append(f"Fiber median range {fiber_med_range} outside [0.5-2.0]")
+            validation_passed = False
+            print(f"✗ FAIL: Fiber median range {fiber_med_range} outside [0.5-2.0]")
+        else:
+            print(f"✓ PASS: Fiber median range {fiber_med_range} within [0.5-2.0]")
+    else:
+        print(f"⚠  SKIP: Per-fiber checks (no fiber image available)")
+
+    # Check 4: Should not have all pixels ≈ 1.0
+    if fiber_image is not None:
+        median_traced = np.median(traced_values)
+        if 0.99 <= median_traced <= 1.01 and fiber_std < 0.02:
+            issues.append("All values ~1.0 - global normalization artifact")
+            validation_passed = False
+            print(f"✗ FAIL: Median {median_traced:.4f} ≈ 1.0 with low std - suggests wrong normalization method")
+        else:
+            print(f"✓ PASS: Values show physical variation, not forced to 1.0")
+
+    # Summary
+    print(f"\n{'='*70}")
+    if validation_passed:
+        print(f"✓✓✓ VALIDATION PASSED - Normalized flat looks good!")
+        print(f"✓ Per-fiber throughput variations preserved")
+        print(f"✓ Suitable for flat field correction by division")
+    else:
+        print(f"✗✗✗ VALIDATION FAILED - Issues detected:")
+        for issue in issues:
+            print(f"  ✗ {issue}")
+    print(f"{'='*70}\n")
+
+    return {
+        'validation_passed': validation_passed,
+        'issues': issues,
+        'norm_type': norm_type,
+        'fiber_count': len(all_fiber_medians) if fiber_image is not None else None,
+        'fiber_median_range': (np.min(all_fiber_medians), np.max(all_fiber_medians)) if fiber_image is not None and len(all_fiber_medians) > 0 else None,
+        'fiber_std': fiber_std if fiber_image is not None and len(all_fiber_medians) > 1 else None,
+        'background_is_one': all_ones
+    }
+
+

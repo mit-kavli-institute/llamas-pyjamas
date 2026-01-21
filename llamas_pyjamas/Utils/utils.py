@@ -1,6 +1,6 @@
 # llamas_pyjamas/utils.py
 """Utils module for llamas_pyjamas package.
-This module provides various utility functions for logging, file handling, 
+This module provides various utility functions for logging, file handling,
 data processing, and visualization related to the llamas_pyjamas project.
 Functions:
     setup_logger(name, log_filename=None):
@@ -23,6 +23,14 @@ Functions:
         Plot trace data from a trace object.
     plot_traces_on_image(traceobj, data, zscale=False):
         Plot traces overlaid on raw data with optional zscale.
+    check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir='diagnostics'):
+        Fast scanning function to identify negative values in B-spline fit results.
+    plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
+        Plot individual fiber B-spline fits with original data for inspection.
+    check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
+        Check wavelength ranges in the LLAMAS reference arc calibration file.
+    check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
+        Check wavelength ranges in extraction file and compare to reference arc.
 """
 import os
 import logging
@@ -38,7 +46,20 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import cloudpickle
+import cloudpickle as pickle
+
+# Module-level logger for utility functions
+# This logger can be used by all functions in this module
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Add console handler if no handlers exist
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(levelname)s - %(name)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
 def setup_logger(name, log_filename=None)-> logging.Logger:
     """Setup logger with file and console handlers.
@@ -89,6 +110,46 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     logger.addHandler(console_handler)
     
     return logger
+
+
+def check_header(fits_file, color=None, bench=None, side=None) -> bool:
+    """
+    Check the FITS file header for color, bench, and side values.
+
+    Args:
+        fits_file (str): Path to the FITS file.
+        color (str, optional): Expected color value. Defaults to None.
+        bench (str, optional): Expected bench value. Defaults to None.
+        side (str, optional): Expected side value. Defaults to None.
+
+    Returns:
+        bool: True if all specified checks pass, False otherwise.
+    """
+    hdu = fits.open(fits_file)
+    primary = hdu[0].header
+
+    if 'CAM_NAME' in primary:
+        cam_name = primary['CAM_NAME']
+        bench_h = cam_name.split('_')[0][0]
+        side_h = cam_name.split('_')[0][1]
+        color_h = cam_name.split('_')[1].lower()
+    else:
+        bench_h = primary.get('BENCH')
+        side_h = primary.get('SIDE')
+        color_h = primary.get('COLOR', '').lower()
+
+    if bench is not None and bench_h != bench:
+        logger.error(f'Bench mismatch in {fits_file}: header {bench_h} vs expected {bench}')
+        return False
+    if side is not None and side_h != side:
+        logger.error(f'Side mismatch in {fits_file}: header {side_h} vs expected {side}')
+        return False
+    if color is not None and color_h != color:
+        logger.error(f'Color mismatch in {fits_file}: header {color_h} vs expected {color}')
+        return False
+
+    return True
+
 
 def concat_extractions(pkl_files: list, outfile: str) -> None:
     """Concatenate multiple pickle files containing extraction data.
@@ -486,23 +547,165 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
+def copy_mastercalib_trace(channel: str, bench: str, side: str,
+                          mastercalib_dir: str, target_dir: str) -> str:
+    """
+    Copy mastercalib trace to target directory with clear naming.
+
+    Args:
+        channel: Color channel (red/green/blue)
+        bench: Bench number
+        side: Side letter (A/B)
+        mastercalib_dir: Source mastercalib directory
+        target_dir: Destination user trace directory
+
+    Returns:
+        str: Path to copied trace file
+
+    Raises:
+        FileNotFoundError: If mastercalib trace not found
+
+    Example:
+        >>> copy_mastercalib_trace('green', '4', 'B', '/calib', '/user/traces')
+        '/user/traces/LLAMAS_master_green_4_B_traces.pkl'
+    """
+    import shutil
+
+    # Find mastercalib trace
+    mastercalib_filename = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+    mastercalib_path = os.path.join(mastercalib_dir, mastercalib_filename)
+
+    if not os.path.exists(mastercalib_path):
+        raise FileNotFoundError(f"Mastercalib trace not found: {mastercalib_path}")
+
+    # Copy to target directory with same naming convention
+    target_path = os.path.join(target_dir, mastercalib_filename)
+
+    # Use shutil.copy2 to preserve metadata
+    shutil.copy2(mastercalib_path, target_path)
+    logger.info(f"Copied mastercalib trace {mastercalib_filename} to {target_dir}")
+
+    return target_path
+
+
+def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_DIR) -> dict:
+    """
+    Validate each trace file individually and copy mastercalib fallback when needed.
+
+    This function checks each trace file for correct fiber count. If a trace has
+    the wrong number of fibers, it automatically copies the corresponding mastercalib
+    trace as a fallback, allowing the pipeline to continue with a hybrid trace set.
+
+    Args:
+        trace_dir: User trace directory to validate
+        mastercalib_dir: Mastercalib directory for fallback traces
+
+    Returns:
+        dict: {
+            'valid_traces': [(channel, bench, side, filepath), ...],
+            'invalid_traces': [(channel, bench, side, expected, actual), ...],
+            'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
+            'all_valid': bool
+        }
+
+    Example:
+        >>> results = validate_and_fix_trace_fibres('/user/traces')
+        >>> if not results['all_valid']:
+        ...     print(f"Replaced {len(results['fallback_used'])} invalid traces")
+    """
+    # Expected fiber counts per benchside
+    N_fib = {'1A': 298, '1B': 300, '2A': 298, '2B': 297,
+             '3A': 298, '3B': 300, '4A': 300, '4B': 298}
+
+    # Get all trace files in directory
+    files = glob.glob(os.path.join(trace_dir, '*.pkl'))
+
+    if not files:
+        logger.warning(f"No trace files found in {trace_dir}")
+        return {
+            'valid_traces': [],
+            'invalid_traces': [],
+            'fallback_used': [],
+            'all_valid': False
+        }
+
+    valid_traces = []
+    invalid_traces = []
+    fallback_used = []
+
+    for pkl_file in files:
+        try:
+            # Load trace object
+            with open(pkl_file, "rb") as file:
+                traceobj = cloudpickle.load(file)
+
+            # Extract trace information
+            shape = traceobj.traces.shape[0]
+            channel = traceobj.channel.lower()
+            bench = str(traceobj.bench)
+            side = traceobj.side
+            benchside = f"{bench}{side}"
+
+            # Get expected fiber count
+            expected_fibers = N_fib.get(benchside)
+
+            if expected_fibers is None:
+                logger.warning(f"Unknown benchside {benchside} in {os.path.basename(pkl_file)}")
+                continue
+
+            # Check if fiber count matches
+            if shape == expected_fibers:
+                valid_traces.append((channel, bench, side, pkl_file))
+                logger.debug(f"✓ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (valid)")
+            else:
+                invalid_traces.append((channel, bench, side, expected_fibers, shape))
+                logger.warning(f"✗ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (invalid)")
+
+                # Copy mastercalib fallback
+                try:
+                    copied_path = copy_mastercalib_trace(
+                        channel, bench, side,
+                        mastercalib_dir, trace_dir
+                    )
+                    fallback_used.append((channel, bench, side, os.path.join(mastercalib_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'), copied_path))
+                    logger.info(f"✓ Copied mastercalib fallback for {channel}{bench}{side}")
+                except FileNotFoundError as e:
+                    logger.error(f"✗ Could not find mastercalib fallback for {channel}{bench}{side}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error validating trace file {pkl_file}: {e}")
+            continue
+
+    all_valid = len(invalid_traces) == 0
+
+    return {
+        'valid_traces': valid_traces,
+        'invalid_traces': invalid_traces,
+        'fallback_used': fallback_used,
+        'all_valid': all_valid
+    }
+
+
 def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
     """
     Checks if all trace files have the correct number of fibers for their benchside.
-    
+
+    DEPRECATED: Use validate_and_fix_trace_fibres() for more detailed validation
+    with automatic fallback support.
+
     Args:
         mastercalib_dir (str): Directory containing the trace calibration pickle files.
             Defaults to CALIB_DIR from config.
-    
+
     Returns:
         bool: True if all trace files have the correct fiber count, False otherwise.
     """
     N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
     files = glob.glob(mastercalib_dir+'/*.pkl')
     assert type(files) == list, 'File extraction did not return as list'
-    
+
     all_match = True
-    
+
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
             traceobj = cloudpickle.load(file)
@@ -510,12 +713,12 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
         channel = traceobj.channel
         benchside = f"{traceobj.bench}{traceobj.side}"
         req = N_fib[benchside]
-        
+
         if shape != req:
             all_match = False
-            
+
         print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
-    
+
     return all_match
         
         
@@ -571,7 +774,7 @@ def flip_blue_combs()-> None:
     
     
 def check_image_properties(hdu: fits.HDUList, start_idx: int = 1) -> None:
-    
+
     for i in range(start_idx, len(hdu)):
         color = hdu[i].header['COLOR']
         bench = hdu[i].header['BENCh']
@@ -582,4 +785,702 @@ def check_image_properties(hdu: fits.HDUList, start_idx: int = 1) -> None:
         print(f'color {color} bench {bench} side {side}')
         print(f'Has NaN: {has_nan}')
         print(f'Has negative value {has_neg}')
+
+
+def check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir='diagnostics'):
+    """
+    Fast scanning function to identify and summarize negative values in B-spline fit results.
+
+    This function checks B-spline fit results for negative predicted values, which should not
+    occur in flat field calibration. It also optionally checks pixel map FITS files for
+    negative pixels. Results are summarized without generating plots for performance.
+
+    Args:
+        fit_results (dict): Dictionary from calculate_fits_all_extensions() containing
+            B-spline fits for each extension and fiber
+        pixel_map_files (list, optional): List of pixel map FITS file paths to check
+            for negative values. Defaults to None.
+        output_dir (str, optional): Directory for saving diagnostic report.
+            Defaults to 'diagnostics'.
+
+    Returns:
+        dict: Dictionary mapping (extension_key, fiber_idx) -> negative_info for
+            problematic fibers found
+    """
+    import os
+
+    print("="*80)
+    print("B-SPLINE NEGATIVE VALUE CHECKER")
+    print("="*80)
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    problematic_fibers = {}
+    total_fibers = 0
+    total_negative_predictions = 0
+
+    # Check fit results for negative predictions
+    print(f"\nChecking B-spline fit results...")
+    print(f"Found {len(fit_results)} extensions to check")
+
+    for ext_key, extension_data in fit_results.items():
+        print(f"\nExtension {ext_key}:")
+        extension_problems = 0
+
+        for fiber_idx, fiber_data in extension_data.items():
+            total_fibers += 1
+
+            # Check y_predicted values
+            y_predicted = fiber_data.get('y_predicted', [])
+            if len(y_predicted) == 0:
+                continue
+
+            negative_mask = np.array(y_predicted) < 0
+            negative_count = np.sum(negative_mask)
+
+            if negative_count > 0:
+                min_value = np.min(y_predicted)
+                negative_fraction = negative_count / len(y_predicted) * 100
+
+                problematic_fibers[(ext_key, fiber_idx)] = {
+                    'negative_count': negative_count,
+                    'total_points': len(y_predicted),
+                    'negative_fraction': negative_fraction,
+                    'min_value': min_value,
+                    'rms_residual': fiber_data.get('rms_residual', np.nan),
+                    'relative_rms': fiber_data.get('relative_rms', np.nan)
+                }
+
+                extension_problems += 1
+                total_negative_predictions += negative_count
+
+        print(f"  {len(extension_data)} fibers checked, {extension_problems} with negative predictions")
+
+    # Check pixel map files if provided
+    pixel_map_negatives = 0
+    total_pixels_checked = 0
+
+    if pixel_map_files:
+        print(f"\nChecking {len(pixel_map_files)} pixel map files...")
+
+        for pixel_map_file in pixel_map_files:
+            if not os.path.exists(pixel_map_file):
+                print(f"  WARNING: File not found: {os.path.basename(pixel_map_file)}")
+                continue
+
+            try:
+                with fits.open(pixel_map_file) as hdul:
+                    data = hdul[0].data
+                    if data is not None:
+                        negative_pixels = np.sum(data < 0)
+                        total_pixels = data.size
+                        total_pixels_checked += total_pixels
+                        pixel_map_negatives += negative_pixels
+
+                        if negative_pixels > 0:
+                            min_value = np.min(data)
+                            print(f"  {os.path.basename(pixel_map_file)}: {negative_pixels:,} negative pixels "
+                                  f"({negative_pixels/total_pixels*100:.2f}%), min={min_value:.3f}")
+                        else:
+                            print(f"  {os.path.basename(pixel_map_file)}: No negative pixels")
+            except Exception as e:
+                print(f"  ERROR reading {os.path.basename(pixel_map_file)}: {str(e)}")
+
+    # Print summary
+    print(f"\n" + "="*60)
+    print(f"SUMMARY")
+    print(f"="*60)
+    print(f"Total fibers checked: {total_fibers}")
+    print(f"Fibers with negative predictions: {len(problematic_fibers)}")
+    print(f"Total negative prediction points: {total_negative_predictions}")
+
+    if pixel_map_files:
+        print(f"Total pixels checked in pixel maps: {total_pixels_checked:,}")
+        print(f"Negative pixels found: {pixel_map_negatives:,}")
+
+    if problematic_fibers:
+        print(f"\nPROBLEMATIC FIBERS:")
+        for (ext_key, fiber_idx), info in sorted(problematic_fibers.items()):
+            print(f"  {ext_key} fiber {fiber_idx}: {info['negative_count']} negative points "
+                  f"({info['negative_fraction']:.1f}%), min={info['min_value']:.3f}, "
+                  f"RMS={info['rms_residual']:.3f}")
+    else:
+        print(f"\n✅ No negative values found in B-spline predictions!")
+
+    # Write detailed report
+    report_file = os.path.join(output_dir, 'negative_values_report.txt')
+    with open(report_file, 'w') as f:
+        f.write("B-SPLINE NEGATIVE VALUE REPORT\n")
+        f.write("="*50 + "\n\n")
+        f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Total fibers checked: {total_fibers}\n")
+        f.write(f"Fibers with negative predictions: {len(problematic_fibers)}\n")
+        f.write(f"Total negative prediction points: {total_negative_predictions}\n\n")
+
+        if pixel_map_files:
+            f.write(f"Pixel map files checked: {len(pixel_map_files)}\n")
+            f.write(f"Total pixels checked: {total_pixels_checked:,}\n")
+            f.write(f"Negative pixels found: {pixel_map_negatives:,}\n\n")
+
+        if problematic_fibers:
+            f.write("DETAILED PROBLEMATIC FIBER LIST:\n")
+            f.write("-" * 40 + "\n")
+            for (ext_key, fiber_idx), info in sorted(problematic_fibers.items()):
+                f.write(f"Extension: {ext_key}, Fiber: {fiber_idx}\n")
+                f.write(f"  Negative points: {info['negative_count']}/{info['total_points']} "
+                        f"({info['negative_fraction']:.1f}%)\n")
+                f.write(f"  Minimum value: {info['min_value']:.6f}\n")
+                f.write(f"  RMS residual: {info['rms_residual']:.6f}\n")
+                f.write(f"  Relative RMS: {info['relative_rms']:.6f}\n\n")
+
+    print(f"\nDetailed report saved to: {report_file}")
+
+    return problematic_fibers
+
+
+def plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
+    """
+    Plot individual fiber B-spline fits with original data for detailed inspection.
+
+    This function creates a comprehensive plot showing the original flat field data,
+    B-spline fit, and residuals for a specific fiber. Negative predictions are
+    highlighted in red for easy identification.
+
+    Args:
+        fit_results (dict): B-spline fit results dictionary from calculate_fits_all_extensions()
+        extension_key (str): Extension identifier (e.g., 'red1A', 'green2B')
+        fiber_idx (int): Fiber number to plot
+        output_file (str, optional): Filename to save plot. If None, displays plot.
+            Defaults to None.
+
+    Returns:
+        None
+    """
+
+    # Validate inputs
+    if extension_key not in fit_results:
+        print(f"ERROR: Extension '{extension_key}' not found in fit results")
+        print(f"Available extensions: {list(fit_results.keys())}")
+        return
+
+    if fiber_idx not in fit_results[extension_key]:
+        print(f"ERROR: Fiber {fiber_idx} not found in extension '{extension_key}'")
+        print(f"Available fibers: {list(fit_results[extension_key].keys())}")
+        return
+
+    # Get fiber data
+    fiber_data = fit_results[extension_key][fiber_idx]
+
+    # Extract data arrays
+    xshift_clean = np.array(fiber_data.get('xshift_clean', []))
+    counts_clean = np.array(fiber_data.get('counts_clean', []))
+    y_predicted = np.array(fiber_data.get('y_predicted', []))
+    residuals = np.array(fiber_data.get('residuals', []))
+    rms_residual = fiber_data.get('rms_residual', np.nan)
+    relative_rms = fiber_data.get('relative_rms', np.nan)
+
+    # Check for negative predictions
+    negative_mask = y_predicted < 0
+    negative_count = np.sum(negative_mask)
+    min_prediction = np.min(y_predicted) if len(y_predicted) > 0 else 0
+
+    # Create figure with subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+    # Plot 1: Original data and B-spline fit
+    ax1.scatter(xshift_clean, counts_clean, alpha=0.6, s=20, color='blue',
+               label='Original Data')
+    ax1.plot(xshift_clean, y_predicted, 'r-', linewidth=2, label='B-spline Fit')
+
+    # Highlight negative predictions
+    if negative_count > 0:
+        negative_x = xshift_clean[negative_mask]
+        negative_y = y_predicted[negative_mask]
+        ax1.scatter(negative_x, negative_y, color='red', s=50, marker='x',
+                   linewidth=3, label=f'Negative Predictions ({negative_count})')
+
+    ax1.set_xlabel('X-shift')
+    ax1.set_ylabel('Counts')
+    ax1.set_title(f'B-spline Fit: {extension_key.upper()} Fiber {fiber_idx}')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # Add statistics text
+    stats_text = f'RMS Residual: {rms_residual:.4f}\n'
+    stats_text += f'Relative RMS: {relative_rms:.4f}\n'
+    stats_text += f'Min Prediction: {min_prediction:.4f}\n'
+    stats_text += f'Data Points: {len(xshift_clean)}'
+    ax1.text(0.02, 0.98, stats_text, transform=ax1.transAxes, fontsize=10,
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    # Plot 2: Residuals
+    ax2.scatter(xshift_clean, residuals, alpha=0.6, s=20, color='green')
+    ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    ax2.set_xlabel('X-shift')
+    ax2.set_ylabel('Residuals (Data - Fit)')
+    ax2.set_title(f'Fit Residuals: {extension_key.upper()} Fiber {fiber_idx}')
+    ax2.grid(True, alpha=0.3)
+
+    # Add residual statistics
+    if len(residuals) > 0:
+        residual_std = np.std(residuals)
+        residual_mean = np.mean(residuals)
+        ax2.axhline(y=residual_mean + 2*residual_std, color='red', linestyle=':', alpha=0.7, label='+2σ')
+        ax2.axhline(y=residual_mean - 2*residual_std, color='red', linestyle=':', alpha=0.7, label='-2σ')
+        ax2.legend()
+
+    plt.tight_layout()
+
+    # Save or display plot
+    if output_file:
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: {output_file}")
+        plt.close()
+    else:
+        plt.show()
+
+    # Print summary information
+    print(f"\nFiber Summary: {extension_key.upper()} Fiber {fiber_idx}")
+    print(f"  Data points: {len(xshift_clean)}")
+    print(f"  RMS residual: {rms_residual:.6f}")
+    print(f"  Relative RMS: {relative_rms:.6f}")
+    print(f"  Min prediction: {min_prediction:.6f}")
+    if negative_count > 0:
+        print(f"  ⚠️  WARNING: {negative_count} negative predictions found!")
+        print(f"  Negative fraction: {negative_count/len(y_predicted)*100:.1f}%")
+    else:
+        print(f"  ✅ No negative predictions")
+
+def plot_spline_fibre(pkl_file: str, extension: str, fiber_number: int) -> None:
+    """
+    Load B-spline fit results from a pickle file and plot a specific fiber.
+
+    This function reads B-spline fit results from a specified pickle file,
+    lists available extensions and fibers, and generates a plot for the
+    specified extension and fiber number.
+
+    Args:
+        pkl_file (str): Path to the pickle file containing fit results.
+        extension (str): Extension identifier (e.g., 'red1A', 'green2B').
+        fiber_number (int): Fiber number to plot.
+
+    Returns:
+        None
+    """
+    import pickle
+    import os
+
+    print(f"Loading B-spline fit results from: {pkl_file}")
+
+    if not os.path.exists(pkl_file):
+        print(f"ERROR: File not found: {pkl_file}")
+        return
+# Load fit results
+    with open(pkl_file, 'rb') as f:
+        fit_results = pickle.load(f)
+    # See what's available
+    print("Available extensions:")
+    for ext_key in fit_results.keys():
+        fiber_count = len(fit_results[ext_key])
+        fiber_range = f"{min(fit_results[ext_key].keys())}-{max(fit_results[ext_key].keys())}"
+        print(f"  {ext_key}: {fiber_count} fibers (range: {fiber_range})")
+    # Plot specific fiber (change these values)
+    extension = 'green2B'  # Change this
+    fiber_number = 0    # Change this
+    plot_bspline_fit(fit_results, extension, fiber_number, f'{extension}_fiber_{fiber_number}.png')
+    return
+
+
+# Example usage functions and documentation
+def check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
+    """
+    Check wavelength ranges in the LLAMAS reference arc calibration file.
+
+    This function loads the reference arc file used for wavelength calibration
+    and reports the wavelength coverage for each extension and channel.
+
+    Args:
+        arc_file (str, optional): Path to the reference arc pickle file.
+            If None, uses the default LLAMAS_reference_arc.pkl from LUT_DIR.
+            Defaults to None.
+        verbose (bool, optional): If True, prints detailed output for each extension.
+            If False, only prints channel summaries. Defaults to True.
+
+    Returns:
+        dict: Dictionary containing wavelength ranges organized by channel:
+            {
+                'extensions': [
+                    {
+                        'index': int,
+                        'bench': str,
+                        'side': str,
+                        'channel': str,
+                        'nfibers': int,
+                        'wave_min': float,
+                        'wave_max': float,
+                        'has_wavelength_data': bool
+                    },
+                    ...
+                ],
+                'channels': {
+                    'red': {'min': float, 'max': float},
+                    'green': {'min': float, 'max': float},
+                    'blue': {'min': float, 'max': float}
+                }
+            }
+
+    Example:
+        >>> from llamas_pyjamas.Utils.utils import check_reference_arc_wavelength_ranges
+        >>> ranges = check_reference_arc_wavelength_ranges()
+        >>> print(f"Red channel: {ranges['channels']['red']['min']:.1f} - {ranges['channels']['red']['max']:.1f} Å")
+    """
+    import sys
+    from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+
+    # Use default file if none provided
+    if arc_file is None:
+        arc_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+
+    # Check if file exists
+    if not os.path.exists(arc_file):
+        print(f"ERROR: Reference arc file not found: {arc_file}")
+        return None
+
+    # Load the reference arc
+    try:
+        arc_data = ExtractLlamas.loadExtraction(arc_file)
+    except Exception as e:
+        print(f"ERROR: Failed to load reference arc file: {e}")
+        return None
+
+    extractions = arc_data['extractions']
+    metadata = arc_data['metadata']
+
+    # Initialize results
+    results = {
+        'extensions': [],
+        'channels': {}
+    }
+
+    if verbose:
+        print("=" * 60)
+        print("WAVELENGTH RANGES BY EXTENSION")
+        print("=" * 60)
+
+    # Process each extension
+    for i in range(len(extractions)):
+        ext = extractions[i]
+        meta = metadata[i]
+
+        channel = meta['channel']
+        bench = meta['bench']
+        side = meta['side']
+        nfibers = meta['nfibers']
+
+        ext_info = {
+            'index': i,
+            'bench': str(bench),
+            'side': side,
+            'channel': channel,
+            'nfibers': nfibers,
+            'has_wavelength_data': False
+        }
+
+        if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+            # Get min/max wavelengths (excluding zeros)
+            wave_min = np.min(ext.wave[ext.wave > 0])
+            wave_max = np.max(ext.wave)
+
+            ext_info['wave_min'] = wave_min
+            ext_info['wave_max'] = wave_max
+            ext_info['has_wavelength_data'] = True
+
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | "
+                      f"{wave_min:7.2f} - {wave_max:7.2f} Å | "
+                      f"{nfibers} fibers")
+
+            # Update channel ranges
+            if channel not in results['channels']:
+                results['channels'][channel] = {'min': wave_min, 'max': wave_max}
+            else:
+                results['channels'][channel]['min'] = min(results['channels'][channel]['min'], wave_min)
+                results['channels'][channel]['max'] = max(results['channels'][channel]['max'], wave_max)
+        else:
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | NO WAVELENGTH DATA")
+
+        results['extensions'].append(ext_info)
+
+    # Print channel summary
+    if verbose:
+        print("=" * 60)
+    print("\nWAVELENGTH COVERAGE BY CHANNEL:")
+    print("-" * 60)
+
+    for channel in ['red', 'green', 'blue']:
+        if channel in results['channels']:
+            print(f"{channel.upper():6s}: {results['channels'][channel]['min']:7.2f} - "
+                  f"{results['channels'][channel]['max']:7.2f} Å")
+        else:
+            print(f"{channel.upper():6s}: No wavelength data found")
+
+    if verbose:
+        print("=" * 60)
+
+    return results
+
+
+def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
+    """
+    Check wavelength ranges in an extraction file and compare to reference arc.
+
+    This function loads an extraction pickle file (science or arc data) and reports
+    the wavelength coverage for each extension and channel. It can optionally compare
+    against the reference arc calibration to identify any extrapolation.
+
+    Args:
+        extraction_file (str): Path to the extraction pickle file to check.
+        reference_arc_file (str, optional): Path to the reference arc pickle file.
+            If None, uses the default LLAMAS_reference_arc.pkl from LUT_DIR.
+            Defaults to None.
+        verbose (bool, optional): If True, prints detailed output for each extension.
+            If False, only prints channel summaries. Defaults to True.
+
+    Returns:
+        dict: Dictionary containing wavelength ranges and comparison results:
+            {
+                'extensions': [...],  # Same format as check_reference_arc_wavelength_ranges
+                'channels': {...},
+                'comparison': {
+                    'red': {'below': float, 'above': float, 'within': bool},
+                    'green': {...},
+                    'blue': {...}
+                }
+            }
+
+    Example:
+        >>> from llamas_pyjamas.Utils.utils import check_extraction_wavelength_ranges
+        >>> results = check_extraction_wavelength_ranges('science_extract.pkl')
+        >>> if results['comparison']['red']['within']:
+        >>>     print("Red channel is within calibration range")
+    """
+    from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+
+    # Load the extraction file
+    if not os.path.exists(extraction_file):
+        print(f"ERROR: Extraction file not found: {extraction_file}")
+        return None
+
+    try:
+        data = ExtractLlamas.loadExtraction(extraction_file)
+    except Exception as e:
+        print(f"ERROR: Failed to load extraction file: {e}")
+        return None
+
+    extractions = data['extractions']
+    metadata = data['metadata']
+
+    # Load reference arc if comparison requested
+    arc_ranges = None
+    if reference_arc_file or reference_arc_file is None:
+        if reference_arc_file is None:
+            reference_arc_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+
+        if os.path.exists(reference_arc_file):
+            try:
+                arc_data = ExtractLlamas.loadExtraction(reference_arc_file)
+                arc_extractions = arc_data['extractions']
+                arc_metadata = arc_data['metadata']
+
+                # Build arc ranges
+                arc_ranges = {}
+                for channel in ['red', 'green', 'blue']:
+                    channel_exts = [i for i, m in enumerate(arc_metadata) if m['channel'] == channel]
+                    if channel_exts:
+                        all_mins = []
+                        all_maxs = []
+                        for i in channel_exts:
+                            ext = arc_extractions[i]
+                            if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+                                all_mins.append(np.min(ext.wave[ext.wave > 0]))
+                                all_maxs.append(np.max(ext.wave))
+                        if all_mins and all_maxs:
+                            arc_ranges[channel] = (min(all_mins), max(all_maxs))
+            except Exception as e:
+                print(f"Warning: Could not load reference arc: {e}")
+
+    # Initialize results
+    results = {
+        'extensions': [],
+        'channels': {},
+        'comparison': {}
+    }
+
+    if verbose:
+        print("=" * 80)
+        print("EXTRACTION WAVELENGTH RANGES")
+        print("=" * 80)
+
+    # Process each extension
+    channels_data = {'red': [], 'green': [], 'blue': []}
+
+    for i in range(len(extractions)):
+        ext = extractions[i]
+        meta = metadata[i]
+
+        channel = meta['channel']
+        bench = meta['bench']
+        side = meta['side']
+        nfibers = meta['nfibers']
+
+        ext_info = {
+            'index': i,
+            'bench': str(bench),
+            'side': side,
+            'channel': channel,
+            'nfibers': nfibers,
+            'has_wavelength_data': False
+        }
+
+        if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+            wave_min = np.min(ext.wave[ext.wave > 0])
+            wave_max = np.max(ext.wave)
+
+            ext_info['wave_min'] = wave_min
+            ext_info['wave_max'] = wave_max
+            ext_info['has_wavelength_data'] = True
+
+            channels_data[channel].append({'min': wave_min, 'max': wave_max})
+
+            if verbose:
+                status = ""
+                if arc_ranges and channel in arc_ranges:
+                    arc_min, arc_max = arc_ranges[channel]
+                    if wave_min < arc_min or wave_max > arc_max:
+                        status = " ⚠️  OUTSIDE ARC RANGE"
+
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | "
+                      f"{wave_min:7.2f} - {wave_max:7.2f} Å | "
+                      f"{nfibers} fibers{status}")
+
+            # Update channel ranges
+            if channel not in results['channels']:
+                results['channels'][channel] = {'min': wave_min, 'max': wave_max}
+            else:
+                results['channels'][channel]['min'] = min(results['channels'][channel]['min'], wave_min)
+                results['channels'][channel]['max'] = max(results['channels'][channel]['max'], wave_max)
+        else:
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | NO WAVELENGTH DATA")
+
+        results['extensions'].append(ext_info)
+
+    # Compare to arc ranges
+    if arc_ranges:
+        if verbose:
+            print("=" * 80)
+            print("\nCOMPARISON TO REFERENCE ARC:")
+            print("-" * 80)
+
+        for channel in ['red', 'green', 'blue']:
+            if channel in results['channels'] and channel in arc_ranges:
+                ext_min = results['channels'][channel]['min']
+                ext_max = results['channels'][channel]['max']
+                arc_min, arc_max = arc_ranges[channel]
+
+                below = max(0, arc_min - ext_min)
+                above = max(0, ext_max - arc_max)
+                within = (ext_min >= arc_min) and (ext_max <= arc_max)
+
+                results['comparison'][channel] = {
+                    'below': below,
+                    'above': above,
+                    'within': within
+                }
+
+                if verbose:
+                    print(f"\n{channel.upper():6s}:")
+                    print(f"  Extraction range: {ext_min:.4f} - {ext_max:.4f} Å")
+                    print(f"  Arc range:        {arc_min:.2f} - {arc_max:.2f} Å")
+
+                    if within:
+                        print(f"  Status: ✅ WITHIN arc calibration range")
+                    else:
+                        if below > 0:
+                            print(f"  Status: ⚠️  BELOW arc range by {below:.4f} Å")
+                        if above > 0:
+                            print(f"  Status: ⚠️  ABOVE arc range by {above:.4f} Å")
+
+    if verbose:
+        print("=" * 80)
+
+    return results
+
+
+def _bspline_diagnostic_usage_examples():
+    """
+    Example usage for B-spline diagnostic functions.
+
+    This function is not meant to be called directly, but serves as documentation
+    for how to use the check_bspline_negative_values and plot_bspline_fit functions.
+    """
+
+    # Example 1: Check for negative values after flat field processing
+    """
+    import pickle
+    import glob
+    from llamas_pyjamas.Utils.utils import check_bspline_negative_values, plot_bspline_fit
+
+    # Load fit results from flat field processing
+    with open('output/combined_flat_extractions_fits.pkl', 'rb') as f:
+        fit_results = pickle.load(f)
+
+    # Find pixel map files
+    pixel_map_files = glob.glob('output/flat_pixel_map_*.fits')
+
+    # Run negative value check
+    problematic_fibers = check_bspline_negative_values(
+        fit_results=fit_results,
+        pixel_map_files=pixel_map_files,
+        output_dir='diagnostics/'
+    )
+
+    # Plot specific problematic fibers
+    for (ext_key, fiber_idx), info in problematic_fibers.items():
+        if info['negative_fraction'] > 10:  # Only plot fibers with >10% negative values
+            print(f"Plotting problematic fiber: {ext_key} fiber {fiber_idx}")
+            plot_bspline_fit(fit_results, ext_key, fiber_idx,
+                            output_file=f'diagnostics/fiber_{ext_key}_{fiber_idx}.png')
+    """
+
+    # Example 2: Plot any fiber for inspection
+    """
+    # Plot a specific fiber for inspection (doesn't need to be problematic)
+    plot_bspline_fit(fit_results, 'red1A', 150, 'inspection_red1A_150.png')
+
+    # Plot without saving (display interactively)
+    plot_bspline_fit(fit_results, 'green2B', 200)
+    """
+
+    # Example 3: Command line usage
+    """
+    # After running flat field processing, check from command line:
+    cd /path/to/llamas_pyjamas
+    python -c "
+    from llamas_pyjamas.Utils.utils import check_bspline_negative_values
+    import pickle
+    import glob
+
+    with open('output/combined_flat_extractions_fits.pkl', 'rb') as f:
+        fit_results = pickle.load(f)
+
+    pixel_maps = glob.glob('output/flat_pixel_map_*.fits')
+
+    problems = check_bspline_negative_values(fit_results, pixel_maps, 'diagnostics/')
+    print(f'Found {len(problems)} problematic fibers')
+    "
+    """
+    pass
     

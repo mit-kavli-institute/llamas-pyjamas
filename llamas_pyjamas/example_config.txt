@@ -28,3 +28,26 @@ cube_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fres
 # Ray parallelization control (optional, defaults to all CPU cores)
 ray_num_cpus = 8
 
+#==============================================================================
+# CUBE CONSTRUCTION PARAMETERS
+#==============================================================================
+# Enable/disable cube generation (set to False if only 2D RSS products needed)
+generate_cubes = True
+
+# Cube construction method: simple (default, MUSE-like), crr, or traditional
+# simple = Fast, MUSE-inspired interpolation (recommended)
+# crr = Covariance-Regularized Reconstruction (slower, experimental)
+# traditional = Legacy method
+cube_method = simple
+
+# Simple cube constructor parameters (used when cube_method = simple)
+cube_pixel_size = 0.3          # Spatial pixel size in arcseconds (default: 0.3)
+cube_fiber_pitch = 0.75        # Fiber-to-fiber pitch in arcseconds (default: 0.75)
+cube_wave_sampling = 1.0       # Wavelength sampling factor (1.0 = native, 0.5 = 2x oversample)
+cube_radius = 1.5              # Interpolation radius in arcseconds (default: 1.5, ~2 fiber pitches)
+cube_min_weight = 0.01         # Minimum weight threshold for interpolation (default: 0.01)
+
+# Legacy parameters for CRR and traditional methods (keep for backward compatibility)
+CRR_cube = False               # Use CRR method (overrides cube_method if True)
+CRR_parallel = False           # Enable parallel processing for CRR method
+

@@ -81,9 +81,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None) -> None:
         
     if not tracedir:
         trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        logger.info(f'No tracedir specified, using CALIB_DIR: {CALIB_DIR}')
     else:
-        logger.debug('Currently only using mastercalib files to implement this...check again later')
-        trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+        trace_files = glob.glob(os.path.join(tracedir, f'{masterfile}*traces.pkl'))
+        logger.info(f'Using specified tracedir: {tracedir}')
     
     _hdu_trace_pairs = match_hdu_to_traces(channel_hdus, trace_files, start_idx=0)
     logger.debug(f"HDU-Trace pairs: {_hdu_trace_pairs}")

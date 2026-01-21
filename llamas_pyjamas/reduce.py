@@ -35,45 +35,195 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
+from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
+from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
+from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
 from astropy.io import fits
 import numpy as np
 
+import shutil
+
+from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices
 
 _linefile = os.path.join(LUT_DIR, '')
 
 
+def validate_input_files(file_list):
+
+    for file in file_list:
+        assert os.path.exists(file), f"Input file does not exist: {file}"
+        validate_and_fix_extensions(file, 
+                                    output_file=None, backup=True)
+
+    return True
+
+def get_input_files_from_config(config, file_keys=None):
+      """
+      Extract all input file paths from a configuration dictionary.
+      
+      Parameters
+      ----------
+      config : dict
+          Configuration dictionary with file paths
+      file_keys : list, optional
+          List of config keys that contain file paths. If None, uses default keys.
+          
+      Returns
+      -------
+      list
+          List of all file paths found in the config
+      """
+      if file_keys is None:
+          file_keys = ['science_files', 'bias_file', 'red_flat_file',
+                       'green_flat_file', 'blue_flat_file']
+
+      input_files = []
+
+      for key in file_keys:
+          if key in config:
+              value = config[key]
+              # If it's a list, extend the input_files list
+              if isinstance(value, list):
+                  input_files.extend(value)
+              # If it's a single string, append it
+              elif isinstance(value, str):
+                  input_files.append(value)
+
+      return input_files
+
+
+def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
+    """
+    Copy mastercalib traces for placeholder extensions identified in a flat file.
+
+    Args:
+        flat_file: Path to flat field FITS file
+        trace_dir: Directory where traces should be copied to
+        channel: Channel name ('red', 'green', 'blue')
+        placeholder_indices: Optional list of placeholder indices (will detect if None)
+
+    Returns:
+        int: Number of traces copied
+    """
+    if placeholder_indices is None:
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+    if len(placeholder_indices) == 0:
+        return 0  # No placeholders to handle
+
+    print(f"Copying {len(placeholder_indices)} mastercalib traces for missing {channel} cameras")
+
+    traces_copied = 0
+    with fits.open(flat_file) as hdul:
+        for idx in placeholder_indices:
+            hdu = hdul[idx]
+
+            # Extract camera metadata
+            bench = hdu.header['BENCH']
+            side = hdu.header['SIDE']
+            cam_channel = hdu.header['COLOR'].lower()
+
+            # Only copy if the channel matches
+            if cam_channel != channel.lower():
+                continue
+
+            # Determine mastercalib trace filename
+            master_trace_file = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+            master_trace_path = os.path.join(CALIB_DIR, master_trace_file)
+
+            # Target filename (user trace naming convention)
+            user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+            user_trace_path = os.path.join(trace_dir, user_trace_file)
+
+            # Copy mastercalib trace to user trace directory
+            if os.path.exists(master_trace_path):
+                shutil.copy2(master_trace_path, user_trace_path)
+                print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
+                traces_copied += 1
+            else:
+                print(f"  ✗ WARNING: Mastercalib trace not found: {master_trace_file}")
+
+    return traces_copied
 
 
 
-def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
+def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, missing_cams=False):
     """Generate fiber traces from flat field observations for all three channels.
-    
+
+    This function intelligently handles missing camera extensions by:
+    1. Detecting placeholder extensions in each flat field file
+    2. Running trace generation only for real camera data
+    3. Copying mastercalib traces for placeholder extensions
+
     Args:
         red_flat: Path to red flat field FITS file.
-        green_flat: Path to green flat field FITS file. 
+        green_flat: Path to green flat field FITS file.
         blue_flat: Path to blue flat field FITS file.
         output_dir: Directory to save trace files.
         bias: Optional bias frame for correction.
-        
+        missing_cams: Deprecated parameter, kept for backwards compatibility.
+
     Raises:
         AssertionError: If any of the flat field files do not exist.
     """
-    
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
+
     assert os.path.exists(red_flat), "Red flat file does not exist."
     assert os.path.exists(green_flat), "Green flat file does not exist."
     assert os.path.exists(blue_flat), "Blue flat file does not exist."
 
-    run_ray_tracing(red_flat, outpath=output_dir, channel='red', use_bias=bias)
-    run_ray_tracing(green_flat, outpath=output_dir, channel='green', use_bias=bias)
-    run_ray_tracing(blue_flat, outpath=output_dir, channel='blue', use_bias=bias)
-    print(f"Traces generated and saved to {output_dir}")
+    print("\n" + "="*60)
+    print("TRACE GENERATION WITH PLACEHOLDER DETECTION")
+    print("="*60)
+
+    # Process each channel with placeholder detection
+    channels = [
+        ('red', red_flat),
+        ('green', green_flat),
+        ('blue', blue_flat)
+    ]
+
+    for channel, flat_file in channels:
+        print(f"\n--- Processing {channel.upper()} channel ---")
+
+        # Detect placeholder extensions
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+        if placeholder_indices:
+            print(f"Found {len(placeholder_indices)} placeholder extensions in {os.path.basename(flat_file)}")
+            print(f"Will skip trace generation for placeholder indices: {placeholder_indices}")
+        else:
+            print(f"No placeholder extensions found in {os.path.basename(flat_file)}")
+
+        # Run trace generation, skipping placeholder extensions
+        run_ray_tracing(
+            flat_file,
+            outpath=output_dir,
+            channel=channel,
+            use_bias=bias,
+            is_master_calib=False,
+            skip_extension_indices=placeholder_indices
+        )
+
+        # Copy mastercalib traces for placeholder extensions
+        if placeholder_indices:
+            traces_copied = copy_mastercalib_traces_for_placeholders(
+                flat_file,
+                output_dir,
+                channel,
+                placeholder_indices
+            )
+            if traces_copied > 0:
+                print(f"Successfully copied {traces_copied} mastercalib traces for {channel} placeholders")
+
+    print("\n" + "="*60)
+    print(f"All traces generated and saved to {output_dir}")
+    print("="*60)
 
     return
 
@@ -91,22 +241,52 @@ def extract_flat_field(flat_file_dir, output_dir, use_bias=None):
     return
 
 
-def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None):
+def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mastercalib_trace_dir=None):
+    """
+    Run spectrum extraction with hybrid trace support.
+
+    Args:
+        science_file: Path to science FITS file or list of paths
+        output_dir: Output directory for extractions
+        use_bias: Bias file for calibration
+        trace_dir: User trace directory (for real extensions)
+        mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
+
+    Returns:
+        str: Path to extraction file
+    """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    # Default mastercalib location if not specified
+    if mastercalib_trace_dir is None:
+        mastercalib_trace_dir = CALIB_DIR
 
     assert os.path.exists(science_file), "Science file does not exist."
     if type(science_file) is list:
         for file in science_file:
             assert os.path.exists(file), f"Science file {file} does not exist."
-            extraction_file_path = ge.GUI_extract(file, output_dir=output_dir, use_bias=use_bias, trace_dir=trace_dir)
+            extraction_file_path = ge.GUI_extract(
+                file,
+                output_dir=output_dir,
+                use_bias=use_bias,
+                trace_dir=trace_dir,
+                mastercalib_trace_dir=mastercalib_trace_dir
+            )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
-        extraction_file_path, _ = ge.GUI_extract(science_file, output_dir=output_dir, use_bias=use_bias, trace_dir=trace_dir)
+        extraction_file_path, _ = ge.GUI_extract(
+            science_file,
+            output_dir=output_dir,
+            use_bias=use_bias,
+            trace_dir=trace_dir,
+            mastercalib_trace_dir=mastercalib_trace_dir
+        )
 
     return  extraction_file_path
 
 
+#this isn't quite right -> nneeds checking
 def calc_wavelength_soln(arc_file, output_dir, bias=None):
 
     ge.GUI_extract(arc_file, use_bias=bias, output_dir=output_dir)
@@ -167,8 +347,8 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
     """
     from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
     
-    # Create flat field output directory for pixel maps
-    flat_output_dir = os.path.join(output_dir, 'pixel_maps')
+    # Use flat field output directory directly (no nested pixel_maps subdirectory)
+    flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
     
     print(f"Processing flat field calibration...")
@@ -556,25 +736,34 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
 
 
-def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75, use_crr=True, crr_config=None, parallel=False):
+def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
+                   use_crr=True, crr_config=None, parallel=False, cube_method='simple',
+                   cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
+                   cube_radius=1.5, cube_min_weight=0.01):
     """
-    Construct IFU data cubes from RSS files using either traditional or CRR method.
-    
+    Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
+
     This function can handle both:
     1. Single RSS files with multiple channels
     2. Multiple channel-specific RSS files with names like:
        "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
-    
+
     Parameters:
         rss_files (str or list): Path to RSS FITS file(s) or base paths
         output_dir (str): Directory to save output cubes
         wavelength_range (tuple, optional): Min/max wavelength range for output cubes
-        dispersion (float): Wavelength dispersion in Angstroms/pixel
-        spatial_sampling (float): Spatial sampling in arcsec/pixel
-        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method
+        dispersion (float): Wavelength dispersion in Angstroms/pixel (legacy, for traditional/CRR)
+        spatial_sampling (float): Spatial sampling in arcsec/pixel (legacy, for traditional/CRR)
+        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
         crr_config (CRRCubeConfig, optional): CRR configuration parameters
         parallel (bool): Use parallel processing for CRR method
-        
+        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
+        cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
+        cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
+        cube_wave_sampling (float): Wavelength sampling factor (for simple method)
+        cube_radius (float): Interpolation radius in arcsec (for simple method)
+        cube_min_weight (float): Minimum weight threshold (for simple method)
+
     Returns:
         list: Paths to constructed cube files
     """
@@ -620,7 +809,77 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
         else:
             print(f"Processing RSS file (no specific channel detected): {base_name}")
-            
+
+        # Determine which method to use
+        # CRR flag overrides cube_method for backward compatibility
+        use_simple = (cube_method == 'simple') and not use_crr
+        use_traditional = (cube_method == 'traditional') and not use_crr
+
+        if use_simple:
+            # Use SimpleCubeConstructor (MUSE-like method)
+            logger.info(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+            print(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+
+            try:
+                # Initialize simple cube constructor
+                constructor = SimpleCubeConstructor(
+                    fiber_pitch=cube_fiber_pitch,
+                    pixel_size=cube_pixel_size,
+                    wave_sampling=cube_wave_sampling
+                )
+
+                # Load fibermap
+                fibermap_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
+                constructor.load_fibermap(fibermap_path)
+
+                # Load RSS file
+                constructor.load_rss_file(rss_file)
+
+                # Create wavelength grid
+                wave_min, wave_max = None, None
+                if wavelength_range is not None:
+                    wave_min, wave_max = wavelength_range
+                constructor.create_wavelength_grid(wave_min=wave_min, wave_max=wave_max)
+
+                # Create spatial grid
+                constructor.create_spatial_grid()
+
+                # Construct cube
+                constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
+
+                # Create WCS (use default RA/Dec = 0 for now, could be enhanced later)
+                constructor.create_wcs(ra_center=0.0, dec_center=0.0)
+
+                # Save cube
+                if channel:
+                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                else:
+                    cube_filename = f"{base_name}_cube.fits"
+
+                cube_path = os.path.join(output_dir, cube_filename)
+                constructor.save_cube(cube_path, overwrite=True)
+                cube_files.append(cube_path)
+
+                print(f"  - Simple cube saved: {cube_path}")
+                logger.info(f"Simple cube saved: {cube_path}")
+
+                # Log quality metrics
+                valid_spaxels = np.sum(np.any(constructor.cube_weight > 0, axis=0))
+                total_spaxels = constructor.cube_weight.shape[1] * constructor.cube_weight.shape[2]
+                coverage = valid_spaxels / total_spaxels if total_spaxels > 0 else 0
+                print(f"  - Coverage: {coverage:.1%} ({valid_spaxels}/{total_spaxels} spaxels)")
+                logger.info(f"Simple cube quality: {coverage:.1%} coverage ({valid_spaxels}/{total_spaxels} spaxels)")
+
+            except Exception as e:
+                logger.error(f"Simple cube construction failed: {e}")
+                print(f"  ERROR: Simple cube construction failed: {e}")
+                print("  Falling back to traditional cube construction...")
+                traceback.print_exc()
+
+                # Fall back to traditional method
+                use_simple = False
+                use_traditional = True
+
         if use_crr:
             # Use CRR (Covariance-regularized Reconstruction) method
             logger.info(f"Constructing CRR cube from RSS file: {rss_file}")
@@ -674,8 +933,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 
                 # Fall back to traditional method
                 use_crr = False
-        
-        if not use_crr:
+                use_traditional = True
+
+        if use_traditional or (not use_simple and not use_crr):
             # Use traditional cube construction method
             logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
             print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
@@ -714,7 +974,25 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     return cube_files
 
 def main(config_path):
-    print("This is a placeholder for the reduce module.")
+    """
+    Main entry point for the data reduction pipeline.
+    This function reads a configuration file containing key-value pairs and processes the parameters to drive a series of data reduction operations. The configuration file is expected to include various settings such as file paths for flat-fields, science files, bias files, and other optional parameters. It sets up the necessary output directories (like the reduced data directory, traces, and extractions), performs trace generation, handles science file extractions, corrects wavelengths, and finally constructs a data cube.
+    The configuration file format:
+        - Each non-empty line should contain a key and a value separated by '='.
+        - Lines starting with '#' are treated as comments and skipped.
+        - Values may not be quoted, but can be comma-separated lists.
+    Args:
+        config_path (str): The file path to the configuration file.
+    Raises:
+        ValueError: If required configuration keys (e.g., 'arc_file' or 'science_files') are missing.
+        FileNotFoundError: If specified science or extraction files do not exist.
+        Exception: Propagates any other exceptions that occur during processing, with a traceback printed for debugging purposes.
+    Examples:
+        >>> main("/path/to/config.cfg")
+        Loaded configuration from /path/to/config.cfg
+        Configuration: {...}
+    """
+    print(f"Loading configuration from {config_path}")
     # You can add functionality here as needed.
     with open(config_path, 'r') as f:
         config = {}
@@ -746,14 +1024,65 @@ def main(config_path):
                     
                 config[key] = value
         
-        print(f"Loaded configuration from {config_path}")
+        
     print("Configuration:", config)
 
+    input_files = get_input_files_from_config(config)
+    validate_input_files(input_files)
+
+
+
+    #code to handle bias file input
+    if 'bias_file' not in config:
+        raise ValueError("No bias file provided in the configuration.")
+    
+    if isinstance(config['bias_file'], str):
+        bias_file = config['bias_file']
+        if 'bias_dir' in config:
+            # If bias_file is just a basename, join with bias_dir
+            if bias_file == os.path.basename(bias_file):
+                bias_file = os.path.join(config['bias_dir'], bias_file)
+            bias = BiasLlamas(bias_file)
+        else:
+            # bias_dir not provided; ensure bias_file is an absolute path
+            if not os.path.isabs(bias_file):
+                raise ValueError("Bias file is provided as a relative path and 'bias_dir' is missing in configuration.")
+            bias = BiasLlamas(bias_file)
+
+    elif isinstance(config['bias_file'], list):
+        
+        bias_list = config['bias_file']
+        print(f"Using a list of bias files {bias_list}")
+        if 'bias_dir' in config:
+            bias_dir = config['bias_dir']
+            updated_bias_list = []
+            for b in bias_list:
+                # If each bias file is provided as a basename, join with bias_dir
+                if b == os.path.basename(b):
+                    updated_bias_list.append(os.path.join(bias_dir, b))
+                else:
+                    updated_bias_list.append(b)
+            bias_list = updated_bias_list
+        else:
+            # Ensure all bias file paths in the list are absolute
+            for b in bias_list:
+                if not os.path.isabs(b):
+                    raise ValueError("One or more bias files are provided as relative paths and 'bias_dir' is missing in configuration.")
+        
+        
+        bias = BiasLlamas(bias_list)
+    bias_file = bias.master_bias()
+
+
+
+        
     # Parse CRR cube configuration (defaults to True if not specified)
-    use_crr_cube = config.get('CRR_cube', True)  # Default to True
+    use_crr_cube = config.get('CRR_cube', False)  # Default to True
     if isinstance(use_crr_cube, str):
         use_crr_cube = use_crr_cube.lower() == 'true'
-    
+        
+    _gen_cubes = config.get('generate_cubes', True)  # Default to True
+
     print(f"CRR cube reconstruction: {'enabled' if use_crr_cube else 'disabled'}")
 
     # Configure Ray CPU usage globally
@@ -763,7 +1092,7 @@ def main(config_path):
     os.environ['LLAMAS_RAY_CPUS'] = str(ray_num_cpus)
     print(f"Configuring pipeline to use {ray_num_cpus} Ray cores")
 
-        
+
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
     else:
@@ -772,11 +1101,11 @@ def main(config_path):
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
-        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=config.get('bias_file'))
+        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
         relative_throughput(config.get('shift_picklename'), config.get('flat_picklename'))
-        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=config.get('bias_file'))
+        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=bias_file)
         config['arcdict'] = arcdict
         
     
@@ -796,38 +1125,156 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
     
-    # Create pixel_maps directory for flat field processing
-    os.makedirs(os.path.join(extraction_path, 'pixel_maps'), exist_ok=True)
+    # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
+    # No need to pre-create a separate pixel_maps directory
     try:
         
+        # =====================================================================
+        # CENTRALIZED TRACE DIRECTORY SELECTION
+        # This is the SINGLE decision point for traces used throughout pipeline
+        # =====================================================================
+
+        print("\n" + "="*60)
+        print("TRACE DIRECTORY SELECTION")
+        print("="*60)
+
+        final_trace_dir = None
+        trace_source = None
+
         # Check if we should use existing traces or generate new ones
         if config.get('use_existing_traces', False) and os.path.exists(config.get('trace_output_dir')):
             # Check if trace files exist in the specified directory
             import glob
             existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
             if existing_traces:
-                print(f"Using existing traces from {config.get('trace_output_dir')}")
-                print(f"Found {len(existing_traces)} existing trace files.")
+                print(f"Found {len(existing_traces)} existing trace files in {config.get('trace_output_dir')}")
+
+                # Validate existing traces with per-trace fallback
+                from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
+
+                print("Validating existing traces...")
+                validation_results = validate_and_fix_trace_fibres(
+                    config.get('trace_output_dir'),
+                    mastercalib_dir=CALIB_DIR
+                )
+
+                if validation_results['all_valid']:
+                    print("✓ All existing traces validated successfully")
+                    final_trace_dir = config.get('trace_output_dir')
+                    trace_source = "existing_validated"
+                else:
+                    # Some traces invalid - fallbacks were copied
+                    invalid_count = len(validation_results['invalid_traces'])
+                    fallback_count = len(validation_results['fallback_used'])
+
+                    print(f"⚠️  Found {invalid_count} trace(s) with incorrect fiber counts")
+                    print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
+
+                    # Print details about invalid traces
+                    for channel, bench, side, expected, actual in validation_results['invalid_traces']:
+                        print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+
+                    # Print details about fallbacks used
+                    for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
+                        print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+
+                    # Still use trace_output_dir (now contains mix of user + mastercalib)
+                    final_trace_dir = config.get('trace_output_dir')
+                    trace_source = "existing_partial_fallback"
+
+                    print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} user + {fallback_count} mastercalib)")
             else:
-                print("No existing trace files found, generating new traces...")
-                generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
-                               config.get('trace_output_dir'), bias=config.get('bias_file'))
+                print("No existing trace files found in specified directory")
+                final_trace_dir = None  # Will generate new or fallback
+                trace_source = "existing_missing"
         else:
             print("Generating new traces...")
-            generate_traces(config.get('red_flat_file'), config.get('green_flat_file'), config.get('blue_flat_file'), 
+
+            # Validate flat field files before trace generation
+            
+
+            print("Validating flat field files...")
+            red_flat_validated = validate_and_fix_extensions(
+                config.get('red_flat_file'),
+                output_file=None,  # Fix in-place
+                backup=True
+            )
+            green_flat_validated = validate_and_fix_extensions(
+                config.get('green_flat_file'),
+                output_file=None,
+                backup=True
+            )
+            blue_flat_validated = validate_and_fix_extensions(
+                config.get('blue_flat_file'),
+                output_file=None,
+                backup=True
+            )
+
+            generate_traces(red_flat_validated, green_flat_validated, blue_flat_validated,
                            config.get('trace_output_dir'), bias=config.get('bias_file'))
-        
-        # Check if the traces (whether existing or newly generated) have the correct number of fibers
-        print("Checking fiber counts in traces...")
-        if not count_trace_fibres(config.get('trace_output_dir')):
-            print("Traces have incorrect fiber counts. Using traces from CALIB_DIR instead.")
-            config['trace_output_dir'] = CALIB_DIR
-        else:
-            print("Traces have correct fiber counts. Proceeding with current traces.")
+
+            # Validate newly generated traces with per-trace fallback
+            from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
+
+            print("Validating newly generated traces...")
+            validation_results = validate_and_fix_trace_fibres(
+                config.get('trace_output_dir'),
+                mastercalib_dir=CALIB_DIR
+            )
+
+            if validation_results['all_valid']:
+                print("✓ Generated traces validated successfully")
+                final_trace_dir = config.get('trace_output_dir')
+                trace_source = "generated_validated"
+            else:
+                # Some traces invalid - fallbacks were copied
+                invalid_count = len(validation_results['invalid_traces'])
+                fallback_count = len(validation_results['fallback_used'])
+
+                print(f"⚠️  Found {invalid_count} generated trace(s) with incorrect fiber counts")
+                print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
+
+                # Print details about invalid traces
+                for channel, bench, side, expected, actual in validation_results['invalid_traces']:
+                    print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+
+                # Print details about fallbacks used
+                for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
+                    print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+
+                # Still use trace_output_dir (now contains mix of user + mastercalib)
+                final_trace_dir = config.get('trace_output_dir')
+                trace_source = "generated_partial_fallback"
+
+                print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} generated + {fallback_count} mastercalib)")
+
+        # Final fallback to mastercalib if needed
+        if final_trace_dir is None:
+            print(f"\n⚠️  FALLBACK: Using mastercalib traces from {CALIB_DIR}")
+
+            # Validate mastercalib traces exist and are valid
+            if count_trace_fibres(CALIB_DIR):
+                final_trace_dir = CALIB_DIR
+                trace_source = "mastercalib"
+                print("✓ Mastercalib traces validated successfully")
+            else:
+                raise RuntimeError(f"FATAL: Even mastercalib traces in {CALIB_DIR} are invalid or missing!")
+
+        # Update config to reflect final decision
+        config['trace_output_dir'] = final_trace_dir
+
+        # Clear status reporting
+        print("\n" + "="*60)
+        print("TRACE SELECTION FINAL DECISION")
+        print("="*60)
+        print(f"Selected trace directory: {final_trace_dir}")
+        print(f"Trace source: {trace_source}")
+        print(f"All pipeline steps will use traces from: {final_trace_dir}")
+        print("="*60)
         
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
-        if config.get('apply_flat_field_correction', True):  # Default to True
+        if config.get('apply_flat_field_correction', False):  # Default to True
             print("\n" + "="*60)
             print("FLAT FIELD PROCESSING")
             print("="*60)
@@ -848,23 +1295,48 @@ def main(config_path):
             
             if flat_pixel_maps:
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
-                for flat_file in flat_pixel_maps:
-                    print(f"  - {os.path.basename(flat_file)}")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
         
+
         
        # Apply flat field corrections to science files before extraction
-        science_files_to_process = config['science_files']
-        
+        # First, validate all science files for missing extensions
+        # from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+
+        print("\n" + "="*60)
+        print("VALIDATING SCIENCE FILES")
+        print("="*60)
+
+        validated_science_files = []
+        if isinstance(config['science_files'], list):
+            for science_file in config['science_files']:
+                print(f"Validating: {os.path.basename(science_file)}")
+                validated_file = validate_and_fix_extensions(
+                    science_file,
+                    output_file=None,  # Fix in-place
+                    backup=True
+                )
+                validated_science_files.append(validated_file)
+        else:
+            print(f"Validating: {os.path.basename(config['science_files'])}")
+            validated_file = validate_and_fix_extensions(
+                config['science_files'],
+                output_file=None,
+                backup=True
+            )
+            validated_science_files = validated_file
+
+        science_files_to_process = validated_science_files
+
         if config.get('apply_flat_field_correction', True) and flat_pixel_maps:
             print("\n" + "="*60)
             print("APPLYING FLAT FIELD CORRECTIONS")
             print("="*60)
             
             flat_corrected_files = []
-            flat_output_dir = os.path.join(output_dir, 'flat_corrected')
-            os.makedirs(flat_output_dir, exist_ok=True)
+            # Output flat-corrected files directly to main output directory to avoid unnecessary subdirectories
+            flat_output_dir = output_dir
             
             overall_stats = {'total_corrected': 0, 'total_skipped': 0, 'total_errors': 0}
             
@@ -881,7 +1353,7 @@ def main(config_path):
                         flat_pixel_maps, 
                         flat_output_dir,
                         validate_matching=config.get('validate_flat_matching', True),
-                        require_all_matches=config.get('require_all_flat_matches', False)
+                        require_all_matches=config.get('require_all_flat_matches', True)
                     )
                     
                     if corrected_file:
@@ -938,16 +1410,28 @@ def main(config_path):
         
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
-        
+
             for i, science_file in enumerate(science_files_to_process):
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
-                # Process each science file by color
-                extracted_file = run_extraction(science_file, extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
+                # Process each science file with hybrid trace support
+                extracted_file = run_extraction(
+                    science_file,
+                    extraction_path,
+                    use_bias=config.get('bias_file'),
+                    trace_dir=final_trace_dir,              # User traces
+                    mastercalib_trace_dir=CALIB_DIR         # Mastercalib fallback
+                )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_file}")
         else:
             print(f"Extracting science file: {os.path.basename(science_files_to_process)}")
-            extracted_file = run_extraction(science_files_to_process, extraction_path, use_bias=config.get('bias_file'), trace_dir=config.get('trace_output_dir'))
-            print(f"Extraction completed. Used traces {config.get('trace_output_dir')} Output file: {extracted_file}")
+            extracted_file = run_extraction(
+                science_files_to_process,
+                extraction_path,
+                use_bias=config.get('bias_file'),
+                trace_dir=final_trace_dir,                  # User traces
+                mastercalib_trace_dir=CALIB_DIR             # Mastercalib fallback
+            )
+            print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_file}")
 
         # print("Correcting wavelengths in the extracted file...")
         # correction_path = os.path.join(extraction_path, extracted_file)
@@ -1014,15 +1498,21 @@ def main(config_path):
         os.makedirs(cube_output_dir, exist_ok=True)
 
 
-        if rss_files:
+        if rss_files and _gen_cubes:
             cube_files = construct_cube(
-                rss_files, 
+                rss_files,
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
                 spatial_sampling=config.get('spatial_sampling', 0.75),
                 use_crr=use_crr_cube,
-                parallel=config.get('CRR_parallel', False)
+                parallel=config.get('CRR_parallel', False),
+                cube_method=config.get('cube_method', 'simple'),
+                cube_pixel_size=float(config.get('cube_pixel_size', 0.3)),
+                cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
+                cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
+                cube_radius=float(config.get('cube_radius', 1.5)),
+                cube_min_weight=float(config.get('cube_min_weight', 0.01))
             )
             print(f"Cubes constructed: {cube_files}")
         else:
