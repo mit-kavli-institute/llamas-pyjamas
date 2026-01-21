@@ -19,7 +19,7 @@ These documentation files are created to help Claude Code understand and work wi
 - **FIBER_TRACING.md** - Fiber position identification and mapping
 - **SPECTRUM_EXTRACTION.md** - 1D spectrum extraction with optimal/boxcar methods
 - **WAVELENGTH_CALIBRATION.md** - Pixel-to-wavelength conversion using arc lamps
-- **FLAT_FIELD_PROCESSING.md** - Pixel-to-pixel sensitivity corrections
+- **FLAT_FIELD_PROCESSING.md** - Pixel-to-pixel sensitivity corrections with per-fiber normalization
 - **BIAS_CORRECTION.md** - Electronic offset removal from CCD readout
 
 ### Data Product Generation
@@ -27,12 +27,14 @@ These documentation files are created to help Claude Code understand and work wi
 - **CUBE_CONSTRUCTION.md** - 3D data cube construction with advanced CRR method
 - **WHITE_LIGHT_IMAGING.md** - 2D image reconstruction from spectroscopic data
 
-### Analysis and Quality Control
+### Data Validation and Quality Control
+- **DATA_VALIDATION.md** - FITS structure validation, missing extension handling, trace fallback mechanisms
 - **QUALITY_ASSURANCE.md** - Comprehensive QA visualization and validation
 - **THROUGHPUT_ANALYSIS.md** - System efficiency and flux calibration calculations
 
-### User Interface
+### User Interface and Utilities
 - **GUI_INTERFACE.md** - Interactive graphical interface for pipeline operations
+- **POSTPROCESSING_UTILS.md** - Standalone FITS arithmetic and quick white light preview tools
 
 ## Usage
 

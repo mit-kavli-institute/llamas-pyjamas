@@ -33,13 +33,16 @@ class RSSgeneration:
         """
         Generate a row-stacked spectra (RSS) FITS file with the following structure:
         Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux in units of 10(-17) erg/s/cm2/Ang/fiber [NWAVE x NFIBER]
-        Extension 2 - ERROR: the error array, sigma of above, for each fiber [NWAVE x NFIBER]
-        Extension 3 - MASK: the pixel mask array for each fiber [NWAVE x NFIBER]
-        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-        Extension 5 - FWHM: the full width half max array for each fiber [NWAVE x NFIBER]
+        Extension 1 - FLUX: extracted fiber flux in units of 10(-17) erg/s/cm2/Ang/fiber [NFIBER x NWAVE]
+        Extension 2 - ERROR: the error array, sigma of above, for each fiber [NFIBER x NWAVE]
+        Extension 3 - MASK: the pixel mask array for each fiber [NFIBER x NWAVE]
+        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        Extension 5 - FWHM: the full width half max array for each fiber [NFIBER x NWAVE]
         Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
-        
+
+        Note: Each row in the data extensions represents one fiber's full spectrum across all wavelengths.
+              Access fiber N's data as: data[N, :] (row N, all columns)
+
         Parameters:
         -----------
         extraction_file : str
@@ -109,6 +112,7 @@ class RSSgeneration:
                     # Get the counts (flux)
                     counts = obj.counts
                     n_fibers = counts.shape[0]
+                    original_n_fibers = n_fibers  # Track original count before any removals
                     
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
@@ -122,10 +126,41 @@ class RSSgeneration:
                         self.logger.warning(f"No valid DQ data for object {i}. Creating zero array.")
                         dq = np.zeros_like(counts, dtype=np.int16)
                     
-                    # Get wavelength arrays
+                    # Get wavelength arrays with improved shape handling
                     waves = getattr(obj, 'wave', None)
-                    if waves is None or waves.shape != counts.shape:
-                        self.logger.warning(f"No valid wavelength data for object {i}. Using NaN arrays.")
+                    if waves is None:
+                        self.logger.warning(f"No wavelength attribute for object {i}. Using NaN arrays.")
+                        waves = np.full(counts.shape, np.nan, dtype=np.float32)
+                    elif waves.shape != counts.shape:
+                        # Shape mismatch might be due to dead fiber insertion during extraction
+                        self.logger.warning(f"Object {i} wavelength shape {waves.shape} != counts shape {counts.shape}")
+
+                        # Check if wavelength array is smaller (missing dead fiber rows)
+                        if waves.shape[0] < counts.shape[0] and waves.shape[1] == counts.shape[1]:
+                            # Wavelength array is missing dead fiber rows - need to insert them
+                            n_missing = counts.shape[0] - waves.shape[0]
+                            self.logger.info(f"Wavelength array missing {n_missing} rows. This may be due to dead fiber insertion.")
+
+                            # Get dead fibers that should have been inserted
+                            dead_fibers_list = getattr(obj, 'dead_fibers', None)
+                            if dead_fibers_list and len(dead_fibers_list) == n_missing:
+                                # Insert NaN rows at dead fiber positions
+                                self.logger.info(f"Inserting NaN rows at dead fiber positions: {dead_fibers_list}")
+                                for dead_idx in sorted(dead_fibers_list):
+                                    nan_row = np.full((1, waves.shape[1]), np.nan, dtype=np.float32)
+                                    waves = np.insert(waves, dead_idx, nan_row, axis=0)
+                                self.logger.info(f"After insertion, wavelength shape: {waves.shape}")
+                            else:
+                                self.logger.warning(f"Cannot reconcile shape mismatch. Using NaN arrays.")
+                                waves = np.full(counts.shape, np.nan, dtype=np.float32)
+                        else:
+                            # Other shape mismatch - use NaN arrays
+                            self.logger.warning(f"Incompatible wavelength shape. Using NaN arrays.")
+                            waves = np.full(counts.shape, np.nan, dtype=np.float32)
+
+                    # Final validation
+                    if waves.shape != counts.shape:
+                        self.logger.error(f"Object {i} wavelength shape {waves.shape} still != counts shape {counts.shape}. Using NaN arrays.")
                         waves = np.full(counts.shape, np.nan, dtype=np.float32)
                     
                     # Get or create FWHM arrays (may not exist in all extractions)
@@ -136,6 +171,7 @@ class RSSgeneration:
                     
                     # Handle dead fibers
                     dead_fibers = getattr(obj, 'dead_fibers', None)
+                    removed_dead_fibers = []  # Track which fibers were actually removed
                     if dead_fibers is not None:
                         self.logger.info(f"Object {i} has dead fibers: {dead_fibers}")
                         # Validate each dead fiber
@@ -147,44 +183,75 @@ class RSSgeneration:
                                 is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
                                 if is_zero_row:
                                     valid_dead_fibers.append(dead_fiber)
+                                    self.logger.info(f"Validated dead fiber {dead_fiber}: all zeros = True")
                                 else:
                                     self.logger.warning(f"Dead fiber {dead_fiber} in object {i} has non-zero values - not removing")
                             else:
                                 self.logger.warning(f"Dead fiber index {dead_fiber} is out of range for object {i} with {n_fibers} fibers")
-                        
-                        # Remove the valid dead fibers
+
+                        # Remove the valid dead fibers using boolean mask to avoid index shifting issues
                         if valid_dead_fibers:
-                            # Sort in descending order if there are multiple fibers to avoid index shifting
-                            if len(valid_dead_fibers) > 1:
-                                valid_dead_fibers.sort(reverse=True)
-                            
                             self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from object {i}")
-                            for dead_fiber in valid_dead_fibers:
-                                # Double check as a sanity check that the row is all zeros
-                                is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
-                                self.logger.info(f"Sanity check for fiber {dead_fiber}: all zeros = {is_zero_row}")
-                                if not is_zero_row:
-                                    self.logger.warning(f"Skipping removal of fiber {dead_fiber} as it contains non-zero values")
-                                    continue
-                                    
-                                # Remove the dead fiber from all arrays
-                                counts = np.delete(counts, dead_fiber, axis=0)
-                                errors = np.delete(errors, dead_fiber, axis=0)
-                                waves = np.delete(waves, dead_fiber, axis=0)
-                                dq = np.delete(dq, dead_fiber, axis=0)
-                                fwhm = np.delete(fwhm, dead_fiber, axis=0)
-                                
-                            # Log the final shape after all removals
+
+                            # Log wavelength stats BEFORE removal for debugging
+                            self.logger.info(f"BEFORE dead fiber removal - Wavelength shape: {waves.shape}, " +
+                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
+
+                            # Create boolean mask: True for fibers to KEEP, False for fibers to REMOVE
+                            keep_mask = np.ones(n_fibers, dtype=bool)
+                            keep_mask[valid_dead_fibers] = False
+
+                            # Apply mask to all arrays simultaneously
+                            counts = counts[keep_mask]
+                            errors = errors[keep_mask]
+                            waves = waves[keep_mask]
+                            dq = dq[keep_mask]
+                            fwhm = fwhm[keep_mask]
+
+                            # Track which fibers were removed for fiber ID generation
+                            removed_dead_fibers = valid_dead_fibers
+
+                            # Log the final shape and wavelength stats after removal
                             self.logger.info(f"New arrays shape after removal: {counts.shape}")
+                            self.logger.info(f"AFTER dead fiber removal - Wavelength shape: {waves.shape}, " +
+                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
                             n_fibers = counts.shape[0]  # Update fiber count
                     
-                    # Log wavelength stats if available
+                    # Enhanced wavelength validation logging
                     if waves is not None:
                         nan_count = np.sum(np.isnan(waves))
+                        zero_count = np.sum(waves == 0)
+                        valid_mask = ~np.isnan(waves) & (waves != 0)
+                        valid_count = np.sum(valid_mask)
+
                         nan_percentage = (nan_count / waves.size) * 100
-                        self.logger.info(f"Wavelength array for object {i}: shape={waves.shape}, " +
-                                        f"NaN count={nan_count} ({nan_percentage:.2f}%), " +
-                                        f"valid range={np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
+                        valid_percentage = (valid_count / waves.size) * 100
+
+                        self.logger.info(f"Wavelength array for object {i}:")
+                        self.logger.info(f"  Shape: {waves.shape}")
+                        self.logger.info(f"  NaN count: {nan_count} ({nan_percentage:.2f}%)")
+                        self.logger.info(f"  Zero count: {zero_count} ({100*zero_count/waves.size:.2f}%)")
+                        self.logger.info(f"  Valid count: {valid_count} ({valid_percentage:.2f}%)")
+
+                        if valid_count > 0:
+                            self.logger.info(f"  Valid range: {waves[valid_mask].min():.2f}-{waves[valid_mask].max():.2f} Å")
+
+                            # Check for wavelength inversions per fiber
+                            n_inversions = 0
+                            for fiber_idx in range(waves.shape[0]):
+                                fiber_wave = waves[fiber_idx]
+                                diffs = np.diff(fiber_wave)
+                                n_backwards = np.sum(diffs < 0)
+                                if n_backwards > 10:  # More than 10 backwards steps is problematic
+                                    n_inversions += 1
+                                    self.logger.warning(f"  Fiber {fiber_idx} has {n_backwards} wavelength inversions!")
+
+                            if n_inversions > 0:
+                                self.logger.warning(f"  Total fibers with inversions: {n_inversions}/{waves.shape[0]}")
+                            else:
+                                self.logger.info(f"  No wavelength inversions detected")
+                        else:
+                            self.logger.error(f"  ERROR: No valid wavelength data!")
                     
                     # Add data for each fiber
                     all_flux.append(counts)
@@ -198,9 +265,26 @@ class RSSgeneration:
                     fiber_type = meta.get('fiber_type', ['UNKNOWN'] * n_fibers)
                     fiber_ra = meta.get('fiber_ra', [np.nan] * n_fibers)
                     fiber_dec = meta.get('fiber_dec', [np.nan] * n_fibers)
-                    
+
                     benchsides.extend([benchside_str] * n_fibers)
-                    fiber_ids.extend(np.arange(n_fibers))
+
+                    # Generate fiber IDs that preserve original fiber indices (skip dead fibers)
+                    if removed_dead_fibers:
+                        # Build list of alive fiber IDs by skipping dead ones
+                        fibers = []
+                        counter = 0
+                        while len(fibers) < n_fibers:
+                            if counter in removed_dead_fibers:
+                                counter += 1
+                            else:
+                                fibers.append(counter)
+                                counter += 1
+                        fiber_ids.extend(fibers)
+                        self.logger.info(f"Object {i}: Generated fiber IDs {fibers} (skipped dead fibers {removed_dead_fibers})")
+                    else:
+                        # No dead fibers removed, use sequential IDs
+                        fiber_ids.extend(np.arange(n_fibers))
+
                     fiber_types.extend(fiber_type if len(fiber_type) == n_fibers else ['UNKNOWN'] * n_fibers)
                     fiber_ras.extend(fiber_ra if len(fiber_ra) == n_fibers else [np.nan] * n_fibers)
                     fiber_decs.extend(fiber_dec if len(fiber_dec) == n_fibers else [np.nan] * n_fibers)
@@ -247,39 +331,39 @@ class RSSgeneration:
                 except Exception as e:
                     self.logger.error(f"Could not determine wavelength range: {str(e)}")
                 
-                # Extension 1 - FLUX: extracted fiber flux [NWAVE x NFIBER]
-                # Transpose the array to make it [NWAVE x NFIBER]
-                flux_hdu = fits.ImageHDU(flux_stack.T, header=common_header)
+                # Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
+                # Each row represents one fiber's spectrum
+                flux_hdu = fits.ImageHDU(flux_stack, header=common_header)
                 flux_hdu.header['EXTNAME'] = 'FLUX'
                 flux_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 hdul.append(flux_hdu)
-                self.logger.info(f"Added FLUX extension with shape {flux_stack.T.shape}")
+                self.logger.info(f"Added FLUX extension with shape {flux_stack.shape}")
                 
-                # Extension 2 - ERROR: the error array [NWAVE x NFIBER]
-                error_hdu = fits.ImageHDU(error_stack.T, header=common_header)
+                # Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+                # Each row represents one fiber's error spectrum
+                error_hdu = fits.ImageHDU(error_stack, header=common_header)
                 error_hdu.header['EXTNAME'] = 'ERROR'
                 error_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 hdul.append(error_hdu)
-                self.logger.info(f"Added ERROR extension with shape {error_stack.T.shape}")
+                self.logger.info(f"Added ERROR extension with shape {error_stack.shape}")
                 
-                # Extension 3 - MASK: the pixel mask array [NWAVE x NFIBER]
-                mask_hdu = fits.ImageHDU(dq_stack.T, header=common_header)
+                # Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
+                # Each row represents one fiber's mask
+                mask_hdu = fits.ImageHDU(dq_stack, header=common_header)
                 mask_hdu.header['EXTNAME'] = 'MASK'
                 mask_hdu.header['COMMENT'] = 'Pixel mask: 0=good, >0=various issues'
                 hdul.append(mask_hdu)
-                self.logger.info(f"Added MASK extension with shape {dq_stack.T.shape}")
+                self.logger.info(f"Added MASK extension with shape {dq_stack.shape}")
                 
-                # Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-                # Use the actual wavelength solution from each fiber in the extraction file
-                
+                # Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+                # Each row represents one fiber's wavelength solution
                 # Note: this directly uses the wavelength arrays from the extraction objects
                 # which were stacked as wave_stack
-                
-                # Transpose the array to make it [NWAVE x NFIBER] to match other extensions
-                wave_hdu = fits.ImageHDU(wave_stack.T, header=common_header)
+
+                wave_hdu = fits.ImageHDU(wave_stack, header=common_header)
                 wave_hdu.header['EXTNAME'] = 'WAVE'
                 wave_hdu.header['BUNIT'] = 'Angstrom'
-                
+
                 # Add information about wavelength data quality
                 if valid_count > 0:
                     wave_hdu.header['WAVESTAT'] = 'GOOD'
@@ -288,16 +372,17 @@ class RSSgeneration:
                 else:
                     wave_hdu.header['WAVESTAT'] = 'POOR'
                     wave_hdu.header['COMMENT'] = 'Warning: Limited or no valid wavelength data'
-                
+
                 hdul.append(wave_hdu)
-                self.logger.info(f"Added WAVE extension with shape {wave_stack.T.shape}")
+                self.logger.info(f"Added WAVE extension with shape {wave_stack.shape}")
                 
-                # Extension 5 - FWHM: the full width half max array [NWAVE x NFIBER]
-                fwhm_hdu = fits.ImageHDU(fwhm_stack.T, header=common_header)
+                # Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
+                # Each row represents one fiber's FWHM values
+                fwhm_hdu = fits.ImageHDU(fwhm_stack, header=common_header)
                 fwhm_hdu.header['EXTNAME'] = 'FWHM'
                 fwhm_hdu.header['BUNIT'] = 'Pixels'
                 hdul.append(fwhm_hdu)
-                self.logger.info(f"Added FWHM extension with shape {fwhm_stack.T.shape}")
+                self.logger.info(f"Added FWHM extension with shape {fwhm_stack.shape}")
                 
                 # Extension 6 - FIBERMAP: binary table with fiber information
                 fibermap_cols = [
