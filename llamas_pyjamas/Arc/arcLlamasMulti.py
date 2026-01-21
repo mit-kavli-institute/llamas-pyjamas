@@ -655,7 +655,7 @@ def fiberRelativeThroughputRay(flat_extraction_pickle, arc_extraction_pickle):
     print(f"Saved throughput-corrected arc extraction to {sv}")
 
 
-def arcSolve_original(arc_extraction_shifted_pickle, autoid=False):
+def arcSolve_original(arc_extraction_shifted_pickle, autoid=False, savefile='LLAMAS_reference_arc.pkl', savedir=OUTPUT_DIR):
     """Solve wavelength calibration from ThAr arc spectra (original serial version).
 
     This function fits wavelength solutions to ThAr arc spectra by identifying 
@@ -800,10 +800,10 @@ def arcSolve_original(arc_extraction_shifted_pickle, autoid=False):
 
     # Save the wavelength solution to disk
     print("Saving wavelength solution to disk")
-    extract.save_extractions(arcspec_shifted, savefile='LLAMAS_reference_arc.pkl')
+    extract.save_extractions(arcspec_shifted, savefile=savefile, savedir=savedir)
     return()
 
-def arcSolveRay(arc_extraction_shifted_pickle, autoid=False):
+def arcSolveRay(arc_extraction_shifted_pickle, autoid=False, savefile='LLAMAS_reference_arc.pkl', savedir=OUTPUT_DIR):
     """Ray-enabled version of arcSolve for parallel processing.
     
     Solve wavelength calibration from ThAr arc spectra using Ray multiprocessing.
@@ -965,7 +965,7 @@ def arcSolveRay(arc_extraction_shifted_pickle, autoid=False):
 
     # Save the wavelength solution to disk
     print("Saving wavelength solution to disk")
-    extract.save_extractions(arcspec_shifted, savefile='LLAMAS_reference_arc.pkl')
+    extract.save_extractions(arcspec_shifted, savefile=savefile, savedir=savedir)
     return()
 
 # Smart wrapper functions that use Ray by default with fallback to serial
@@ -1031,7 +1031,7 @@ def fiberRelativeThroughput(flat_extraction_pickle, arc_extraction_pickle, use_r
         print("🐌 Using serial processing for fiber throughput calculation...")
         return fiberRelativeThroughput_original(flat_extraction_pickle, arc_extraction_pickle)
 
-def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
+def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True, savefile='LLAMAS_reference_arc.pkl', savedir=OUTPUT_DIR):
     """Solve wavelength calibration from ThAr arc spectra.
     
     This function automatically uses Ray multiprocessing for significant speedup.
@@ -1051,7 +1051,7 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
         if ray_available:
             try:
                 print("🔥 Using Ray multiprocessing for arc wavelength solution...")
-                return arcSolveRay(arc_extraction_shifted_pickle, autoid)
+                return arcSolveRay(arc_extraction_shifted_pickle, autoid, savedir=savedir, savefile=savefile)
             except Exception as e:
                 print(f"⚠️  Ray processing failed: {str(e)}")
                 print("🔀 Falling back to serial processing...")
@@ -1059,7 +1059,7 @@ def arcSolve(arc_extraction_shifted_pickle, autoid=False, use_ray=True):
     
     if not use_ray:
         print("🐌 Using serial processing for arc wavelength solution...")
-        return arcSolve_original(arc_extraction_shifted_pickle, autoid)
+        return arcSolve_original(arc_extraction_shifted_pickle, autoid, savedir=savedir, savefile=savefile)
 
 def arcTransfer(scidict, arcdict):
     """Transfer wavelength calibration from arc to science spectra.
