@@ -27,6 +27,10 @@ Functions:
         Fast scanning function to identify negative values in B-spline fit results.
     plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
         Plot individual fiber B-spline fits with original data for inspection.
+    check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
+        Check wavelength ranges in the LLAMAS reference arc calibration file.
+    check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
+        Check wavelength ranges in extraction file and compare to reference arc.
 """
 import os
 import logging
@@ -42,7 +46,9 @@ from typing import Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
-import cloudpickle as pickle 
+import pickle
+import cloudpickle
+
 # Module-level logger for utility functions
 # This logger can be used by all functions in this module
 logger = logging.getLogger(__name__)
@@ -106,6 +112,46 @@ def setup_logger(name, log_filename=None)-> logging.Logger:
     
     return logger
 
+
+def check_header(fits_file, color=None, bench=None, side=None) -> bool:
+    """
+    Check the FITS file header for color, bench, and side values.
+
+    Args:
+        fits_file (str): Path to the FITS file.
+        color (str, optional): Expected color value. Defaults to None.
+        bench (str, optional): Expected bench value. Defaults to None.
+        side (str, optional): Expected side value. Defaults to None.
+
+    Returns:
+        bool: True if all specified checks pass, False otherwise.
+    """
+    hdu = fits.open(fits_file)
+    primary = hdu[0].header
+
+    if 'CAM_NAME' in primary:
+        cam_name = primary['CAM_NAME']
+        bench_h = cam_name.split('_')[0][0]
+        side_h = cam_name.split('_')[0][1]
+        color_h = cam_name.split('_')[1].lower()
+    else:
+        bench_h = primary.get('BENCH')
+        side_h = primary.get('SIDE')
+        color_h = primary.get('COLOR', '').lower()
+
+    if bench is not None and bench_h != bench:
+        logger.error(f'Bench mismatch in {fits_file}: header {bench_h} vs expected {bench}')
+        return False
+    if side is not None and side_h != side:
+        logger.error(f'Side mismatch in {fits_file}: header {side_h} vs expected {side}')
+        return False
+    if color is not None and color_h != color:
+        logger.error(f'Color mismatch in {fits_file}: header {color_h} vs expected {color}')
+        return False
+
+    return True
+
+
 def concat_extractions(pkl_files: list, outfile: str) -> None:
     """Concatenate multiple pickle files containing extraction data.
 
@@ -133,7 +179,7 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
                 combined_data['metadata'].extend(data['metadata'])
     
     with open(outfile, 'wb') as f:
-        pickle.dump(combined_data, f)
+        cloudpickle.dump(combined_data, f)
     
     return
 
@@ -1050,6 +1096,332 @@ def plot_spline_fibre(pkl_file: str, extension: str, fiber_number: int) -> None:
 
 
 # Example usage functions and documentation
+def check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
+    """
+    Check wavelength ranges in the LLAMAS reference arc calibration file.
+
+    This function loads the reference arc file used for wavelength calibration
+    and reports the wavelength coverage for each extension and channel.
+
+    Args:
+        arc_file (str, optional): Path to the reference arc pickle file.
+            If None, uses the default LLAMAS_reference_arc.pkl from LUT_DIR.
+            Defaults to None.
+        verbose (bool, optional): If True, prints detailed output for each extension.
+            If False, only prints channel summaries. Defaults to True.
+
+    Returns:
+        dict: Dictionary containing wavelength ranges organized by channel:
+            {
+                'extensions': [
+                    {
+                        'index': int,
+                        'bench': str,
+                        'side': str,
+                        'channel': str,
+                        'nfibers': int,
+                        'wave_min': float,
+                        'wave_max': float,
+                        'has_wavelength_data': bool
+                    },
+                    ...
+                ],
+                'channels': {
+                    'red': {'min': float, 'max': float},
+                    'green': {'min': float, 'max': float},
+                    'blue': {'min': float, 'max': float}
+                }
+            }
+
+    Example:
+        >>> from llamas_pyjamas.Utils.utils import check_reference_arc_wavelength_ranges
+        >>> ranges = check_reference_arc_wavelength_ranges()
+        >>> print(f"Red channel: {ranges['channels']['red']['min']:.1f} - {ranges['channels']['red']['max']:.1f} Å")
+    """
+    import sys
+    from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+
+    # Use default file if none provided
+    if arc_file is None:
+        arc_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+
+    # Check if file exists
+    if not os.path.exists(arc_file):
+        print(f"ERROR: Reference arc file not found: {arc_file}")
+        return None
+
+    # Load the reference arc
+    try:
+        arc_data = ExtractLlamas.loadExtraction(arc_file)
+    except Exception as e:
+        print(f"ERROR: Failed to load reference arc file: {e}")
+        return None
+
+    extractions = arc_data['extractions']
+    metadata = arc_data['metadata']
+
+    # Initialize results
+    results = {
+        'extensions': [],
+        'channels': {}
+    }
+
+    if verbose:
+        print("=" * 60)
+        print("WAVELENGTH RANGES BY EXTENSION")
+        print("=" * 60)
+
+    # Process each extension
+    for i in range(len(extractions)):
+        ext = extractions[i]
+        meta = metadata[i]
+
+        channel = meta['channel']
+        bench = meta['bench']
+        side = meta['side']
+        nfibers = meta['nfibers']
+
+        ext_info = {
+            'index': i,
+            'bench': str(bench),
+            'side': side,
+            'channel': channel,
+            'nfibers': nfibers,
+            'has_wavelength_data': False
+        }
+
+        if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+            # Get min/max wavelengths (excluding zeros)
+            wave_min = np.min(ext.wave[ext.wave > 0])
+            wave_max = np.max(ext.wave)
+
+            ext_info['wave_min'] = wave_min
+            ext_info['wave_max'] = wave_max
+            ext_info['has_wavelength_data'] = True
+
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | "
+                      f"{wave_min:7.2f} - {wave_max:7.2f} Å | "
+                      f"{nfibers} fibers")
+
+            # Update channel ranges
+            if channel not in results['channels']:
+                results['channels'][channel] = {'min': wave_min, 'max': wave_max}
+            else:
+                results['channels'][channel]['min'] = min(results['channels'][channel]['min'], wave_min)
+                results['channels'][channel]['max'] = max(results['channels'][channel]['max'], wave_max)
+        else:
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | NO WAVELENGTH DATA")
+
+        results['extensions'].append(ext_info)
+
+    # Print channel summary
+    if verbose:
+        print("=" * 60)
+    print("\nWAVELENGTH COVERAGE BY CHANNEL:")
+    print("-" * 60)
+
+    for channel in ['red', 'green', 'blue']:
+        if channel in results['channels']:
+            print(f"{channel.upper():6s}: {results['channels'][channel]['min']:7.2f} - "
+                  f"{results['channels'][channel]['max']:7.2f} Å")
+        else:
+            print(f"{channel.upper():6s}: No wavelength data found")
+
+    if verbose:
+        print("=" * 60)
+
+    return results
+
+
+def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
+    """
+    Check wavelength ranges in an extraction file and compare to reference arc.
+
+    This function loads an extraction pickle file (science or arc data) and reports
+    the wavelength coverage for each extension and channel. It can optionally compare
+    against the reference arc calibration to identify any extrapolation.
+
+    Args:
+        extraction_file (str): Path to the extraction pickle file to check.
+        reference_arc_file (str, optional): Path to the reference arc pickle file.
+            If None, uses the default LLAMAS_reference_arc.pkl from LUT_DIR.
+            Defaults to None.
+        verbose (bool, optional): If True, prints detailed output for each extension.
+            If False, only prints channel summaries. Defaults to True.
+
+    Returns:
+        dict: Dictionary containing wavelength ranges and comparison results:
+            {
+                'extensions': [...],  # Same format as check_reference_arc_wavelength_ranges
+                'channels': {...},
+                'comparison': {
+                    'red': {'below': float, 'above': float, 'within': bool},
+                    'green': {...},
+                    'blue': {...}
+                }
+            }
+
+    Example:
+        >>> from llamas_pyjamas.Utils.utils import check_extraction_wavelength_ranges
+        >>> results = check_extraction_wavelength_ranges('science_extract.pkl')
+        >>> if results['comparison']['red']['within']:
+        >>>     print("Red channel is within calibration range")
+    """
+    from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+
+    # Load the extraction file
+    if not os.path.exists(extraction_file):
+        print(f"ERROR: Extraction file not found: {extraction_file}")
+        return None
+
+    try:
+        data = ExtractLlamas.loadExtraction(extraction_file)
+    except Exception as e:
+        print(f"ERROR: Failed to load extraction file: {e}")
+        return None
+
+    extractions = data['extractions']
+    metadata = data['metadata']
+
+    # Load reference arc if comparison requested
+    arc_ranges = None
+    if reference_arc_file or reference_arc_file is None:
+        if reference_arc_file is None:
+            reference_arc_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+
+        if os.path.exists(reference_arc_file):
+            try:
+                arc_data = ExtractLlamas.loadExtraction(reference_arc_file)
+                arc_extractions = arc_data['extractions']
+                arc_metadata = arc_data['metadata']
+
+                # Build arc ranges
+                arc_ranges = {}
+                for channel in ['red', 'green', 'blue']:
+                    channel_exts = [i for i, m in enumerate(arc_metadata) if m['channel'] == channel]
+                    if channel_exts:
+                        all_mins = []
+                        all_maxs = []
+                        for i in channel_exts:
+                            ext = arc_extractions[i]
+                            if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+                                all_mins.append(np.min(ext.wave[ext.wave > 0]))
+                                all_maxs.append(np.max(ext.wave))
+                        if all_mins and all_maxs:
+                            arc_ranges[channel] = (min(all_mins), max(all_maxs))
+            except Exception as e:
+                print(f"Warning: Could not load reference arc: {e}")
+
+    # Initialize results
+    results = {
+        'extensions': [],
+        'channels': {},
+        'comparison': {}
+    }
+
+    if verbose:
+        print("=" * 80)
+        print("EXTRACTION WAVELENGTH RANGES")
+        print("=" * 80)
+
+    # Process each extension
+    channels_data = {'red': [], 'green': [], 'blue': []}
+
+    for i in range(len(extractions)):
+        ext = extractions[i]
+        meta = metadata[i]
+
+        channel = meta['channel']
+        bench = meta['bench']
+        side = meta['side']
+        nfibers = meta['nfibers']
+
+        ext_info = {
+            'index': i,
+            'bench': str(bench),
+            'side': side,
+            'channel': channel,
+            'nfibers': nfibers,
+            'has_wavelength_data': False
+        }
+
+        if hasattr(ext, 'wave') and ext.wave is not None and np.any(ext.wave > 0):
+            wave_min = np.min(ext.wave[ext.wave > 0])
+            wave_max = np.max(ext.wave)
+
+            ext_info['wave_min'] = wave_min
+            ext_info['wave_max'] = wave_max
+            ext_info['has_wavelength_data'] = True
+
+            channels_data[channel].append({'min': wave_min, 'max': wave_max})
+
+            if verbose:
+                status = ""
+                if arc_ranges and channel in arc_ranges:
+                    arc_min, arc_max = arc_ranges[channel]
+                    if wave_min < arc_min or wave_max > arc_max:
+                        status = " ⚠️  OUTSIDE ARC RANGE"
+
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | "
+                      f"{wave_min:7.2f} - {wave_max:7.2f} Å | "
+                      f"{nfibers} fibers{status}")
+
+            # Update channel ranges
+            if channel not in results['channels']:
+                results['channels'][channel] = {'min': wave_min, 'max': wave_max}
+            else:
+                results['channels'][channel]['min'] = min(results['channels'][channel]['min'], wave_min)
+                results['channels'][channel]['max'] = max(results['channels'][channel]['max'], wave_max)
+        else:
+            if verbose:
+                print(f"Extension {i:2d}: {bench}{side} {channel:6s} | NO WAVELENGTH DATA")
+
+        results['extensions'].append(ext_info)
+
+    # Compare to arc ranges
+    if arc_ranges:
+        if verbose:
+            print("=" * 80)
+            print("\nCOMPARISON TO REFERENCE ARC:")
+            print("-" * 80)
+
+        for channel in ['red', 'green', 'blue']:
+            if channel in results['channels'] and channel in arc_ranges:
+                ext_min = results['channels'][channel]['min']
+                ext_max = results['channels'][channel]['max']
+                arc_min, arc_max = arc_ranges[channel]
+
+                below = max(0, arc_min - ext_min)
+                above = max(0, ext_max - arc_max)
+                within = (ext_min >= arc_min) and (ext_max <= arc_max)
+
+                results['comparison'][channel] = {
+                    'below': below,
+                    'above': above,
+                    'within': within
+                }
+
+                if verbose:
+                    print(f"\n{channel.upper():6s}:")
+                    print(f"  Extraction range: {ext_min:.4f} - {ext_max:.4f} Å")
+                    print(f"  Arc range:        {arc_min:.2f} - {arc_max:.2f} Å")
+
+                    if within:
+                        print(f"  Status: ✅ WITHIN arc calibration range")
+                    else:
+                        if below > 0:
+                            print(f"  Status: ⚠️  BELOW arc range by {below:.4f} Å")
+                        if above > 0:
+                            print(f"  Status: ⚠️  ABOVE arc range by {above:.4f} Å")
+
+    if verbose:
+        print("=" * 80)
+
+    return results
+
+
 def _bspline_diagnostic_usage_examples():
     """
     Example usage for B-spline diagnostic functions.

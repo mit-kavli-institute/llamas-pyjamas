@@ -35,46 +35,195 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger
+from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
+from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
 from astropy.io import fits
 import numpy as np
 
+import shutil
+
+from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices
 
 _linefile = os.path.join(LUT_DIR, '')
 
 
+def validate_input_files(file_list):
+
+    for file in file_list:
+        assert os.path.exists(file), f"Input file does not exist: {file}"
+        validate_and_fix_extensions(file, 
+                                    output_file=None, backup=True)
+
+    return True
+
+def get_input_files_from_config(config, file_keys=None):
+      """
+      Extract all input file paths from a configuration dictionary.
+      
+      Parameters
+      ----------
+      config : dict
+          Configuration dictionary with file paths
+      file_keys : list, optional
+          List of config keys that contain file paths. If None, uses default keys.
+          
+      Returns
+      -------
+      list
+          List of all file paths found in the config
+      """
+      if file_keys is None:
+          file_keys = ['science_files', 'bias_file', 'red_flat_file',
+                       'green_flat_file', 'blue_flat_file']
+
+      input_files = []
+
+      for key in file_keys:
+          if key in config:
+              value = config[key]
+              # If it's a list, extend the input_files list
+              if isinstance(value, list):
+                  input_files.extend(value)
+              # If it's a single string, append it
+              elif isinstance(value, str):
+                  input_files.append(value)
+
+      return input_files
+
+
+def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
+    """
+    Copy mastercalib traces for placeholder extensions identified in a flat file.
+
+    Args:
+        flat_file: Path to flat field FITS file
+        trace_dir: Directory where traces should be copied to
+        channel: Channel name ('red', 'green', 'blue')
+        placeholder_indices: Optional list of placeholder indices (will detect if None)
+
+    Returns:
+        int: Number of traces copied
+    """
+    if placeholder_indices is None:
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+    if len(placeholder_indices) == 0:
+        return 0  # No placeholders to handle
+
+    print(f"Copying {len(placeholder_indices)} mastercalib traces for missing {channel} cameras")
+
+    traces_copied = 0
+    with fits.open(flat_file) as hdul:
+        for idx in placeholder_indices:
+            hdu = hdul[idx]
+
+            # Extract camera metadata
+            bench = hdu.header['BENCH']
+            side = hdu.header['SIDE']
+            cam_channel = hdu.header['COLOR'].lower()
+
+            # Only copy if the channel matches
+            if cam_channel != channel.lower():
+                continue
+
+            # Determine mastercalib trace filename
+            master_trace_file = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+            master_trace_path = os.path.join(CALIB_DIR, master_trace_file)
+
+            # Target filename (user trace naming convention)
+            user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+            user_trace_path = os.path.join(trace_dir, user_trace_file)
+
+            # Copy mastercalib trace to user trace directory
+            if os.path.exists(master_trace_path):
+                shutil.copy2(master_trace_path, user_trace_path)
+                print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
+                traces_copied += 1
+            else:
+                print(f"  ✗ WARNING: Mastercalib trace not found: {master_trace_file}")
+
+    return traces_copied
 
 
 
-def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None):
+def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, missing_cams=False):
     """Generate fiber traces from flat field observations for all three channels.
-    
+
+    This function intelligently handles missing camera extensions by:
+    1. Detecting placeholder extensions in each flat field file
+    2. Running trace generation only for real camera data
+    3. Copying mastercalib traces for placeholder extensions
+
     Args:
         red_flat: Path to red flat field FITS file.
-        green_flat: Path to green flat field FITS file. 
+        green_flat: Path to green flat field FITS file.
         blue_flat: Path to blue flat field FITS file.
         output_dir: Directory to save trace files.
         bias: Optional bias frame for correction.
-        
+        missing_cams: Deprecated parameter, kept for backwards compatibility.
+
     Raises:
         AssertionError: If any of the flat field files do not exist.
     """
-    
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
+
     assert os.path.exists(red_flat), "Red flat file does not exist."
     assert os.path.exists(green_flat), "Green flat file does not exist."
     assert os.path.exists(blue_flat), "Blue flat file does not exist."
 
-    run_ray_tracing(red_flat, outpath=output_dir, channel='red', use_bias=bias, is_master_calib=False)
-    run_ray_tracing(green_flat, outpath=output_dir, channel='green', use_bias=bias, is_master_calib=False)
-    run_ray_tracing(blue_flat, outpath=output_dir, channel='blue', use_bias=bias, is_master_calib=False)
-    print(f"Traces generated and saved to {output_dir}")
+    print("\n" + "="*60)
+    print("TRACE GENERATION WITH PLACEHOLDER DETECTION")
+    print("="*60)
+
+    # Process each channel with placeholder detection
+    channels = [
+        ('red', red_flat),
+        ('green', green_flat),
+        ('blue', blue_flat)
+    ]
+
+    for channel, flat_file in channels:
+        print(f"\n--- Processing {channel.upper()} channel ---")
+
+        # Detect placeholder extensions
+        placeholder_indices = get_placeholder_extension_indices(flat_file)
+
+        if placeholder_indices:
+            print(f"Found {len(placeholder_indices)} placeholder extensions in {os.path.basename(flat_file)}")
+            print(f"Will skip trace generation for placeholder indices: {placeholder_indices}")
+        else:
+            print(f"No placeholder extensions found in {os.path.basename(flat_file)}")
+
+        # Run trace generation, skipping placeholder extensions
+        run_ray_tracing(
+            flat_file,
+            outpath=output_dir,
+            channel=channel,
+            use_bias=bias,
+            is_master_calib=False,
+            skip_extension_indices=placeholder_indices
+        )
+
+        # Copy mastercalib traces for placeholder extensions
+        if placeholder_indices:
+            traces_copied = copy_mastercalib_traces_for_placeholders(
+                flat_file,
+                output_dir,
+                channel,
+                placeholder_indices
+            )
+            if traces_copied > 0:
+                print(f"Successfully copied {traces_copied} mastercalib traces for {channel} placeholders")
+
+    print("\n" + "="*60)
+    print(f"All traces generated and saved to {output_dir}")
+    print("="*60)
 
     return
 
@@ -595,25 +744,34 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
 
 
-def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75, use_crr=True, crr_config=None, parallel=False):
+def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
+                   use_crr=True, crr_config=None, parallel=False, cube_method='simple',
+                   cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
+                   cube_radius=1.5, cube_min_weight=0.01):
     """
-    Construct IFU data cubes from RSS files using either traditional or CRR method.
-    
+    Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
+
     This function can handle both:
     1. Single RSS files with multiple channels
     2. Multiple channel-specific RSS files with names like:
        "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
-    
+
     Parameters:
         rss_files (str or list): Path to RSS FITS file(s) or base paths
         output_dir (str): Directory to save output cubes
         wavelength_range (tuple, optional): Min/max wavelength range for output cubes
-        dispersion (float): Wavelength dispersion in Angstroms/pixel
-        spatial_sampling (float): Spatial sampling in arcsec/pixel
-        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method
+        dispersion (float): Wavelength dispersion in Angstroms/pixel (legacy, for traditional/CRR)
+        spatial_sampling (float): Spatial sampling in arcsec/pixel (legacy, for traditional/CRR)
+        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
         crr_config (CRRCubeConfig, optional): CRR configuration parameters
         parallel (bool): Use parallel processing for CRR method
-        
+        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
+        cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
+        cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
+        cube_wave_sampling (float): Wavelength sampling factor (for simple method)
+        cube_radius (float): Interpolation radius in arcsec (for simple method)
+        cube_min_weight (float): Minimum weight threshold (for simple method)
+
     Returns:
         list: Paths to constructed cube files
     """
@@ -659,7 +817,77 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
         else:
             print(f"Processing RSS file (no specific channel detected): {base_name}")
-            
+
+        # Determine which method to use
+        # CRR flag overrides cube_method for backward compatibility
+        use_simple = (cube_method == 'simple') and not use_crr
+        use_traditional = (cube_method == 'traditional') and not use_crr
+
+        if use_simple:
+            # Use SimpleCubeConstructor (MUSE-like method)
+            logger.info(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+            print(f"Constructing simple MUSE-like cube from RSS file: {rss_file}")
+
+            try:
+                # Initialize simple cube constructor
+                constructor = SimpleCubeConstructor(
+                    fiber_pitch=cube_fiber_pitch,
+                    pixel_size=cube_pixel_size,
+                    wave_sampling=cube_wave_sampling
+                )
+
+                # Load fibermap
+                fibermap_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
+                constructor.load_fibermap(fibermap_path)
+
+                # Load RSS file
+                constructor.load_rss_file(rss_file)
+
+                # Create wavelength grid
+                wave_min, wave_max = None, None
+                if wavelength_range is not None:
+                    wave_min, wave_max = wavelength_range
+                constructor.create_wavelength_grid(wave_min=wave_min, wave_max=wave_max)
+
+                # Create spatial grid
+                constructor.create_spatial_grid()
+
+                # Construct cube
+                constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
+
+                # Create WCS (use default RA/Dec = 0 for now, could be enhanced later)
+                constructor.create_wcs(ra_center=0.0, dec_center=0.0)
+
+                # Save cube
+                if channel:
+                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                else:
+                    cube_filename = f"{base_name}_cube.fits"
+
+                cube_path = os.path.join(output_dir, cube_filename)
+                constructor.save_cube(cube_path, overwrite=True)
+                cube_files.append(cube_path)
+
+                print(f"  - Simple cube saved: {cube_path}")
+                logger.info(f"Simple cube saved: {cube_path}")
+
+                # Log quality metrics
+                valid_spaxels = np.sum(np.any(constructor.cube_weight > 0, axis=0))
+                total_spaxels = constructor.cube_weight.shape[1] * constructor.cube_weight.shape[2]
+                coverage = valid_spaxels / total_spaxels if total_spaxels > 0 else 0
+                print(f"  - Coverage: {coverage:.1%} ({valid_spaxels}/{total_spaxels} spaxels)")
+                logger.info(f"Simple cube quality: {coverage:.1%} coverage ({valid_spaxels}/{total_spaxels} spaxels)")
+
+            except Exception as e:
+                logger.error(f"Simple cube construction failed: {e}")
+                print(f"  ERROR: Simple cube construction failed: {e}")
+                print("  Falling back to traditional cube construction...")
+                traceback.print_exc()
+
+                # Fall back to traditional method
+                use_simple = False
+                use_traditional = True
+
         if use_crr:
             # Use CRR (Covariance-regularized Reconstruction) method
             logger.info(f"Constructing CRR cube from RSS file: {rss_file}")
@@ -713,8 +941,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 
                 # Fall back to traditional method
                 use_crr = False
-        
-        if not use_crr:
+                use_traditional = True
+
+        if use_traditional or (not use_simple and not use_crr):
             # Use traditional cube construction method
             logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
             print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
@@ -805,6 +1034,11 @@ def main(config_path):
         
         
     print("Configuration:", config)
+
+    input_files = get_input_files_from_config(config)
+    validate_input_files(input_files)
+
+
 
     #code to handle bias file input
     if 'bias_file' not in config:
@@ -965,7 +1199,7 @@ def main(config_path):
             print("Generating new traces...")
 
             # Validate flat field files before trace generation
-            from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+            
 
             print("Validating flat field files...")
             red_flat_validated = validate_and_fix_extensions(
@@ -1077,7 +1311,7 @@ def main(config_path):
         
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
-        from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
+        # from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")
@@ -1275,13 +1509,19 @@ def main(config_path):
 
         if rss_files and _gen_cubes:
             cube_files = construct_cube(
-                rss_files, 
+                rss_files,
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
                 spatial_sampling=config.get('spatial_sampling', 0.75),
                 use_crr=use_crr_cube,
-                parallel=config.get('CRR_parallel', False)
+                parallel=config.get('CRR_parallel', False),
+                cube_method=config.get('cube_method', 'simple'),
+                cube_pixel_size=float(config.get('cube_pixel_size', 0.3)),
+                cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
+                cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
+                cube_radius=float(config.get('cube_radius', 1.5)),
+                cube_min_weight=float(config.get('cube_min_weight', 0.01))
             )
             print(f"Cubes constructed: {cube_files}")
         else:
