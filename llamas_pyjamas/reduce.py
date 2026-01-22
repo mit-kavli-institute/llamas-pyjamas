@@ -33,7 +33,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
-import llamas_pyjamas.Arc.arcLlamas as arc
+import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
@@ -324,54 +324,73 @@ def correct_wavelengths(science_extraction_file, soln=None):
     std_wvcal = arc.arcTransfer(_science, arcdict,)
     
     print(f'std_wvcal: {std_wvcal}')
-    print(f'std_wvcal metadata: {std_wvcal.get('metadata', {})}')
-    
+    print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
+
     return std_wvcal, primary_hdr
 
 
-def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir, 
-                                  arc_calib_file=None, verbose=False):
+def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
+                                  arc_calib_file=None, verbose=False, flat_method='standard'):
     """Generate flat field pixel maps for science frame correction.
-    
+
     Args:
         red_flat (str): Path to red flat field FITS file
-        green_flat (str): Path to green flat field FITS file  
+        green_flat (str): Path to green flat field FITS file
         blue_flat (str): Path to blue flat field FITS file
         trace_dir (str): Directory containing trace files
         output_dir (str): Output directory for flat field products
         arc_calib_file (str, optional): Path to arc calibration file
         verbose (bool): Enable verbose output
-        
+        flat_method (str): Flat fielding method - 'standard' or 'pypeit' (default: 'standard')
+
     Returns:
         list: List of flat field pixel map FITS file paths
     """
-    from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
-    
     # Use flat field output directory directly (no nested pixel_maps subdirectory)
     flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
-    
-    print(f"Processing flat field calibration...")
+
+    print(f"Processing flat field calibration using method: {flat_method}")
     print(f"  Red flat: {os.path.basename(red_flat)}")
     print(f"  Green flat: {os.path.basename(green_flat)}")
     print(f"  Blue flat: {os.path.basename(blue_flat)}")
     print(f"  Output directory: {flat_output_dir}")
-    
-    # Run the complete flat field workflow
+
+    # Run the appropriate flat field workflow based on method
     try:
-        results = process_flat_field_complete(
-            red_flat, green_flat, blue_flat,
-            arc_calib_file=arc_calib_file,
-            output_dir=flat_output_dir,
-            trace_dir=trace_dir,
-            verbose=verbose
-        )
-        
-        pixel_map_files = results.get('output_files', [])
-        print(f"Successfully generated {len(pixel_map_files)} flat field pixel maps")
-        
+        if flat_method == 'pypeit':
+            # Use PypeIt-style flat fielding with full detector integration
+            from llamas_pyjamas.Flat.pypeit_integration import process_flat_with_pypeit
+
+            print("Using PypeIt-style flat fielding approach")
+            print("Processing 24 detector extensions (Red/Green/Blue for benches 1A-4B)")
+
+            results = process_flat_with_pypeit(
+                red_flat, green_flat, blue_flat,
+                trace_dir=trace_dir,
+                output_dir=flat_output_dir,
+                arc_calib_file=arc_calib_file,
+                reference_fiber=150,
+                verbose=verbose
+            )
+        else:
+            # Use standard flat fielding method
+            from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
+
+            print("Using standard flat fielding approach")
+            results = process_flat_field_complete(
+                red_flat, green_flat, blue_flat,
+                arc_calib_file=arc_calib_file,
+                output_dir=flat_output_dir,
+                trace_dir=trace_dir,
+                verbose=verbose
+            )
+
+        pixel_map_files = [results['normalized_flat_field_file']]
+        print(f"✓ Flat field calibration complete: {os.path.basename(pixel_map_files[0])}")
+        print(f"  MEF file with 24 extensions generated")
         return pixel_map_files
-        
+
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
         import traceback
@@ -382,116 +401,97 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
 def build_flat_field_map(flat_pixel_maps, science_file):
     """
     Build mapping between science extensions and corresponding flat field pixel maps.
-    
+
+    Handles multi-extension FITS (MEF) flat field files by matching
+    extension metadata exactly (channel, bench, side).
+
     Args:
-        flat_pixel_maps (list): List of flat field pixel map file paths
+        flat_pixel_maps (list): List with single MEF file path
         science_file (str): Path to science FITS file
-        
+
     Returns:
-        dict: {extension_index: {'flat_file': path, 'match_info': details}}
+        dict: {sci_ext_idx: {'flat_ext_idx': N, 'match_found': bool, ...}}
     """
     flat_map = {}
-    
-    print(f"Building flat field mapping for: {os.path.basename(science_file)}")
-    print(f"Available flat field pixel maps: {len(flat_pixel_maps)}")
-    
-    # Open science file to get extension headers
+
+    if len(flat_pixel_maps) != 1:
+        print(f"ERROR: Expected single MEF flat file, got {len(flat_pixel_maps)} files")
+        return {}
+
+    flat_mef_file = flat_pixel_maps[0]
+    print(f"Building flat field map from MEF: {os.path.basename(flat_mef_file)}")
+
     try:
-        with fits.open(science_file) as sci_hdul:
-            for ext_idx in range(1, len(sci_hdul)):  # Skip primary HDU
-                sci_hdu = sci_hdul[ext_idx]
-                
-                # Extract science extension metadata
-                sci_channel = sci_hdu.header.get('COLOR', '').lower()
-                sci_bench = sci_hdu.header.get('BENCH', '')
-                sci_side = sci_hdu.header.get('SIDE', '')
-                
-                # Alternative naming if COLOR not present
-                if not sci_channel:
-                    cam_name = sci_hdu.header.get('CAM_NAME', '')
+        with fits.open(flat_mef_file) as flat_hdul, fits.open(science_file) as sci_hdul:
+            # Iterate over science extensions (skip primary at index 0)
+            for sci_ext_idx in range(1, len(sci_hdul)):
+                if sci_hdul[sci_ext_idx].data is None:
+                    continue
+
+                # Get science metadata - try multiple header keys
+                sci_header = sci_hdul[sci_ext_idx].header
+                sci_channel = sci_header.get('CHANNEL', sci_header.get('COLOR', '')).lower()
+                sci_bench = str(sci_header.get('BENCH', ''))
+                sci_side = sci_header.get('SIDE', '').upper()
+
+                # Alternative naming if metadata not directly present
+                if not sci_channel or not sci_bench:
+                    cam_name = sci_header.get('CAM_NAME', '')
                     if cam_name:
                         parts = cam_name.split('_')
                         if len(parts) >= 2:
-                            sci_channel = parts[1].lower()
-                            if len(parts[0]) >= 2:
+                            sci_channel = parts[1].lower() if not sci_channel else sci_channel
+                            if len(parts[0]) >= 2 and not sci_bench:
                                 sci_bench = parts[0][0]
                                 sci_side = parts[0][1]
-                
-                # Build expected flat field key
+
                 sci_key = f"{sci_channel}{sci_bench}{sci_side}"
-                
-                # Find matching flat field pixel map
-                matching_flat = None
-                best_match_score = 0
-                
-                for flat_file in flat_pixel_maps:
-                    flat_basename = os.path.basename(flat_file)
-                    
-                    # Check if flat file contains the science key
-                    if sci_key.lower() in flat_basename.lower():
-                        # Try to verify match by reading flat file header
-                        try:
-                            with fits.open(flat_file) as flat_hdul:
-                                flat_channel = flat_hdul[0].header.get('CHANNEL', '').lower()
-                                flat_bench = flat_hdul[0].header.get('BENCH', '')
-                                flat_side = flat_hdul[0].header.get('SIDE', '')
-                                
-                                # Calculate match score
-                                match_score = 0
-                                if flat_channel == sci_channel:
-                                    match_score += 3
-                                if flat_bench == sci_bench:
-                                    match_score += 2  
-                                if flat_side == sci_side:
-                                    match_score += 1
-                                
-                                # Perfect match verification
-                                if (flat_channel == sci_channel and 
-                                    flat_bench == sci_bench and 
-                                    flat_side == sci_side):
-                                    matching_flat = flat_file
-                                    best_match_score = match_score
-                                    break
-                                elif match_score > best_match_score:
-                                    # Keep track of best partial match
-                                    matching_flat = flat_file
-                                    best_match_score = match_score
-                                    
-                        except Exception as e:
-                            print(f"Warning: Could not read flat file {flat_file}: {str(e)}")
-                            continue
-                    
-                    # Fallback: try pattern matching in filename
-                    elif not matching_flat:
-                        # Look for individual components in filename
-                        name_lower = flat_basename.lower()
-                        component_matches = 0
-                        if sci_channel in name_lower:
-                            component_matches += 1
-                        if sci_bench.lower() in name_lower:
-                            component_matches += 1
-                        if sci_side.lower() in name_lower:
-                            component_matches += 1
-                            
-                        if component_matches >= 2:  # At least 2 out of 3 match
-                            matching_flat = flat_file
-                            best_match_score = component_matches
-                
-                # Store mapping result
-                flat_map[ext_idx] = {
-                    'flat_file': matching_flat,
+
+                # Search flat extensions for EXACT match
+                matching_flat_ext = None
+
+                for flat_ext_idx in range(1, len(flat_hdul)):
+                    if flat_hdul[flat_ext_idx].data is None:
+                        continue
+
+                    flat_header = flat_hdul[flat_ext_idx].header
+                    flat_channel = flat_header.get('CHANNEL', '').lower()
+                    flat_bench = str(flat_header.get('BENCH', ''))
+                    flat_side = flat_header.get('SIDE', '').upper()
+
+                    # Exact match required (no scoring)
+                    if (flat_channel == sci_channel and
+                        flat_bench == sci_bench and
+                        flat_side == sci_side):
+                        matching_flat_ext = flat_ext_idx
+                        print(f"  ✓ Sci ext {sci_ext_idx} ({sci_key}) → Flat ext {flat_ext_idx}")
+                        break
+
+                # Store mapping
+                flat_map[sci_ext_idx] = {
+                    'flat_file': flat_mef_file,
+                    'flat_ext_idx': matching_flat_ext,
                     'science_key': sci_key,
                     'science_channel': sci_channel,
-                    'science_bench': sci_bench, 
+                    'science_bench': sci_bench,
                     'science_side': sci_side,
-                    'match_found': matching_flat is not None,
-                    'match_score': best_match_score
+                    'match_found': matching_flat_ext is not None,
+                    'is_mef': True
                 }
-    
+
+                if matching_flat_ext is None:
+                    print(f"  ✗ Sci ext {sci_ext_idx} ({sci_key}) → No flat match found")
+
+        # Summary
+        matched = sum(1 for m in flat_map.values() if m['match_found'])
+        print(f"✓ Matched {matched}/{len(flat_map)} science extensions to flat field")
+
     except Exception as e:
-        print(f"Error reading science file {science_file}: {str(e)}")
+        print(f"ERROR building flat field map: {e}")
+        import traceback
+        traceback.print_exc()
         return {}
-    
+
     return flat_map
 
 
@@ -602,7 +602,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     print(f"Applying flat field correction to: {os.path.basename(science_file)}")
     
     # Step 1: Build flat field mapping with cross-checking
-    flat_map = build_flat_field_map(flat_pixel_maps, science_file)
+    flat_map = build_flat_field_map(flat_pixel_maps, science_file) # this doesn't seem righ
     
     if not flat_map:
         print("ERROR: Could not build flat field mapping")
@@ -625,65 +625,73 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     
     # Step 3: Apply corrections with verified matching
     try:
-        with fits.open(science_file) as sci_hdul:
+        # Open flat MEF file once (outside the loop for efficiency)
+        flat_mef_file = flat_pixel_maps[0]
+
+        with fits.open(science_file) as sci_hdul, fits.open(flat_mef_file) as flat_hdul:
             corrected_hdus = [sci_hdul[0].copy()]  # Primary header
-            
+
             correction_stats = {'corrected': 0, 'skipped': 0, 'errors': 0}
-            
+
             for ext_idx in range(1, len(sci_hdul)):
                 sci_hdu = sci_hdul[ext_idx]
                 mapping = flat_map.get(ext_idx, {})
-                
+
                 if mapping.get('match_found') and sci_hdu.data is not None:
                     try:
-                        # Apply flat field correction with verified matching
-                        with fits.open(mapping['flat_file']) as flat_hdul:
-                            flat_data = flat_hdul[0].data
-                            
-                            # Shape verification
-                            if flat_data.shape != sci_hdu.data.shape:
-                                print(f"  ERROR: Shape mismatch for extension {ext_idx} "
-                                      f"(sci: {sci_hdu.data.shape}, flat: {flat_data.shape})")
-                                raise ValueError(f"Shape mismatch: sci={sci_hdu.data.shape}, flat={flat_data.shape}")
-                            
-                            # Check for valid flat field data
-                            valid_flat_pixels = np.isfinite(flat_data) & (flat_data > 0)
-                            if not np.any(valid_flat_pixels):
-                                print(f"  ERROR: No valid flat field data for extension {ext_idx}")
-                                raise ValueError("No valid flat field data")
-                            
-                            # Perform division with NaN protection
-                            corrected_data = np.divide(
-                                sci_hdu.data.astype(np.float32),
-                                flat_data.astype(np.float32),
-                                out=np.full_like(sci_hdu.data, np.nan, dtype=np.float32),
-                                where=flat_data > 0
-                            )
-                            
-                            # Create new HDU with corrected data
-                            new_hdu = fits.ImageHDU(
-                                data=corrected_data,
-                                header=sci_hdu.header.copy()
-                            )
-                            
-                            # Add correction metadata
-                            new_hdu.header['FLATCORR'] = (True, 'Flat field corrected')
-                            new_hdu.header['FLATFILE'] = (os.path.basename(mapping['flat_file']), 'Flat field file used')
-                            new_hdu.header['FLATKEY'] = (mapping['science_key'], 'Flat field matching key')
-                            new_hdu.header['FLATSCORE'] = (mapping.get('match_score', 0), 'Flat field match score')
-                            
-                            # Add statistics
-                            valid_pixels = np.isfinite(corrected_data)
-                            if np.any(valid_pixels):
-                                new_hdu.header['FLATMEAN'] = (float(np.nanmean(corrected_data)), 'Mean after flat correction')
-                                new_hdu.header['FLATMED'] = (float(np.nanmedian(corrected_data)), 'Median after flat correction')
-                                new_hdu.header['FLATVPIX'] = (int(np.sum(valid_pixels)), 'Valid pixels after flat correction')
-                            
-                            corrected_hdus.append(new_hdu)
-                            correction_stats['corrected'] += 1
-                            
-                            print(f"  ✓ Extension {ext_idx:2d} ({mapping['science_key']}): Corrected with {os.path.basename(mapping['flat_file'])}")
-                            
+                        # Get flat data from MEF extension
+                        flat_ext_idx = mapping['flat_ext_idx']
+                        flat_data = flat_hdul[flat_ext_idx].data
+
+                        # Shape verification
+                        if flat_data.shape != sci_hdu.data.shape:
+                            print(f"  ERROR: Shape mismatch for extension {ext_idx} "
+                                  f"(sci: {sci_hdu.data.shape}, flat: {flat_data.shape})")
+                            raise ValueError(f"Shape mismatch: sci={sci_hdu.data.shape}, flat={flat_data.shape}")
+
+                        # Perform division with NaN protection
+                        # where flat_data == 1.0, no correction is applied (passes through)
+                        # where flat_data != 1.0, science is divided by flat
+                        corrected_data = np.divide(
+                            sci_hdu.data.astype(np.float32),
+                            flat_data.astype(np.float32),
+                            out=np.full_like(sci_hdu.data, np.nan, dtype=np.float32),
+                            where=(flat_data > 0)
+                        )
+
+                        # Handle bad pixels from division
+                        bad_pixels = ~np.isfinite(corrected_data)
+                        n_bad = np.sum(bad_pixels)
+                        if n_bad > 0:
+                            # Set to original science values (no correction for bad pixels)
+                            corrected_data[bad_pixels] = sci_hdu.data[bad_pixels]
+
+                        # Create new HDU with corrected data
+                        new_hdu = fits.ImageHDU(
+                            data=corrected_data,
+                            header=sci_hdu.header.copy(),
+                            name=sci_hdu.name
+                        )
+
+                        # Add correction metadata
+                        new_hdu.header['FLATCORR'] = (True, 'Flat field corrected')
+                        new_hdu.header['FLATFILE'] = (os.path.basename(flat_mef_file), 'Flat field MEF file')
+                        new_hdu.header['FLATEXT'] = (flat_ext_idx, 'Flat field extension index')
+                        new_hdu.header['FLATKEY'] = (mapping['science_key'], 'Flat field matching key')
+                        new_hdu.header['BADFPIX'] = (int(n_bad), 'Bad pixels from flat division')
+
+                        # Add statistics
+                        valid_pixels = np.isfinite(corrected_data)
+                        if np.any(valid_pixels):
+                            new_hdu.header['FLATMEAN'] = (float(np.mean(corrected_data[valid_pixels])), 'Mean after flat correction')
+                            new_hdu.header['FLATMED'] = (float(np.median(corrected_data[valid_pixels])), 'Median after flat correction')
+                            new_hdu.header['FLATVPIX'] = (int(np.sum(valid_pixels)), 'Valid pixels after flat correction')
+
+                        corrected_hdus.append(new_hdu)
+                        correction_stats['corrected'] += 1
+
+                        print(f"  ✓ Extension {ext_idx:2d} ({mapping['science_key']}): Corrected (bad pixels: {n_bad})")
+
                     except Exception as e:
                         print(f"  ✗ Extension {ext_idx:2d} ({mapping.get('science_key', 'UNKNOWN')}): Error - {str(e)}")
                         # Copy original on error
@@ -692,7 +700,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
                         new_hdu.header['FLATKEY'] = (mapping.get('science_key', 'UNKNOWN'), 'Failed flat correction')
                         corrected_hdus.append(new_hdu)
                         correction_stats['errors'] += 1
-                        
+
                 else:
                     # No flat correction applied
                     new_hdu = sci_hdu.copy()
@@ -1284,13 +1292,14 @@ def main(config_path):
             os.makedirs(flat_field_dir, exist_ok=True)
             
             flat_pixel_maps = process_flat_field_calibration(
-                config.get('red_flat_file'), 
-                config.get('green_flat_file'), 
+                config.get('red_flat_file'),
+                config.get('green_flat_file'),
                 config.get('blue_flat_file'),
                 config.get('trace_output_dir'),
                 flat_field_dir,
                 arc_calib_file=config.get('arc_calib_file'),
-                verbose=config.get('verbose_flat_processing', False)
+                verbose=config.get('verbose_flat_processing', False),
+                flat_method=config.get('flat_method', 'standard')
             )
             
             if flat_pixel_maps:
