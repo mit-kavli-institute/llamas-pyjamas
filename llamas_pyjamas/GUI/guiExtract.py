@@ -255,7 +255,70 @@ def make_writable(extraction_obj):
     logger.warning(f"Could not make object of type {type(extraction_obj)} writable")
     return extraction_obj
 
+def is_placeholder_camera(data):
+    """
+    Check if HDU data represents a non-functional camera (filled with 1.0).
+    
+    Args:
+        data: numpy array of HDU data
+        
+    Returns:
+        bool: True if this is a placeholder camera
+    """
+    if data is None:
+        return True
+    
+    # Check if all values are 1.0 (or very close due to floating point)
+    return np.allclose(data, 1.0, rtol=1e-5)
 
+def compute_detector_background(data, rows=(30, 50)):
+    """
+    Compute median background from specified detector rows.
+    
+    Args:
+        data: numpy array of detector data
+        rows: tuple of (start_row, end_row) for background region
+        
+    Returns:
+        float: median background value
+    """
+    upper_det = data[rows[0]:rows[1], :]
+    upper_background_value = np.median(upper_det)
+    return upper_background_value
+
+def normalize_detector_backgrounds(hdu_data_list, rows=(30, 50)):
+    """
+    Normalize detector backgrounds to a common reference level.
+    Instead of subtracting to zero, we subtract the difference from the minimum
+    background level to preserve absolute counts.
+    
+    Args:
+        hdu_data_list: list of (hdu_index, data_array) tuples
+        rows: tuple of (start_row, end_row) for background region
+        
+    Returns:
+        dict: {hdu_index: offset_to_subtract}
+    """
+    backgrounds = {}
+    
+    # Compute background for each detector
+    for hdu_index, data in hdu_data_list:
+        if not is_placeholder_camera(data):
+            bg = compute_detector_background(data, rows)
+            backgrounds[hdu_index] = bg
+    
+    if not backgrounds:
+        return {}
+    
+    # Find minimum background (our reference level)
+    min_background = min(backgrounds.values())
+    
+    # Calculate offsets: subtract only the DIFFERENCE from minimum
+    offsets = {}
+    for hdu_index, bg in backgrounds.items():
+        offsets[hdu_index] = bg - min_background
+    
+    return offsets
 
 ##Main function currently used by the Quicklook for full extraction
 
@@ -410,14 +473,33 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         ### Testing ray usage
 
         # Process each HDU-trace pair in parallel using Ray.
-        futures = []
+        
+        hdu_data_pairs = []
         for hdu_index, trace_file in hdu_trace_pairs:
             
-            hdu_data = hdu[hdu_index].data
+            hdu_data = hdu[hdu_index].data.copy()
+            hdu_data_pairs.append((hdu_index, hdu_data))
+            
+        # Compute detector-to-detector normalization offsets
+        offsets = normalize_detector_backgrounds(hdu_data_pairs, rows=(30, 50))
             
             # Get the data and header from the current extension.
-            
+        futures = []
+        for (hdu_index, trace_file), (_, hdu_data) in zip(hdu_trace_pairs, hdu_data_pairs):
+        
             hdr = hdu[hdu_index].header
+            
+            # Check if this is a placeholder camera and skip background subtraction if so
+            if is_placeholder_camera(hdu_data):
+                logger.warning(f"Extension {hdu_index} is a placeholder camera (filled with 1.0), skipping background subtraction")
+                # Still process but don't subtract background
+            elif hdu_index in offsets:
+                # Apply normalization offset (not full background subtraction!)
+                offset = offsets[hdu_index]
+                hdu_data = hdu_data - offset
+                logger.info(f"Extension {hdu_index}: Applied detector normalization offset of {offset:.2f}")
+
+            
             #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
             if (method == 'optimal'):
                 future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
@@ -456,6 +538,12 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile+'_whitelight.fits'
+        
+        if output_dir and os.path.exists(output_dir):
+            outfile = os.path.join(output_dir, outfile)
+        else:
+            outfile = os.path.join(OUTPUT_DIR, outfile)
+                
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
 
