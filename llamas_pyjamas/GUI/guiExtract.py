@@ -162,10 +162,14 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote
 
-def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
-    Returns the extraction object or None if there is an error.
+
+    Returns a dict containing:
+        'extraction': ExtractLlamas object (or None if error)
+        'detector_background': median background after bias subtraction
+        'hdu_index': the HDU index for this extraction
     """
     try:
         # Compute the bias from the current extension data.
@@ -193,21 +197,34 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
         
-        bias_data = bias.data #np.median(bias.data[20:50])
-            
+        bias_data = bias.data
+
+        # Compute bias-subtracted data
+        bias_subtracted_data = hdu_data.astype(float) - bias_data
+
+        # Compute detector background AFTER bias subtraction
+        detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
+        print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
+
         # Load the trace object from the pickle file using cloudpickle for better compatibility
         with open(trace_file, mode='rb') as f:
             tracer = cloudpickle.load(f)
-        # Create an ExtractLlamas object; note the subtraction of the bias.
+
+        # Create an ExtractLlamas object with bias-subtracted data
         if (method == 'optimal'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=True)
         elif (method == 'boxcar'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
-        return extraction
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=False)
+
+        return {
+            'extraction': extraction,
+            'detector_background': detector_background,
+            'hdu_index': hdu_index
+        }
     except Exception as e:
         logger.error(f"Error extracting trace from {trace_file}")
         logger.error(traceback.format_exc())
-        return None
+        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index}
 
 
 def make_writable(extraction_obj):
@@ -470,52 +487,62 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 # Don't add to pairs - will skip this extension
         #print(hdu_trace_pairs)
 
-        ### Testing ray usage
+        ### Process each HDU-trace pair in parallel using Ray
 
-        # Process each HDU-trace pair in parallel using Ray.
-        
-        hdu_data_pairs = []
-        for hdu_index, trace_file in hdu_trace_pairs:
-            
-            hdu_data = hdu[hdu_index].data.copy()
-            hdu_data_pairs.append((hdu_index, hdu_data))
-            
-        # Compute detector-to-detector normalization offsets
-        offsets = normalize_detector_backgrounds(hdu_data_pairs, rows=(30, 50))
-            
-            # Get the data and header from the current extension.
         futures = []
-        for (hdu_index, trace_file), (_, hdu_data) in zip(hdu_trace_pairs, hdu_data_pairs):
-        
+        for hdu_index, trace_file in hdu_trace_pairs:
+            hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
-            
-            # Check if this is a placeholder camera and skip background subtraction if so
-            if is_placeholder_camera(hdu_data):
-                logger.warning(f"Extension {hdu_index} is a placeholder camera (filled with 1.0), skipping background subtraction")
-                # Still process but don't subtract background
-            elif hdu_index in offsets:
-                # Apply normalization offset (not full background subtraction!)
-                offset = offsets[hdu_index]
-                hdu_data = hdu_data - offset
-                logger.info(f"Extension {hdu_index}: Applied detector normalization offset of {offset:.2f}")
 
-            
-            #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=use_bias)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar', use_bias=use_bias)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=use_bias)
             futures.append(future)
-        
-        # Wait for all remote tasks to complete.
-        raw_extraction_list = ray.get(futures)
-        #extraction_list = [ex for ex in extraction_list if ex is not None]
 
-        # Post-process to make objects writable
+        # Wait for all remote tasks to complete
+        results = ray.get(futures)
+
+        # Collect detector backgrounds from non-placeholder detectors (AFTER bias subtraction)
+        backgrounds = {}
+        for result in results:
+            if result is not None and result.get('extraction') is not None:
+                hdu_idx = result['hdu_index']
+                hdu_data = hdu[hdu_idx].data
+                if not is_placeholder_camera(hdu_data):
+                    backgrounds[hdu_idx] = result['detector_background']
+                    logger.info(f"Extension {hdu_idx}: Post-bias background = {result['detector_background']:.2f}")
+
+        # Normalize to minimum background (apply offsets to extraction counts)
+        if backgrounds:
+            min_background = min(backgrounds.values())
+            logger.info(f"Detector backgrounds: {backgrounds}")
+            logger.info(f"Minimum background (reference): {min_background:.2f}")
+
+            for result in results:
+                if result is not None and result.get('extraction') is not None:
+                    hdu_idx = result['hdu_index']
+                    if hdu_idx in backgrounds:
+                        offset = backgrounds[hdu_idx] - min_background
+                        if offset > 0:
+                            result['extraction'].counts -= offset
+                            logger.info(f"Extension {hdu_idx}: Applied offset of {offset:.2f} to counts")
+
+            # Adjust placeholder camera counts to match minimum background
+            # This ensures whitelight flux from missing cameras matches real detector backgrounds
+            for result in results:
+                if result is not None and result.get('extraction') is not None:
+                    hdu_idx = result['hdu_index']
+                    hdu_data = hdu[hdu_idx].data
+                    if is_placeholder_camera(hdu_data):
+                        result['extraction'].counts[:] = min_background
+                        logger.info(f"Extension {hdu_idx}: Set placeholder counts to background level {min_background:.2f}")
+
+        # Build extraction list from results and make objects writable
         extraction_list = []
-        for ex in raw_extraction_list:
-            if ex is not None:
-                writable_ex = make_writable(ex)
+        for result in results:
+            if result is not None and result.get('extraction') is not None:
+                writable_ex = make_writable(result['extraction'])
                 extraction_list.append(writable_ex)
 
 
