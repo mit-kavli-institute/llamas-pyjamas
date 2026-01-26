@@ -513,37 +513,42 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                     backgrounds[hdu_idx] = result['detector_background']
                     logger.info(f"Extension {hdu_idx}: Post-bias background = {result['detector_background']:.2f}")
 
+        # First, make all extraction objects writable (Ray returns read-only objects)
+        writable_results = []
+        for result in results:
+            if result is not None and result.get('extraction') is not None:
+                writable_ex = make_writable(result['extraction'])
+                writable_results.append({
+                    'extraction': writable_ex,
+                    'detector_background': result['detector_background'],
+                    'hdu_index': result['hdu_index']
+                })
+
         # Normalize to minimum background (apply offsets to extraction counts)
         if backgrounds:
             min_background = min(backgrounds.values())
             logger.info(f"Detector backgrounds: {backgrounds}")
             logger.info(f"Minimum background (reference): {min_background:.2f}")
 
-            for result in results:
-                if result is not None and result.get('extraction') is not None:
-                    hdu_idx = result['hdu_index']
-                    if hdu_idx in backgrounds:
-                        offset = backgrounds[hdu_idx] - min_background
-                        if offset > 0:
-                            result['extraction'].counts -= offset
-                            logger.info(f"Extension {hdu_idx}: Applied offset of {offset:.2f} to counts")
+            for result in writable_results:
+                hdu_idx = result['hdu_index']
+                if hdu_idx in backgrounds:
+                    offset = backgrounds[hdu_idx] - min_background
+                    if offset > 0:
+                        result['extraction'].counts -= offset
+                        logger.info(f"Extension {hdu_idx}: Applied offset of {offset:.2f} to counts")
 
             # Adjust placeholder camera counts to match minimum background
             # This ensures whitelight flux from missing cameras matches real detector backgrounds
-            for result in results:
-                if result is not None and result.get('extraction') is not None:
-                    hdu_idx = result['hdu_index']
-                    hdu_data = hdu[hdu_idx].data
-                    if is_placeholder_camera(hdu_data):
-                        result['extraction'].counts[:] = min_background
-                        logger.info(f"Extension {hdu_idx}: Set placeholder counts to background level {min_background:.2f}")
+            for result in writable_results:
+                hdu_idx = result['hdu_index']
+                hdu_data = hdu[hdu_idx].data
+                if is_placeholder_camera(hdu_data):
+                    result['extraction'].counts[:] = min_background
+                    logger.info(f"Extension {hdu_idx}: Set placeholder counts to background level {min_background:.2f}")
 
-        # Build extraction list from results and make objects writable
-        extraction_list = []
-        for result in results:
-            if result is not None and result.get('extraction') is not None:
-                writable_ex = make_writable(result['extraction'])
-                extraction_list.append(writable_ex)
+        # Build extraction list from writable results
+        extraction_list = [result['extraction'] for result in writable_results]
 
 
         print(f'Extraction list = {extraction_list}')
