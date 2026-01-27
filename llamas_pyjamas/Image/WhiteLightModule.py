@@ -137,7 +137,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
             fits.Column(name='XDATA', format='E', array=blue_x.astype(np.float32)),
             fits.Column(name='YDATA', format='E', array=blue_y.astype(np.float32)),
             fits.Column(name='FLUX', format='E', array=blue_flux.astype(np.float32))
-        ], name='BLUE_TAB', nrows=len(blue_whitelight))
+        ], name='BLUE_TAB')
         hdul.append(blue_tab)
     
     # Process green data if exists
@@ -164,7 +164,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
             fits.Column(name='XDATA', format='E', array=red_x.astype(np.float32)),
             fits.Column(name='YDATA', format='E', array=red_y.astype(np.float32)),
             fits.Column(name='FLUX', format='E', array=red_flux.astype(np.float32))
-        ], name='RED_TAB', nrows=len(red_whitelight))
+        ], name='RED_TAB')
         hdul.append(red_tab)
     if not outfile:
         fitsfilebase = fitsfile.split('/')[-1]
