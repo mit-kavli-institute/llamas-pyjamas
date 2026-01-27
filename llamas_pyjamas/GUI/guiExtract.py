@@ -183,12 +183,12 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        if use_bias is None:    
+        if use_bias is None:
             bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-        elif use_bias is str:
-            if os.path.isfile(use_bias):
-                bias_file = use_bias
+        elif isinstance(use_bias, (str, os.PathLike)):
+            bias_file = os.fspath(use_bias)
+            if not os.path.isfile(bias_file):
+                raise FileNotFoundError(f"Bias file not found: {bias_file}")
         else:
             bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
 
@@ -302,40 +302,6 @@ def compute_detector_background(data, rows=(30, 50)):
     upper_det = data[rows[0]:rows[1], :]
     upper_background_value = np.median(upper_det)
     return upper_background_value
-
-def normalize_detector_backgrounds(hdu_data_list, rows=(30, 50)):
-    """
-    Normalize detector backgrounds to a common reference level.
-    Instead of subtracting to zero, we subtract the difference from the minimum
-    background level to preserve absolute counts.
-    
-    Args:
-        hdu_data_list: list of (hdu_index, data_array) tuples
-        rows: tuple of (start_row, end_row) for background region
-        
-    Returns:
-        dict: {hdu_index: offset_to_subtract}
-    """
-    backgrounds = {}
-    
-    # Compute background for each detector
-    for hdu_index, data in hdu_data_list:
-        if not is_placeholder_camera(data):
-            bg = compute_detector_background(data, rows)
-            backgrounds[hdu_index] = bg
-    
-    if not backgrounds:
-        return {}
-    
-    # Find minimum background (our reference level)
-    min_background = min(backgrounds.values())
-    
-    # Calculate offsets: subtract only the DIFFERENCE from minimum
-    offsets = {}
-    for hdu_index, bg in backgrounds.items():
-        offsets[hdu_index] = bg - min_background
-    
-    return offsets
 
 ##Main function currently used by the Quicklook for full extraction
 
@@ -514,42 +480,13 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                     'hdu_index': result['hdu_index']
                 })
 
-        # Group detector backgrounds by color (for per-color normalization)
-        backgrounds_by_color = {'red': {}, 'green': {}, 'blue': {}}
+        # Set placeholder cameras to zero (no real data)
         for result in writable_results:
             hdu_idx = result['hdu_index']
             hdu_data = hdu[hdu_idx].data
-            if not is_placeholder_camera(hdu_data):
-                color = result['extraction'].channel.lower()
-                backgrounds_by_color[color][hdu_idx] = result['detector_background']
-                logger.info(f"Extension {hdu_idx} ({color}): Post-bias background = {result['detector_background']:.2f}")
-
-        # Normalize each color separately to its own minimum background
-        for color, color_backgrounds in backgrounds_by_color.items():
-            if not color_backgrounds:
-                continue
-
-            min_background = min(color_backgrounds.values())
-            logger.info(f"{color.upper()}: Detector backgrounds = {color_backgrounds}")
-            logger.info(f"{color.upper()}: min_background = {min_background:.2f}")
-
-            # Apply offsets to detectors of this color
-            for result in writable_results:
-                hdu_idx = result['hdu_index']
-                if hdu_idx in color_backgrounds:
-                    offset = color_backgrounds[hdu_idx] - min_background
-                    if offset > 0:
-                        result['extraction'].counts -= offset
-                        logger.info(f"Extension {hdu_idx} ({color}): Applied offset of {offset:.2f} to counts")
-
-            # Set placeholder cameras for this color to min_background
-            for result in writable_results:
-                hdu_idx = result['hdu_index']
-                hdu_data = hdu[hdu_idx].data
-                extraction_color = result['extraction'].channel.lower()
-                if is_placeholder_camera(hdu_data) and extraction_color == color:
-                    result['extraction'].counts[:] = min_background
-                    logger.info(f"Extension {hdu_idx} ({color}): Set placeholder to {min_background:.2f}")
+            if is_placeholder_camera(hdu_data):
+                result['extraction'].counts[:] = 0.0
+                logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
 
         # Build extraction list from writable results
         extraction_list = [result['extraction'] for result in writable_results]
