@@ -503,16 +503,6 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         # Wait for all remote tasks to complete
         results = ray.get(futures)
 
-        # Collect detector backgrounds from non-placeholder detectors (AFTER bias subtraction)
-        backgrounds = {}
-        for result in results:
-            if result is not None and result.get('extraction') is not None:
-                hdu_idx = result['hdu_index']
-                hdu_data = hdu[hdu_idx].data
-                if not is_placeholder_camera(hdu_data):
-                    backgrounds[hdu_idx] = result['detector_background']
-                    logger.info(f"Extension {hdu_idx}: Post-bias background = {result['detector_background']:.2f}")
-
         # First, make all extraction objects writable (Ray returns read-only objects)
         writable_results = []
         for result in results:
@@ -524,28 +514,42 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                     'hdu_index': result['hdu_index']
                 })
 
-        # Normalize to minimum background (apply offsets to extraction counts)
-        if backgrounds:
-            min_background = min(backgrounds.values())
-            logger.info(f"Detector backgrounds: {backgrounds}")
-            logger.info(f"Minimum background (reference): {min_background:.2f}")
+        # Group detector backgrounds by color (for per-color normalization)
+        backgrounds_by_color = {'red': {}, 'green': {}, 'blue': {}}
+        for result in writable_results:
+            hdu_idx = result['hdu_index']
+            hdu_data = hdu[hdu_idx].data
+            if not is_placeholder_camera(hdu_data):
+                color = result['extraction'].channel.lower()
+                backgrounds_by_color[color][hdu_idx] = result['detector_background']
+                logger.info(f"Extension {hdu_idx} ({color}): Post-bias background = {result['detector_background']:.2f}")
 
+        # Normalize each color separately to its own minimum background
+        for color, color_backgrounds in backgrounds_by_color.items():
+            if not color_backgrounds:
+                continue
+
+            min_background = min(color_backgrounds.values())
+            logger.info(f"{color.upper()}: Detector backgrounds = {color_backgrounds}")
+            logger.info(f"{color.upper()}: min_background = {min_background:.2f}")
+
+            # Apply offsets to detectors of this color
             for result in writable_results:
                 hdu_idx = result['hdu_index']
-                if hdu_idx in backgrounds:
-                    offset = backgrounds[hdu_idx] - min_background
+                if hdu_idx in color_backgrounds:
+                    offset = color_backgrounds[hdu_idx] - min_background
                     if offset > 0:
                         result['extraction'].counts -= offset
-                        logger.info(f"Extension {hdu_idx}: Applied offset of {offset:.2f} to counts")
+                        logger.info(f"Extension {hdu_idx} ({color}): Applied offset of {offset:.2f} to counts")
 
-            # Adjust placeholder camera counts to match minimum background
-            # This ensures whitelight flux from missing cameras matches real detector backgrounds
+            # Set placeholder cameras for this color to min_background
             for result in writable_results:
                 hdu_idx = result['hdu_index']
                 hdu_data = hdu[hdu_idx].data
-                if is_placeholder_camera(hdu_data):
+                extraction_color = result['extraction'].channel.lower()
+                if is_placeholder_camera(hdu_data) and extraction_color == color:
                     result['extraction'].counts[:] = min_background
-                    logger.info(f"Extension {hdu_idx}: Set placeholder counts to background level {min_background:.2f}")
+                    logger.info(f"Extension {hdu_idx} ({color}): Set placeholder to {min_background:.2f}")
 
         # Build extraction list from writable results
         extraction_list = [result['extraction'] for result in writable_results]
