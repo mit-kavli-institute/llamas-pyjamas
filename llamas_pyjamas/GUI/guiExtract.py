@@ -183,16 +183,8 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        if use_bias is None:
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-        elif isinstance(use_bias, (str, os.PathLike)):
-            bias_file = os.fspath(use_bias)
-            if not os.path.isfile(bias_file):
-                raise FileNotFoundError(f"Bias file not found: {bias_file}")
-        else:
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-
+        # use_bias is the resolved bias file path from GUI_extract
+        bias_file = os.fspath(use_bias)
         print(f'Bias file: {bias_file}')
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
@@ -374,19 +366,51 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         primary_hdr = hdu[0].header
 
+        # Determine bias file based on READ-MDE header keyword
+        read_mode = primary_hdr.get('READ-MDE', None)
+        if read_mode is not None:
+            read_mode = read_mode.strip().upper()
+            logger.info(f"Detected READ-MDE: {read_mode}")
+
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
         #Defining the base filename
-        #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
+
         if use_bias is not None:
+            # User-specified bias file takes priority
             if os.path.isfile(use_bias):
                 masterbiasfile = use_bias
             else:
                 raise ValueError(f"Bias file {use_bias} does not exist.")
         else:
-            masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            # Auto-select bias based on READ-MDE
+            # Default fallback is slow_master_bias.fits (standard readout mode)
+            default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+            if read_mode == 'FAST':
+                candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using FAST mode bias: {masterbiasfile}")
+                else:
+                    logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                    masterbiasfile = default_bias
+            elif read_mode == 'SLOW':
+                candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+                else:
+                    raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+            else:
+                # Unknown or missing READ-MDE, use slow mode as default
+                masterbiasfile = default_bias
+                if read_mode is None:
+                    logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+                else:
+                    logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
 
         #Debug statements
         print(f'basefile = {basefile}')
@@ -461,9 +485,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdr = hdu[hdu_index].header
 
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=use_bias)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=use_bias)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile)
             futures.append(future)
 
         # Wait for all remote tasks to complete
