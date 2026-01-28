@@ -162,10 +162,14 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote
 
-def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
-    Returns the extraction object or None if there is an error.
+
+    Returns a dict containing:
+        'extraction': ExtractLlamas object (or None if error)
+        'detector_background': median background after bias subtraction
+        'hdu_index': the HDU index for this extraction
     """
     try:
         # Compute the bias from the current extension data.
@@ -179,35 +183,40 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        if use_bias is None:    
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-        elif use_bias is str:
-            if os.path.isfile(use_bias):
-                bias_file = use_bias
-        else:
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-
+        # use_bias is the resolved bias file path from GUI_extract
+        bias_file = os.fspath(use_bias)
         print(f'Bias file: {bias_file}')
         #### fix the directory here!
         bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
         
-        bias_data = bias.data #np.median(bias.data[20:50])
-            
+        bias_data = bias.data
+
+        # Compute bias-subtracted data
+        bias_subtracted_data = hdu_data.astype(float) - bias_data
+
+        # Compute detector background AFTER bias subtraction
+        detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
+        print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
+
         # Load the trace object from the pickle file using cloudpickle for better compatibility
         with open(trace_file, mode='rb') as f:
             tracer = cloudpickle.load(f)
-        # Create an ExtractLlamas object; note the subtraction of the bias.
+
+        # Create an ExtractLlamas object with bias-subtracted data
         if (method == 'optimal'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=True)
         elif (method == 'boxcar'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
-        return extraction
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=False)
+
+        return {
+            'extraction': extraction,
+            'detector_background': detector_background,
+            'hdu_index': hdu_index
+        }
     except Exception as e:
         logger.error(f"Error extracting trace from {trace_file}")
         logger.error(traceback.format_exc())
-        return None
+        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index}
 
 
 def make_writable(extraction_obj):
@@ -255,7 +264,36 @@ def make_writable(extraction_obj):
     logger.warning(f"Could not make object of type {type(extraction_obj)} writable")
     return extraction_obj
 
+def is_placeholder_camera(data):
+    """
+    Check if HDU data represents a non-functional camera (filled with 1.0).
+    
+    Args:
+        data: numpy array of HDU data
+        
+    Returns:
+        bool: True if this is a placeholder camera
+    """
+    if data is None:
+        return True
+    
+    # Check if all values are 1.0 (or very close due to floating point)
+    return np.allclose(data, 1.0, rtol=1e-5)
 
+def compute_detector_background(data, rows=(30, 50)):
+    """
+    Compute median background from specified detector rows.
+    
+    Args:
+        data: numpy array of detector data
+        rows: tuple of (start_row, end_row) for background region
+        
+    Returns:
+        float: median background value
+    """
+    upper_det = data[rows[0]:rows[1], :]
+    upper_background_value = np.median(upper_det)
+    return upper_background_value
 
 ##Main function currently used by the Quicklook for full extraction
 
@@ -321,26 +359,61 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
         # Import placeholder detection utilities
-        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+
+        # Validate and create GUI version if needed (preserves original file)
+        file = validate_for_gui(file)
 
         #opening the fitsfile
         hdu = process_fits_by_color(file)
 
         primary_hdr = hdu[0].header
 
+        # Determine bias file based on READ-MDE header keyword
+        read_mode = primary_hdr.get('READ-MDE', None)
+        if read_mode is not None:
+            read_mode = read_mode.strip().upper()
+            logger.info(f"Detected READ-MDE: {read_mode}")
+
         extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
 
         #Defining the base filename
-        #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
+
         if use_bias is not None:
+            # User-specified bias file takes priority
             if os.path.isfile(use_bias):
                 masterbiasfile = use_bias
             else:
                 raise ValueError(f"Bias file {use_bias} does not exist.")
         else:
-            masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            # Auto-select bias based on READ-MDE
+            # Default fallback is slow_master_bias.fits (standard readout mode)
+            default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+            if read_mode == 'FAST':
+                candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using FAST mode bias: {masterbiasfile}")
+                else:
+                    logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                    masterbiasfile = default_bias
+            elif read_mode == 'SLOW':
+                candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+                else:
+                    raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+            else:
+                # Unknown or missing READ-MDE, use slow mode as default
+                masterbiasfile = default_bias
+                if read_mode is None:
+                    logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+                else:
+                    logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
 
         #Debug statements
         print(f'basefile = {basefile}')
@@ -407,34 +480,43 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 # Don't add to pairs - will skip this extension
         #print(hdu_trace_pairs)
 
-        ### Testing ray usage
+        ### Process each HDU-trace pair in parallel using Ray
 
-        # Process each HDU-trace pair in parallel using Ray.
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
-            
-            hdu_data = hdu[hdu_index].data
-            
-            # Get the data and header from the current extension.
-            
+            hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
-            #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
-            if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
-            elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar', use_bias=use_bias)
-            futures.append(future)
-        
-        # Wait for all remote tasks to complete.
-        raw_extraction_list = ray.get(futures)
-        #extraction_list = [ex for ex in extraction_list if ex is not None]
 
-        # Post-process to make objects writable
-        extraction_list = []
-        for ex in raw_extraction_list:
-            if ex is not None:
-                writable_ex = make_writable(ex)
-                extraction_list.append(writable_ex)
+            if (method == 'optimal'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+            elif (method == 'boxcar'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile)
+            futures.append(future)
+
+        # Wait for all remote tasks to complete
+        results = ray.get(futures)
+
+        # First, make all extraction objects writable (Ray returns read-only objects)
+        writable_results = []
+        for result in results:
+            if result is not None and result.get('extraction') is not None:
+                writable_ex = make_writable(result['extraction'])
+                writable_results.append({
+                    'extraction': writable_ex,
+                    'detector_background': result['detector_background'],
+                    'hdu_index': result['hdu_index']
+                })
+
+        # Set placeholder cameras to zero (no real data)
+        for result in writable_results:
+            hdu_idx = result['hdu_index']
+            hdu_data = hdu[hdu_idx].data
+            if is_placeholder_camera(hdu_data):
+                result['extraction'].counts[:] = 0.0
+                logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
+
+        # Build extraction list from writable results
+        extraction_list = [result['extraction'] for result in writable_results]
 
 
         print(f'Extraction list = {extraction_list}')
@@ -456,6 +538,12 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile+'_whitelight.fits'
+        
+        if output_dir and os.path.exists(output_dir):
+            outfile = os.path.join(output_dir, outfile)
+        else:
+            outfile = os.path.join(OUTPUT_DIR, outfile)
+                
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
 
