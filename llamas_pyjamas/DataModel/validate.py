@@ -440,6 +440,40 @@ def validate_and_fix_extensions(fits_file: str,
 
     return output_file
 
+
+def validate_for_gui(fits_file: str, expected_extensions: int = 24) -> str:
+    """Validate and fix a FITS file for GUI extraction, preserving the original.
+
+    Creates a copy with 'GUI_version' in the filename. If extensions need fixing,
+    the copy is modified to add placeholders. Original file is never touched.
+    If the file already has the expected extensions, returns the original path unchanged.
+
+    Args:
+        fits_file: Path to the input FITS file.
+        expected_extensions: Number of extensions expected (default: 24).
+
+    Returns:
+        Path to use for extraction (original if valid, GUI_version copy if fixed).
+    """
+    import shutil
+
+    validation_info = validate_fits_structure(fits_file, expected_extensions)
+
+    if not validation_info['needs_validation']:
+        logger.info("File already has correct number of extensions - using original")
+        return fits_file
+
+    # Build GUI_version output path and copy the original
+    base, ext = os.path.splitext(fits_file)
+    gui_file = f"{base}_GUI_version{ext}"
+    shutil.copy2(fits_file, gui_file)
+    logger.info(f"Copied science file to: {gui_file}")
+
+    # Fix the copy in-place (modifies gui_file, not original)
+    return validate_and_fix_extensions(gui_file, expected_extensions=expected_extensions,
+                                       backup=False)
+
+
 if __name__ == "__main__":
     """Command-line interface for FITS validation."""
     import argparse

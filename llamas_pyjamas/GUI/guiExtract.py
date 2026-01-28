@@ -359,7 +359,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
         # Import placeholder detection utilities
-        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+
+        # Validate and create GUI version if needed (preserves original file)
+        file = validate_for_gui(file)
 
         #opening the fitsfile
         hdu = process_fits_by_color(file)
