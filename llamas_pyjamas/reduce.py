@@ -165,8 +165,8 @@ def relative_throughput(shift_picklename, flat_picklename):
     return
 
 
-def correct_wavelengths(science_extraction_file, soln=None):
-    if soln is None:
+def correct_wavelengths(science_extraction_file, soln=os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')):
+    if not soln:
         # Load the reference arc dictionary if not provided
         arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
     
@@ -232,7 +232,6 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
 
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
-        import traceback
         traceback.print_exc()
         return []
 
@@ -519,7 +518,7 @@ def main(config_path):
 
     ### Checking for arc file or master wavelength solution
         
-    if bool(config.get('generate_new_wavelength_soln')) == True:
+    if bool(config.get('generate_new_wavelength_soln', False)) == True:
         print("Generating new wavelength solution.")
         extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
         if 'arc_file' not in config:
@@ -720,13 +719,13 @@ def main(config_path):
                                             verbose=False)
             except Exception as e:
                 print(f"Error during preliminary flat field processing: {str(e)}")
-                import traceback
+                
                 traceback.print_exc()
 
-        if flat_pixel_maps:
-            print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
-        else:
-            print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
+        # if flat_pixel_maps:
+            # print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
+        # else:
+            # print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
         
 
         
@@ -759,7 +758,7 @@ def main(config_path):
 
         science_files_to_process = validated_science_files
 
-        if config.get('apply_flat_field_correction', True) and flat_pixel_maps:
+        if config.get('apply_flat_field_correction', True): #and flat_pixel_maps:
             print("\n" + "="*60)
             print("APPLYING FLAT FIELD CORRECTIONS")
             print("="*60)
@@ -769,7 +768,7 @@ def main(config_path):
             flat_output_dir = output_dir
             
             overall_stats = {'total_corrected': 0, 'total_skipped': 0, 'total_errors': 0}
-            
+            """
             if isinstance(config['science_files'], list):
                 for i, science_file in enumerate(config['science_files']):
                     print(f"\nFlat-correcting science file {i+1}/{len(config['science_files'])}:")
@@ -813,30 +812,30 @@ def main(config_path):
                 #     require_all_matches=config.get('require_all_flat_matches', False)
                 # )
                 
-                if corrected_file:
-                    science_files_to_process = corrected_file
-                    overall_stats['total_corrected'] = stats['corrected']
-                    overall_stats['total_skipped'] = stats['skipped']
-                    overall_stats['total_errors'] = stats['errors']
-                else:
-                    print(f"ERROR: Failed to flat-correct {science_file}, using original")
-                    science_files_to_process = science_file
+            #     if corrected_file:
+            #         science_files_to_process = corrected_file
+            #         overall_stats['total_corrected'] = stats['corrected']
+            #         overall_stats['total_skipped'] = stats['skipped']
+            #         overall_stats['total_errors'] = stats['errors']
+            #     else:
+            #         print(f"ERROR: Failed to flat-correct {science_file}, using original")
+            #         science_files_to_process = science_file
             
-            print("\n" + "="*60)
-            print("FLAT FIELD CORRECTION SUMMARY")
-            print("="*60)
-            files_processed = len(config['science_files']) if isinstance(config['science_files'], list) else 1
-            print(f"Files processed: {files_processed}")
-            print(f"Total extensions corrected: {overall_stats['total_corrected']}")
-            print(f"Total extensions skipped: {overall_stats['total_skipped']}")
-            print(f"Total extensions with errors: {overall_stats['total_errors']}")
-        
+            # print("\n" + "="*60)
+            # print("FLAT FIELD CORRECTION SUMMARY")
+            # print("="*60)
+            # files_processed = len(config['science_files']) if isinstance(config['science_files'], list) else 1
+            # print(f"Files processed: {files_processed}")
+            # print(f"Total extensions corrected: {overall_stats['total_corrected']}")
+            # print(f"Total extensions skipped: {overall_stats['total_skipped']}")
+            # print(f"Total extensions with errors: {overall_stats['total_errors']}")
+        """
         # Process science files (now potentially flat-corrected) for extraction
         if 'science_files' not in config:
             raise ValueError("No science files provided in the configuration.")
     
         # Track whether files were flat-corrected
-        were_flat_corrected = config.get('apply_flat_field_correction', True) and flat_pixel_maps and len(flat_pixel_maps) > 0
+        # were_flat_corrected = config.get('apply_flat_field_correction', True) and flat_pixel_maps and len(flat_pixel_maps) > 0
         
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
@@ -874,7 +873,7 @@ def main(config_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
             
             # Correct wavelengths for each extraction file
-            corr_extractions, primary_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            corr_extractions, primary_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict', os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')))
             
             corr_extraction_list = corr_extractions['extractions']
             
@@ -889,12 +888,12 @@ def main(config_path):
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
             # Construct RSS output filename with flat correction traceability
-            flat_suffix = '_flat_corrected' if were_flat_corrected else ''
+            flat_suffix = '' #'_flat_corrected' if were_flat_corrected else ''
             rss_output_file = os.path.join(extraction_path, f'{base_name}{flat_suffix}_RSS.fits')
             
-            if were_flat_corrected:
-                rss_logger.info(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
-                print(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
+            # if were_flat_corrected:
+                # rss_logger.info(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
+                # print(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
             
             #RSS generation
             rss_gen = RSSgeneration(logger=rss_logger)
