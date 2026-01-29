@@ -8,13 +8,8 @@ from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
-<<<<<<< HEAD
-from llamas_pyjamas.Utils.utils import concat_extractions
-from llamas_pyjamas.Arc.arcLlamasMulti import arcTransfer
-=======
 from llamas_pyjamas.Utils.utils import concat_extractions, is_wavelength_solution_useable
 from llamas_pyjamas.Arc.arcLlamas import arcTransfer
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
 from pypeit.core.fitting import iterfit
@@ -514,29 +509,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     pixel_map_results = threshold_processor.generate_all_pixel_maps() #generate_complete_pixel_maps()
     
 
-<<<<<<< HEAD
-    # Step 6: Create normalized flat field FITS file using notebook method
-    logger.info("Step 6: Creating normalized flat field FITS file using B-spline division method")
-
-    try:
-        logger.info("Starting normalized flat field creation...")
-        normalized_flat_field_file = threshold_processor.generate_normalized_flat_from_bspline_fits(
-            flat_dict_calibrated=flat_dict_calibrated,
-            fit_results=fit_results,
-            trace_dir=trace_dir
-        )
-        logger.info(f"✓ Successfully created normalized flat field: {os.path.basename(normalized_flat_field_file)}")
-
-    except Exception as e:
-        logger.error(f"CRITICAL ERROR: Failed to create normalized flat field: {str(e)}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        normalized_flat_field_file = None
-
-        # Also raise the exception to ensure calling code knows about the failure
-        raise
-=======
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
     
     results = {
         'combined_flat_file': combined_flat_file,
@@ -784,7 +756,6 @@ class Thresholding():
             for reason, count in reason_counts.items():
                 print(f"  {reason}: {count}")
 
-<<<<<<< HEAD
                 # Get the column indices of the fiber pixels in this row (2D image columns)
                 col_indices = np.where(row_pixels)[0]
 
@@ -977,12 +948,7 @@ class Thresholding():
         return output_file
 
     def generate_thresholds(self):
-        """Generate thresholds for flat fielding based on science data.
-=======
-        return pixel_map, bad_pixels
-    
-    def generate_all_pixel_maps(self):
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
+        """Generate thresholds for flat fielding based on science data."""
 
         pixel_maps = {}
         bad_pixels = {}
