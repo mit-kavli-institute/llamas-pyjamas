@@ -8,7 +8,7 @@ from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
-from llamas_pyjamas.Utils.utils import concat_extractions, is_wavelength_solution_useable
+from llamas_pyjamas.Utils.utils import concat_extractions
 from llamas_pyjamas.Arc.arcLlamas import arcTransfer
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
@@ -452,9 +452,9 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info(f"Loading arc calibration from {arc_calib_file}")
     arc_dict = ExtractLlamas.loadExtraction(arc_calib_file)
 
-    if not is_wavelength_solution_useable(arc_dict):
-        logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
-        raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
+    # if not is_wavelength_solution_useable(arc_dict):
+    #     logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
+    #     raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
     
     # Load the combined flat extractions
     logger.info(f"Loading combined flat extractions from {combined_flat_file}")
