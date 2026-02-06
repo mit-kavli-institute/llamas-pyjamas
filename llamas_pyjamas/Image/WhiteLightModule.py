@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
 from astropy.table import Table
 import os
@@ -37,6 +37,8 @@ import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from matplotlib.patches import RegularPolygon
 import matplotlib.cm as cm
@@ -907,7 +909,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
 #     return whitelight, xdata, ydata, flux
 
-def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None, use_dir: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -935,21 +937,65 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         trace_objs = []
 
+        # Validate and create GUI version if needed (preserves original file)
+        science_file = validate_for_gui(science_file)
+
         # Open the science FITS file and create the output HDU list
         science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
 
-        if not bias:
-            bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
-        else:
-            try:
-                bias_hdul = process_fits_by_color(bias)
-            except Exception as e:
-                logger.error(f"Error processing bias file {bias}: {e}")
-                raise ValueError(f"Could not process bias file {bias}. Ensure it is a valid FITS file.")
-            
-        if len(science_hdul) != len(bias_hdul):
-            logger.error(f"Science file has {len(science_hdul)} extensions while bias file has {len(bias_hdul)} extensions.")
-            raise ValueError("Science and bias FITS files must have the same number of extensions. Please use compatible files.")
+        # Identify placeholder extensions (missing cameras)
+        placeholder_indices = get_placeholder_extension_indices(science_file)
+        if placeholder_indices:
+            logger.info(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
+
+        primary_hdr = science_hdul[0].header
+
+        # Determine bias file based on READ-MDE header keyword
+        read_mode = primary_hdr.get('READ-MDE', None)
+        if read_mode is not None:
+            read_mode = read_mode.strip().upper()
+            logger.info(f"Detected READ-MDE: {read_mode}")
+
+        # Default fallback is slow_master_bias.fits (standard readout mode)
+        default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+        if bias is not None:
+            # User-specified bias file takes priority, but fall back to default if not found
+            if os.path.isfile(bias):
+                masterbiasfile = bias
+            else:
+                logger.warning(f"User-specified bias file {bias} not found. Falling back to default bias selection.")
+                bias = None  # Fall through to auto-selection below
+
+        if bias is None:
+            # Auto-select bias based on READ-MDE
+            if read_mode == 'FAST':
+                candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using FAST mode bias: {masterbiasfile}")
+                else:
+                    logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                    masterbiasfile = default_bias
+            elif read_mode == 'SLOW':
+                candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+                else:
+                    raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+            else:
+                # Unknown or missing READ-MDE, use slow mode as default
+                masterbiasfile = default_bias
+                if read_mode is None:
+                    logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+                else:
+                    logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+
+        logger.info(f"Bias file is {masterbiasfile}")
+
+        # Validate bias file structure (add placeholders for missing cameras)
+        masterbiasfile = validate_for_gui(masterbiasfile)
 
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
@@ -957,8 +1003,8 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         blue_traces = []
         green_traces = []
-        red_green = []
-        
+        red_traces = []
+
         blue_data = []
         green_data = []
         red_data = []
@@ -969,11 +1015,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
-            bias = bias_hdul[i].data
-            bias_data = np.median(bias[20:50])
-            data = ext.data - bias_data
-            
-            
+            # Parse color/bench/side from header BEFORE bias subtraction
             if 'COLOR' in ext.header:
                 header = ext.header
                 color = header.get('COLOR', '').lower()
@@ -995,6 +1037,11 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
                             side = benchside[1]
 
             print(f'Processing extension {i}: {benchside} {color}')
+
+            # Full 2D bias subtraction matched by header keywords (COLOR/BENCH/SIDE)
+            bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=color, dir=masterbiasfile)
+            data = ext.data.astype(float) - bias_hdu.data
+
             # Determine the corresponding trace file based on benchside and color
             #LLAMAS_master_blue_1_A_traces.pkl
             trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
@@ -1002,13 +1049,11 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
             if not os.path.exists(trace_filepath):
                 logger.info(f"Trace file {trace_filepath} not found for {benchside} {color}. Skipping extension.")
                 continue
-            
+
             with open(trace_filepath, "rb") as f:
                 trace_obj = pickle.load(f)
-            
+
             # Build trace and data lists for QuickWhiteLight processing
-            
-            
             metadata = {'channel': color, 'bench': bench, 'side': side}
             if color == 'blue':
                 blue_traces.append(trace_obj)
@@ -1019,7 +1064,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
                 green_data.append(data)
                 green_meta.append(metadata)
             elif color == 'red':
-                red_green.append(trace_obj)
+                red_traces.append(trace_obj)
                 red_data.append(data)
                 red_meta.append(metadata)
             
@@ -1029,7 +1074,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
         for col, traces_list, data_list, meta_list in [
             ('blue', blue_traces, blue_data, blue_meta),
             ('green', green_traces, green_data, green_meta),
-            ('red', red_green, red_data, red_meta)
+            ('red', red_traces, red_data, red_meta)
         ]:
             if traces_list and data_list:
                 wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot)
@@ -1068,7 +1113,10 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
             
         
         # Write the FITS file to disk.
-        outpath = os.path.join(OUTPUT_DIR, white_light_file)
+        if use_dir is None:
+            use_dir = OUTPUT_DIR
+
+        outpath = os.path.join(use_dir, white_light_file)
         hdul.writeto(outpath, overwrite=True)
         
         print(f'Quick white light cube saved to {outpath}')

@@ -407,10 +407,10 @@ class TraceLlamas:
                 if os.path.isfile(use_bias):
                     bias_file = use_bias
                 else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             else:
-                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
                 
             print(f'Bias file: {bias_file}')
             #### fix the directory here!
