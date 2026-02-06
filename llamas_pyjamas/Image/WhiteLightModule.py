@@ -909,6 +909,27 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     
 #     return whitelight, xdata, ydata, flux
 
+def compute_residual_background(data, regions=((5, 20), (20, 50), (30, 50))):
+    """Compute residual detector background from multiple regions of a bias-subtracted frame.
+
+    Calculates the median of each candidate region, then returns the median
+    of those estimates for robustness against signal contamination in any
+    single region.
+
+    Parameters:
+        data: 2D numpy array (bias-subtracted frame)
+        regions: tuple of (start_row, end_row) pairs to sample
+
+    Returns:
+        float: robust background estimate
+    """
+    medians = []
+    for r_start, r_end in regions:
+        region = data[r_start:r_end, :]
+        medians.append(np.median(region))
+    return np.median(medians)
+
+
 def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None, use_dir: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
@@ -1038,9 +1059,15 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
             print(f'Processing extension {i}: {benchside} {color}')
 
-            # Full 2D bias subtraction matched by header keywords (COLOR/BENCH/SIDE)
+            # Step 1: Full 2D bias subtraction matched by header keywords (COLOR/BENCH/SIDE)
             bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=color, dir=masterbiasfile)
             data = ext.data.astype(float) - bias_hdu.data
+
+            # Step 2 (FAST only): compute average from (science - bias) frame, then subtract it
+            if read_mode == 'FAST':
+                residual_bg = compute_residual_background(data)
+                data = data - residual_bg
+                logger.info(f"Extension {i} ({benchside} {color}): FAST residual bg = {residual_bg:.2f}")
 
             # Determine the corresponding trace file based on benchside and color
             #LLAMAS_master_blue_1_A_traces.pkl
