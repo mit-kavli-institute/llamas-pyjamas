@@ -90,40 +90,52 @@ class ExtractLlamas:
 
         if (trace is None or hdu_data is None or hdr is None):
             # Instantiate a blank object that can be used for a deep copy
-            self.trace = None
-            self.bench = None
-            self.side = None
-            self.channel = None
-            self.fitsfile = None     
-            self.counts = None
-            self.hdr    = None
-            self.frame  = None
-            self.x      = None
-            self.xshift = None
-            self.wave   = None
-            self.counts = None
-            self.errors = None
-            self.ximage = None
+            self.trace      = None
+            self.bench      = None
+            self.side       = None
+            self.channel    = None
+            self.fitsfile   = None     
+            self.hdr        = None
+            self.frame      = None
+            self.fiberid    = None
             self.relative_throughput = None
+            self.x          = None
+            self.ximage     = None  
+            self.xshift     = None
+            self.wave       = None
+            self.counts     = None
+            self.counts_err = None
+            self.sky        = None
+            self.sensfunc   = None
+            self.flux       = None
+            self.flux_err   = None
 
         else:
+
             self.trace = trace
             self.bench = trace.bench
             self.side = trace.side
             self.channel = trace.channel
             self.fitsfile = self.trace.fitsfile
             ##put in a check here for hdu against trace attributes when I have more brain capacity        
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            
             self.hdr    = hdr
             self.frame  = hdu_data.astype(float)
+            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+            self.relative_throughput = np.zeros(shape=(trace.nfibers))
+
             self.x      = np.arange(trace.naxis1)
+            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
             # xshift and wave will be populated only after an arc solution
             self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
-            self.relative_throughput = np.zeros(shape=(trace.nfibers))
-            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+
+            self.counts     = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.counts_err = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sky        = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sensfunc   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux       = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux_err   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             
             # Get detector properties from header if available
             # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
