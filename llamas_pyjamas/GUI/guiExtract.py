@@ -27,6 +27,7 @@ from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, Wh
 import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 
 # Set up logging
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -184,6 +185,8 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             side = camname.split('_')[0][1]
 
         # use_bias is the resolved bias file path from GUI_extract
+        if use_bias is None:
+            use_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
         bias_file = os.fspath(use_bias)
         print(f'Bias file: {bias_file}')
         #### fix the directory here!
@@ -414,6 +417,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                     logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
                 else:
                     logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+
+        # Validate bias file structure (add placeholders for missing cameras)
+        masterbiasfile = validate_for_gui(masterbiasfile)
 
         #Debug statements
         print(f'basefile = {basefile}')

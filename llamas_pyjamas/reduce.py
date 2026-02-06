@@ -46,7 +46,7 @@ import numpy as np
 
 import shutil
 
-from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices
+from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -1081,7 +1081,8 @@ def main(config_path):
         bias = BiasLlamas(bias_list)
     bias_file = bias.master_bias()
 
-
+    # Validate bias file structure (add placeholders for missing cameras)
+    bias_file = validate_for_gui(bias_file)
 
         
     # Parse CRR cube configuration (defaults to True if not specified)

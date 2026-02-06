@@ -13,3 +13,4 @@ llamas_pyjamas/LUT/traceLUT_*.json
 *traces.pkl
 
 
+llamas_pyjamas/Bias/*.fits
