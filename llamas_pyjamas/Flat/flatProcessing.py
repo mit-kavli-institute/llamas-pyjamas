@@ -6,7 +6,7 @@ import ray
 import pkg_resources
 from pathlib import Path
 import logging
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 
@@ -19,6 +19,7 @@ from astropy.io import fits
 import numpy as np
 
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
+from llamas_pyjamas.DataModel.validate import validate_for_gui
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 
 from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
@@ -26,7 +27,7 @@ from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
-def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR) -> None:
+def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR, use_bias=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 
     :param filename: the flat field image to reduce, must be of type FITS
@@ -73,6 +74,49 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     logger.debug(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     print(len(channel_hdus))
+
+    # Determine bias file based on READ-MDE header keyword (matching GUI_extract behavior)
+    primary_hdr = _hdus[0].header
+    read_mode = primary_hdr.get('READ-MDE', None)
+    if read_mode is not None:
+        read_mode = read_mode.strip().upper()
+        logger.info(f"Detected READ-MDE: {read_mode}")
+
+    if use_bias is not None:
+        # User-specified bias file takes priority
+        if os.path.isfile(use_bias):
+            masterbiasfile = use_bias
+        else:
+            raise ValueError(f"Bias file {use_bias} does not exist.")
+    else:
+        # Auto-select bias based on READ-MDE
+        default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+        if read_mode == 'FAST':
+            candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+            if os.path.isfile(candidate_bias):
+                masterbiasfile = candidate_bias
+                logger.info(f"Using FAST mode bias: {masterbiasfile}")
+            else:
+                logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                masterbiasfile = default_bias
+        elif read_mode == 'SLOW':
+            candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            if os.path.isfile(candidate_bias):
+                masterbiasfile = candidate_bias
+                logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+            else:
+                raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+        else:
+            masterbiasfile = default_bias
+            if read_mode is None:
+                logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+            else:
+                logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+
+    # Validate bias file structure (add placeholders for missing cameras)
+    masterbiasfile = validate_for_gui(masterbiasfile)
+
     masterfile = 'LLAMAS'  # Changed from 'LLAMAS_master' to match both LLAMAS and LLAMAS_master files
     extraction_file = os.path.splitext(filename)[0] + '_extractions_flat.pkl'
 
@@ -154,16 +198,16 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
-        future = process_trace.remote(hdu_data, hdr, trace_file)
+        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
         futures.append(future)
     
     _extractions = ray.get(futures)
     ray.shutdown()
     # Post-process to make objects writable
     extraction_list = []
-    for ex in _extractions:
-        if ex is not None:
-            writable_ex = make_writable(ex)
+    for result in _extractions:
+        if result is not None and result.get('extraction') is not None:
+            writable_ex = make_writable(result['extraction'])
             extraction_list.append(writable_ex)    
     print(len(extraction_list))
     extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
