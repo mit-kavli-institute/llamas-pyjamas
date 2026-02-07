@@ -110,7 +110,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None):
         plt.plot(sky_fitx, sky_fity, '.', markersize=0.1, label='data', color='k')
         y = sset.value(sky_fitx)[0]
         plt.plot(sky_fitx, y, color='r')
-        plt.ylim(0,100)
+        plt.ylim(0,1000)
         plt.show()
 
         # Now apply the sky model to all science fibers
