@@ -1422,6 +1422,71 @@ def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None,
     return results
 
 
+def is_wavelength_solution_useable(arc_dict):
+    """Check if an arc calibration dictionary has useable wavelength solutions.
+
+    Validates that wavelength solutions exist and are properly calibrated
+    for use in wavelength transfer operations. This function samples a few
+    fibers from each extension to verify the wavelength data is valid.
+
+    Parameters
+    ----------
+    arc_dict : dict
+        Dictionary containing 'extractions' (list of ExtractLlamas objects)
+        and 'metadata' for each extension. Typically loaded via
+        ExtractLlamas.loadExtraction().
+
+    Returns
+    -------
+    bool
+        True if wavelength solutions are useable, False otherwise.
+
+    Notes
+    -----
+    This function uses validate_wavelength_solution() from Arc/arcValidation.py
+    to check wavelength data quality including:
+    - Non-zero wavelength values
+    - No NaN/Inf values
+    - Monotonically increasing wavelengths
+    - Reasonable wavelength ranges for each channel
+    """
+    from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
+
+    extractions = arc_dict.get('extractions', [])
+    metadata = arc_dict.get('metadata', [])
+
+    if not extractions:
+        logger.warning("No extractions found in arc_dict")
+        return False
+
+    for idx, extraction in enumerate(extractions):
+        meta = metadata[idx] if idx < len(metadata) else {}
+        channel = meta.get('channel', 'red')
+
+        # Check if wave attribute exists
+        if not hasattr(extraction, 'wave') or extraction.wave is None:
+            logger.warning(f"Extension {idx} has no wavelength data")
+            return False
+
+        # Check a sample of fibers (first, middle, last)
+        n_fibers = extraction.wave.shape[0] if extraction.wave.ndim > 1 else 1
+        if n_fibers == 0:
+            logger.warning(f"Extension {idx} has no fibers")
+            return False
+
+        sample_fibers = [0, n_fibers // 2, n_fibers - 1]
+
+        for fiber_idx in sample_fibers:
+            if fiber_idx >= n_fibers:
+                continue
+            result = validate_wavelength_solution(extraction, channel, fiber_idx)
+            if not result['valid']:
+                logger.warning(f"Extension {idx} fiber {fiber_idx} invalid: {result['errors']}")
+                return False
+
+    return True
+
+
 def _bspline_diagnostic_usage_examples():
     """
     Example usage for B-spline diagnostic functions.

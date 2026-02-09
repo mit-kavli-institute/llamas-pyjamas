@@ -8,13 +8,8 @@ from astropy.io import fits
 from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
-<<<<<<< HEAD
-from llamas_pyjamas.Utils.utils import concat_extractions
-from llamas_pyjamas.Arc.arcLlamasMulti import arcTransfer
-=======
 from llamas_pyjamas.Utils.utils import concat_extractions, is_wavelength_solution_useable
-from llamas_pyjamas.Arc.arcLlamas import arcTransfer
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
+from llamas_pyjamas.Arc.arcLlamasMulti import arcTransfer
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 
 from pypeit.core.fitting import iterfit
@@ -414,12 +409,13 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 1: Produce individual flat extractions
     logger.info("Step 1: Producing individual flat field extractions")
     produce_flat_extractions(
-        red_flat_file, 
-        green_flat_file, 
-        blue_flat_file, 
-        tracedir=trace_dir, 
+        red_flat_file,
+        green_flat_file,
+        blue_flat_file,
+        tracedir=trace_dir,
         outpath=output_dir,
-        verbose=verbose
+        verbose=verbose,
+        use_bias=use_bias
     )
     
     # Step 2: Combine all extractions into a single file
@@ -514,7 +510,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     pixel_map_results = threshold_processor.generate_all_pixel_maps() #generate_complete_pixel_maps()
     
 
-<<<<<<< HEAD
     # Step 6: Create normalized flat field FITS file using notebook method
     logger.info("Step 6: Creating normalized flat field FITS file using B-spline division method")
 
@@ -535,8 +530,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
 
         # Also raise the exception to ensure calling code knows about the failure
         raise
-=======
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
     
     results = {
         'combined_flat_file': combined_flat_file,
@@ -784,42 +777,7 @@ class Thresholding():
             for reason, count in reason_counts.items():
                 print(f"  {reason}: {count}")
 
-<<<<<<< HEAD
-                # Get the column indices of the fiber pixels in this row (2D image columns)
-                col_indices = np.where(row_pixels)[0]
-
-                # FIX: Interpolate xshift values at actual image column positions
-                # This maps: 2D image columns → extraction positions → wavelengths
-                xshift_at_cols = np.interp(col_indices, extraction_cols, xshift_1d)
-
-                # Evaluate the B-spline model at interpolated wavelength positions
-                try:
-                    predicted_values = bspline_model.value(xshift_at_cols)[0]
-                    # Assign the predicted values to the pixel map
-                    pixel_map[row, col_indices] = predicted_values
-                except Exception as e:
-                    logger.debug(f"Error evaluating B-spline for fiber {fiber_idx}, row {row}: {str(e)}")
-                    continue
-
-            processed_fibers += 1
-
-            if processed_fibers % 50 == 0:
-                logger.debug(f"Processed {processed_fibers}/{len(fiber_fits)} fibers")
-
-        # Set unassigned pixels (outside fiber traces) to 1.0 for proper flat field normalization
-        nan_mask = np.isnan(pixel_map)
-        pixel_map[nan_mask] = 1.0
-
-        # Check statistics
-        nan_count = np.sum(nan_mask)  # Count of pixels that were NaN (now set to 1.0)
-        total_pixels = pixel_map.size
-        traced_pixels = total_pixels - nan_count
-
-        logger.info(f"Pixel map normalization: {traced_pixels}/{total_pixels} traced pixels, "
-                   f"{nan_count}/{total_pixels} untraced pixels set to 1.0 "
-                   f"({100*nan_count/total_pixels:.1f}% untraced)")
-
-        return pixel_map
+        return pixel_map, bad_pixels
 
     def generate_normalized_flat_from_bspline_fits(self, flat_dict_calibrated, fit_results, trace_dir):
         """Generate normalized flat field maps using notebook method.
@@ -976,13 +934,7 @@ class Thresholding():
 
         return output_file
 
-    def generate_thresholds(self):
-        """Generate thresholds for flat fielding based on science data.
-=======
-        return pixel_map, bad_pixels
-    
     def generate_all_pixel_maps(self):
->>>>>>> ce70df31f7d94c3f2abe4d2b0d98f1c4cd12533c
 
         pixel_maps = {}
         bad_pixels = {}

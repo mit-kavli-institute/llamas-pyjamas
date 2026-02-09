@@ -26,7 +26,7 @@ from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
-def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR) -> None:
+def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR, use_bias=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 
     :param filename: the flat field image to reduce, must be of type FITS
@@ -37,6 +37,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     :type tracedir: str, optional
     :param channel: the spectrograph channel from the fits image to process, defaults to None
     :type channel: str, optional
+    :param save_dir: directory to save the extraction files, defaults to OUTPUT_DIR
+    :type save_dir: str, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
     """
     
     assert type(idxs) == list, 'idxs must be a list of integers'
@@ -154,7 +158,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
-        future = process_trace.remote(hdu_data, hdr, trace_file)
+        future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
         futures.append(future)
     
     _extractions = ray.get(futures)
@@ -172,7 +176,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     return 
 
 
-def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, verbose=False) -> Tuple[List, List]:
+def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, verbose=False, use_bias=None) -> Tuple[List, List]:
     """Produce flat field extractions for each color channel.
 
     :param red_flat: file to use for red channel flat field extraction
@@ -187,6 +191,8 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     :type outpath: str, optional
     :param verbose: Enable verbose console output, defaults to False
     :type verbose: bool, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
     """
     
     # Set up logger verbosity
@@ -204,11 +210,11 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     logger.info(f'Using output directory: {output_directory}')
 
     # Reduce the red flat field image
-    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red', save_dir=output_directory)
+    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red', save_dir=output_directory, use_bias=use_bias)
     # Reduce the green flat field image
-    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green', save_dir=output_directory)
+    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green', save_dir=output_directory, use_bias=use_bias)
     # Reduce the blue flat field image
-    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue', save_dir=output_directory)
+    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue', save_dir=output_directory, use_bias=use_bias)
 
     logger.info('Flat field extractions complete.')
 
@@ -270,10 +276,24 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     return all_extractions, all_metadata
 
 
-def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None, custom=None) -> None:
+def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, use_bias=None) -> None:
+    """Produce normalized white light flat field image.
 
+    :param red_flat: file to use for red channel flat field extraction
+    :type red_flat: str
+    :param green_flat: file to use for green channel flat field extraction
+    :type green_flat: str
+    :param blue_flat: file to use for blue channel flat field extraction
+    :type blue_flat: str
+    :param tracedir: Directory to use find the trace files, defaults to None
+    :type tracedir: str, optional
+    :param outpath: Directory to save the output files, defaults to None (uses OUTPUT_DIR)
+    :type outpath: str, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
+    """
 
-    extraction_list, metadata = produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=tracedir, custom=custom)
+    extraction_list, metadata = produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=tracedir, outpath=outpath, use_bias=use_bias)
 
     outfile = 'flat_whitelight.fits'
     white_light_file = WhiteLightFits(extraction_list, metadata, outfile=outfile)
@@ -380,7 +400,12 @@ if __name__ == '__main__':
         type=str,
         help='Path to save output files'
     )
-    
+    parser.add_argument(
+        '--bias',
+        type=str,
+        help='Path to bias file for calibration'
+    )
+
     args = parser.parse_args()
     logger.debug(f'args.filenames {args.filenames}')
     # Multiple files provided: use produce_flat_extractions if exactly three files given.
@@ -388,7 +413,7 @@ if __name__ == '__main__':
         if len(args.filenames) != 3:
             parser.error("When providing multiple files, exactly three files are required for red, green, and blue channels.")
         #produce_flat_extractions(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
-        produce_normalised_whitelight(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
+        produce_normalised_whitelight(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath, use_bias=args.bias)
     else:
         # Single file provided. Must supply either --channel or --all.
         if not (args.channel or args.all):
@@ -400,13 +425,13 @@ if __name__ == '__main__':
                 idxs = GREEN_IDXS
             elif args.channel == 'blue':
                 idxs = BLUE_IDXS
-            reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel)
+            reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel, use_bias=args.bias)
         elif args.all:
             # Process all channels for the single file.
             if len(args.filenames) != 1:
                 parser.error("When using --all, only one file should be provided.")
             logger.info("Processing all channels for the single file...")
-            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red')
-            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green')
-            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue')
+            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red', use_bias=args.bias)
+            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green', use_bias=args.bias)
+            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue', use_bias=args.bias)
 

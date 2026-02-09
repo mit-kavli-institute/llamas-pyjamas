@@ -179,12 +179,9 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        if use_bias is None:    
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-        elif use_bias is str:
-            if os.path.isfile(use_bias):
-                bias_file = use_bias
+        # use_bias is the resolved bias file path from GUI_extract
+        if use_bias is not None:
+            bias_file = os.fspath(use_bias)
         else:
             bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
 
