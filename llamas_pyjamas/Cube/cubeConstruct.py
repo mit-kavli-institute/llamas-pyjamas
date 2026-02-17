@@ -102,13 +102,13 @@ class CubeConstructor:
         """
         Load extraction data from RSS FITS file format.
 
-        New RSS file format:
+        RSS file format (as written by llamasRSS.py):
         Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux [NWAVE x NFIBER]
-        Extension 2 - ERROR: the error array [NWAVE x NFIBER]
-        Extension 3 - MASK: the pixel mask array [NWAVE x NFIBER]
-        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-        Extension 5 - FWHM: the full width half max array [NWAVE x NFIBER]
+        Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
+        Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+        Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
+        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
         Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
 
         Parameters:
@@ -125,7 +125,7 @@ class CubeConstructor:
             # Get channel from primary header
             primary_hdr = hdul[0].header
             channel = primary_hdr.get('CHANNEL', 'unknown').lower()
-            
+
             # Initialize extraction dictionary
             extraction = {
                 'channel': channel,
@@ -137,52 +137,48 @@ class CubeConstructor:
                 'fibermap': None,
                 'benchside': None
             }
-            
+
             # Process all extensions
+            # Data arrays are already [NFIBER x NWAVE] as written by llamasRSS.py
             for i, hdu in enumerate(hdul[1:], 1):
                 extname = hdu.header.get('EXTNAME', '').upper()
-                
+
                 try:
                     if extname == 'FLUX':
-                        # FLUX: [NWAVE x NFIBER] array
+                        # FLUX: [NFIBER x NWAVE] array
                         flux = hdu.data
                         self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['flux'] = flux.T
-                        
+                        extraction['flux'] = flux
+
                     elif extname == 'ERROR':
-                        # ERROR: [NWAVE x NFIBER] array
+                        # ERROR: [NFIBER x NWAVE] array
                         error = hdu.data
                         self.logger.info(f"Loaded ERROR extension with shape {error.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['error'] = error.T
-                        
+                        extraction['error'] = error
+
                     elif extname == 'MASK':
-                        # MASK: [NWAVE x NFIBER] array
+                        # MASK: [NFIBER x NWAVE] array
                         mask = hdu.data
                         self.logger.info(f"Loaded MASK extension with shape {mask.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['mask'] = mask.T
-                        
+                        extraction['mask'] = mask
+
                     elif extname == 'WAVE':
-                        # WAVE: [NWAVE x NFIBER] array
+                        # WAVE: [NFIBER x NWAVE] array
                         wave = hdu.data
                         self.logger.info(f"Loaded WAVE extension with shape {wave.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['wave'] = wave.T
-                        
+                        extraction['wave'] = wave
+
                         # Also create a common wavelength grid as the median across all fibers
                         # This is useful for operations that need a single wavelength grid
-                        wave_common = np.nanmedian(wave, axis=1)  # Median across fibers for each wavelength point
+                        wave_common = np.nanmedian(wave, axis=0)  # Median across fibers (rows) for each wavelength point
                         extraction['wave_common'] = wave_common
                         self.logger.info(f"Created common wavelength grid with {len(wave_common)} points")
-                        
+
                     elif extname == 'FWHM':
-                        # FWHM: [NWAVE x NFIBER] array
+                        # FWHM: [NFIBER x NWAVE] array
                         fwhm = hdu.data
                         self.logger.info(f"Loaded FWHM extension with shape {fwhm.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['fwhm'] = fwhm.T
+                        extraction['fwhm'] = fwhm
                         
                     elif extname == 'FIBERMAP':
                         # FIBERMAP: binary table with fiber information
@@ -758,74 +754,75 @@ class CubeConstructor:
         Load all channel data from an RSS FITS file in the new format.
         Returns a dict: {channel: {'flux':..., 'err':..., 'wave':..., 'mask':..., 'fwhm':..., 'fibermap':...}}
         
-        New RSS file format:
+        RSS file format (as written by llamasRSS.py):
         Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux in units of 10(-17) erg/s/cm2/Ang/fiber [NWAVE x NFIBER]
-        Extension 2 - ERROR: the error array, sigma of above, for each fiber [NWAVE x NFIBER]
-        Extension 3 - MASK: the pixel mask array for each fiber [NWAVE x NFIBER]
-        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-        Extension 5 - FWHM: the full width half max array for each fiber [NWAVE x NFIBER]
+        Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
+        Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+        Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
+        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
         Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
         """
         self.logger.info(f'Loading channels from RSS file: {rss_file}')
         channels = {}
-        
+
         with fits.open(rss_file) as hdul:
             # First get the channel from the primary header
             primary_hdr = hdul[0].header
             channel = primary_hdr.get('CHANNEL', 'UNKNOWN').lower()
-            
+
             # Initialize the channel dictionary
             channels[channel] = {}
-            
+
             # Check if all required extensions are present
             required_extensions = ['FLUX', 'ERROR', 'MASK', 'WAVE', 'FWHM', 'FIBERMAP']
             for ext in required_extensions:
                 if not any(hdu.header.get('EXTNAME', '') == ext for hdu in hdul[1:]):
                     self.logger.warning(f"Required extension {ext} not found in RSS file")
-            
+
             # Process all extensions
+            # Data arrays are already [NFIBER x NWAVE] as written by llamasRSS.py
             for i, hdu in enumerate(hdul[1:], 1):
                 extname = hdu.header.get('EXTNAME', '').upper()
-                
+
                 try:
                     if extname == 'FLUX':
-                        # FLUX: [NWAVE x NFIBER] array
+                        # FLUX: [NFIBER x NWAVE] array
                         flux = hdu.data
                         self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
-                        channels[channel]['flux'] = flux.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['flux'] = flux
+
                     elif extname == 'ERROR':
-                        # ERROR: [NWAVE x NFIBER] array
+                        # ERROR: [NFIBER x NWAVE] array
                         error = hdu.data
                         self.logger.info(f"Loaded ERROR extension with shape {error.shape}")
-                        channels[channel]['err'] = error.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['err'] = error
+
                     elif extname == 'MASK':
-                        # MASK: [NWAVE x NFIBER] array
+                        # MASK: [NFIBER x NWAVE] array
                         mask = hdu.data
                         self.logger.info(f"Loaded MASK extension with shape {mask.shape}")
-                        channels[channel]['dq'] = mask.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['dq'] = mask
+
                     elif extname == 'WAVE':
-                        # WAVE: [NWAVE x NFIBER] array - now has per-fiber wavelength data
+                        # WAVE: [NFIBER x NWAVE] array - per-fiber wavelength data
                         wave = hdu.data
                         self.logger.info(f"Loaded WAVE extension with shape {wave.shape}")
-                        
-                        # Store the per-fiber wavelength array (transpose to [NFIBER x NWAVE])
-                        channels[channel]['wave'] = wave.T
-                        
+
+                        # Store the per-fiber wavelength array (already [NFIBER x NWAVE])
+                        channels[channel]['wave'] = wave
+
                         # Also compute a common wavelength grid as the median across all fibers
                         # This is useful for operations that need a single wavelength grid
-                        wave_common = np.nanmedian(wave, axis=1)  # Median across fibers for each wavelength point
+                        wave_common = np.nanmedian(wave, axis=0)  # Median across fibers (rows) for each wavelength point
                         channels[channel]['wave_common'] = wave_common
                         self.logger.info(f"Created common wavelength grid with {len(wave_common)} points")
-                        
+
                     elif extname == 'FWHM':
-                        # FWHM: [NWAVE x NFIBER] array
+                        # FWHM: [NFIBER x NWAVE] array
                         fwhm = hdu.data
                         self.logger.info(f"Loaded FWHM extension with shape {fwhm.shape}")
-                        channels[channel]['fwhm'] = fwhm.T  # Transpose to [NFIBER x NWAVE]
+                        channels[channel]['fwhm'] = fwhm
                         
                     elif extname == 'FIBERMAP':
                         # FIBERMAP: binary table with fiber information
