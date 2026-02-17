@@ -747,7 +747,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
                    use_crr=True, crr_config=None, parallel=False, cube_method='simple',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
-                   cube_radius=1.5, cube_min_weight=0.01):
+                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -771,6 +771,8 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         cube_wave_sampling (float): Wavelength sampling factor (for simple method)
         cube_radius (float): Interpolation radius in arcsec (for simple method)
         cube_min_weight (float): Minimum weight threshold (for simple method)
+        cube_grid_method (str): Spatial grid method for simple constructor:
+            'oversampled' (default), 'native_hex', or 'nearest_hex'
 
     Returns:
         list: Paths to constructed cube files
@@ -833,15 +835,15 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 constructor = SimpleCubeConstructor(
                     fiber_pitch=cube_fiber_pitch,
                     pixel_size=cube_pixel_size,
-                    wave_sampling=cube_wave_sampling
+                    wave_sampling=cube_wave_sampling,
+                    grid_method=cube_grid_method
                 )
 
-                # Load fibermap
-                fibermap_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
-                constructor.load_fibermap(fibermap_path)
-
-                # Load RSS file
+                # Load RSS file (reads FIBERMAP extension for fiber identity)
                 constructor.load_rss_file(rss_file)
+
+                # Match fibers to IFU positions via FiberMap_LUT
+                constructor.match_fibers_to_fibermap()
 
                 # Create wavelength grid
                 wave_min, wave_max = None, None
@@ -1522,7 +1524,8 @@ def main(config_path):
                 cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
                 cube_radius=float(config.get('cube_radius', 1.5)),
-                cube_min_weight=float(config.get('cube_min_weight', 0.01))
+                cube_min_weight=float(config.get('cube_min_weight', 0.01)),
+                cube_grid_method=config.get('cube_grid_method', 'oversampled')
             )
             print(f"Cubes constructed: {cube_files}")
         else:
