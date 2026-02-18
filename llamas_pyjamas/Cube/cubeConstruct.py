@@ -698,6 +698,50 @@ class CubeConstructor:
         channel_wavelength_grids = {}  # Store wavelength grid for each channel
         channel_wcs = {}  # Store WCS for each channel
 
+        # Pre-compute a shared spatial grid from the union of all channels' fibre positions.
+        # This ensures all colour cubes have identical spatial grids.
+        all_x_coords = []
+        all_y_coords = []
+        for ch_name, ch_data in channels_data.items():
+            table_data = ch_data.get('table')
+            if table_data is None:
+                continue
+            for i in range(len(table_data['FIBER_ID'])):
+                benchside = table_data['BENCHSIDE'][i]
+                fiber_id = table_data['FIBER_ID'][i]
+                x, y = self.get_fiber_coordinates(benchside, fiber_id)
+                if x == -1 and y == -1:
+                    continue
+                x_arcsec = x * 0.75
+                y_arcsec = y * 0.75
+                if ref_coords is not None:
+                    ra_ref, dec_ref = ref_coords
+                    ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                    dec = dec_ref + (y_arcsec / 3600.0)
+                    x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
+                    y_sky = (dec - dec_ref) * 3600.0
+                    all_x_coords.append(x_sky)
+                    all_y_coords.append(y_sky)
+                else:
+                    all_x_coords.append(x_arcsec)
+                    all_y_coords.append(y_arcsec)
+
+        if all_x_coords:
+            x_min = min(all_x_coords) - spatial_sampling
+            x_max = max(all_x_coords) + spatial_sampling
+            y_min = min(all_y_coords) - spatial_sampling
+            y_max = max(all_y_coords) + spatial_sampling
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+            shared_grid_x = np.linspace(x_min, x_max, n_x)
+            shared_grid_y = np.linspace(y_min, y_max, n_y)
+            self.logger.info(f"Computed shared spatial grid: {n_x} x {n_y} from "
+                           f"{len(all_x_coords)} fibre positions across {len(channels_data)} channels")
+        else:
+            shared_grid_x = None
+            shared_grid_y = None
+            self.logger.warning("No valid fibre positions found across any channel for shared grid")
+
         # Save original attributes to restore later
         original_wavelength_grid = self.wavelength_grid
         original_wcs = self.wcs
@@ -717,7 +761,9 @@ class CubeConstructor:
                 wavelength_range=wavelength_range,
                 dispersion=dispersion,
                 spatial_sampling=spatial_sampling,
-                reference_coord=ref_coords
+                reference_coord=ref_coords,
+                spatial_grid_x=shared_grid_x,
+                spatial_grid_y=shared_grid_y
             )
 
             if cube is not None:
@@ -886,7 +932,9 @@ class CubeConstructor:
 
     def construct_cube_from_rss_channel(self, rss_file: str, channel: str, wavelength_range: Optional[Tuple[float, float]] = None,
                                       dispersion: float = 1.0, spatial_sampling: float = 0.75,
-                                      reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+                                      reference_coord: Optional[Tuple[float, float]] = None,
+                                      spatial_grid_x: Optional[np.ndarray] = None,
+                                      spatial_grid_y: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Construct IFU cube from a single channel in an RSS FITS file.
     
@@ -902,7 +950,12 @@ class CubeConstructor:
             dispersion (float): Wavelength dispersion in Angstroms/pixel
             spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
             reference_coord (tuple, optional): Reference RA/Dec for WCS
-    
+            spatial_grid_x (ndarray, optional): Pre-computed shared X spatial grid.
+                When provided (along with spatial_grid_y), this grid is used instead
+                of computing one from this channel's fibre positions alone. This ensures
+                all colour channels share identical spatial grids.
+            spatial_grid_y (ndarray, optional): Pre-computed shared Y spatial grid.
+
         Returns:
             np.ndarray: 3D cube data with shape [wavelength, y, x]
         """
@@ -1036,27 +1089,33 @@ class CubeConstructor:
             self.logger.error(f"No valid fiber positions found for channel {channel}")
             return None
     
-        # Continue with rest of the method as before...
-        # Determine spatial extent from fiber positions
-        x_coords = [pos[1] for pos in fiber_positions]
-        y_coords = [pos[2] for pos in fiber_positions]
-    
-        x_min, x_max = min(x_coords), max(x_coords)
-        y_min, y_max = min(y_coords), max(y_coords)
-    
-        # Add buffer around edges
-        buffer = spatial_sampling
-        x_min -= buffer
-        x_max += buffer
-        y_min -= buffer
-        y_max += buffer
-    
-        # Create spatial grid with fixed spaxel size (spatial_sampling is in arcsec/pixel)
-        n_x = int((x_max - x_min) / spatial_sampling) + 1
-        n_y = int((y_max - y_min) / spatial_sampling) + 1
-    
-        self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
-        self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
+        # Determine spatial grid
+        if spatial_grid_x is not None and spatial_grid_y is not None:
+            # Use pre-computed shared spatial grid (ensures all channels are aligned)
+            self.spatial_grid_x = spatial_grid_x
+            self.spatial_grid_y = spatial_grid_y
+            self.logger.info(f"Using shared spatial grid: {len(spatial_grid_x)} x {len(spatial_grid_y)}")
+        else:
+            # Compute from this channel's fibre positions alone
+            x_coords = [pos[1] for pos in fiber_positions]
+            y_coords = [pos[2] for pos in fiber_positions]
+
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+
+            # Add buffer around edges
+            buffer = spatial_sampling
+            x_min -= buffer
+            x_max += buffer
+            y_min -= buffer
+            y_max += buffer
+
+            # Create spatial grid with fixed spaxel size (spatial_sampling is in arcsec/pixel)
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+
+            self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
+            self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
     
         # Initialize cube with NaNs
         cube_shape = (len(self.wavelength_grid), len(self.spatial_grid_y), len(self.spatial_grid_x))
@@ -1744,18 +1803,66 @@ class CubeConstructor:
             else:
                 self.logger.warning("No valid reference coordinates found in any channel. Using local coordinates.")
         
+        # Pre-compute a shared spatial grid from the union of all channels' fibre positions.
+        # This ensures all colour cubes have identical spatial grids, preventing alignment offsets
+        # caused by different channels having slightly different sets of valid fibres.
+        all_x_coords = []
+        all_y_coords = []
+        ref_for_grid = common_ref_coord
+        for ch_name, file_path in channel_files.items():
+            ch_data = self.load_rss_channels(file_path)
+            ch_key = list(ch_data.keys())[0]
+            table_data = ch_data[ch_key].get('table')
+            if table_data is None:
+                continue
+            for i in range(len(table_data['FIBER_ID'])):
+                benchside = table_data['BENCHSIDE'][i]
+                fiber_id = table_data['FIBER_ID'][i]
+                x, y = self.get_fiber_coordinates(benchside, fiber_id)
+                if x == -1 and y == -1:
+                    continue
+                x_arcsec = x * 0.75
+                y_arcsec = y * 0.75
+                if ref_for_grid is not None:
+                    ra_ref, dec_ref = ref_for_grid
+                    ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                    dec = dec_ref + (y_arcsec / 3600.0)
+                    x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
+                    y_sky = (dec - dec_ref) * 3600.0
+                    all_x_coords.append(x_sky)
+                    all_y_coords.append(y_sky)
+                else:
+                    all_x_coords.append(x_arcsec)
+                    all_y_coords.append(y_arcsec)
+
+        if all_x_coords:
+            x_min = min(all_x_coords) - spatial_sampling
+            x_max = max(all_x_coords) + spatial_sampling
+            y_min = min(all_y_coords) - spatial_sampling
+            y_max = max(all_y_coords) + spatial_sampling
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+            shared_grid_x = np.linspace(x_min, x_max, n_x)
+            shared_grid_y = np.linspace(y_min, y_max, n_y)
+            self.logger.info(f"Computed shared spatial grid: {n_x} x {n_y} from "
+                           f"{len(all_x_coords)} fibre positions across {len(channel_files)} channels")
+        else:
+            shared_grid_x = None
+            shared_grid_y = None
+            self.logger.warning("No valid fibre positions found across any channel for shared grid")
+
         # Save original attributes to restore later
         original_wavelength_grid = self.wavelength_grid
         original_wcs = self.wcs
         original_cube_data = self.cube_data
-        
+
         # Process each channel file to construct cubes
         for channel, file_path in channel_files.items():
             self.logger.info(f"Constructing cube for channel {channel} from file: {file_path}")
-            
+
             # Reset wavelength grid for this channel
             self.wavelength_grid = None
-            
+
             # Construct cube for this channel
             # Use the channel from the filename as the channel identifier
             cube = self.construct_cube_from_rss_channel(
@@ -1764,7 +1871,9 @@ class CubeConstructor:
                 wavelength_range=wavelength_range,
                 dispersion=dispersion,
                 spatial_sampling=spatial_sampling,
-                reference_coord=common_ref_coord or reference_coords_map[channel]
+                reference_coord=common_ref_coord or reference_coords_map[channel],
+                spatial_grid_x=shared_grid_x,
+                spatial_grid_y=shared_grid_y
             )
             
             if cube is not None:

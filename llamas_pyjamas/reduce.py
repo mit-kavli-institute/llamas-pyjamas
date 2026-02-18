@@ -784,12 +784,17 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         rss_files = [rss_files]
         
     cube_files = []
-    
+
+    # Track base names already processed by the traditional method to avoid
+    # redundant work when rss_files contains multiple channel-specific files
+    # (e.g. _RSS_blue, _RSS_green, _RSS_red) that share the same base name.
+    processed_traditional_bases = set()
+
     # Create a single logger for all cube construction
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
-    
+
     for rss_file in rss_files:
         # Get base name for output files and detect channel if present
         base_name = os.path.splitext(os.path.basename(rss_file))[0]
@@ -946,13 +951,29 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 use_traditional = True
 
         if use_traditional or (not use_simple and not use_crr):
+            # Deduplicate: construct_cube_from_rss strips the channel suffix and
+            # discovers all 3 colour files, so processing any one of them builds
+            # all 3 cubes.  Skip if this base name has already been handled.
+            trad_base = os.path.splitext(rss_file)[0]
+            for color in ['red', 'green', 'blue']:
+                for pattern in [f'_extract_RSS_{color}', f'_flat_corrected_RSS_{color}']:
+                    if pattern in trad_base:
+                        trad_base = trad_base.split(pattern)[0]
+                        break
+
+            if trad_base in processed_traditional_bases:
+                logger.info(f"Skipping {rss_file}: base '{os.path.basename(trad_base)}' already processed")
+                print(f"  Skipping {os.path.basename(rss_file)} (already built all channels for this base)")
+                continue
+            processed_traditional_bases.add(trad_base)
+
             # Use traditional cube construction method
             logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
             print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
-            
+
             # Pass the common logger to the constructor
             constructor = CubeConstructor(logger=logger)
-            
+
             # Construct one cube per channel
             channel_cubes = constructor.construct_cube_from_rss(
                 rss_file,
