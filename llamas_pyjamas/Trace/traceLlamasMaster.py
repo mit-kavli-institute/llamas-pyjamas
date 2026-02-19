@@ -64,7 +64,7 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 LOG = []
 
 
-def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(CALIB_DIR, 'combined_bias.fits')) -> fits.ImageHDU:
+def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(BIAS_DIR, 'slow_master_bias.fits')) -> fits.ImageHDU:
     """
     Retrieves the appropriate bias HDU from a combined bias file.
     
@@ -93,16 +93,62 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.pat
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
     bias_hdus = process_fits_by_color(dir)
-    
+
+    # First try to match by header keywords (robust to non-standard extension order)
+    target_color = color.lower()
+    target_bench = str(bench)
+    target_side = side.upper()
+    for hdu in bias_hdus[1:]:
+        hdr = hdu.header
+        if 'COLOR' in hdr and 'BENCH' in hdr and 'SIDE' in hdr:
+            if (str(hdr['BENCH']) == target_bench and
+                str(hdr['SIDE']).upper() == target_side and
+                str(hdr['COLOR']).lower() == target_color):
+                logger.info(
+                    f"Bias HDU matched by header: {target_bench}{target_side} {target_color}"
+                )
+                return hdu
+        elif 'CAM_NAME' in hdr:
+            camname = hdr['CAM_NAME']
+            cam_color = camname.split('_')[1].lower()
+            cam_bench = camname.split('_')[0][0]
+            cam_side = camname.split('_')[0][1].upper()
+            if cam_color == target_color and cam_bench == target_bench and cam_side == target_side:
+                logger.info(
+                    f"Bias HDU matched by CAM_NAME: {target_bench}{target_side} {target_color}"
+                )
+                return hdu
+
+    # Fall back to standard index lookup if header match fails
     try:
-        bias_idx = idx_lookup.get((color.lower(), str(bench), side.upper()))
+        bias_idx = idx_lookup.get((target_color, target_bench, target_side))
         print(f"Bias index: {bias_idx} for {bench}/{side}/{color}")
-    except:
+    except Exception:
         raise ValueError(f"Invalid bench/side/color combination: {bench}/{side}/{color}")
-        
-    
+
+    if bias_idx is None or bias_idx >= len(bias_hdus):
+        raise ValueError(
+            f"Bias index lookup failed for {bench}/{side}/{color} in file {dir}"
+        )
+
+    logger.warning(
+        f"Bias HDU matched by index only (header match failed): {target_bench}{target_side} {target_color}"
+    )
     bias_hdu = bias_hdus[bias_idx]
-    
+
+    # Verify the index-matched HDU actually corresponds to the requested camera
+    hdr = bias_hdu.header
+    matched_color = hdr.get('COLOR', '').lower() if 'COLOR' in hdr else None
+    matched_bench = str(hdr.get('BENCH', '')) if 'BENCH' in hdr else None
+    matched_side = hdr.get('SIDE', '').upper() if 'SIDE' in hdr else None
+
+    if matched_color != target_color or matched_bench != target_bench or matched_side != target_side:
+        raise ValueError(
+            f"Bias index lookup returned wrong camera for {target_bench}{target_side} {target_color}: "
+            f"got {matched_bench}{matched_side} {matched_color} at index {bias_idx}. "
+            f"The bias file may have missing extensions — validate it first."
+        )
+
     return bias_hdu
 
 
@@ -510,10 +556,10 @@ class TraceLlamas:
                 if os.path.isfile(use_bias):
                     bias_file = use_bias
                 else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             else:
-                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             print(f'Bias file: {bias_file}')
             #### fix the directory here!
             bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)

@@ -22,10 +22,11 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
 from astropy.table import Table
 import os
+import json
 from matplotlib.tri import Triangulation, LinearTriInterpolator
 from llamas_pyjamas.Utils.utils import setup_logger
 from datetime import datetime
@@ -37,6 +38,8 @@ import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from matplotlib.patches import RegularPolygon
 import matplotlib.cm as cm
@@ -137,7 +140,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
             fits.Column(name='XDATA', format='E', array=blue_x.astype(np.float32)),
             fits.Column(name='YDATA', format='E', array=blue_y.astype(np.float32)),
             fits.Column(name='FLUX', format='E', array=blue_flux.astype(np.float32))
-        ], name='BLUE_TAB', nrows=len(blue_whitelight))
+        ], name='BLUE_TAB')
         hdul.append(blue_tab)
     
     # Process green data if exists
@@ -164,7 +167,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
             fits.Column(name='XDATA', format='E', array=red_x.astype(np.float32)),
             fits.Column(name='YDATA', format='E', array=red_y.astype(np.float32)),
             fits.Column(name='FLUX', format='E', array=red_flux.astype(np.float32))
-        ], name='RED_TAB', nrows=len(red_whitelight))
+        ], name='RED_TAB')
         hdul.append(red_tab)
     if not outfile:
         fitsfilebase = fitsfile.split('/')[-1]
@@ -740,174 +743,120 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     xdata = np.array([])
     ydata = np.array([])
     flux = np.array([])
-    
-    # Track all fiber positions for exclusion of dead fibers in interpolation
-    all_fiber_positions = []
-    dead_fiber_positions = []
-    
+
+    # Load dead fiber definitions from the canonical LUT (same source as extractLlamas)
+    try:
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+            trace_lut = json.load(f)
+        dead_fiber_lut = trace_lut.get('dead_fibers', {})
+    except Exception as e:
+        logger.warning(f'Could not load dead fiber definitions from traceLUT.json: {e}')
+        dead_fiber_lut = {}
+
     for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
         # Get bench and side information
         bench = trace_obj.bench
         side = trace_obj.side
-        channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
-        
-        # Get dead fibers list
-        dead_fibers = trace_obj.dead_fibers if hasattr(trace_obj, 'dead_fibers') else []
         benchside = f'{bench}{side}'
-        
-        # Process each fiber
+
+        # Get the sorted list of dead physical fiber indices for this bench
+        dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
+
+        if dead_fibers:
+            logger.info(f'Bench {benchside}: {trace_obj.nfibers} traced fibers, '
+                        f'dead physical fibers: {dead_fibers}')
+
+        # Build the trace-index → physical-fiber-number mapping.
+        # The trace object has nfibers entries (e.g. 297 for 2B) because dead
+        # fibers were never detected during tracing.  We need to re-insert the
+        # gaps so that trace index i maps to the correct physical fiber number
+        # that the FiberMap LUT expects.
+        #
+        # Example for 2B (dead fiber 49, nfibers=297):
+        #   trace 0-48  → physical 0-48
+        #   trace 49-296 → physical 50-297
+        trace_to_physical = []
+        physical = 0
+        dead_set = set(dead_fibers)
+        for trace_idx in range(trace_obj.nfibers):
+            while physical in dead_set:
+                physical += 1
+            trace_to_physical.append(physical)
+            physical += 1
+
+        # Process each fiber using the corrected mapping
         for ifib in range(trace_obj.nfibers):
+            physical_fiber = trace_to_physical[ifib]
+
             # Get fiber mask from the trace object
             fiber_mask = trace_obj.fiberimg == ifib
-            
-            # Store the fiber position regardless of whether it's dead
+
+            if not np.any(fiber_mask):
+                logger.info(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
+                            f'on bench {benchside}: no pixels in fiberimg')
+                continue
+
+            # Map physical fiber number to IFU position
             try:
-                x, y = FiberMap_LUT(benchside, ifib)
+                x, y = FiberMap_LUT(benchside, physical_fiber)
                 if x == -1 and y == -1:
                     continue  # Skip if fiber mapping not found
-                
-                # Track all valid fiber positions
-                all_fiber_positions.append((x, y))
-                
-                # Track dead fiber positions separately
-                if ifib in dead_fibers or not np.any(fiber_mask):
-                    dead_fiber_positions.append((x, y))
-                    logger.info(f'Marking fiber {ifib} as dead on bench {benchside}')
-                    continue  # Skip further processing for dead fibers
-                
             except Exception as e:
-                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.info(f'Physical fiber {physical_fiber} (trace {ifib}) '
+                            f'not found in fiber map for bench {benchside}')
                 logger.error(traceback.format_exc())
                 continue
-            
+
             # Sum the flux directly from masked values in the data
             thisflux = np.nansum(data[fiber_mask])
-            
-            # Record the position and flux for valid fibers
+
+            # Record the position and flux
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata, x)
             ydata = np.append(ydata, y)
-    
+
     # Create interpolated image using only valid fibers
+    # Dead fibers are simply absent from the interpolation inputs;
+    # LinearNDInterpolator will naturally fill those positions from neighbours.
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
-    
+
     # Define grid for interpolation
     subsample = 1.5
     xx = 1.0/subsample * np.arange(53*subsample)
     yy = 1.0/subsample * np.arange(53*subsample)
     x_grid, y_grid = np.meshgrid(xx, yy)
-    
+
     # Generate white light image
     whitelight = flux_interpolator(x_grid, y_grid)
-    
-    # Explicitly mask out dead fiber positions in the interpolated image
-    if dead_fiber_positions:
-        logger.info(f'Masking {len(dead_fiber_positions)} dead fibers in white light image')
-        for dead_x, dead_y in dead_fiber_positions:
-            # Find the closest grid points to the dead fiber
-            x_idx = np.argmin(np.abs(xx - dead_x))
-            y_idx = np.argmin(np.abs(yy - dead_y))
-            
-            # Create a mask around the dead fiber position (use a small radius)
-            mask_radius = 2  # Adjust as needed
-            for i in range(-mask_radius, mask_radius+1):
-                for j in range(-mask_radius, mask_radius+1):
-                    if 0 <= y_idx+i < whitelight.shape[0] and 0 <= x_idx+j < whitelight.shape[1]:
-                        whitelight[y_idx+i, x_idx+j] = np.nan  # Set to NaN to make dead fibers visible
-    
+
     # Optional DS9 plot
     if ds9plot:
         plot_ds9(whitelight)
-    
+
     return whitelight, xdata, ydata, flux
 
-# def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
-#     """
-#     Generate a white light image by directly summing unmasked fiber values without extraction.
-    
-#     Parameters:
-#     -----------
-#     trace_list : list
-#         A list of TraceLlamas objects containing the fiber trace information.
-#     data_list : list
-#         A list of data arrays corresponding to each trace object.
-#     metadata : list, optional
-#         Optional metadata for each trace/data pair.
-#     ds9plot : bool, optional
-#         If True, display the resulting white light image using DS9. Default is False.
-    
-#     Returns:
-#     --------
-#     tuple
-#         A tuple containing:
-#         - whitelight (numpy.ndarray): The interpolated white light image.
-#         - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
-#         - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
-#         - flux (numpy.ndarray): The flux values for each fiber.
-#     """
+def compute_residual_background(data, regions=((5, 20), (20, 50), (30, 50))):
+    """Compute residual detector background from multiple regions of a bias-subtracted frame.
 
-#     xdata = np.array([])
-#     ydata = np.array([])
-#     flux = np.array([])
-    
-#     for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
-#         # Get bench and side information
-#         bench = trace_obj.bench
-#         side = trace_obj.side
-#         channel = trace_obj.channel if hasattr(trace_obj, 'channel') else meta.get('channel') if meta else None
-        
-#         #attempt to handle dead fibers
-#         dead_fibers = trace_obj.dead_fibers if hasattr(trace_obj, 'dead_fibers') else []
+    Calculates the median of each candidate region, then returns the median
+    of those estimates for robustness against signal contamination in any
+    single region.
 
-#         # Process each fiber
-#         for ifib in range(trace_obj.nfibers):
-#             # Get fiber mask from the trace object
-#             fiber_mask = trace_obj.fiberimg == ifib
+    Parameters:
+        data: 2D numpy array (bias-subtracted frame)
+        regions: tuple of (start_row, end_row) pairs to sample
 
-#             if not np.any(fiber_mask) or ifib in dead_fibers:
-#                 logger.info(f'Skipping fiber {ifib} on bench {bench}{side}')
-#                 continue  # Skip if no pixels for this fiber
-            
-#             # Get bench-side identifier
-#             benchside = f'{bench}{side}'
-            
-#             try:
-#                 # Map fiber to physical coordinates
-#                 x, y = FiberMap_LUT(benchside, ifib)
-#                 if x == -1 and y == -1:
-#                     continue  # Skip if fiber mapping not found
-#             except Exception as e:
-#                 logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
-#                 logger.error(traceback.format_exc())
-#                 continue
-            
-#             # Sum the flux directly from masked values in the data
-#             thisflux = np.nansum(data[fiber_mask])
-            
-#             # Record the position and flux
-#             flux = np.append(flux, thisflux)
-#             xdata = np.append(xdata, x)
-#             ydata = np.append(ydata, y)
-    
-#     # Create interpolated image
-#     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
-    
-#     # Define grid for interpolation
-#     subsample = 1.5
-#     xx = 1.0/subsample * np.arange(53*subsample)
-#     yy = 1.0/subsample * np.arange(53*subsample)
-#     x_grid, y_grid = np.meshgrid(xx, yy)
-    
-#     # Generate white light image
-#     whitelight = flux_interpolator(x_grid, y_grid)
-    
-#     # Optional DS9 plot
-#     if ds9plot:
-#         plot_ds9(whitelight)
-    
-#     return whitelight, xdata, ydata, flux
+    Returns:
+        float: robust background estimate
+    """
+    medians = []
+    for r_start, r_end in regions:
+        region = data[r_start:r_end, :]
+        medians.append(np.median(region))
+    return np.median(medians)
 
-def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None) -> str:
+
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None, use_dir: str = None) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -935,21 +884,65 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         trace_objs = []
 
+        # Validate and create GUI version if needed (preserves original file)
+        science_file = validate_for_gui(science_file)
+
         # Open the science FITS file and create the output HDU list
         science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
 
-        if not bias:
-            bias_hdul = process_fits_by_color(os.path.join(CALIB_DIR, 'combined_bias.fits'))
-        else:
-            try:
-                bias_hdul = process_fits_by_color(bias)
-            except Exception as e:
-                logger.error(f"Error processing bias file {bias}: {e}")
-                raise ValueError(f"Could not process bias file {bias}. Ensure it is a valid FITS file.")
-            
-        if len(science_hdul) != len(bias_hdul):
-            logger.error(f"Science file has {len(science_hdul)} extensions while bias file has {len(bias_hdul)} extensions.")
-            raise ValueError("Science and bias FITS files must have the same number of extensions. Please use compatible files.")
+        # Identify placeholder extensions (missing cameras)
+        placeholder_indices = get_placeholder_extension_indices(science_file)
+        if placeholder_indices:
+            logger.info(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
+
+        primary_hdr = science_hdul[0].header
+
+        # Determine bias file based on READ-MDE header keyword
+        read_mode = primary_hdr.get('READ-MDE', None)
+        if read_mode is not None:
+            read_mode = read_mode.strip().upper()
+            logger.info(f"Detected READ-MDE: {read_mode}")
+
+        # Default fallback is slow_master_bias.fits (standard readout mode)
+        default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+        if bias is not None:
+            # User-specified bias file takes priority, but fall back to default if not found
+            if os.path.isfile(bias):
+                masterbiasfile = bias
+            else:
+                logger.warning(f"User-specified bias file {bias} not found. Falling back to default bias selection.")
+                bias = None  # Fall through to auto-selection below
+
+        if bias is None:
+            # Auto-select bias based on READ-MDE
+            if read_mode == 'FAST':
+                candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using FAST mode bias: {masterbiasfile}")
+                else:
+                    logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                    masterbiasfile = default_bias
+            elif read_mode == 'SLOW':
+                candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                if os.path.isfile(candidate_bias):
+                    masterbiasfile = candidate_bias
+                    logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+                else:
+                    raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+            else:
+                # Unknown or missing READ-MDE, use slow mode as default
+                masterbiasfile = default_bias
+                if read_mode is None:
+                    logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+                else:
+                    logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+
+        logger.info(f"Bias file is {masterbiasfile}")
+
+        # Validate bias file structure (add placeholders for missing cameras)
+        masterbiasfile = validate_for_gui(masterbiasfile)
 
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
@@ -957,8 +950,8 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         blue_traces = []
         green_traces = []
-        red_green = []
-        
+        red_traces = []
+
         blue_data = []
         green_data = []
         red_data = []
@@ -969,11 +962,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
-            bias = bias_hdul[i].data
-            bias_data = np.median(bias[20:50])
-            data = ext.data - bias_data
-            
-            
+            # Parse color/bench/side from header BEFORE bias subtraction
             if 'COLOR' in ext.header:
                 header = ext.header
                 color = header.get('COLOR', '').lower()
@@ -995,6 +984,17 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
                             side = benchside[1]
 
             print(f'Processing extension {i}: {benchside} {color}')
+
+            # Step 1: Full 2D bias subtraction matched by header keywords (COLOR/BENCH/SIDE)
+            bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=color, dir=masterbiasfile)
+            data = ext.data.astype(float) - bias_hdu.data
+
+            # Step 2 (FAST only): compute average from (science - bias) frame, then subtract it
+            if read_mode == 'FAST':
+                residual_bg = compute_residual_background(data)
+                data = data - residual_bg
+                logger.info(f"Extension {i} ({benchside} {color}): FAST residual bg = {residual_bg:.2f}")
+
             # Determine the corresponding trace file based on benchside and color
             #LLAMAS_master_blue_1_A_traces.pkl
             trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
@@ -1002,13 +1002,11 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
             if not os.path.exists(trace_filepath):
                 logger.info(f"Trace file {trace_filepath} not found for {benchside} {color}. Skipping extension.")
                 continue
-            
+
             with open(trace_filepath, "rb") as f:
                 trace_obj = pickle.load(f)
-            
+
             # Build trace and data lists for QuickWhiteLight processing
-            
-            
             metadata = {'channel': color, 'bench': bench, 'side': side}
             if color == 'blue':
                 blue_traces.append(trace_obj)
@@ -1019,7 +1017,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
                 green_data.append(data)
                 green_meta.append(metadata)
             elif color == 'red':
-                red_green.append(trace_obj)
+                red_traces.append(trace_obj)
                 red_data.append(data)
                 red_meta.append(metadata)
             
@@ -1029,7 +1027,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
         for col, traces_list, data_list, meta_list in [
             ('blue', blue_traces, blue_data, blue_meta),
             ('green', green_traces, green_data, green_meta),
-            ('red', red_green, red_data, red_meta)
+            ('red', red_traces, red_data, red_meta)
         ]:
             if traces_list and data_list:
                 wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot)
@@ -1068,7 +1066,10 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
             
         
         # Write the FITS file to disk.
-        outpath = os.path.join(OUTPUT_DIR, white_light_file)
+        if use_dir is None:
+            use_dir = OUTPUT_DIR
+
+        outpath = os.path.join(use_dir, white_light_file)
         hdul.writeto(outpath, overwrite=True)
         
         print(f'Quick white light cube saved to {outpath}')

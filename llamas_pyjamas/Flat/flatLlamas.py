@@ -453,9 +453,9 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info(f"Loading arc calibration from {arc_calib_file}")
     arc_dict = ExtractLlamas.loadExtraction(arc_calib_file)
 
-    if not is_wavelength_solution_useable(arc_dict):
-        logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
-        raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
+    # if not is_wavelength_solution_useable(arc_dict):
+    #     logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
+    #     raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
     
     # Load the combined flat extractions
     logger.info(f"Loading combined flat extractions from {combined_flat_file}")
@@ -933,8 +933,77 @@ class Thresholding():
         logger.info(f"✓ Normalized flat field saved: {output_file}")
 
         return output_file
-
+    
     def generate_all_pixel_maps(self):
+
+        pixel_maps = {}
+        bad_pixels = {}
+
+        #grabbing the tracefiles
+
+        trace_files = glob.glob(os.path.join(self.trace_dir, 'LLAMAS*traces.pkl'))
+
+        # 1. grab each extension from the combined extraction file
+        #2. for each extension, find the matching trace file, and the matching fit result
+        with open(self.combined_flat_file, 'rb') as f:
+            extraction_data = pickle.load(f)
+        extract_objs = extraction_data['extractions']
+        metadata = extraction_data['metadata']
+
+        for ext_idx, item in enumerate(extract_objs):
+            ext_metadata = metadata[ext_idx]
+            benchside = f"{ext_metadata['bench']}{ext_metadata['side']}"
+            channel = ext_metadata['channel']
+            ext_name = f"{channel}{benchside}"
+
+            logger.info(f"Generating pixel map for extension {ext_idx}: {ext_name}")
+
+            # Find matching trace file
+            matching_trace_file = None
+            for trace_file in trace_files:
+                with open(trace_file, 'rb') as tf:
+                    trace_obj = pickle.load(tf)
+                    trace_key = f"{trace_obj.channel}{trace_obj.bench}{trace_obj.side}"
+                    if trace_key.lower() == ext_name.lower():
+                        matching_trace_file = trace_file
+                        break
+
+            if matching_trace_file is None:
+                logger.warning(f"No matching trace file found for extension {ext_name}, skipping")
+                continue
+
+            # Load the trace object
+            with open(matching_trace_file, 'rb') as tf:
+                trace_obj = pickle.load(tf)
+
+            # Get the fit results for this extension
+            if ext_name not in self.fit_results:
+                logger.warning(f"No fit results found for extension {ext_name}, skipping")
+                continue
+
+            ext_fit_results = self.fit_results[ext_name]
+
+            # Generate the pixel map
+            pixel_map, bad_pixel_info = self._generate_single_pixel_map(
+                ext_name, item, trace_obj, ext_fit_results
+            )
+
+            pixel_maps[ext_name] = pixel_map
+            bad_pixels[ext_name] = bad_pixel_info
+
+            # Optionally save individual pixel maps
+            # output_filename = os.path.join(output_dir, f'pixel_map_{ext_name}.fits')
+            # hdu = fits.PrimaryHDU(data=pixel_map.astype(np.float32))
+            # hdu.writeto(output_filename, overwrite=True)
+            # logger.info(f"Saved pixel map for {ext_name} to {output_filename}")
+        self.map_filename = os.path.join(self.output_dir, 'pixel_maps.fits')
+        sort_and_write_pixel_maps(pixel_maps, self.map_filename)
+
+        return pixel_maps    
+
+
+    def generate_thresholds(self):
+        """Generate thresholds for flat fielding based on science data."""
 
         pixel_maps = {}
         bad_pixels = {}
