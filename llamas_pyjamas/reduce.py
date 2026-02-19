@@ -747,7 +747,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
                    use_crr=True, crr_config=None, parallel=False, cube_method='simple',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
-                   cube_radius=1.5, cube_min_weight=0.01):
+                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -771,6 +771,8 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         cube_wave_sampling (float): Wavelength sampling factor (for simple method)
         cube_radius (float): Interpolation radius in arcsec (for simple method)
         cube_min_weight (float): Minimum weight threshold (for simple method)
+        cube_grid_method (str): Spatial grid method for simple constructor:
+            'oversampled' (default), 'native_hex', or 'nearest_hex'
 
     Returns:
         list: Paths to constructed cube files
@@ -782,12 +784,17 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         rss_files = [rss_files]
         
     cube_files = []
-    
+
+    # Track base names already processed by the traditional method to avoid
+    # redundant work when rss_files contains multiple channel-specific files
+    # (e.g. _RSS_blue, _RSS_green, _RSS_red) that share the same base name.
+    processed_traditional_bases = set()
+
     # Create a single logger for all cube construction
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
-    
+
     for rss_file in rss_files:
         # Get base name for output files and detect channel if present
         base_name = os.path.splitext(os.path.basename(rss_file))[0]
@@ -833,15 +840,15 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 constructor = SimpleCubeConstructor(
                     fiber_pitch=cube_fiber_pitch,
                     pixel_size=cube_pixel_size,
-                    wave_sampling=cube_wave_sampling
+                    wave_sampling=cube_wave_sampling,
+                    grid_method=cube_grid_method
                 )
 
-                # Load fibermap
-                fibermap_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
-                constructor.load_fibermap(fibermap_path)
-
-                # Load RSS file
+                # Load RSS file (reads FIBERMAP extension for fiber identity)
                 constructor.load_rss_file(rss_file)
+
+                # Match fibers to IFU positions via FiberMap_LUT
+                constructor.match_fibers_to_fibermap()
 
                 # Create wavelength grid
                 wave_min, wave_max = None, None
@@ -944,13 +951,29 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 use_traditional = True
 
         if use_traditional or (not use_simple and not use_crr):
+            # Deduplicate: construct_cube_from_rss strips the channel suffix and
+            # discovers all 3 colour files, so processing any one of them builds
+            # all 3 cubes.  Skip if this base name has already been handled.
+            trad_base = os.path.splitext(rss_file)[0]
+            for color in ['red', 'green', 'blue']:
+                for pattern in [f'_extract_RSS_{color}', f'_flat_corrected_RSS_{color}']:
+                    if pattern in trad_base:
+                        trad_base = trad_base.split(pattern)[0]
+                        break
+
+            if trad_base in processed_traditional_bases:
+                logger.info(f"Skipping {rss_file}: base '{os.path.basename(trad_base)}' already processed")
+                print(f"  Skipping {os.path.basename(rss_file)} (already built all channels for this base)")
+                continue
+            processed_traditional_bases.add(trad_base)
+
             # Use traditional cube construction method
             logger.info(f"Constructing traditional channel cubes from RSS file: {rss_file}")
             print(f"Constructing traditional channel cubes from RSS file: {rss_file}")
-            
+
             # Pass the common logger to the constructor
             constructor = CubeConstructor(logger=logger)
-            
+
             # Construct one cube per channel
             channel_cubes = constructor.construct_cube_from_rss(
                 rss_file,
@@ -1522,7 +1545,8 @@ def main(config_path):
                 cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
                 cube_radius=float(config.get('cube_radius', 1.5)),
-                cube_min_weight=float(config.get('cube_min_weight', 0.01))
+                cube_min_weight=float(config.get('cube_min_weight', 0.01)),
+                cube_grid_method=config.get('cube_grid_method', 'oversampled')
             )
             print(f"Cubes constructed: {cube_files}")
         else:
