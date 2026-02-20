@@ -745,7 +745,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 
 
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
-                   use_crr=True, crr_config=None, parallel=False, cube_method='simple',
+                   use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
                    cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
     """
@@ -1540,7 +1540,7 @@ def main(config_path):
                 spatial_sampling=config.get('spatial_sampling', 0.75),
                 use_crr=use_crr_cube,
                 parallel=config.get('CRR_parallel', False),
-                cube_method=config.get('cube_method', 'simple'),
+                cube_method=config.get('cube_method', 'traditional'),
                 cube_pixel_size=float(config.get('cube_pixel_size', 0.3)),
                 cube_fiber_pitch=float(config.get('cube_fiber_pitch', 0.75)),
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
