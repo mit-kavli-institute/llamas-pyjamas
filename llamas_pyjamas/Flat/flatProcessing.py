@@ -27,6 +27,74 @@ from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
+
+def load_bias_subtracted_flat_2d(flat_fits_file, channel, bench, side, bias_file=None):
+    """Load and bias-subtract the raw 2D flat image for one detector extension.
+
+    Parameters
+    ----------
+    flat_fits_file : str
+        Path to the raw flat field FITS file for the appropriate color channel.
+    channel : str
+        Color channel ('red', 'green', 'blue').
+    bench : str
+        Bench identifier ('1', '2', '3', '4').
+    side : str
+        Side identifier ('A', 'B').
+    bias_file : str, optional
+        Path to bias file. If None, uses default slow_master_bias.fits.
+
+    Returns
+    -------
+    np.ndarray
+        Bias-subtracted 2D flat image for the specified extension.
+    """
+    from llamas_pyjamas.config import BIAS_DIR
+
+    hdus = process_fits_by_color(flat_fits_file)
+
+    # Find the HDU matching the requested bench/side
+    target_hdu = None
+    for hdu in hdus:
+        if not hasattr(hdu, 'data') or hdu.data is None:
+            continue
+        hdr = hdu.header
+        if 'COLOR' in hdr:
+            hdu_color = hdr['COLOR'].strip().lower()
+            hdu_bench = str(hdr.get('BENCH', '')).strip()
+            hdu_side = str(hdr.get('SIDE', '')).strip().upper()
+        elif 'CAM_NAME' in hdr:
+            camname = hdr['CAM_NAME']
+            hdu_color = camname.split('_')[1].lower()
+            hdu_bench = camname.split('_')[0][0]
+            hdu_side = camname.split('_')[0][1].upper()
+        else:
+            continue
+
+        if (hdu_color == channel.lower() and
+                str(hdu_bench) == str(bench) and
+                hdu_side == side.upper()):
+            target_hdu = hdu
+            break
+
+    if target_hdu is None:
+        raise ValueError(
+            f"No HDU found matching channel={channel}, bench={bench}, side={side} "
+            f"in {flat_fits_file}"
+        )
+
+    # Load bias
+    if bias_file is None:
+        bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+    bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=channel, dir=bias_file)
+    bias_data = bias_hdu.data
+
+    # Bias-subtract
+    flat_2d = target_hdu.data.astype(np.float64) - bias_data.astype(np.float64)
+
+    return flat_2d
+
 def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR, use_bias=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 

@@ -359,19 +359,20 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
     # Run the appropriate flat field workflow based on method
     try:
         if flat_method == 'pypeit':
-            # Use PypeIt-style flat fielding with full detector integration
-            from llamas_pyjamas.Flat.pypeit_integration import process_flat_with_pypeit
+            # PypeIt-style: per-fiber bspline spectral fits + aggregated pixel sensitivity
+            from llamas_pyjamas.Flat.flatPypeit import process_pypeit_flat_field
 
             print("Using PypeIt-style flat fielding approach")
+            print("  Per-fiber bspline spectral response (log-space)")
+            print("  Fiber-aggregated pixel sensitivity maps")
             print("Processing 24 detector extensions (Red/Green/Blue for benches 1A-4B)")
 
-            results = process_flat_with_pypeit(
+            results = process_pypeit_flat_field(
                 red_flat, green_flat, blue_flat,
-                trace_dir=trace_dir,
-                output_dir=flat_output_dir,
                 arc_calib_file=arc_calib_file,
-                reference_fiber=150,
-                verbose=verbose
+                output_dir=flat_output_dir,
+                trace_dir=trace_dir,
+                verbose=verbose,
             )
         else:
             # Use standard flat fielding method

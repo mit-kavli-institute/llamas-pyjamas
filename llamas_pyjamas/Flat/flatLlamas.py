@@ -369,9 +369,9 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
         raise
 
 
-def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file, 
-                               arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR, 
-                               trace_dir=CALIB_DIR, verbose=False):
+def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
+                               arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR,
+                               trace_dir=CALIB_DIR, verbose=False, pixel_qe_mode=True):
     """Process complete flat field workflow with wavelength calibration and pixel mapping.
 
     This function implements the complete flat field processing workflow:
@@ -380,17 +380,21 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     3. Apply wavelength solution from arc calibration
     4. Fit B-splines to xshift vs counts for each fiber
     5. Generate per-pixel flat field correction images
+    6. (Optional) Generate true 2D pixel QE maps
 
     Args:
         red_flat_file (str): Path to red flat field FITS file
         green_flat_file (str): Path to green flat field FITS file
         blue_flat_file (str): Path to blue flat field FITS file
-        arc_calib_file (str, optional): Path to arc calibration file. 
+        arc_calib_file (str, optional): Path to arc calibration file.
             Defaults to 'LLAMAS_reference_arc.pkl' in trace_dir.
         use_bias (str, optional): Path to bias file. Defaults to None.
         output_dir (str, optional): Output directory. Defaults to OUTPUT_DIR.
         trace_dir (str, optional): Trace directory. Defaults to CALIB_DIR.
         verbose (bool, optional): Enable verbose console output. Defaults to False.
+        pixel_qe_mode (bool, optional): If True, generate true 2D pixel-level QE maps
+            that capture intra-fibre pixel-to-pixel variations. If False, use the legacy
+            fibre-averaged normalization. Defaults to True.
 
     Returns:
         dict: Dictionary containing processing results and output file paths
@@ -531,14 +535,39 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
         # Also raise the exception to ensure calling code knows about the failure
         raise
     
+    # Step 7: Generate true 2D pixel QE maps (if requested)
+    pixel_qe_file = None
+    if pixel_qe_mode:
+        logger.info("Step 7: Generating true 2D pixel QE flat field maps")
+        try:
+            flat_files = {
+                'red': red_flat_file,
+                'green': green_flat_file,
+                'blue': blue_flat_file
+            }
+            pixel_qe_file = threshold_processor.generate_2d_pixel_qe_map(
+                flat_dict_calibrated=flat_dict_calibrated,
+                fit_results=fit_results,
+                trace_dir=trace_dir,
+                flat_files=flat_files,
+                bias_file=use_bias
+            )
+            logger.info(f"Successfully created pixel QE flat field: {os.path.basename(pixel_qe_file)}")
+        except Exception as e:
+            logger.error(f"Failed to create pixel QE flat field: {str(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            pixel_qe_file = None
+
     results = {
         'combined_flat_file': combined_flat_file,
         'calibrated_flat_file': calibrated_flat_file,
         'fit_results': fit_results,
         'pixel_map_results': pixel_map_results,
+        'pixel_qe_file': pixel_qe_file,
         'processing_status': 'completed'
     }
-    
+
     logger.info("Complete flat field processing workflow finished successfully")
     return results
 
@@ -739,8 +768,8 @@ class Thresholding():
                 for spectral_idx, col in enumerate(unique_cols):
                     rows_in_col = fibre_rows[fibre_cols == col]
 
-                    if spectral_idx < len(normalised_flat):
-                        norm_value = normalised_flat[spectral_idx]
+                    if col < len(normalised_flat):
+                        norm_value = normalised_flat[col]
 
                         if np.isnan(norm_value):
                             pixel_map[rows_in_col, col] = 1.0
@@ -878,8 +907,8 @@ class Thresholding():
                                 rows_in_col = fiber_rows[fiber_cols == col]
 
                                 # Assign normalized value
-                                if spectral_idx < len(normalized_flat_1d):
-                                    value = normalized_flat_1d[spectral_idx]
+                                if col < len(normalized_flat_1d):
+                                    value = normalized_flat_1d[col]
 
                                     # Handle NaN/Inf
                                     if np.isnan(value) or np.isinf(value):
@@ -934,6 +963,244 @@ class Thresholding():
 
         return output_file
     
+    def generate_2d_pixel_qe_map(self, flat_dict_calibrated, fit_results, trace_dir,
+                                    flat_files, bias_file=None,
+                                    clip_low=0.5, clip_high=1.5,
+                                    min_profile_weight=0.01):
+        """Generate a true 2D pixel-level QE flat field map.
+
+        Unlike generate_normalized_flat_from_bspline_fits() which assigns a single
+        normalization value to all spatial pixels within a fibre, this method computes
+        a per-pixel correction by dividing the raw 2D flat image by the expected model:
+
+            pixel_qe(row, col) = flat_2d(row, col) / [bspline_pred(col) * profimg(row, col)]
+
+        This isolates the per-pixel quantum efficiency relative to the fibre's mean,
+        capturing intra-fibre spatial QE variations that are lost in the 1D approach.
+
+        Parameters
+        ----------
+        flat_dict_calibrated : dict
+            Dictionary with wavelength-calibrated flat extractions (from arcTransfer).
+        fit_results : dict
+            Dictionary from calculate_fits_all_extensions with B-spline fits per fibre.
+        trace_dir : str
+            Directory containing trace files with fiberimg and profimg.
+        flat_files : dict
+            Dictionary mapping color channel to FITS file path, e.g.
+            {'red': '/path/to/red.fits', 'green': '/path/to/green.fits', 'blue': '/path/to/blue.fits'}
+        bias_file : str, optional
+            Path to bias file for subtraction. If None, uses default.
+        clip_low : float, optional
+            Lower clip bound for pixel QE values. Default 0.5.
+        clip_high : float, optional
+            Upper clip bound for pixel QE values. Default 1.5.
+        min_profile_weight : float, optional
+            Minimum profimg value to trust. Pixels below this get correction=1.0. Default 0.01.
+
+        Returns
+        -------
+        str
+            Path to the output pixel_qe_flat_field.fits MEF file.
+        """
+        from llamas_pyjamas.Flat.flatProcessing import load_bias_subtracted_flat_2d
+
+        logger.info("Generating TRUE 2D pixel QE flat field maps")
+        logger.info(f"  clip_low={clip_low}, clip_high={clip_high}, min_profile_weight={min_profile_weight}")
+
+        output_file = os.path.join(self.output_dir, 'pixel_qe_flat_field.fits')
+
+        primary_hdu = fits.PrimaryHDU()
+        primary_hdu.header['OBJECT'] = 'Pixel QE Flat Field'
+        primary_hdu.header['METHOD'] = '2D Pixel QE (bspline * profimg division)'
+        primary_hdu.header['COMMENT'] = 'True per-pixel QE correction: flat_2d / (bspline_pred * profimg)'
+        primary_hdu.header['CLIPLO'] = (clip_low, 'Lower clip bound for pixel QE')
+        primary_hdu.header['CLIPHI'] = (clip_high, 'Upper clip bound for pixel QE')
+        primary_hdu.header['MINPROF'] = (min_profile_weight, 'Min profile weight threshold')
+        primary_hdu.header['NEXTEN'] = (24, 'Number of extensions')
+
+        hdu_list = [primary_hdu]
+
+        extensions = list(idx_lookup.keys())
+
+        for ext_idx, (channel, bench, side) in enumerate(sorted(extensions, key=lambda x: idx_lookup[x])):
+            ext_key = f"{channel}{bench}{side}"
+            logger.info(f"Processing extension {ext_idx+1}/24: {ext_key}")
+
+            try:
+                # Find matching extraction
+                extraction_idx = None
+                for i, meta in enumerate(flat_dict_calibrated['metadata']):
+                    if (meta['channel'] == channel and
+                        str(meta['bench']) == str(bench) and
+                        meta['side'] == side):
+                        extraction_idx = i
+                        break
+
+                if extraction_idx is None:
+                    logger.error(f"No extraction found for {ext_key}")
+                    hdu_list.append(self._make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx))
+                    continue
+
+                # Load trace file
+                trace_file = os.path.join(trace_dir, f'LLAMAS_{channel}_{bench}_{side}_traces.pkl')
+                if not os.path.exists(trace_file):
+                    logger.error(f"Trace file not found: {trace_file}")
+                    hdu_list.append(self._make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx))
+                    continue
+
+                with open(trace_file, 'rb') as f:
+                    trace_obj = pickle.load(f)
+
+                fiberimg = trace_obj.fiberimg
+                profimg = trace_obj.profimg
+
+                # Load bias-subtracted 2D flat
+                flat_fits_file = flat_files.get(channel.lower())
+                if flat_fits_file is None:
+                    logger.error(f"No flat file provided for channel {channel}")
+                    hdu_list.append(self._make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx))
+                    continue
+
+                flat_2d = load_bias_subtracted_flat_2d(
+                    flat_fits_file, channel, bench, side, bias_file=bias_file
+                )
+
+                # Get B-spline fit results
+                ext_results = fit_results.get(ext_key, {})
+                if not ext_results:
+                    logger.warning(f"No fit results for {ext_key}")
+                    hdu_list.append(self._make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx))
+                    continue
+
+                # Normalize profimg so it sums to 1 per fibre per column.
+                # The extraction uses a weighted mean: sum(frame*profimg)/sum(profimg),
+                # so bspline_pred ≈ average pixel value. To reconstruct per-pixel expected
+                # values we need profimg_norm where sum(profimg_norm) = 1 across each fibre,
+                # so that bspline_pred * profimg_norm gives the fraction of flux at each pixel.
+                profimg_norm = np.zeros_like(profimg, dtype=np.float64)
+
+                # Compute per-fibre per-column profile sums (vectorized per fibre)
+                for fiber_idx in ext_results.keys():
+                    fiber_rows, fiber_cols = np.where(fiberimg == fiber_idx)
+                    if len(fiber_rows) == 0:
+                        continue
+
+                    # For each unique column, normalize the profile to sum to 1
+                    unique_cols, col_inverse = np.unique(fiber_cols, return_inverse=True)
+
+                    # Sum profimg per column for this fibre
+                    prof_vals = profimg[fiber_rows, fiber_cols]
+                    col_sums = np.zeros(len(unique_cols), dtype=np.float64)
+                    np.add.at(col_sums, col_inverse, prof_vals)
+
+                    # Normalize: divide each pixel's profimg by its column sum
+                    safe_sums = np.where(col_sums > 0, col_sums, 1.0)
+                    profimg_norm[fiber_rows, fiber_cols] = prof_vals / safe_sums[col_inverse]
+
+                # Build expected model image: bspline_pred(col) * profimg_norm(row, col)
+                model_2d = np.zeros_like(flat_2d, dtype=np.float64)
+
+                for fiber_idx in ext_results.keys():
+                    bspline_model = ext_results[fiber_idx]['bspline_model']
+                    xshift = ext_results[fiber_idx]['xshift']
+
+                    # Evaluate bspline at all spectral columns
+                    valid_xshift = np.isfinite(xshift)
+                    bspline_vals = np.zeros(len(xshift), dtype=np.float64)
+                    if np.any(valid_xshift):
+                        bspline_vals[valid_xshift] = bspline_model.value(xshift[valid_xshift])[0]
+
+                    # Get all pixels belonging to this fibre
+                    fiber_rows, fiber_cols = np.where(fiberimg == fiber_idx)
+
+                    if len(fiber_rows) == 0:
+                        continue
+
+                    # Vectorized: model = bspline_at_column * normalized_profile_weight
+                    model_2d[fiber_rows, fiber_cols] = (
+                        bspline_vals[fiber_cols] * profimg_norm[fiber_rows, fiber_cols]
+                    )
+
+                # Compute pixel QE: flat_2d / model_2d
+                pixel_qe = np.ones_like(flat_2d, dtype=np.float32)
+
+                # Only compute where model is positive and both arrays are finite
+                valid = (
+                    (model_2d > 0) &
+                    np.isfinite(flat_2d) &
+                    np.isfinite(model_2d) &
+                    (profimg_norm >= min_profile_weight)
+                )
+                pixel_qe[valid] = (flat_2d[valid] / model_2d[valid]).astype(np.float32)
+
+                # Clip extreme values
+                pixel_qe = np.clip(pixel_qe, clip_low, clip_high)
+
+                # Reset non-fibre and low-profile pixels to 1.0
+                non_fibre = (fiberimg == -1) | (profimg_norm < min_profile_weight)
+                pixel_qe[non_fibre] = 1.0
+
+                # Handle any remaining NaN/Inf
+                bad_mask = ~np.isfinite(pixel_qe)
+                pixel_qe[bad_mask] = 1.0
+
+                # Statistics on traced pixels
+                traced_mask = valid & ~non_fibre
+                n_bad = int(np.sum(bad_mask & ~non_fibre))
+
+                logger.info(f"  {ext_key}: traced pixels={int(np.sum(traced_mask))}, "
+                           f"bad pixels={n_bad}")
+
+                # Create HDU
+                hdu = fits.ImageHDU(data=pixel_qe)
+                hdu.header['EXTNAME'] = ext_key
+                hdu.header['CHANNEL'] = channel.upper()
+                hdu.header['BENCH'] = str(bench)
+                hdu.header['SIDE'] = side
+                hdu.header['EXTVER'] = ext_idx + 1
+                hdu.header['METHOD'] = '2D Pixel QE'
+
+                if np.any(traced_mask):
+                    traced_values = pixel_qe[traced_mask]
+                    hdu.header['DATAMEAN'] = float(np.mean(traced_values))
+                    hdu.header['DATAMED'] = float(np.median(traced_values))
+                    hdu.header['DATAMIN'] = float(np.min(traced_values))
+                    hdu.header['DATAMAX'] = float(np.max(traced_values))
+                    hdu.header['DATASTD'] = float(np.std(traced_values))
+                    hdu.header['NPIX'] = int(np.sum(traced_mask))
+                    hdu.header['NBADFPIX'] = n_bad
+
+                hdu_list.append(hdu)
+
+            except Exception as e:
+                logger.error(f"Error processing {ext_key}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                hdu_list.append(self._make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx,
+                                                         error=str(e)))
+
+        # Write MEF file
+        hdul = fits.HDUList(hdu_list)
+        hdul.writeto(output_file, overwrite=True)
+        logger.info(f"Pixel QE flat field saved: {output_file}")
+
+        return output_file
+
+    @staticmethod
+    def _make_empty_qe_hdu(ext_key, channel, bench, side, ext_idx, error=None):
+        """Create an empty (all 1.0) QE HDU for extensions that couldn't be processed."""
+        empty_data = np.ones((4112, 4096), dtype=np.float32)
+        hdu = fits.ImageHDU(data=empty_data)
+        hdu.header['EXTNAME'] = ext_key
+        hdu.header['CHANNEL'] = channel.upper()
+        hdu.header['BENCH'] = str(bench)
+        hdu.header['SIDE'] = side
+        hdu.header['EXTVER'] = ext_idx + 1
+        if error:
+            hdu.header['ERROR'] = str(error)[:68]
+        return hdu
+
     def generate_all_pixel_maps(self):
 
         pixel_maps = {}
@@ -1001,6 +1268,40 @@ class Thresholding():
 
         return pixel_maps    
 
+
+    def generate_pypeit_flat_field(self, flat_dict_calibrated, trace_dir, flat_files,
+                                  bias_file=None, verbose=False):
+        """Generate flat field products using PypeIt-style methodology.
+
+        This uses the fiber-aggregated approach: per-fiber bspline spectral
+        fitting in log-space, plus a per-detector pixel sensitivity map built
+        by stacking all fibers by fractional cross-dispersion position.
+
+        Parameters
+        ----------
+        flat_dict_calibrated : dict
+            Wavelength-calibrated flat extractions with metadata.
+        trace_dir : str
+            Directory containing trace pickle files.
+        flat_files : dict
+            Maps channel to raw FITS path, e.g.
+            {'red': '/path/red.fits', 'green': '...', 'blue': '...'}.
+        bias_file : str, optional
+            Path to bias file.
+        verbose : bool
+            Enable verbose logging.
+
+        Returns
+        -------
+        dict
+            Output file paths and processing results.
+        """
+        from llamas_pyjamas.Flat.flatPypeit import PypeItFlatField
+
+        pypeit_ff = PypeItFlatField(output_dir=self.output_dir, verbose=verbose)
+        return pypeit_ff.generate_all_maps(
+            flat_dict_calibrated, trace_dir, flat_files, bias_file=bias_file
+        )
 
     def generate_thresholds(self):
         """Generate thresholds for flat fielding based on science data."""
