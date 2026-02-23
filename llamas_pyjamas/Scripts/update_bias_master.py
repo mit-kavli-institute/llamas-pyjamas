@@ -16,11 +16,19 @@ def main():
     directory = os.path.abspath(args.directory)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIST_EXPTIME_READOUT.sh")
 
-    subprocess.run(["bash", script], cwd=directory, check=True)
+    try:
+        subprocess.run(["bash", script], cwd=directory, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to run observation log script: {e.stderr.decode().strip()}", file=sys.stderr)
+        sys.exit(1)
 
     obs_log = os.path.join(directory, "obs.log")
-    with open(obs_log) as f:
-        lines = f.readlines()
+    try:
+        with open(obs_log) as f:
+            lines = f.readlines()
+    except OSError as e:
+        print(f"Could not read observation log: {e}", file=sys.stderr)
+        sys.exit(1)
 
     slow_bias = None
     fast_bias = None
@@ -39,38 +47,28 @@ def main():
         if slow_bias and fast_bias:
             break
 
-    if slow_bias:
-        print(slow_bias)
-    else:
-        print("No SLOW BIAS file found.", file=sys.stderr)
+    if not slow_bias and not fast_bias:
+        print("No SLOW or FAST BIAS files found in the observation log.", file=sys.stderr)
+        sys.exit(1)
 
-    if fast_bias:
-        print(fast_bias)
-    else:
-        print("No FAST BIAS file found.", file=sys.stderr)
+    try:
+        if slow_bias:
+            shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.bias_dir, "slow_master_bias.fits"))
+            shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.calib_dir, "slow_master_bias.fits"))
 
-    if slow_bias and fast_bias:
-        print("Found both SLOW and FAST BIAS files.")
-        shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.bias_dir, "slow_master_bias.fits"))
-        shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.bias_dir, "fast_master_bias.fits"))
-
-        shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.calib_dir, "slow_master_bias.fits"))
-        shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.calib_dir, "fast_master_bias.fits"))
-
-        print("Both Master BIAS files updated.")
-
-    elif slow_bias and not fast_bias:
-        print("Found SLOW BIAS file only.")
-        shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.bias_dir, "slow_master_bias.fits"))
-        shutil.copy2(os.path.join(directory, slow_bias), os.path.join(args.calib_dir, "slow_master_bias.fits"))
-        print("SLOW Master BIAS file updated.")
-    elif fast_bias and not slow_bias:
-        print("Found FAST BIAS file only.")
-        shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.bias_dir, "fast_master_bias.fits"))
-        shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.calib_dir, "fast_master_bias.fits"))
-        print("FAST Master BIAS file updated.")
-    else:
-        print("No files copied as no BIAS files were found.")
+        if fast_bias:
+            shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.bias_dir, "fast_master_bias.fits"))
+            shutil.copy2(os.path.join(directory, fast_bias), os.path.join(args.calib_dir, "fast_master_bias.fits"))
+    except OSError as e:
+        print(f"Failed to copy BIAS file: {e}", file=sys.stderr)
+        sys.exit(1)
+        
+    found = ", ".join(filter(None, [
+        "SLOW" if slow_bias else None,
+        "FAST" if fast_bias else None
+    ]))
+    print(f"Master BIAS files updated successfully ({found}).")
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
