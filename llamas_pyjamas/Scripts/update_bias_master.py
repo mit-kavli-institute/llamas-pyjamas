@@ -14,6 +14,11 @@ def main():
     args = parser.parse_args()
 
     directory = os.path.abspath(args.directory)
+    if not os.path.isdir(directory):
+        print(f"Directory not found: {directory}", file=sys.stderr)
+        sys.exit(1)
+    
+    
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIST_EXPTIME_READOUT.sh")
 
     try:
