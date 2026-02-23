@@ -27,6 +27,11 @@ Example:
             print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
 from astropy.io import fits # type: ignore
+from datetime import datetime
+from llamas_pyjamas.Utils.utils import setup_logger
+
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, f'file_validation_{timestamp}.log')
 ##############################################################
 
 class llamasOneCamera:
@@ -47,6 +52,7 @@ class llamasOneCamera:
         self.bench  =   -1
         self.side   =   ''
         self.channel =  ''
+        
 
     def readhdu(self, hdu: fits.HDUList) -> None:
         """Read header and data from the given HDU and extract metadata.
@@ -162,9 +168,9 @@ def process_fits_by_color(fits_file):
                         original_shape = hdu.data.shape
                         if x2 <= original_shape[1] and y2 <= original_shape[0]:
                             hdu.data = hdu.data[y1:y2, x1:x2]
-                            print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
+                            # print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
                         else:
-                            print(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
+                            logger.warning(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
                 
                 # Check if the HDU has data
                 if hdu.data is not None:
