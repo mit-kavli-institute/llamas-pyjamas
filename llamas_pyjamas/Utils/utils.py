@@ -942,6 +942,256 @@ def check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir=
     return problematic_fibers
 
 
+def assess_pixel_maps(pixel_map_file, output_dir=None, extensions=None, save_figs=True):
+    """Assess pixel-to-pixel flat field maps for imprint patterns and data quality.
+
+    For each extension in ``pixel_map_file`` this function computes:
+
+    - Global statistics (mean, median, std, fraction of pixels outside [0.9, 1.1])
+    - 2D image display with a diverging colormap centred at 1.0
+    - Spatial profile: median collapsed along the spectral axis to reveal
+      cross-fiber sensitivity gradients or block-level imprint patterns
+    - Spectral profile: median collapsed along the spatial axis to reveal
+      large-scale spectral residuals or fringing structure
+    - Power spectrum of the spectral profile via FFT to quantify fringing
+      frequency and amplitude (especially important for the red channel)
+    - Histogram of pixel values
+
+    A multi-panel PNG is saved per extension and a plain-text summary report is
+    written listing per-extension statistics with flags for anomalous structure.
+
+    Args:
+        pixel_map_file (str): Path to the ``pixel_maps.fits`` MEF file produced by
+            ``process_flat_field_complete``.
+        output_dir (str, optional): Directory for output PNGs and the summary report.
+            Defaults to the directory containing ``pixel_map_file``.
+        extensions (list of str, optional): Subset of EXTNAME values to assess
+            (e.g. ``['red1A', 'red2B']``).  If ``None`` all extensions are assessed.
+        save_figs (bool): Whether to write PNG files.  Defaults to True.
+
+    Returns:
+        dict: ``{ext_name: {'mean': float, 'std': float, 'median': float,
+                            'frac_outside': float, 'dominant_fft_freq': float,
+                            'dominant_fft_amp': float}}``
+    """
+    import os
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from astropy.io import fits
+
+    if not os.path.exists(pixel_map_file):
+        raise FileNotFoundError(f"Pixel map file not found: {pixel_map_file}")
+
+    if output_dir is None:
+        output_dir = os.path.dirname(os.path.abspath(pixel_map_file))
+    os.makedirs(output_dir, exist_ok=True)
+
+    summary = {}
+    report_lines = [
+        f"Pixel Map Assessment: {os.path.basename(pixel_map_file)}",
+        "=" * 70,
+        f"{'Extension':<12} {'Mean':>8} {'Median':>8} {'Std':>8} {'%Outside':>9} "
+        f"{'FFT_freq':>9} {'FFT_amp':>9} {'Flags'}",
+        "-" * 70,
+    ]
+
+    with fits.open(pixel_map_file) as hdul:
+        image_exts = [h for h in hdul if h.data is not None and h.data.ndim == 2]
+
+        for hdu in image_exts:
+            ext_name = hdu.header.get('EXTNAME', 'UNKNOWN')
+
+            if extensions is not None and ext_name not in extensions:
+                continue
+
+            data = hdu.data.astype(np.float64)
+
+            # ------------------------------------------------------------------
+            # Statistics
+            # ------------------------------------------------------------------
+            flat_data = data.ravel()
+            finite_mask = np.isfinite(flat_data)
+            flat_finite = flat_data[finite_mask]
+
+            mean_val  = float(np.mean(flat_finite))
+            median_val = float(np.median(flat_finite))
+            std_val   = float(np.std(flat_finite))
+            frac_outside = float(np.mean((flat_finite < 0.9) | (flat_finite > 1.1)))
+
+            # ------------------------------------------------------------------
+            # Collapsed profiles
+            # ------------------------------------------------------------------
+            # Spatial profile: median along spectral axis (axis=1 → along columns)
+            # Result shape = (nrows,) — one value per detector row
+            spatial_profile = np.nanmedian(data, axis=1)
+
+            # Spectral profile: median along spatial axis (axis=0 → along rows)
+            # Result shape = (ncols,) — one value per spectral pixel
+            spectral_profile = np.nanmedian(data, axis=0)
+
+            # ------------------------------------------------------------------
+            # Power spectrum of spectral profile
+            # ------------------------------------------------------------------
+            sp_finite = spectral_profile[np.isfinite(spectral_profile)]
+            sp_detrended = sp_finite - np.mean(sp_finite)
+            fft_coeffs = np.fft.rfft(sp_detrended)
+            fft_power  = np.abs(fft_coeffs) ** 2
+            freqs      = np.fft.rfftfreq(len(sp_finite))
+
+            # Ignore DC (index 0)
+            if len(fft_power) > 1:
+                peak_idx = int(np.argmax(fft_power[1:]) + 1)
+                dominant_fft_freq = float(freqs[peak_idx])
+                dominant_fft_amp  = float(np.sqrt(fft_power[peak_idx]) / len(sp_finite))
+            else:
+                dominant_fft_freq = 0.0
+                dominant_fft_amp  = 0.0
+
+            summary[ext_name] = {
+                'mean': mean_val,
+                'median': median_val,
+                'std': std_val,
+                'frac_outside': frac_outside,
+                'dominant_fft_freq': dominant_fft_freq,
+                'dominant_fft_amp': dominant_fft_amp,
+            }
+
+            # ------------------------------------------------------------------
+            # Flags
+            # ------------------------------------------------------------------
+            flags = []
+            if std_val > 0.05:
+                flags.append('HIGH_STD')
+            if dominant_fft_amp > 0.01:
+                flags.append('FRINGING')
+            if abs(mean_val - 1.0) > 0.02:
+                flags.append('OFFSET')
+            flag_str = ','.join(flags) if flags else 'OK'
+
+            report_lines.append(
+                f"{ext_name:<12} {mean_val:>8.4f} {median_val:>8.4f} {std_val:>8.4f} "
+                f"{frac_outside*100:>8.2f}% {dominant_fft_freq:>9.4f} "
+                f"{dominant_fft_amp:>9.5f}  {flag_str}"
+            )
+
+            # ------------------------------------------------------------------
+            # Multi-panel figure
+            # ------------------------------------------------------------------
+            if save_figs:
+                fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+                fig.suptitle(
+                    f"Pixel Map Assessment: {ext_name}\n"
+                    f"mean={mean_val:.4f}  median={median_val:.4f}  "
+                    f"std={std_val:.4f}  {frac_outside*100:.1f}% outside [0.9, 1.1]",
+                    fontsize=12
+                )
+
+                # Panel 1: 2D image
+                ax = axes[0, 0]
+                vmin = float(np.nanpercentile(data, 2))
+                vmax = float(np.nanpercentile(data, 98))
+                # Centre the diverging colourmap at 1.0
+                half_range = max(abs(vmin - 1.0), abs(vmax - 1.0), 0.01)
+                im = ax.imshow(data, origin='lower', aspect='auto',
+                               cmap='RdBu_r',
+                               vmin=1.0 - half_range, vmax=1.0 + half_range)
+                plt.colorbar(im, ax=ax, label='Pixel ratio')
+                ax.set_title('2D Pixel Map')
+                ax.set_xlabel('Spectral pixel')
+                ax.set_ylabel('Spatial pixel')
+
+                # Panel 2: Spatial profile
+                ax = axes[0, 1]
+                ax.plot(spatial_profile, np.arange(len(spatial_profile)),
+                        color='steelblue', lw=0.8)
+                ax.axvline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.set_title('Spatial Profile\n(median along spectral axis)')
+                ax.set_xlabel('Median pixel ratio')
+                ax.set_ylabel('Detector row')
+                ax.legend(fontsize=8)
+
+                # Panel 3: Spectral profile
+                ax = axes[0, 2]
+                ax.plot(np.arange(len(spectral_profile)), spectral_profile,
+                        color='darkorange', lw=0.8)
+                ax.axhline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.set_title('Spectral Profile\n(median along spatial axis)')
+                ax.set_xlabel('Spectral pixel')
+                ax.set_ylabel('Median pixel ratio')
+                ax.legend(fontsize=8)
+
+                # Panel 4: Power spectrum
+                ax = axes[1, 0]
+                ax.semilogy(freqs[1:], fft_power[1:], color='purple', lw=0.8)
+                ax.axvline(dominant_fft_freq, color='red', ls='--', lw=1.5,
+                           label=f'Peak f={dominant_fft_freq:.4f}')
+                ax.set_title('Power Spectrum of Spectral Profile\n(fringing indicator)')
+                ax.set_xlabel('Spatial frequency (cycles/pixel)')
+                ax.set_ylabel('Power')
+                ax.legend(fontsize=8)
+
+                # Panel 5: Histogram
+                ax = axes[1, 1]
+                clip_lo, clip_hi = 0.5, 1.5
+                hist_data = flat_finite[(flat_finite > clip_lo) & (flat_finite < clip_hi)]
+                ax.hist(hist_data, bins=200, color='#2ab0ff', edgecolor='none', alpha=0.8)
+                ax.axvline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.axvline(mean_val, color='green', ls=':', lw=1.5,
+                           label=f'Mean={mean_val:.4f}')
+                ax.set_title(f'Pixel Value Histogram\nstd={std_val:.4f}')
+                ax.set_xlabel('Pixel ratio (Actual / Model)')
+                ax.set_ylabel('Count')
+                ax.legend(fontsize=8)
+
+                # Panel 6: Text summary
+                ax = axes[1, 2]
+                ax.axis('off')
+                summary_text = (
+                    f"Extension: {ext_name}\n\n"
+                    f"Statistics:\n"
+                    f"  Mean:    {mean_val:.5f}\n"
+                    f"  Median:  {median_val:.5f}\n"
+                    f"  Std:     {std_val:.5f}\n"
+                    f"  % outside [0.9,1.1]: {frac_outside*100:.2f}%\n\n"
+                    f"Fringing (spectral FFT):\n"
+                    f"  Peak freq:  {dominant_fft_freq:.5f} cyc/px\n"
+                    f"  Peak amp:   {dominant_fft_amp:.5f}\n\n"
+                    f"Flags: {flag_str}"
+                )
+                ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
+                        fontsize=10, verticalalignment='top', fontfamily='monospace',
+                        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+
+                plt.tight_layout()
+                out_png = os.path.join(output_dir, f"assessment_{ext_name}.png")
+                plt.savefig(out_png, dpi=120, bbox_inches='tight')
+                plt.close(fig)
+                print(f"  Saved: {os.path.basename(out_png)}")
+
+    # ------------------------------------------------------------------
+    # Write summary report
+    # ------------------------------------------------------------------
+    report_lines.append("=" * 70)
+    flagged = [k for k, v in summary.items()
+               if v['std'] > 0.05 or v['dominant_fft_amp'] > 0.01 or abs(v['mean'] - 1.0) > 0.02]
+    report_lines.append(f"\nFlagged extensions ({len(flagged)}): {', '.join(flagged) or 'none'}")
+    report_lines.append(
+        "\nFlag definitions:\n"
+        "  HIGH_STD  : std > 0.05 (excessive pixel-to-pixel structure)\n"
+        "  FRINGING  : dominant FFT amplitude > 0.01 (spectral ripple)\n"
+        "  OFFSET    : |mean - 1.0| > 0.02 (calibration level offset)\n"
+    )
+
+    report_file = os.path.join(output_dir, 'pixel_map_assessment.txt')
+    with open(report_file, 'w') as f:
+        f.write('\n'.join(report_lines) + '\n')
+    print(f"\nAssessment report saved to: {report_file}")
+
+    return summary
+
+
 def plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
     """
     Plot individual fiber B-spline fits with original data for detailed inspection.

@@ -47,6 +47,7 @@ import numpy as np
 import shutil
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -330,7 +331,7 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
-                                  arc_calib_file=None, verbose=False, flat_method='standard'):
+                                  arc_calib_file=None, verbose=False):
     """Generate flat field pixel maps for science frame correction.
 
     Args:
@@ -341,53 +342,29 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
         output_dir (str): Output directory for flat field products
         arc_calib_file (str, optional): Path to arc calibration file
         verbose (bool): Enable verbose output
-        flat_method (str): Flat fielding method - 'standard' or 'pypeit' (default: 'standard')
 
     Returns:
         list: List of flat field pixel map FITS file paths
     """
-    # Use flat field output directory directly (no nested pixel_maps subdirectory)
     flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
 
-    print(f"Processing flat field calibration using method: {flat_method}")
+    print(f"Processing flat field calibration")
     print(f"  Red flat: {os.path.basename(red_flat)}")
     print(f"  Green flat: {os.path.basename(green_flat)}")
     print(f"  Blue flat: {os.path.basename(blue_flat)}")
     print(f"  Output directory: {flat_output_dir}")
 
-    # Run the appropriate flat field workflow based on method
     try:
-        if flat_method == 'pypeit':
-            # PypeIt-style: per-fiber bspline spectral fits + aggregated pixel sensitivity
-            from llamas_pyjamas.Flat.flatPypeit import process_pypeit_flat_field
+        results = process_flat_field_complete(
+            red_flat, green_flat, blue_flat,
+            arc_calib_file=arc_calib_file,
+            output_dir=flat_output_dir,
+            trace_dir=trace_dir,
+            verbose=verbose
+        )
 
-            print("Using PypeIt-style flat fielding approach")
-            print("  Per-fiber bspline spectral response (log-space)")
-            print("  Fiber-aggregated pixel sensitivity maps")
-            print("Processing 24 detector extensions (Red/Green/Blue for benches 1A-4B)")
-
-            results = process_pypeit_flat_field(
-                red_flat, green_flat, blue_flat,
-                arc_calib_file=arc_calib_file,
-                output_dir=flat_output_dir,
-                trace_dir=trace_dir,
-                verbose=verbose,
-            )
-        else:
-            # Use standard flat fielding method
-            from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
-
-            print("Using standard flat fielding approach")
-            results = process_flat_field_complete(
-                red_flat, green_flat, blue_flat,
-                arc_calib_file=arc_calib_file,
-                output_dir=flat_output_dir,
-                trace_dir=trace_dir,
-                verbose=verbose
-            )
-
-        pixel_map_files = [results['normalized_flat_field_file']]
+        pixel_map_files = [results['pixel_map_file']]
         print(f"✓ Flat field calibration complete: {os.path.basename(pixel_map_files[0])}")
         print(f"  MEF file with 24 extensions generated")
         return pixel_map_files
@@ -1323,8 +1300,7 @@ def main(config_path):
                 config.get('trace_output_dir'),
                 flat_field_dir,
                 arc_calib_file=config.get('arc_calib_file'),
-                verbose=config.get('verbose_flat_processing', False),
-                flat_method=config.get('flat_method', 'standard')
+                verbose=config.get('verbose_flat_processing', False)
             )
             
             if flat_pixel_maps:
@@ -1469,7 +1445,7 @@ def main(config_path):
 
         # print("Correcting wavelengths in the extracted file...")
         # correction_path = os.path.join(extraction_path, extracted_file)
-        pkl_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('.pkl') and 'corrected' not in f]
+        pkl_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('.pkl') and 'corrected_extractions' not in f]
         
         for index, file in enumerate(pkl_files):
             print(f"Processing extraction file {index+1}/{len(pkl_files)}: {file}")
@@ -1492,13 +1468,7 @@ def main(config_path):
             rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
-            # Construct RSS output filename with flat correction traceability
-            flat_suffix = '_flat_corrected' if were_flat_corrected else ''
-            rss_output_file = os.path.join(extraction_path, f'{base_name}{flat_suffix}_RSS.fits')
-            
-            if were_flat_corrected:
-                rss_logger.info(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
-                print(f"Science data was flat-field corrected - RSS files will include '_flat_corrected' suffix")
+            rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
             
             #RSS generation
             rss_gen = RSSgeneration(logger=rss_logger)
@@ -1506,9 +1476,9 @@ def main(config_path):
             rss_logger.info(f"RSS file generated: {new_rss_outputs}")
             print(f"RSS file generated: {new_rss_outputs}")
 
-        # Updating RA and Dec in RSS files
-        for rss_output_file in new_rss_outputs:
-            update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+            # Updating RA and Dec in RSS files
+            for rss_output_file in new_rss_outputs:
+                update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")

@@ -46,7 +46,7 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
     # Find the trace files
     basefile = os.path.basename(tracefits).split('.fits')[0]
     trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
-    extraction_file = os.path.basename(infits).split('mef.fits')[0] + 'extract.pkl'
+    extraction_file = os.path.splitext(os.path.basename(infits))[0] + '_extract.pkl'
 
     if len(trace_files) == 0:
         logger.error("No trace files found for the indicated file root!")
@@ -378,7 +378,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             read_mode = read_mode.strip().upper()
             logger.info(f"Detected READ-MDE: {read_mode}")
 
-        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+        extraction_file = os.path.splitext(os.path.basename(file))[0] + '_extract.pkl'
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]
