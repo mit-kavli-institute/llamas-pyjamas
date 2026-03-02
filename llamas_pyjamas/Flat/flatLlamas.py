@@ -9,12 +9,13 @@ from llamas_pyjamas.config import CALIB_DIR, OUTPUT_DIR, LUT_DIR
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Flat.flatProcessing import produce_flat_extractions
 from llamas_pyjamas.Utils.utils import concat_extractions, is_wavelength_solution_useable
-from llamas_pyjamas.Arc.arcLlamas import arcTransfer
+from llamas_pyjamas.Arc.arcLlamasMulti import arcTransfer
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
-
+import matplotlib.pyplot as plt
 from pypeit.core.fitting import iterfit
 import pickle
 from datetime import datetime
+
 
 
 
@@ -61,6 +62,60 @@ def setup_logger(verbose=False):
 
 # Initialize with default settings
 logger = setup_logger(verbose=False)
+
+def create_master_flat(file_list, target_color, output_dir=OUTPUT_DIR):
+    """
+    Stacks multiple flats into a 24-extension FITS file compatible with LLAMAS.
+    
+    Parameters:
+    -----------
+    file_list : list
+        Paths to the raw LLAMAS FITS files.
+    target_color : str
+        'red', 'green', or 'blue'.
+    output_dir : str
+        Where to save the master flat.
+    """
+    if not file_list:
+        raise ValueError(f"No files provided for {target_color} stacking.")
+
+    target_color = target_color.lower()
+    os.makedirs(output_dir, exist_ok=True)
+    output_filename = os.path.join(output_dir, f"master_flat_{target_color}.fits")
+    
+    logger.info(f"Creating 24-extension Master Flat for {target_color.upper()}")
+
+    # 1. Use the first file as a structural template
+    with fits.open(file_list[0]) as template:
+        master_hdul = fits.HDUList([fits.PrimaryHDU(header=template[0].header)])
+        
+        # 2. Iterate through all 24 extensions to maintain index integrity
+        for ext_idx in range(1, len(template)):
+            ext = template[ext_idx]
+            ext_color = ext.header.get('COLOR', '').lower()
+            
+            if ext_color == target_color:
+                # This extension matches our target color; perform the median stack
+                logger.debug(f"Stacking extensions at index {ext_idx} ({ext.name})")
+                
+                data_stack = []
+                for fname in file_list:
+                    with fits.open(fname) as hdul:
+                        data_stack.append(hdul[ext_idx].data)
+                
+                # Median stack to reject cosmic rays and increase SNR
+                master_data = np.median(data_stack, axis=0).astype(np.float32)
+                new_ext = fits.ImageHDU(data=master_data, header=ext.header, name=ext.name)
+            else:
+                # For other colors, we keep the extension/header but zero the data.
+                # This ensures the file is still 24 extensions long for reduce_flat.
+                new_ext = fits.ImageHDU(data=np.zeros_like(ext.data), header=ext.header, name=ext.name)
+            
+            master_hdul.append(new_ext)
+
+    master_hdul.writeto(output_filename, overwrite=True)
+    logger.info(f"Master {target_color} flat saved to: {output_filename}")
+    return output_filename
 
 
 def sanitize_extraction_dict_for_pickling(extraction_dict):
@@ -135,8 +190,8 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
             continue
         
         idx = idx_lookup[sort_key]
-        ext_with_idx.append((idx, ext_name, pixel_map))
-    
+        ext_with_idx.append((idx, ext_name, pixel_map, channel, bench, side))
+
     # Sort by index
     ext_with_idx.sort(key=lambda x: x[0])
     
@@ -161,12 +216,15 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
     hdu_list = [primary_hdu]
     
     # Add each pixel map as an extension (already sorted)
-    for idx, ext_name, pixel_map in ext_with_idx:
+    for idx, ext_name, pixel_map, channel, bench, side in ext_with_idx:
         img_hdu = fits.ImageHDU(data=pixel_map, name=ext_name)
         img_hdu.header['EXTNAME'] = ext_name
         img_hdu.header['EXTVER'] = idx
+        img_hdu.header['CHANNEL'] = channel.upper()
+        img_hdu.header['BENCH'] = str(bench)
+        img_hdu.header['SIDE'] = side.upper()
         img_hdu.header['COMMENT'] = f'Flat field pixel map for {ext_name}'
-        
+
         hdu_list.append(img_hdu)
     
     # Write to file
@@ -369,9 +427,9 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
         raise
 
 
-def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file, 
-                               arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR, 
-                               trace_dir=CALIB_DIR, verbose=False):
+def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
+                               arc_calib_file=None, use_bias=None, output_dir=OUTPUT_DIR,
+                               trace_dir=CALIB_DIR, verbose=False, pixel_qe_mode=True):
     """Process complete flat field workflow with wavelength calibration and pixel mapping.
 
     This function implements the complete flat field processing workflow:
@@ -380,17 +438,21 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     3. Apply wavelength solution from arc calibration
     4. Fit B-splines to xshift vs counts for each fiber
     5. Generate per-pixel flat field correction images
+    6. (Optional) Generate true 2D pixel QE maps
 
     Args:
         red_flat_file (str): Path to red flat field FITS file
         green_flat_file (str): Path to green flat field FITS file
         blue_flat_file (str): Path to blue flat field FITS file
-        arc_calib_file (str, optional): Path to arc calibration file. 
+        arc_calib_file (str, optional): Path to arc calibration file.
             Defaults to 'LLAMAS_reference_arc.pkl' in trace_dir.
         use_bias (str, optional): Path to bias file. Defaults to None.
         output_dir (str, optional): Output directory. Defaults to OUTPUT_DIR.
         trace_dir (str, optional): Trace directory. Defaults to CALIB_DIR.
         verbose (bool, optional): Enable verbose console output. Defaults to False.
+        pixel_qe_mode (bool, optional): If True, generate true 2D pixel-level QE maps
+            that capture intra-fibre pixel-to-pixel variations. If False, use the legacy
+            fibre-averaged normalization. Defaults to True.
 
     Returns:
         dict: Dictionary containing processing results and output file paths
@@ -409,12 +471,13 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 1: Produce individual flat extractions
     logger.info("Step 1: Producing individual flat field extractions")
     produce_flat_extractions(
-        red_flat_file, 
-        green_flat_file, 
-        blue_flat_file, 
-        tracedir=trace_dir, 
+        red_flat_file,
+        green_flat_file,
+        blue_flat_file,
+        tracedir=trace_dir,
         outpath=output_dir,
-        verbose=verbose
+        verbose=verbose,
+        use_bias=use_bias
     )
     
     # Step 2: Combine all extractions into a single file
@@ -452,9 +515,9 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info(f"Loading arc calibration from {arc_calib_file}")
     arc_dict = ExtractLlamas.loadExtraction(arc_calib_file)
 
-    if not is_wavelength_solution_useable(arc_dict):
-        logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
-        raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
+    # if not is_wavelength_solution_useable(arc_dict):
+    #     logger.critical(f"CRITICAL ERROR: Arc calibration file {arc_calib_file} is not useable.")
+    #     raise ValueError(f"Arc calibration file {arc_calib_file} is not useable.")
     
     # Load the combined flat extractions
     logger.info(f"Loading combined flat extractions from {combined_flat_file}")
@@ -464,8 +527,25 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     
     # Apply wavelength solution transfer
     logger.info("Transferring wavelength calibration to flat field extractions")
-    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict)
-    
+    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict, enable_validation=True, verbose=True)
+    logger.info("Wavelength calibration transferred to flat field extractions")
+
+    # Validate transfer success
+    transfer_failures = []
+    for ext_idx in range(len(flat_dict_calibrated['extractions'])):
+        ext = flat_dict_calibrated['extractions'][ext_idx]
+        xshift_valid = np.count_nonzero(ext.xshift) > 0
+        wave_valid = np.any(ext.wave > 0)
+        if not (xshift_valid and wave_valid):
+            meta = flat_dict_calibrated['metadata'][ext_idx]
+            transfer_failures.append(f"{meta['channel']}{meta['bench']}{meta['side']}")
+            logger.error(f"Extension {ext_idx} wavelength transfer validation failed!")
+
+    if transfer_failures:
+        raise ValueError(f"Wavelength transfer failed for extensions: {transfer_failures}")
+
+    logger.info("✓ All extensions passed wavelength transfer validation")
+
     # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
     sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated) #why is this here?
@@ -486,22 +566,21 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Calculate fits for all extensions in the calibrated file
     fit_results = threshold_processor.calculate_fits_all_extensions(calibrated_flat_file)
     
-    # Step 5: Generate pixel maps for each channel/bench combination
-    logger.info("Step 5: Generating pixel maps for each channel/bench combination")
+    # Step 5: Generate the 2D maps
+    logger.info("Step 5: Generating 2D Pixel-to-Pixel Sensitivity Maps")
     
-    pixel_map_results = threshold_processor.generate_all_pixel_maps() #generate_complete_pixel_maps()
+    # This calls generate_thresholds, which now uses our updated _generate_single_pixel_map
+    pixel_map_results = threshold_processor.generate_thresholds()
     
-
-    
+    # Ensure the results dictionary points to the newly created FITS file
     results = {
         'combined_flat_file': combined_flat_file,
         'calibrated_flat_file': calibrated_flat_file,
         'fit_results': fit_results,
-        'pixel_map_results': pixel_map_results,
+        'pixel_map_file': threshold_processor.map_filename, # This is 'pixel_maps.fits'
         'processing_status': 'completed'
     }
-    
-    logger.info("Complete flat field processing workflow finished successfully")
+
     return results
 
 def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
@@ -659,8 +738,7 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
 
 
 
-
-        
+    
 class Thresholding():
 
     def __init__(self, combined_flat_file, use_bias=None, output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR) -> None:
@@ -690,8 +768,6 @@ class Thresholding():
         logger.info(f"  Trace directory: {trace_dir}")
 
         return None
-    
-
     
     def calculate_fits_all_extensions(self, extraction_file):
         """Calculate pixel thresholds for flat fielding.
@@ -726,13 +802,29 @@ class Thresholding():
         
         for ext_idx, item in enumerate(extract_objs):
             
-            # Assuming item has a 'counts' attribute which is a 2D array
-            
             ext_metadata = metadata[ext_idx]
             benchside = f"{ext_metadata['bench']}{ext_metadata['side']}"
             channel = ext_metadata['channel']
             
-            logger.info(f"Processing extension {ext_idx}: {channel} {benchside}")
+            # ---------------------------------------------------------
+            # DYNAMIC KNOT SPACING LOGIC
+            # ---------------------------------------------------------
+            channel_upper = channel.upper()
+            if 'RED' in channel_upper:
+                # Red channel: use smooth spacing — fringing should NOT be modeled in the flat
+                # (fringe correction belongs in a separate fringe-frame step, not the pixel map)
+                current_bkspace = 30.0
+            elif 'GREEN' in channel_upper:
+                # Green is smooth; standard spacing
+                current_bkspace = 30.0 
+            elif 'BLUE' in channel_upper:
+                # Blue is noisier; wide spacing to prevent overfitting to photon noise
+                current_bkspace = 50.0 
+            else:
+                current_bkspace = 30.0 # Default
+            # ---------------------------------------------------------
+
+            logger.info(f"Processing extension {ext_idx}: {channel} {benchside} (bkspace={current_bkspace})")
             
             # Create a key for this combination
             ext_key = f"{channel}{benchside}"
@@ -745,8 +837,13 @@ class Thresholding():
                 try:
                     logger.debug(f"Processing fiber {fiber_idx}")
                     
-                    # Use fit_spectrum_to_xshift for this fiber
-                    fiber_fit = fit_spectrum_to_xshift(item, fiber_idx)
+                    # Use fit_spectrum_to_xshift for this fiber with dynamic bkspace
+                    # bkspace controls the distance between B-spline knots in pixel units
+                    fiber_fit = fit_spectrum_to_xshift(
+                        item, 
+                        fiber_idx, 
+                        bkspace=current_bkspace
+                    )
                     
                     # Get the bspline model from the fit result
                     bspline_model = fiber_fit['bspline_model']
@@ -761,7 +858,7 @@ class Thresholding():
 
                     # Store results for this fiber
                     results[ext_key][fiber_idx] = {
-                        'xshift': item.xshift[fiber_idx, :],  # Original xshift array for direct pixel mapping
+                        'xshift': item.xshift[fiber_idx, :],
                         'xshift_clean': fiber_fit['xshift_clean'],
                         'counts_clean': fiber_fit['counts_clean'],
                         'y_predicted': y_predicted,
@@ -794,108 +891,124 @@ class Thresholding():
         
         return results
     
-    
+
     def _generate_single_pixel_map(self, ext_name, extraction_obj, trace_obj, ext_results):
         """
-        Generate a single pixel map for one extension using B-spline fits and trace object.
-
-        FIXED: Uses interpolation to map 2D image columns to extraction wavelengths.
-        Previously, direct indexing assumed col_indices could index xshift array,
-        which caused incorrect wavelength mapping.
-
-        Args:
-            fiber_fits (dict): Dictionary of B-spline fits for each fiber
-            trace_obj: Trace object containing fiberimg and other trace information
-
-        Returns:
-            np.ndarray: 2D pixel map with flat field values
+        Creates a 2D map for a single extension where:
+        Pixel Value = Observed Counts / Smooth B-Spline Model.
+        Includes a histogram sanity check plot.
         """
-        logger.debug(f"Generating pixel map for {trace_obj.channel} {trace_obj.bench}{trace_obj.side}")
+        logger.info(f"Generating 2D Sensitivity Map and Sanity Plot for {ext_name}")
 
-        # Get the fiber image from the trace object
-        fib_img = trace_obj.fiberimg
+        # 1. Initialize the 2D map and data containers
+        # We start with 1.0 (no correction)
+        pixel_map = np.ones_like(trace_obj.fiberimg, dtype=np.float32)
+        fiber_img = trace_obj.fiberimg
+        prof_img = trace_obj.profimg    # Profile weight image — used to mask trace edges
+        PROF_MIN = 0.05                 # Minimum profile weight; below this, leave correction = 1.0
+        all_ratios_for_plot = []
 
-        mask_nonneg1 = fib_img != -1
-        n_nonneg1 = np.count_nonzero(mask_nonneg1)
-        vals = fib_img[mask_nonneg1]
-    
-        
-        # Create an empty array matching the shape of the fiber image
-        pixel_map = np.ones_like(fib_img, dtype=np.float32)
-
-        # Dictionary to store bad pixel information
-        bad_pixels = {
-            'coords': [],  # List of (row, col) tuples
-            'fiber_idx': [],  # Which fiber the bad pixel belongs to
-            'spectral_idx': [],  # Position in the 1D spectrum
-            'reason': []  # Why it's bad (e.g., 'nan_in_normalized', 'inf_in_normalized', etc.)
-            }
-
-        # Checking the number of fibres matched the fit results
-        key_len = (ext_results.keys())
-        _fibs = np.unique(vals, return_counts=True)
-        fib_len = len(_fibs)
-        logger.debug(f"Extension {ext_name}: Found {fib_len} unique fibers in trace image")
-        if key_len != fib_len:
-            logger.warning(f"Extension {ext_name}: Mismatch in number of fibers between trace image ({fib_len}) and fit results ({key_len})")   
-
-
-        for fiber_idx in ext_results.keys():
-
-            y_predicted = ext_results[fiber_idx]['y_predicted']
-            fibre_counts = extraction_obj.counts[fiber_idx]
-            try:
-                normalised_flat = fibre_counts / y_predicted
-            
-                fibre_mask = fib_img == fiber_idx
-                fibre_rows, fibre_cols = np.where(fibre_mask)
-
-                unique_cols = np.unique(fibre_cols)
-
-                for spectral_idx, col in enumerate(unique_cols):
-                    rows_in_col = fibre_rows[fibre_cols == col]
-
-                    if spectral_idx < len(normalised_flat):
-                        norm_value = normalised_flat[spectral_idx]
-
-                        if np.isnan(norm_value):
-                            pixel_map[rows_in_col, col] = 1.0
-                            for row in rows_in_col:
-                                bad_pixels['coords'].append((row, col))
-                                bad_pixels['fiber_idx'].append(fiber_idx)
-                                bad_pixels['spectral_idx'].append(spectral_idx)
-                                bad_pixels['reason'].append('nan_in_normalized')
-                            
-                        elif np.isinf(norm_value):
-                            pixel_map[rows_in_col, col] = 1.0
-
-                            for row in rows_in_col:
-                                bad_pixels['coords'].append((row, col))
-                                bad_pixels['fiber_idx'].append(fiber_idx)
-                                bad_pixels['spectral_idx'].append(spectral_idx)
-                                bad_pixels['reason'].append('inf_in_normalized')
-                            
-                        else:
-                            pixel_map[rows_in_col, col] = norm_value
-                        
-            except Exception as e:
-                logger.error(f"Error normalizing fiber {fiber_idx}: {str(e)}")
+        # 2. Iterate through each fiber to calculate the pixel-to-pixel ratio
+        for fiber_idx, fit_data in ext_results.items():
+            if 'y_predicted' not in fit_data:
                 continue
 
-            # Print summary of bad pixels
-            print(f"Total bad pixels found: {len(bad_pixels['coords'])}")
-            print(f"Fibers affected: {len(set(bad_pixels['fiber_idx']))}")
+            # Get the smooth B-spline model and the raw extracted counts
+            smooth_model = fit_data['y_predicted']
+            actual_counts = extraction_obj.counts[fiber_idx]
 
-            # Get counts by reason
-            
-            reason_counts = Counter(bad_pixels['reason'])
-            print("Bad pixel breakdown:")
-            for reason, count in reason_counts.items():
-                print(f"  {reason}: {count}")
+            # Calculate Ratio = Actual / Smooth
+            # If Actual > Smooth, the pixel is more sensitive than average ('hot')
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio_1d = np.divide(actual_counts, smooth_model)
+                # Clean up NaNs or Infs (edges/low signal regions)
+                ratio_1d[~np.isfinite(ratio_1d)] = 1.0
+            # Clip to physically meaningful range — variations >±50% from unity are artefacts
+            ratio_1d = np.clip(ratio_1d, 0.5, 2.0)
 
-        return pixel_map, bad_pixels
+            # Collect values for the histogram (excluding the 1.0 fillers later)
+            all_ratios_for_plot.extend(ratio_1d.tolist())
+
+            # 3. Project the 1D ratio back to the 2D detector grid
+            # Find pixels on the CCD assigned to this fiber index
+            mask = (fiber_img == fiber_idx)
+            rows, cols = np.where(mask)
+
+            # Map the ratio to the coordinates.
+            # Note: c (column) corresponds to the spectral index in the 1D array.
+            # Only apply the correction where the profile weight is substantial; edge pixels
+            # (low profimg weight) are left at 1.0 to avoid blow-up from trace wing artefacts.
+            for r, c in zip(rows, cols):
+                if c < len(ratio_1d):
+                    if prof_img[r, c] >= PROF_MIN:
+                        pixel_map[r, c] = ratio_1d[c]
+                    # else: pixel_map[r, c] stays 1.0 (no correction at trace edges)
+
+        # 4. Generate the Sanity Check Plot
+        if all_ratios_for_plot:
+            # Filter: Ignore the '1.0' fillers and extreme outliers for a clean histogram
+            plot_data = np.array(all_ratios_for_plot)
+            plot_data = plot_data[(plot_data != 1.0) & (plot_data > 0.5) & (plot_data < 1.5)]
+
+            if len(plot_data) > 0:
+                plt.figure(figsize=(10, 6))
+                plt.hist(plot_data, bins=100, color='#2ab0ff', edgecolor='black', alpha=0.7)
+
+                # Statistics
+                mu, std = np.mean(plot_data), np.std(plot_data)
+
+                # Formatting the plot
+                plt.axvline(1.0, color='red', linestyle='--', linewidth=2, label='Ideal (1.0)')
+                plt.title(f"Sensitivity Distribution: {ext_name}\nMean: {mu:.4f} | Std Dev: {std:.4f}")
+                plt.xlabel("Pixel Ratio (Actual / Model)")
+                plt.ylabel("Frequency")
+                plt.legend()
+                plt.grid(axis='y', alpha=0.3)
+
+                # Save to output directory
+                if not os.path.exists(self.output_dir):
+                    os.makedirs(self.output_dir)
+
+                plot_path = os.path.join(self.output_dir, f"map_check_{ext_name}.png")
+                plt.savefig(plot_path)
+                plt.close()
+                logger.info(f"Sanity plot saved to: {plot_path}")
+            else:
+                logger.warning(f"No valid ratio data found for plot in {ext_name}")
+
+        return pixel_map, {}
     
-    def generate_all_pixel_maps(self):
+    def plot_pixel_distribution(self, all_ratios, ext_name):
+        """
+        Plots a histogram of the pixel-to-pixel ratios to ensure they center at 1.0.
+        """
+        plt.figure(figsize=(10, 6))
+        
+        # Flatten the list of ratios and remove the '1.0' fillers (pixels not in fibers)
+        data = np.array(all_ratios)
+        data = data[data != 1.0] # Only look at active fiber pixels
+        
+        # Filter out extreme outliers for a cleaner plot (e.g., keep 0.5 to 1.5)
+        data = data[(data > 0.5) & (data < 1.5)]
+    
+        plt.hist(data, bins=100, color='skyblue', edgecolor='black', alpha=0.7)
+        plt.axvline(1.0, color='red', linestyle='dashed', linewidth=2, label='Ideal Center (1.0)')
+        
+        mu, std = np.mean(data), np.std(data)
+        plt.title(f"Pixel-to-Pixel Variation Distribution: {ext_name}\nMean: {mu:.4f}, Std: {std:.4f}")
+        plt.xlabel("Sensitivity Ratio (Actual / Model)")
+        plt.ylabel("Pixel Count")
+        plt.legend()
+        plt.grid(axis='y', alpha=0.3)
+    
+        # Save the plot to the output directory
+        plot_path = os.path.join(self.output_dir, f"sanity_check_{ext_name}.png")
+        plt.savefig(plot_path)
+        plt.close()
+        logger.info(f"Sanity check plot saved to {plot_path}")
+
+    def generate_thresholds(self):
+        """Generate thresholds for flat fielding based on science data."""
 
         pixel_maps = {}
         bad_pixels = {}

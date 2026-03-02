@@ -6,7 +6,7 @@ import ray
 import pkg_resources
 from pathlib import Path
 import logging
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.Image.WhiteLightModule import WhiteLightFits
 
@@ -19,6 +19,7 @@ from astropy.io import fits
 import numpy as np
 
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
+from llamas_pyjamas.DataModel.validate import validate_for_gui
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 
 from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
@@ -26,7 +27,75 @@ from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 # Set up logger
 logger = logging.getLogger('flatProcessing')
 
-def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR) -> None:
+
+def load_bias_subtracted_flat_2d(flat_fits_file, channel, bench, side, bias_file=None):
+    """Load and bias-subtract the raw 2D flat image for one detector extension.
+
+    Parameters
+    ----------
+    flat_fits_file : str
+        Path to the raw flat field FITS file for the appropriate color channel.
+    channel : str
+        Color channel ('red', 'green', 'blue').
+    bench : str
+        Bench identifier ('1', '2', '3', '4').
+    side : str
+        Side identifier ('A', 'B').
+    bias_file : str, optional
+        Path to bias file. If None, uses default slow_master_bias.fits.
+
+    Returns
+    -------
+    np.ndarray
+        Bias-subtracted 2D flat image for the specified extension.
+    """
+    from llamas_pyjamas.config import BIAS_DIR
+
+    hdus = process_fits_by_color(flat_fits_file)
+
+    # Find the HDU matching the requested bench/side
+    target_hdu = None
+    for hdu in hdus:
+        if not hasattr(hdu, 'data') or hdu.data is None:
+            continue
+        hdr = hdu.header
+        if 'COLOR' in hdr:
+            hdu_color = hdr['COLOR'].strip().lower()
+            hdu_bench = str(hdr.get('BENCH', '')).strip()
+            hdu_side = str(hdr.get('SIDE', '')).strip().upper()
+        elif 'CAM_NAME' in hdr:
+            camname = hdr['CAM_NAME']
+            hdu_color = camname.split('_')[1].lower()
+            hdu_bench = camname.split('_')[0][0]
+            hdu_side = camname.split('_')[0][1].upper()
+        else:
+            continue
+
+        if (hdu_color == channel.lower() and
+                str(hdu_bench) == str(bench) and
+                hdu_side == side.upper()):
+            target_hdu = hdu
+            break
+
+    if target_hdu is None:
+        raise ValueError(
+            f"No HDU found matching channel={channel}, bench={bench}, side={side} "
+            f"in {flat_fits_file}"
+        )
+
+    # Load bias
+    if bias_file is None:
+        bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+    bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=channel, dir=bias_file)
+    bias_data = bias_hdu.data
+
+    # Bias-subtract
+    flat_2d = target_hdu.data.astype(np.float64) - bias_data.astype(np.float64)
+
+    return flat_2d
+
+def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR, use_bias=None) -> None:
     """Reduce the flat field image and save the extractions to a pickle file.
 
     :param filename: the flat field image to reduce, must be of type FITS
@@ -37,6 +106,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     :type tracedir: str, optional
     :param channel: the spectrograph channel from the fits image to process, defaults to None
     :type channel: str, optional
+    :param save_dir: directory to save the extraction files, defaults to OUTPUT_DIR
+    :type save_dir: str, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
     """
     
     assert type(idxs) == list, 'idxs must be a list of integers'
@@ -81,6 +154,49 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     logger.debug(f'Length of _hdus: {len(_hdus)}')
     channel_hdus = [_hdus[idx] for idx in idxs]
     print(len(channel_hdus))
+
+    # Determine bias file based on READ-MDE header keyword (matching GUI_extract behavior)
+    primary_hdr = _hdus[0].header
+    read_mode = primary_hdr.get('READ-MDE', None)
+    if read_mode is not None:
+        read_mode = read_mode.strip().upper()
+        logger.info(f"Detected READ-MDE: {read_mode}")
+
+    if use_bias is not None:
+        # User-specified bias file takes priority
+        if os.path.isfile(use_bias):
+            masterbiasfile = use_bias
+        else:
+            raise ValueError(f"Bias file {use_bias} does not exist.")
+    else:
+        # Auto-select bias based on READ-MDE
+        default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+
+        if read_mode == 'FAST':
+            candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+            if os.path.isfile(candidate_bias):
+                masterbiasfile = candidate_bias
+                logger.info(f"Using FAST mode bias: {masterbiasfile}")
+            else:
+                logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
+                masterbiasfile = default_bias
+        elif read_mode == 'SLOW':
+            candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            if os.path.isfile(candidate_bias):
+                masterbiasfile = candidate_bias
+                logger.info(f"Using SLOW mode bias: {masterbiasfile}")
+            else:
+                raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+        else:
+            masterbiasfile = default_bias
+            if read_mode is None:
+                logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
+            else:
+                logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+
+    # Validate bias file structure (add placeholders for missing cameras)
+    masterbiasfile = validate_for_gui(masterbiasfile)
+
     masterfile = 'LLAMAS'  # Changed from 'LLAMAS_master' to match both LLAMAS and LLAMAS_master files
     extraction_file = os.path.splitext(filename)[0] + '_extractions_flat.pkl'
 
@@ -155,38 +271,24 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     if len(_hdu_trace_pairs) == 0:
         print("WARNING: No HDU-trace pairs were matched! This will result in empty extractions.")
 
-    # Process in batches to avoid memory exhaustion
-    # Batch size can be configured via environment variable
-    BATCH_SIZE = int(os.environ.get('LLAMAS_RAY_BATCH_SIZE', 2))  # Process 2 HDUs at a time by default
-
+    futures = []
+    for hdu_index, trace_file in _hdu_trace_pairs:
+        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
+        print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
+        hdu_data = channel_hdus[hdu_index].data
+        hdr = channel_hdus[hdu_index].header
+       
+        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+        futures.append(future)
+    
+    _extractions = ray.get(futures)
+    ray.shutdown()
+    # Post-process to make objects writable
     extraction_list = []
-
-    # Process HDU-trace pairs in batches
-    for batch_start in range(0, len(_hdu_trace_pairs), BATCH_SIZE):
-        batch = _hdu_trace_pairs[batch_start:batch_start + BATCH_SIZE]
-        batch_futures = []
-
-        print(f"\nProcessing batch {batch_start//BATCH_SIZE + 1}/{(len(_hdu_trace_pairs)-1)//BATCH_SIZE + 1}")
-
-        for hdu_index, trace_file in batch:
-            logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
-            print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
-            hdu_data = channel_hdus[hdu_index].data
-            hdr = channel_hdus[hdu_index].header
-
-            future = process_trace.remote(hdu_data, hdr, trace_file)
-            batch_futures.append(future)
-
-        # Wait for batch to complete
-        batch_extractions = ray.get(batch_futures)
-
-        # Immediately process results to free Ray object store
-        for ex in batch_extractions:
-            if ex is not None:
-                writable_ex = make_writable(ex)
-                extraction_list.append(writable_ex)
-
-    ray.shutdown()    
+    for result in _extractions:
+        if result is not None and result.get('extraction') is not None:
+            writable_ex = make_writable(result['extraction'])
+            extraction_list.append(writable_ex)    
     print(len(extraction_list))
     extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')
@@ -194,7 +296,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     return 
 
 
-def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, verbose=False) -> Tuple[List, List]:
+def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, verbose=False, use_bias=None) -> Tuple[List, List]:
     """Produce flat field extractions for each color channel.
 
     :param red_flat: file to use for red channel flat field extraction
@@ -209,6 +311,8 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     :type outpath: str, optional
     :param verbose: Enable verbose console output, defaults to False
     :type verbose: bool, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
     """
     
     # Set up logger verbosity
@@ -226,11 +330,11 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     logger.info(f'Using output directory: {output_directory}')
 
     # Reduce the red flat field image
-    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red', save_dir=output_directory)
+    reduce_flat(red_flat, RED_IDXS, tracedir=tracedir, channel='red', save_dir=output_directory, use_bias=use_bias)
     # Reduce the green flat field image
-    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green', save_dir=output_directory)
+    reduce_flat(green_flat, GREEN_IDXS, tracedir=tracedir, channel='green', save_dir=output_directory, use_bias=use_bias)
     # Reduce the blue flat field image
-    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue', save_dir=output_directory)
+    reduce_flat(blue_flat, BLUE_IDXS, tracedir=tracedir, channel='blue', save_dir=output_directory, use_bias=use_bias)
 
     logger.info('Flat field extractions complete.')
 
@@ -292,10 +396,24 @@ def produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=None, out
     return all_extractions, all_metadata
 
 
-def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None, custom=None) -> None:
+def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None, outpath=None, use_bias=None) -> None:
+    """Produce normalized white light flat field image.
 
+    :param red_flat: file to use for red channel flat field extraction
+    :type red_flat: str
+    :param green_flat: file to use for green channel flat field extraction
+    :type green_flat: str
+    :param blue_flat: file to use for blue channel flat field extraction
+    :type blue_flat: str
+    :param tracedir: Directory to use find the trace files, defaults to None
+    :type tracedir: str, optional
+    :param outpath: Directory to save the output files, defaults to None (uses OUTPUT_DIR)
+    :type outpath: str, optional
+    :param use_bias: path to bias file for calibration, defaults to None (uses default bias)
+    :type use_bias: str, optional
+    """
 
-    extraction_list, metadata = produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=tracedir, custom=custom)
+    extraction_list, metadata = produce_flat_extractions(red_flat, green_flat, blue_flat, tracedir=tracedir, outpath=outpath, use_bias=use_bias)
 
     outfile = 'flat_whitelight.fits'
     white_light_file = WhiteLightFits(extraction_list, metadata, outfile=outfile)
@@ -402,7 +520,12 @@ if __name__ == '__main__':
         type=str,
         help='Path to save output files'
     )
-    
+    parser.add_argument(
+        '--bias',
+        type=str,
+        help='Path to bias file for calibration'
+    )
+
     args = parser.parse_args()
     logger.debug(f'args.filenames {args.filenames}')
     # Multiple files provided: use produce_flat_extractions if exactly three files given.
@@ -410,7 +533,7 @@ if __name__ == '__main__':
         if len(args.filenames) != 3:
             parser.error("When providing multiple files, exactly three files are required for red, green, and blue channels.")
         #produce_flat_extractions(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
-        produce_normalised_whitelight(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath)
+        produce_normalised_whitelight(args.filenames[0], args.filenames[1], args.filenames[2], tracedir=args.outpath, use_bias=args.bias)
     else:
         # Single file provided. Must supply either --channel or --all.
         if not (args.channel or args.all):
@@ -422,13 +545,13 @@ if __name__ == '__main__':
                 idxs = GREEN_IDXS
             elif args.channel == 'blue':
                 idxs = BLUE_IDXS
-            reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel)
+            reduce_flat(args.filenames[0], idxs, tracedir=args.outpath, channel=args.channel, use_bias=args.bias)
         elif args.all:
             # Process all channels for the single file.
             if len(args.filenames) != 1:
                 parser.error("When using --all, only one file should be provided.")
             logger.info("Processing all channels for the single file...")
-            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red')
-            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green')
-            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue')
+            reduce_flat(args.filenames[0], RED_IDXS, tracedir=args.outpath, channel='red', use_bias=args.bias)
+            reduce_flat(args.filenames[0], GREEN_IDXS, tracedir=args.outpath, channel='green', use_bias=args.bias)
+            reduce_flat(args.filenames[0], BLUE_IDXS, tracedir=args.outpath, channel='blue', use_bias=args.bias)
 

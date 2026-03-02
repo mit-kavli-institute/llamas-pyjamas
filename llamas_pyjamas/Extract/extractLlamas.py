@@ -239,6 +239,7 @@ class ExtractLlamas:
                 
                 # Replace the counts array with the new one
                 self.counts = new_counts
+                self.fiberid = np.arange(total_fibers)
                 logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
 
                     
