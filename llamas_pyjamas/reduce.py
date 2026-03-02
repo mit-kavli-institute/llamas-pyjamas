@@ -314,9 +314,8 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 
 def correct_wavelengths(science_extraction_file, soln=None):
-    if soln is None:
-        # Load the reference arc dictionary if not provided
-        arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
+    arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
     
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
     extractions, metadata, primary_hdr = _science['extractions'], _science['metadata'], _science['primary_header']
@@ -1367,13 +1366,13 @@ def main(config_path):
                     if not os.path.exists(science_file):
                         raise FileNotFoundError(f"Science file {science_file} does not exist.")
                     
-                    # corrected_file, stats = apply_flat_field_correction(
-                    #     science_file, 
-                    #     flat_pixel_maps, 
-                    #     flat_output_dir,
-                    #     validate_matching=config.get('validate_flat_matching', True),
-                    #     require_all_matches=config.get('require_all_flat_matches', True)
-                    # )
+                    corrected_file, stats = apply_flat_field_correction(
+                        science_file,
+                        flat_pixel_maps,
+                        flat_output_dir,
+                        validate_matching=config.get('validate_flat_matching', True),
+                        require_all_matches=config.get('require_all_flat_matches', True)
+                    )
                     
                     if corrected_file:
                         flat_corrected_files.append(corrected_file)
@@ -1394,13 +1393,13 @@ def main(config_path):
                     raise FileNotFoundError(f"Science file {science_file} does not exist.")
                 
                 print(f"\nFlat-correcting science file: {os.path.basename(science_file)}")
-                # corrected_file, stats = apply_flat_field_correction(
-                #     science_file,
-                #     flat_pixel_maps,
-                #     flat_output_dir,
-                #     validate_matching=config.get('validate_flat_matching', True),
-                #     require_all_matches=config.get('require_all_flat_matches', False)
-                # )
+                corrected_file, stats = apply_flat_field_correction(
+                    science_file,
+                    flat_pixel_maps,
+                    flat_output_dir,
+                    validate_matching=config.get('validate_flat_matching', True),
+                    require_all_matches=config.get('require_all_flat_matches', False)
+                )
                 
                 if corrected_file:
                     science_files_to_process = corrected_file
