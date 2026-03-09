@@ -888,7 +888,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
         science_file = validate_for_gui(science_file)
 
         # Open the science FITS file and create the output HDU list
-        science_hdul = process_fits_by_color(science_file) #fits.open(science_file)
+        science_hdul, _ = process_fits_by_color(science_file) #fits.open(science_file)
 
         # Identify placeholder extensions (missing cameras)
         placeholder_indices = get_placeholder_extension_indices(science_file)
