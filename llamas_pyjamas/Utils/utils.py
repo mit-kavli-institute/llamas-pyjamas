@@ -1804,4 +1804,355 @@ def _bspline_diagnostic_usage_examples():
     "
     """
     pass
-    
+
+
+# =========================================================================
+# Pixel flat-field diagnostic functions
+# =========================================================================
+
+def plot_flat_correction_ratio(uncorrected_pkl, corrected_pkl, output_file=None,
+                               n_fibers=5):
+    """Compare uncorrected vs flat-corrected extractions fiber by fiber.
+
+    For each of the 24 extensions the ratio ``corrected / uncorrected`` is
+    plotted for *n_fibers* representative fibers.  A perfect correction
+    produces a smooth curve near 1.0; high-frequency residual structure
+    indicates under- or over-correction.
+
+    Parameters
+    ----------
+    uncorrected_pkl : str
+        Path to batch extraction pickle **before** flat correction.
+    corrected_pkl : str
+        Path to batch extraction pickle **after** flat correction.
+    output_file : str, optional
+        Path to save the figure.  If ``None``, displays interactively.
+    n_fibers : int
+        Number of representative fibers per extension (evenly spaced).
+
+    Returns
+    -------
+    dict
+        ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    uncorr_data = _load_extraction_pkl(uncorrected_pkl)
+    corr_data = _load_extraction_pkl(corrected_pkl)
+
+    uncorr_exts, uncorr_meta = uncorr_data['extractions'], uncorr_data['metadata']
+    corr_exts, corr_meta = corr_data['extractions'], corr_data['metadata']
+
+    n_ext = min(len(uncorr_exts), len(corr_exts))
+    color_map = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    ncols = 6
+    nrows = int(np.ceil(n_ext / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows),
+                             sharex=True, sharey=True)
+    axes = np.atleast_2d(axes).ravel()
+
+    stats = {}
+    for idx in range(n_ext):
+        ax = axes[idx]
+        u_ext = uncorr_exts[idx]
+        c_ext = corr_exts[idx]
+        meta = uncorr_meta[idx]
+        channel = meta['channel']
+        label = f"{channel[:3].upper()}{meta['bench']}{meta['side']}"
+
+        nfib = min(u_ext.counts.shape[0], c_ext.counts.shape[0])
+        fib_idxs = np.linspace(0, nfib - 1, n_fibers, dtype=int)
+
+        all_ratios = []
+        for fib in fib_idxs:
+            u_counts = u_ext.counts[fib, :]
+            c_counts = c_ext.counts[fib, :]
+            valid = u_counts > 0
+            ratio = np.ones_like(u_counts, dtype=float)
+            ratio[valid] = c_counts[valid] / u_counts[valid]
+            ax.plot(ratio, lw=0.5, alpha=0.7,
+                    color=color_map.get(channel, 'gray'))
+            all_ratios.append(ratio[valid])
+
+        ax.axhline(1.0, color='k', ls='--', lw=0.8, alpha=0.5)
+        ax.set_ylim(0.85, 1.15)
+        ax.set_title(label, fontsize=8)
+
+        combined = np.concatenate(all_ratios) if all_ratios else np.array([1.0])
+        stats[label] = {
+            'median_ratio': float(np.median(combined)),
+            'rms_residual': float(np.std(combined)),
+        }
+
+    for ax in axes[n_ext:]:
+        ax.set_visible(False)
+
+    fig.suptitle('Flat Correction Ratio (corrected / uncorrected)', fontsize=12)
+    fig.supxlabel('Spectral pixel')
+    fig.supylabel('Ratio')
+    plt.tight_layout()
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_channel_flat_summary(extraction_pkl, output_file=None, filter_size=12):
+    """Per-channel histogram of fiber RMS after dividing out a smooth model.
+
+    For every fiber in every extension the extracted counts are divided by
+    a median+Gaussian smooth model to isolate high-frequency residuals.
+    The RMS of those residuals is histogrammed per color channel (red |
+    green | blue).  If one channel has systematically higher RMS, the
+    signal threshold or filter size may need tuning.
+
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. the corrected flat
+        extraction or a corrected science extraction).
+    output_file : str, optional
+        Save path for the figure.
+    filter_size : int
+        Median filter size used to build the smooth model.
+
+    Returns
+    -------
+    dict
+        ``{'red': {'median_rms': float, 'fibers': int}, ...}``
+    """
+    from scipy.ndimage import median_filter as _mf, gaussian_filter as _gf
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = _load_extraction_pkl(extraction_pkl)
+    extractions, metadata = data['extractions'], data['metadata']
+
+    channel_rms = {'red': [], 'green': [], 'blue': []}
+    color_hex = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    for ext, meta in zip(extractions, metadata):
+        channel = meta['channel'].lower()
+        if channel not in channel_rms:
+            continue
+        for fib_idx in range(ext.counts.shape[0]):
+            counts = ext.counts[fib_idx, :].astype(np.float64)
+            smooth = _gf(_mf(counts, size=filter_size), sigma=2.0)
+            valid = smooth > 0
+            if np.sum(valid) < 10:
+                continue
+            ratio = np.ones_like(counts)
+            ratio[valid] = counts[valid] / smooth[valid]
+            rms = float(np.std(ratio[valid]))
+            channel_rms[channel].append(rms)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+    stats = {}
+    for ax, (ch, rms_list) in zip(axes, channel_rms.items()):
+        arr = np.array(rms_list) if rms_list else np.array([0.0])
+        ax.hist(arr * 100, bins=60, range=(0, 6), color=color_hex[ch],
+                alpha=0.75, edgecolor='none')
+        med = float(np.median(arr)) * 100
+        ax.axvline(med, color='k', ls='--', lw=1.5,
+                   label=f'median = {med:.2f}%')
+        ax.set_title(f'{ch.capitalize()} ({len(rms_list)} fibers)', fontsize=10)
+        ax.set_xlabel('Fiber RMS (%)')
+        ax.legend(fontsize=8)
+        stats[ch] = {'median_rms': med, 'fibers': len(rms_list)}
+
+    axes[0].set_ylabel('Fiber count')
+    fig.suptitle('Per-Channel Flat Residual RMS', fontsize=12)
+    plt.tight_layout()
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_fiber_consistency(extraction_pkl, output_file=None):
+    """Fiber-to-fiber scatter as a function of wavelength pixel.
+
+    For each extension the standard deviation across fibers at each
+    spectral pixel is computed.  After good flat correction the
+    fiber-to-fiber scatter should be dominated by photon noise, not
+    systematic structure.  Lines are colored by channel so that
+    red/green/blue can be compared directly.
+
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. corrected flat lamp
+        extraction).
+    output_file : str, optional
+        Save path for the figure.
+
+    Returns
+    -------
+    dict
+        ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = _load_extraction_pkl(extraction_pkl)
+    extractions, metadata = data['extractions'], data['metadata']
+    color_hex = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+    stats = {}
+
+    for ext, meta in zip(extractions, metadata):
+        channel = meta['channel'].lower()
+        label = f"{channel[:3].upper()}{meta['bench']}{meta['side']}"
+        counts = ext.counts.astype(np.float64)
+
+        # Normalize each fiber by its own median to remove throughput
+        fiber_medians = np.nanmedian(counts, axis=1, keepdims=True)
+        fiber_medians[fiber_medians == 0] = 1.0
+        normed = counts / fiber_medians
+
+        # Scatter across fibers at each spectral pixel
+        scatter = np.nanstd(normed, axis=0)
+
+        ax.plot(scatter * 100, lw=0.6, alpha=0.5,
+                color=color_hex.get(channel, 'gray'), label=label)
+
+        finite = scatter[np.isfinite(scatter)]
+        stats[label] = {
+            'mean_scatter': float(np.mean(finite)) * 100 if len(finite) else 0.0,
+            'max_scatter': float(np.max(finite)) * 100 if len(finite) else 0.0,
+        }
+
+    ax.set_xlabel('Spectral pixel')
+    ax.set_ylabel('Fiber-to-fiber scatter (%)')
+    ax.set_title('Fiber-to-Fiber Consistency After Flat Correction')
+    ax.set_ylim(0, 15)
+
+    # De-duplicate legend entries by color
+    handles, labels = ax.get_legend_handles_labels()
+    seen = {}
+    for h, l in zip(handles, labels):
+        ch = l[:3]
+        if ch not in seen:
+            seen[ch] = h
+    ax.legend(seen.values(), seen.keys(), fontsize=8, loc='upper right')
+
+    plt.tight_layout()
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_flat_residual_map(pixel_map_file, output_file=None):
+    """4x6 grid of 2D pixel map images for all 24 extensions.
+
+    Each panel shows the sensitivity map with a diverging colormap
+    centred at 1.0.  Residual structure along traces indicates the flat
+    is not fully removing pixel QE variations; structure perpendicular to
+    traces indicates trace-edge artifacts.
+
+    Parameters
+    ----------
+    pixel_map_file : str
+        Path to ``pixel_maps.fits`` (24-extension MEF).
+    output_file : str, optional
+        Save path for the figure.
+
+    Returns
+    -------
+    dict
+        ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    if not os.path.exists(pixel_map_file):
+        raise FileNotFoundError(f"Pixel map file not found: {pixel_map_file}")
+
+    with fits.open(pixel_map_file) as hdul:
+        image_exts = [(h.header.get('EXTNAME', f'EXT{i}'),
+                       h.data.astype(np.float64))
+                      for i, h in enumerate(hdul)
+                      if h.data is not None and h.data.ndim == 2]
+
+    n_ext = len(image_exts)
+    ncols = 6
+    nrows = max(1, int(np.ceil(n_ext / ncols)))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows))
+    axes = np.atleast_2d(axes).ravel()
+
+    stats = {}
+    for i, (ext_name, data) in enumerate(image_exts):
+        ax = axes[i]
+
+        im = ax.imshow(data, aspect='auto', origin='lower',
+                       vmin=0.90, vmax=1.10, cmap='coolwarm')
+        ax.set_title(ext_name, fontsize=8)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        active = data[(data != 1.0) & np.isfinite(data)]
+        med = float(np.median(active)) if len(active) else 1.0
+        std = float(np.std(active)) if len(active) else 0.0
+        frac = float(np.mean((active < 0.9) | (active > 1.1))) if len(active) else 0.0
+        stats[ext_name] = {'median': med, 'std': std, 'frac_outside': frac}
+
+    for ax in axes[n_ext:]:
+        ax.set_visible(False)
+
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
+    fig.colorbar(im, cax=cbar_ax, label='Sensitivity')
+    fig.suptitle('Pixel-to-Pixel Sensitivity Maps', fontsize=13, y=1.01)
+    plt.tight_layout(rect=[0, 0, 0.91, 1])
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    # Print summary table
+    print(f"\n{'Extension':<12} {'Median':>8} {'Std (%)':>8} {'%Outside':>9}")
+    print("-" * 40)
+    for name, s in stats.items():
+        flag = ' <-- CHECK' if s['std'] > 0.02 or s['frac_outside'] > 0.01 else ''
+        print(f"{name:<12} {s['median']:>8.4f} {s['std']*100:>7.3f}% "
+              f"{s['frac_outside']*100:>8.2f}%{flag}")
+
+    return stats
+
+
+def _load_extraction_pkl(pkl_path):
+    """Load a batch extraction pickle, returning the dict with
+    'extractions' and 'metadata' keys."""
+    if not os.path.exists(pkl_path):
+        raise FileNotFoundError(f"Extraction file not found: {pkl_path}")
+    with open(pkl_path, 'rb') as f:
+        data = cloudpickle.load(f)
+    return data

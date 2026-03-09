@@ -15,6 +15,11 @@ import matplotlib.pyplot as plt
 from pypeit.core.fitting import iterfit
 import pickle
 from datetime import datetime
+from scipy.ndimage import median_filter, gaussian_filter
+
+
+# Default per-channel signal thresholds for the simple pixel flat method
+CHANNEL_SIGNAL_THRESHOLDS = {'red': 5000, 'green': 8000, 'blue': 5000}
 
 
 
@@ -233,6 +238,96 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
     logger.info(f"Wrote {len(ext_with_idx)} pixel maps to {output_path}")
 
 
+def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
+                                  signal_threshold=None, clip_range=(0.90, 1.10)):
+    """Fiber-by-fiber 1D pixel sensitivity map for a single extension.
+
+    Smooths extracted counts in wavelength (xshift) space using a median +
+    Gaussian filter to capture the lamp envelope, then divides to isolate
+    pixel-to-pixel sensitivity variations.  The 1D correction is projected
+    back onto the 2D detector footprint via the trace fiberimg.
+
+    Parameters
+    ----------
+    extraction_obj : ExtractLlamas
+        Extraction object for this extension.  Must have ``.trace`` with
+        ``.fiberimg``, ``.nfibers``, ``.naxis1``, ``.naxis2``, and
+        ``.counts`` and ``.xshift`` arrays (populated by arc transfer).
+    channel : str, optional
+        Color channel ('red', 'green', 'blue').  Used to select default
+        ``signal_threshold`` when not explicitly provided.
+    filter_size : int
+        Median filter kernel size (pixels) for lamp-envelope smoothing.
+    signal_threshold : float, optional
+        Minimum smooth-model ADU to apply correction.  Pixels below this
+        are set to 1.0 (no correction).  If ``None``, uses
+        ``CHANNEL_SIGNAL_THRESHOLDS`` based on *channel*.
+    clip_range : tuple of float
+        (min, max) clipping range for the output sensitivity map.
+
+    Returns
+    -------
+    sensitivity_map : ndarray, shape (naxis2, naxis1)
+        2D pixel sensitivity map clipped to *clip_range*.
+    """
+    trace_obj = extraction_obj.trace
+    naxis1, naxis2 = trace_obj.naxis1, trace_obj.naxis2
+
+    # Resolve threshold
+    if signal_threshold is None:
+        ch = (channel or getattr(extraction_obj, 'channel', 'green')).lower()
+        signal_threshold = CHANNEL_SIGNAL_THRESHOLDS.get(ch, 8000)
+
+    # Check whether xshift is populated (arc transfer has been applied)
+    xshift_available = (extraction_obj.xshift is not None
+                        and np.count_nonzero(extraction_obj.xshift) > 0)
+
+    logger.info(f"Generating pixel flat: nfibers={trace_obj.nfibers}, "
+                f"threshold={signal_threshold}, filter_size={filter_size}, "
+                f"wavelength_space={xshift_available}")
+
+    sensitivity_map = np.ones((naxis2, naxis1), dtype=np.float32)
+
+    for fib_idx in range(trace_obj.nfibers):
+        raw_1d = extraction_obj.counts[fib_idx, :]
+
+        if xshift_available:
+            # --- Smooth in wavelength (xshift) space ---
+            xshift = extraction_obj.xshift[fib_idx, :]
+
+            # Build a regular grid in xshift space
+            xshift_regular = np.linspace(xshift.min(), xshift.max(), len(xshift))
+
+            # Interpolate counts onto the regular wavelength grid
+            counts_regular = np.interp(xshift_regular, xshift,
+                                       raw_1d.astype(np.float64))
+
+            # Smooth on the regular grid
+            smooth_regular = median_filter(counts_regular, size=filter_size)
+            smooth_regular = gaussian_filter(smooth_regular, sigma=2.0)
+
+            # Map smoothed model back to original xshift positions
+            smooth_1d = np.interp(xshift, xshift_regular, smooth_regular)
+        else:
+            # Fallback: smooth in pixel space (notebook behaviour)
+            smooth_1d = median_filter(raw_1d.astype(np.float64), size=filter_size)
+            smooth_1d = gaussian_filter(smooth_1d, sigma=2.0)
+
+        # 1D sensitivity ratio where signal is reliable
+        valid = smooth_1d > signal_threshold
+        ratio_1d = np.ones_like(raw_1d, dtype=np.float32)
+        ratio_1d[valid] = raw_1d[valid] / smooth_1d[valid]
+
+        # Project 1D correction onto the 2D fiber footprint
+        fiber_mask = (trace_obj.fiberimg == fib_idx)
+        sensitivity_map[fiber_mask] = ratio_1d[np.where(fiber_mask)[1]]
+
+    # Clip to remove outliers
+    sensitivity_map = np.clip(sensitivity_map, clip_range[0], clip_range[1])
+
+    return sensitivity_map
+
+
 def _parse_extension_name(ext_name):
     """
     Parse extension name into (channel, bench, side) components.
@@ -268,8 +363,36 @@ def _parse_extension_name(ext_name):
     return None
 
 
+def _find_matching_trace(trace_files, channel, bench, side):
+    """Find the trace file matching a given channel/bench/side combination.
 
-def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4, 
+    Parameters
+    ----------
+    trace_files : list of str
+        Paths to available trace pickle files.
+    channel : str
+        Color channel (e.g. 'red', 'green', 'blue').
+    bench : str
+        Bench number (e.g. '1', '2', '3', '4').
+    side : str
+        Side identifier (e.g. 'A', 'B').
+
+    Returns
+    -------
+    str or None
+        Path to matching trace file, or None if not found.
+    """
+    target = f"{channel}{bench}{side}".lower()
+    for trace_file in trace_files:
+        with open(trace_file, 'rb') as tf:
+            trace_obj = pickle.load(tf)
+            trace_key = f"{trace_obj.channel}{trace_obj.bench}{trace_obj.side}".lower()
+            if trace_key == target:
+                return trace_file
+    return None
+
+
+def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nord=4,
                           adaptive_breakpoints=True, min_breakpoints=50):
     """
     Improved spectrum fitting with adaptive breakpoints for complex spectral features.
@@ -582,6 +705,185 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     }
 
     return results
+
+
+def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
+                              arc_calib_file=None, use_bias=None,
+                              output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR,
+                              verbose=False, filter_size=12,
+                              signal_thresholds=None, clip_range=(0.90, 1.10)):
+    """Generate pixel-to-pixel sensitivity maps using the simple median+Gaussian method.
+
+    Workflow:
+    1. Extract flat spectra via ``produce_flat_extractions`` (shared with B-spline method)
+    2. Concatenate into combined 24-extension file (shared)
+    3. Apply wavelength solution via ``arcTransfer`` (mandatory — smoothing is
+       done in xshift/wavelength space)
+    4. For each extension, generate sensitivity map via ``generate_pixel_flat_extension``
+    5. Write 24-extension FITS via ``sort_and_write_pixel_maps``
+
+    Parameters
+    ----------
+    red_flat_file, green_flat_file, blue_flat_file : str
+        Paths to color-channel flat field FITS files.
+    arc_calib_file : str, optional
+        Path to arc calibration pickle.  Defaults to
+        ``LUT/LLAMAS_reference_arc.pkl``.
+    use_bias : str, optional
+        Path to bias file for bias subtraction during extraction.
+    output_dir : str
+        Output directory for extraction intermediates and final pixel maps.
+    trace_dir : str
+        Directory containing trace pickle files.
+    verbose : bool
+        Enable verbose logging.
+    filter_size : int
+        Median filter kernel size for lamp-envelope smoothing.
+    signal_thresholds : dict, optional
+        Per-channel thresholds ``{'red': N, 'green': N, 'blue': N}``.
+        Defaults to ``CHANNEL_SIGNAL_THRESHOLDS``.
+    clip_range : tuple of float
+        (min, max) clipping for the sensitivity map.
+
+    Returns
+    -------
+    dict
+        ``{'combined_flat_file', 'calibrated_flat_file', 'pixel_map_file',
+        'processing_status'}``
+    """
+    global logger
+    logger = setup_logger(verbose=verbose)
+    logger.info("Starting SIMPLE pixel flat processing workflow")
+
+    if signal_thresholds is None:
+        signal_thresholds = dict(CHANNEL_SIGNAL_THRESHOLDS)
+
+    # ── Step 1: Extract flat spectra (shared with B-spline method) ──
+    logger.info("Step 1: Producing flat field extractions")
+    produce_flat_extractions(
+        red_flat_file, green_flat_file, blue_flat_file,
+        tracedir=trace_dir, outpath=output_dir,
+        verbose=verbose, use_bias=use_bias,
+    )
+
+    # ── Step 2: Concatenate extractions (shared with B-spline method) ──
+    logger.info("Step 2: Concatenating extractions")
+    red_pkl = os.path.join(output_dir, 'red_extractions_flat.pkl')
+    green_pkl = os.path.join(output_dir, 'green_extractions_flat.pkl')
+    blue_pkl = os.path.join(output_dir, 'blue_extractions_flat.pkl')
+
+    for pkl in [red_pkl, green_pkl, blue_pkl]:
+        if not os.path.exists(pkl):
+            raise FileNotFoundError(f"Missing extraction file: {pkl}")
+
+    combined_flat_file = os.path.join(output_dir, 'combined_flat_extractions.pkl')
+    concat_extractions([red_pkl, green_pkl, blue_pkl], combined_flat_file)
+    logger.info(f"Combined extractions saved to {combined_flat_file}")
+
+    # ── Step 3: Apply wavelength solution (mandatory) ──
+    logger.info("Step 3: Applying wavelength solution from arc calibration")
+
+    if arc_calib_file is None:
+        arc_calib_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+    if not os.path.exists(arc_calib_file):
+        raise FileNotFoundError(f"Arc calibration file not found: {arc_calib_file}")
+
+    logger.info(f"Loading arc calibration from {arc_calib_file}")
+    arc_dict = ExtractLlamas.loadExtraction(arc_calib_file)
+
+    logger.info(f"Loading combined flat extractions from {combined_flat_file}")
+    flat_dict = ExtractLlamas.loadExtraction(combined_flat_file)
+
+    logger.info("Transferring wavelength calibration to flat field extractions")
+    flat_dict_calibrated = arcTransfer(flat_dict, arc_dict,
+                                       enable_validation=True, verbose=verbose)
+
+    # Validate transfer success
+    transfer_failures = []
+    for ext_idx in range(len(flat_dict_calibrated['extractions'])):
+        ext = flat_dict_calibrated['extractions'][ext_idx]
+        xshift_valid = np.count_nonzero(ext.xshift) > 0
+        wave_valid = np.any(ext.wave > 0)
+        if not (xshift_valid and wave_valid):
+            meta = flat_dict_calibrated['metadata'][ext_idx]
+            transfer_failures.append(
+                f"{meta['channel']}{meta['bench']}{meta['side']}")
+            logger.error(
+                f"Extension {ext_idx} wavelength transfer validation failed!")
+
+    if transfer_failures:
+        raise ValueError(
+            f"Wavelength transfer failed for extensions: {transfer_failures}")
+    logger.info("All extensions passed wavelength transfer validation")
+
+    # Save calibrated extractions
+    calibrated_flat_file = os.path.join(
+        output_dir, 'combined_flat_extractions_calibrated.pkl')
+    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(
+        flat_dict_calibrated)
+    with open(calibrated_flat_file, 'wb') as f:
+        pickle.dump(sanitized_flat_dict, f)
+    logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
+
+    # ── Step 4: Generate pixel maps using wavelength-calibrated extractions ──
+    logger.info("Step 4: Generating pixel sensitivity maps (simple method)")
+
+    # Use the in-memory calibrated extractions (traces still attached)
+    extractions = flat_dict_calibrated['extractions']
+    metadata = flat_dict_calibrated['metadata']
+
+    # Load trace files for cases where trace is missing
+    trace_files = glob.glob(os.path.join(trace_dir, 'LLAMAS*traces.pkl'))
+
+    pixel_maps = {}  # keyed by underscore-separated ext_name
+
+    for ext_idx, (ext_obj, meta) in enumerate(zip(extractions, metadata)):
+        channel = meta['channel']
+        bench = str(meta['bench'])
+        side = meta['side']
+        ext_name = f"{channel}_{bench}_{side}"
+
+        logger.info(f"Processing extension {ext_idx}: {ext_name}")
+
+        # Ensure trace is available
+        if not hasattr(ext_obj, 'trace') or ext_obj.trace is None:
+            matching_trace = _find_matching_trace(
+                trace_files, channel, bench, side)
+            if matching_trace is None:
+                logger.warning(f"No trace file for {ext_name}, skipping")
+                continue
+            with open(matching_trace, 'rb') as tf:
+                ext_obj.trace = pickle.load(tf)
+
+        threshold = signal_thresholds.get(channel, 8000)
+        pixel_map = generate_pixel_flat_extension(
+            ext_obj, channel=channel,
+            filter_size=filter_size,
+            signal_threshold=threshold,
+            clip_range=clip_range,
+        )
+        pixel_maps[ext_name] = pixel_map
+
+        logger.info(f"  {ext_name}: shape={pixel_map.shape} "
+                     f"median={np.nanmedian(pixel_map):.4f} "
+                     f"std={np.nanstd(pixel_map):.4f}")
+
+    # ── Step 5: Write FITS ──
+    logger.info("Step 5: Writing pixel maps FITS")
+    pixel_map_path = os.path.join(output_dir, 'pixel_maps.fits')
+    sort_and_write_pixel_maps(
+        pixel_maps, pixel_map_path,
+        header_info={'FLATMTHD': 'simple_median_gaussian'})
+
+    logger.info(f"Pixel flat processing complete: {pixel_map_path}")
+
+    return {
+        'combined_flat_file': combined_flat_file,
+        'calibrated_flat_file': calibrated_flat_file,
+        'pixel_map_file': pixel_map_path,
+        'processing_status': 'completed',
+    }
+
 
 def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
     """

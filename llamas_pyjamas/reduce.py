@@ -47,7 +47,7 @@ import numpy as np
 import shutil
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
-from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
+from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -330,7 +330,9 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
-                                  arc_calib_file=None, verbose=False):
+                                  arc_calib_file=None, verbose=False, method='simple',
+                                  filter_size=12, signal_thresholds=None,
+                                  clip_range=(0.90, 1.10)):
     """Generate flat field pixel maps for science frame correction.
 
     Args:
@@ -341,6 +343,11 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
         output_dir (str): Output directory for flat field products
         arc_calib_file (str, optional): Path to arc calibration file
         verbose (bool): Enable verbose output
+        method (str): 'simple' (default, median+Gaussian in wavelength space)
+            or 'bspline' (legacy arc+B-spline fitting).
+        filter_size (int): Median filter size (simple method only).
+        signal_thresholds (dict, optional): Per-channel thresholds (simple method only).
+        clip_range (tuple): Sensitivity clip range (simple method only).
 
     Returns:
         list: List of flat field pixel map FITS file paths
@@ -348,23 +355,39 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
     flat_output_dir = output_dir
     os.makedirs(flat_output_dir, exist_ok=True)
 
-    print(f"Processing flat field calibration")
+    print(f"Processing flat field calibration (method={method})")
     print(f"  Red flat: {os.path.basename(red_flat)}")
     print(f"  Green flat: {os.path.basename(green_flat)}")
     print(f"  Blue flat: {os.path.basename(blue_flat)}")
     print(f"  Output directory: {flat_output_dir}")
 
     try:
-        results = process_flat_field_complete(
-            red_flat, green_flat, blue_flat,
-            arc_calib_file=arc_calib_file,
-            output_dir=flat_output_dir,
-            trace_dir=trace_dir,
-            verbose=verbose
-        )
+        if method == 'simple':
+            results = process_pixel_flat_simple(
+                red_flat, green_flat, blue_flat,
+                arc_calib_file=arc_calib_file,
+                output_dir=flat_output_dir,
+                trace_dir=trace_dir,
+                verbose=verbose,
+                filter_size=filter_size,
+                signal_thresholds=signal_thresholds,
+                clip_range=clip_range,
+            )
+        elif method == 'bspline':
+            results = process_flat_field_complete(
+                red_flat, green_flat, blue_flat,
+                arc_calib_file=arc_calib_file,
+                output_dir=flat_output_dir,
+                trace_dir=trace_dir,
+                verbose=verbose,
+            )
+        else:
+            raise ValueError(
+                f"Unknown flat field method: {method!r}. "
+                f"Use 'simple' or 'bspline'.")
 
         pixel_map_files = [results['pixel_map_file']]
-        print(f"✓ Flat field calibration complete: {os.path.basename(pixel_map_files[0])}")
+        print(f"Flat field calibration complete: {os.path.basename(pixel_map_files[0])}")
         print(f"  MEF file with 24 extensions generated")
         return pixel_map_files
 
@@ -560,7 +583,39 @@ def validate_flat_field_matching(flat_map, science_file):
     }
 
 
-def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir, 
+def _align_shapes(science_data, flat_data):
+    """Align science and flat data shapes by trimming the larger array.
+
+    LLAMAS detectors occasionally produce frames with an extra row or column
+    (e.g. 2049x2048 vs 2048x2048).  This trims the larger array to match
+    the smaller, keeping data from the origin corner.
+
+    Parameters
+    ----------
+    science_data : ndarray
+        2D science frame.
+    flat_data : ndarray
+        2D flat field / pixel map.
+
+    Returns
+    -------
+    science_out, flat_out : ndarray
+        Arrays with matching shapes.
+    trimmed : bool
+        True if any trimming was performed.
+    """
+    if science_data.shape == flat_data.shape:
+        return science_data, flat_data, False
+
+    common_rows = min(science_data.shape[0], flat_data.shape[0])
+    common_cols = min(science_data.shape[1], flat_data.shape[1])
+
+    return (science_data[:common_rows, :common_cols],
+            flat_data[:common_rows, :common_cols],
+            True)
+
+
+def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
                                validate_matching=True, require_all_matches=False):
     """
     Apply flat field corrections to a science frame with robust cross-checking.
@@ -620,28 +675,35 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
                         flat_ext_idx = mapping['flat_ext_idx']
                         flat_data = flat_hdul[flat_ext_idx].data
 
-                        # Shape verification
-                        if flat_data.shape != sci_hdu.data.shape:
-                            print(f"  ERROR: Shape mismatch for extension {ext_idx} "
-                                  f"(sci: {sci_hdu.data.shape}, flat: {flat_data.shape})")
-                            raise ValueError(f"Shape mismatch: sci={sci_hdu.data.shape}, flat={flat_data.shape}")
+                        # Shape alignment (handles extra-row science frames)
+                        sci_aligned, flat_aligned, was_trimmed = _align_shapes(
+                            sci_hdu.data, flat_data)
+                        if was_trimmed:
+                            print(f"  NOTE: Shape mismatch for ext {ext_idx} "
+                                  f"(sci: {sci_hdu.data.shape}, flat: {flat_data.shape}). "
+                                  f"Trimmed to {sci_aligned.shape}.")
 
                         # Perform division with NaN protection
-                        # where flat_data == 1.0, no correction is applied (passes through)
-                        # where flat_data != 1.0, science is divided by flat
-                        corrected_data = np.divide(
-                            sci_hdu.data.astype(np.float32),
-                            flat_data.astype(np.float32),
-                            out=np.full_like(sci_hdu.data, np.nan, dtype=np.float32),
-                            where=(flat_data > 0)
+                        corrected_trimmed = np.divide(
+                            sci_aligned.astype(np.float32),
+                            flat_aligned.astype(np.float32),
+                            out=np.full_like(sci_aligned, np.nan, dtype=np.float32),
+                            where=(flat_aligned > 0)
                         )
 
                         # Handle bad pixels from division
-                        bad_pixels = ~np.isfinite(corrected_data)
+                        bad_pixels = ~np.isfinite(corrected_trimmed)
                         n_bad = np.sum(bad_pixels)
                         if n_bad > 0:
-                            # Set to original science values (no correction for bad pixels)
-                            corrected_data[bad_pixels] = sci_hdu.data[bad_pixels]
+                            corrected_trimmed[bad_pixels] = sci_aligned[bad_pixels]
+
+                        # Embed corrected data back into original science shape
+                        if was_trimmed and sci_hdu.data.shape != sci_aligned.shape:
+                            corrected_data = sci_hdu.data.astype(np.float32).copy()
+                            corrected_data[:sci_aligned.shape[0],
+                                           :sci_aligned.shape[1]] = corrected_trimmed
+                        else:
+                            corrected_data = corrected_trimmed
 
                         # Create new HDU with corrected data
                         new_hdu = fits.ImageHDU(
@@ -1160,7 +1222,7 @@ def main(config_path):
         trace_source = None
 
         # Check if we should use existing traces or generate new ones
-        if config.get('use_existing_traces', False) and os.path.exists(config.get('trace_output_dir')):
+        if config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
             # Check if trace files exist in the specified directory
             import glob
             existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
@@ -1292,15 +1354,30 @@ def main(config_path):
         
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
-        if config.get('apply_flat_field_correction', False):  # Default to True
+        flat_field_method = config.get('flat_field_method', 'simple')
+        if config.get('apply_flat_field_correction', True):
             print("\n" + "="*60)
-            print("FLAT FIELD PROCESSING")
+            print(f"FLAT FIELD PROCESSING (method={flat_field_method})")
             print("="*60)
-            
+
             # Create proper flat field directory structure: extractions/flat/
             flat_field_dir = config.get('flat_field_output_dir', os.path.join(extraction_path, 'flat'))
             os.makedirs(flat_field_dir, exist_ok=True)
-            
+
+            # Parse optional simple-method parameters from config
+            filter_size = int(config.get('flat_filter_size', 12))
+            clip_min = float(config.get('flat_clip_min', 0.90))
+            clip_max = float(config.get('flat_clip_max', 1.10))
+
+            # Parse per-channel thresholds if provided
+            signal_thresholds = None
+            if any(f'flat_signal_threshold_{c}' in config for c in ('red', 'green', 'blue')):
+                signal_thresholds = {
+                    'red':   float(config.get('flat_signal_threshold_red', 5000)),
+                    'green': float(config.get('flat_signal_threshold_green', 8000)),
+                    'blue':  float(config.get('flat_signal_threshold_blue', 5000)),
+                }
+
             flat_pixel_maps = process_flat_field_calibration(
                 config.get('red_flat_file'),
                 config.get('green_flat_file'),
@@ -1308,9 +1385,13 @@ def main(config_path):
                 config.get('trace_output_dir'),
                 flat_field_dir,
                 arc_calib_file=config.get('arc_calib_file'),
-                verbose=config.get('verbose_flat_processing', False)
+                verbose=config.get('verbose_flat_processing', False),
+                method=flat_field_method,
+                filter_size=filter_size,
+                signal_thresholds=signal_thresholds,
+                clip_range=(clip_min, clip_max),
             )
-            
+
             if flat_pixel_maps:
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
