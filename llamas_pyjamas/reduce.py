@@ -398,6 +398,42 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
         return []
 
 
+def _extract_channel_from_filename(path):
+    """Extract the colour channel name ('red', 'green', or 'blue') from a filename.
+
+    Parses the last occurrence of _red, _green, or _blue before the extension.
+
+    Args:
+        path (str): File path.
+
+    Returns:
+        str or None: Channel name lower-cased, or None if not found.
+    """
+    basename = os.path.basename(path).lower()
+    for ch in ('red', 'green', 'blue'):
+        if f'_{ch}' in basename or basename.endswith(f'{ch}.fits'):
+            return ch
+    return None
+
+
+def _find_matching_flat_rss(flat_rss_list, channel):
+    """Return the flat RSS path that matches a given colour channel.
+
+    Args:
+        flat_rss_list (list): List of flat RSS file paths from RSSgeneration.
+        channel (str or None): Channel to match ('red', 'green', 'blue').
+
+    Returns:
+        str or None: Path of the matching flat RSS file, or None.
+    """
+    if not flat_rss_list or channel is None:
+        return None
+    for path in flat_rss_list:
+        if f'_{channel}' in os.path.basename(path).lower():
+            return path
+    return None
+
+
 def build_flat_field_map(flat_pixel_maps, science_file):
     """
     Build mapping between science extensions and corresponding flat field pixel maps.
@@ -1396,9 +1432,25 @@ def main(config_path):
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
-        
 
-        
+            # Generate a flat-field RSS from the calibrated flat extraction pickle.
+            # This is used later for fibre-to-fibre flat correction of science RSS files.
+            calibrated_flat_pkl = os.path.join(flat_field_dir, 'combined_flat_extractions_calibrated.pkl')
+            config['flat_rss_outputs'] = []
+            if os.path.exists(calibrated_flat_pkl):
+                print("\nGenerating flat-field RSS from calibrated flat extractions...")
+                flat_rss_base = os.path.join(flat_field_dir, 'flat_RSS.fits')
+                timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
+                flat_rss_logger = setup_logger(__name__, f'flat_RSS_{timestamp_ff}.log')
+                flat_rss_gen = RSSgeneration(logger=flat_rss_logger)
+                flat_rss_outputs = flat_rss_gen.generate_rss(calibrated_flat_pkl, flat_rss_base)
+                config['flat_rss_outputs'] = flat_rss_outputs if flat_rss_outputs else []
+                print(f"Flat RSS file(s) generated: {config['flat_rss_outputs']}")
+            else:
+                print(f"WARNING: Calibrated flat pickle not found at {calibrated_flat_pkl}; "
+                      "skipping flat RSS generation.")
+
+
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
         
@@ -1568,6 +1620,34 @@ def main(config_path):
             # Updating RA and Dec in RSS files
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+
+            # --- Fibre-to-fibre flat correction ---
+            # Applied per science RSS file if flat RSS products were generated earlier.
+            # Disable by setting apply_fibre_flat = False in the config file.
+            if config.get('flat_rss_outputs') and config.get('apply_fibre_flat', True):
+                from llamas_pyjamas.Flat.fibre_flat import run_fibre_flat as _run_fibre_flat
+                print("\n" + "="*60)
+                print("FIBRE-TO-FIBRE FLAT CORRECTION")
+                print("="*60)
+                ff_smooth = int(config.get('ff_smooth_kernel', 15))
+                for science_rss in (new_rss_outputs or []):
+                    chan = _extract_channel_from_filename(science_rss)
+                    flat_rss = _find_matching_flat_rss(config['flat_rss_outputs'], chan)
+                    if flat_rss and os.path.exists(flat_rss):
+                        print(f"  Applying fibre-flat: {os.path.basename(science_rss)}"
+                              f"  (flat: {os.path.basename(flat_rss)})")
+                        try:
+                            _run_fibre_flat(
+                                science_rss_path=science_rss,
+                                flat_rss_path=flat_rss,
+                                output_dir=extraction_path,
+                                smooth_kernel=ff_smooth,
+                                reference_fibre=None,
+                            )
+                        except Exception as ff_err:
+                            print(f"  WARNING: Fibre-flat failed for {os.path.basename(science_rss)}: {ff_err}")
+                    else:
+                        print(f"  No matching flat RSS for channel '{chan}', skipping fibre-flat.")
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
