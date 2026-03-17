@@ -1,12 +1,14 @@
 """Fibre-to-fibre flat fielding for LLAMAS RSS spectra.
 
 This module computes and applies wavelength-dependent fibre-to-fibre throughput
-corrections to extracted RSS FITS files, following MUSE/WEAVE practice:
+corrections to extracted RSS FITS files.  The correction is computed as:
 
-    correction[i, lambda] = flat_ref(lambda) / flat_i(lambda)
+    correction[i, lambda] = synthetic_reference[lambda] / flat_i[lambda]
 
-where the reference is fibre #150 from bench 4A (the pipeline-wide reference,
-matching Arc/arcLlamas.py:108 and Arc/arcLlamasMulti.py:562).
+where the synthetic reference is the median of the N fibres closest to the
+centre of each detector bench-side (default N=50), selected using spatial
+positions from LUT/LLAMAS_FiberMap_rev04.dat.  This avoids edge-illumination
+effects and provides a stable, representative reference spectrum.
 
 Usage
 -----
@@ -33,7 +35,7 @@ import logging
 from datetime import datetime
 
 import numpy as np
-from scipy.ndimage import median_filter
+from scipy.signal import savgol_filter
 from astropy.io import fits
 import matplotlib
 matplotlib.use('Agg')
@@ -43,18 +45,70 @@ from llamas_pyjamas.Utils.utils import setup_logger
 
 
 # ---------------------------------------------------------------------------
-# Pipeline-wide reference fibre (matches Arc/arcLlamas.py:108-112 and
-# Arc/arcLlamasMulti.py:562-573).  Bench 4A, fibre index 150.
+# Pipeline-wide reference fibre constants — kept for get_reference_row() and
+# _resolve_reference_row() which are still used externally.
 # ---------------------------------------------------------------------------
 REFERENCE_FIBRE    = 150
 REFERENCE_BENCH    = '4'
 REFERENCE_SIDE     = 'A'
 REFERENCE_BENCHSIDE = '4A'   # Value stored in FIBERMAP BENCHSIDE column
 
+# ---------------------------------------------------------------------------
+# Default parameters for the synthetic-reference flat algorithm
+# ---------------------------------------------------------------------------
+FF_SAVGOL_WINDOW    = 51   # Savitzky-Golay smoothing window (pixels along wavelength)
+FF_SAVGOL_POLYORDER = 3    # Savitzky-Golay polynomial order
+FF_N_CENTRAL_FIBRES = 50   # Fibres per bench-side closest to detector centre
+
+# Path to the LLAMAS spatial fibre map (bench, fiber, xpos, ypos)
+_FIBERMAP_LUT_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'LUT', 'LLAMAS_FiberMap_rev04.dat'
+)
+
 
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
+
+def _load_fibermap_lut(lut_path=None):
+    """Load the LLAMAS spatial fibre map from LLAMAS_FiberMap_rev04.dat.
+
+    Returns a dict keyed by bench-side string (e.g. ``'1A'``) mapping to a
+    list of ``(fiber_id, xpos)`` tuples.
+
+    Parameters
+    ----------
+    lut_path : str, optional
+        Override path to the .dat file.  Defaults to ``_FIBERMAP_LUT_PATH``.
+
+    Returns
+    -------
+    dict
+        ``{benchside: [(fiber_id, xpos), ...]}``
+    """
+    path = lut_path or _FIBERMAP_LUT_PATH
+    lut = {}
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            # Skip blank lines, comments, and the header row
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('|') and 'bench' in line.lower():
+                continue
+            # Format: | bench | fiber | xindex | yindex | xpos | ypos |
+            parts = [p.strip() for p in line.strip('|').split('|')]
+            if len(parts) < 5:
+                continue
+            try:
+                bench_str = parts[0].strip()   # e.g. '1A'
+                fiber_id  = int(parts[1])
+                xpos      = float(parts[4])
+                lut.setdefault(bench_str, []).append((fiber_id, xpos))
+            except (ValueError, IndexError):
+                continue
+    return lut
+
 
 def get_reference_row(fibermap_table, bench='4', side='A', fibre_id=150):
     """Return the RSS row index of the pipeline reference fibre.
@@ -219,41 +273,53 @@ def load_rss(filepath, logger=None):
     }
 
 
-def compute_fibre_flat(flat_flux, reference_row_idx, mask=None,
-                       smooth_kernel=15, clip_sigma=3.0, min_throughput=0.1,
+def compute_fibre_flat(flat_flux, flat_err, flat_mask, fibermap,
+                       savgol_window=FF_SAVGOL_WINDOW,
+                       savgol_polyorder=FF_SAVGOL_POLYORDER,
+                       clip_sigma=3.0, min_throughput=0.1,
+                       n_central_fibres=FF_N_CENTRAL_FIBRES,
                        logger=None):
     """Compute wavelength-dependent fibre-to-fibre flat-field correction.
 
-    For each fibre *i*::
+    Builds a synthetic reference spectrum from the *n_central_fibres* fibres
+    closest to the detector centre on each bench-side (selected via
+    ``LUT/LLAMAS_FiberMap_rev04.dat``), then computes a per-fibre correction::
 
-        correction[i, lambda] = smoothed_ref[lambda] / smoothed_flat[i, lambda]
+        correction[i, lambda] = synthetic_reference[lambda] / flat_flux[i, lambda]
 
-    where *smoothed_ref* is the flat spectrum of the reference fibre (bench 4A,
-    fibre 150) after optional median filtering.
+    The raw ratio is smoothed along the wavelength axis with a Savitzky-Golay
+    filter to remove noise while preserving smooth throughput gradients.
 
     Parameters
     ----------
     flat_flux : 2D ndarray, shape (n_fibres, n_wave)
         Extracted flat-field spectra (FLUX extension of flat RSS).
-    reference_row_idx : int
-        RSS row index of the reference fibre (from :func:`get_reference_row`).
-    mask : 2D bool array, optional
-        True where input flat data is bad.
-    smooth_kernel : int or None
-        Median filter kernel width along wavelength axis (pixels).
-        Set to None to disable smoothing.
+    flat_err : 2D ndarray, shape (n_fibres, n_wave)
+        Corresponding error spectra (currently unused in computation but
+        accepted for API consistency and future use).
+    flat_mask : 2D int16 array, shape (n_fibres, n_wave)
+        Pixel mask (0 = good, non-zero = bad).
+    fibermap : astropy BinTableHDU data
+        FIBERMAP extension data with BENCHSIDE and FIBER_ID columns.
+    savgol_window : int
+        Savitzky-Golay smoothing window in pixels.  Must be odd.
+    savgol_polyorder : int
+        Savitzky-Golay polynomial order (< savgol_window).
     clip_sigma : float
-        Sigma-clipping threshold for outlier rejection across fibres.
+        MAD sigma-clipping threshold for column-wise outlier rejection.
     min_throughput : float
-        Fibres with median flux below this fraction of the reference median
-        are flagged as dead.
+        Fibres with median flux below this fraction of the global maximum
+        median are flagged as dead.
+    n_central_fibres : int
+        Number of fibres per bench-side closest to the detector xpos centre
+        used to build the synthetic reference.
     logger : logging.Logger, optional
 
     Returns
     -------
     correction : 2D ndarray, shape (n_fibres, n_wave)
-        Multiplicative correction.  ``correction[reference_row_idx, :] == 1.0``
-        by construction.  Dead-fibre rows are NaN.
+        Multiplicative correction.  No NaN or inf values — dead-fibre rows
+        are set to 1.0 (flagging is handled by :func:`apply_fibre_flat`).
     dead_fibre_mask : 1D bool array, shape (n_fibres,)
         True for fibres flagged as dead/unreliable.
     """
@@ -261,113 +327,220 @@ def compute_fibre_flat(flat_flux, reference_row_idx, mask=None,
         logger = logging.getLogger(__name__)
 
     n_fibres, n_wave = flat_flux.shape
-    logger.info(f"Computing fibre-flat correction: {n_fibres} fibres, reference row {reference_row_idx}")
+    logger.info(f"Computing fibre-flat correction (synthetic reference): "
+                f"{n_fibres} fibres × {n_wave} wavelength pixels")
 
-    # --- Step 1: Optional smoothing along wavelength axis ---
-    if smooth_kernel is not None and smooth_kernel > 1:
-        smoothed = median_filter(flat_flux, size=(1, smooth_kernel), mode='reflect')
-        logger.debug(f"Applied median filter, kernel={smooth_kernel} pixels")
-    else:
-        smoothed = flat_flux.copy()
+    # ---- Combine input mask with non-positive / NaN pixels ----
+    bad_flat = (flat_mask > 0) | (flat_flux <= 0) | np.isnan(flat_flux)
+    masked_flux = np.where(bad_flat, np.nan, flat_flux.astype(np.float64))
 
-    # --- Step 2: Dead fibre detection (before ratio) ---
-    ref_median = np.nanmedian(flat_flux[reference_row_idx, :])
-    fibre_medians = np.nanmedian(flat_flux, axis=1)
-    dead_fibre_mask = fibre_medians < min_throughput * ref_median
-    n_dead = np.sum(dead_fibre_mask)
+    # ---- Step A: Identify dead fibres ----
+    fibre_medians = np.nanmedian(masked_flux, axis=1)       # shape (n_fibres,)
+    max_median    = np.nanmax(fibre_medians)
+    dead_fibre_mask = fibre_medians < min_throughput * max_median
+    n_dead = int(np.sum(dead_fibre_mask))
     if n_dead > 0:
-        logger.warning(f"Flagged {n_dead} dead fibre(s) (throughput < {min_throughput:.0%} of reference)")
+        logger.warning(f"  Flagged {n_dead} dead fibre(s) "
+                       f"(median flux < {min_throughput:.0%} of max_median={max_median:.2f})")
 
-    # --- Step 3: Compute ratios ---
-    ref_spectrum = smoothed[reference_row_idx, :].copy()
+    # ---- Step A: Build synthetic reference from central fibres ----
+    # Load spatial fibermap LUT: {benchside: [(fiber_id, xpos), ...]}
+    try:
+        spatial_lut = _load_fibermap_lut()
+    except Exception as exc:
+        logger.warning(f"  Could not load spatial fibermap LUT: {exc}. "
+                       "Falling back to all healthy fibres as reference.")
+        spatial_lut = {}
+
+    benchside_col  = np.array(fibermap['BENCHSIDE'], dtype=str)
+    fiber_id_col   = np.array(fibermap['FIBER_ID'],  dtype=int)
+    unique_benchsides = np.unique(benchside_col)
+
+    central_rows = np.zeros(n_fibres, dtype=bool)
+
+    for bs in unique_benchsides:
+        bs_rss_rows = np.where(benchside_col == bs)[0]   # rows in the RSS for this bench-side
+        if bs in spatial_lut and len(spatial_lut[bs]) > 0:
+            fib_xpos = np.array(spatial_lut[bs])          # shape (M, 2): fiber_id, xpos
+            xpos_vals = fib_xpos[:, 1]
+            xpos_centre = np.median(xpos_vals)
+            dist        = np.abs(xpos_vals - xpos_centre)
+            sorted_idx  = np.argsort(dist)
+            n_sel       = min(n_central_fibres, len(sorted_idx))
+            central_fib_ids = set(int(fib_xpos[sorted_idx[k], 0]) for k in range(n_sel))
+            # Map selected fiber IDs back to RSS rows for this bench-side
+            for row in bs_rss_rows:
+                if int(fiber_id_col[row]) in central_fib_ids:
+                    central_rows[row] = True
+            logger.debug(f"  Bench-side {bs}: selected {n_sel} central fibres "
+                         f"(xpos_centre={xpos_centre:.1f})")
+        else:
+            # LUT missing for this bench-side — use all alive fibres on this bench-side
+            for row in bs_rss_rows:
+                central_rows[row] = True
+            logger.warning(f"  Bench-side {bs}: not found in spatial LUT — "
+                           "using all alive fibres as reference for this bench-side")
+
+    # Restrict central rows to alive fibres with adequate signal
+    central_alive = central_rows & ~dead_fibre_mask
+    n_central_alive = int(np.sum(central_alive))
+    logger.info(f"  Central healthy fibres contributing to synthetic reference: {n_central_alive}")
+
+    if n_central_alive == 0:
+        raise ValueError(
+            "No central healthy fibres available to build synthetic reference. "
+            "Check flat RSS data or lower min_throughput."
+        )
+    if n_central_alive < n_central_fibres // 2:
+        logger.warning(f"  Only {n_central_alive} central fibres available "
+                       f"(requested {n_central_fibres}) — reference may be noisy")
+
+    # Synthetic reference: median over central alive fibres per wavelength
+    synthetic_reference = np.nanmedian(masked_flux[central_alive, :], axis=0)  # (n_wave,)
+
+    # Interpolate any remaining bad pixels in the reference
+    ref_bad = (synthetic_reference <= 0) | np.isnan(synthetic_reference)
+    if np.any(ref_bad):
+        good_idx = np.where(~ref_bad)[0]
+        bad_idx  = np.where(ref_bad)[0]
+        if len(good_idx) > 0:
+            synthetic_reference[bad_idx] = np.interp(
+                bad_idx, good_idx, synthetic_reference[good_idx]
+            )
+            logger.debug(f"  Interpolated {len(bad_idx)} bad pixels in synthetic reference")
+        else:
+            raise ValueError("Synthetic reference is entirely bad/zero — cannot proceed.")
+
+    # ---- Step C: Raw ratio per fibre ----
     correction = np.ones((n_fibres, n_wave), dtype=np.float64)
 
-    bad_pixel_count = 0
     for i in range(n_fibres):
         if dead_fibre_mask[i]:
             correction[i, :] = np.nan
             continue
-        denom = smoothed[i, :]
-        bad = (denom <= 0) | np.isnan(denom)
-        if mask is not None:
-            bad |= mask[i, :]
-        good = ~bad
+        denom = masked_flux[i, :]
+        bad   = np.isnan(denom) | (denom <= 0)
+        good  = ~bad
         if np.sum(good) == 0:
             correction[i, :] = np.nan
             dead_fibre_mask[i] = True
-            logger.warning(f"Fibre {i}: no valid pixels, flagging as dead")
+            logger.warning(f"  Fibre {i}: no valid pixels after masking — flagging dead")
             continue
-        correction[i, good] = ref_spectrum[good] / denom[good]
-        correction[i, bad] = 1.0   # neutral correction for bad pixels
-        bad_pixel_count += np.sum(bad)
+        correction[i, good] = synthetic_reference[good] / denom[good]
+        correction[i, bad]  = np.nan   # will be clamped in Step E
 
-    if bad_pixel_count > 0:
-        logger.debug(f"Set {bad_pixel_count} bad-pixel correction values to 1.0")
+    # ---- Step D: Savitzky-Golay smoothing of ratio per fibre ----
+    # Ensure window is odd, within bounds, and larger than polyorder + 1
+    actual_window = min(savgol_window, n_wave)
+    if actual_window % 2 == 0:
+        actual_window -= 1
+    actual_window = max(actual_window, savgol_polyorder + 2)
+    if actual_window % 2 == 0:
+        actual_window += 1
 
-    # --- Step 4: Sigma-clip outliers along fibre axis per wavelength column ---
-    valid_corr = correction.copy()
-    valid_corr[dead_fibre_mask] = np.nan
-    col_median = np.nanmedian(valid_corr, axis=0)            # shape (n_wave,)
+    smoothed_correction = correction.copy()
+
+    for i in range(n_fibres):
+        if dead_fibre_mask[i]:
+            smoothed_correction[i, :] = np.nan
+            continue
+        row      = correction[i, :]
+        nan_mask = np.isnan(row)
+        if np.all(nan_mask):
+            smoothed_correction[i, :] = np.nan
+            dead_fibre_mask[i] = True
+            continue
+        # Fill NaN gaps before smoothing (same pattern as flux_calibration.py:147-153)
+        row_filled = row.copy()
+        if np.any(nan_mask):
+            valid_idx   = np.where(~nan_mask)[0]
+            invalid_idx = np.where(nan_mask)[0]
+            row_filled[invalid_idx] = np.interp(invalid_idx, valid_idx, row[valid_idx])
+        row_smooth = savgol_filter(row_filled, actual_window, savgol_polyorder)
+        row_smooth[nan_mask] = np.nan   # restore NaN at originally bad positions
+        smoothed_correction[i, :] = row_smooth
+
+    # ---- Step E: Clamp NaN/inf → 1.0 (neutral, un-flat-fielded) ----
+    final_correction = smoothed_correction.copy()
+    unflat = np.isnan(final_correction) | np.isinf(final_correction)
+    final_correction[unflat] = 1.0
+    # Dead fibre rows also set to 1.0; apply_fibre_flat handles NaN output via dead_fibre_mask
+    final_correction[dead_fibre_mask] = 1.0
+
+    # ---- Step F: Sigma-clip outliers per wavelength column (alive fibres only) ----
+    alive      = ~dead_fibre_mask
+    valid_corr = final_correction.copy()
+    valid_corr[~alive] = np.nan
+    col_median = np.nanmedian(valid_corr, axis=0)
     col_mad    = np.nanmedian(np.abs(valid_corr - col_median[np.newaxis, :]), axis=0)
-    col_mad    = np.where(col_mad == 0, 1e-6, col_mad)       # avoid divide-by-zero
+    col_mad    = np.where(col_mad == 0, 1e-6, col_mad)
     outlier    = np.abs(valid_corr - col_median[np.newaxis, :]) > clip_sigma * col_mad
-    # Only clip alive fibres
-    clip_mask  = outlier & ~dead_fibre_mask[:, np.newaxis]
+    clip_mask  = outlier & alive[:, np.newaxis]
     n_clipped  = int(np.sum(clip_mask))
     if n_clipped > 0:
-        logger.debug(f"Replaced {n_clipped} sigma-clipped correction pixels with column median")
-        # Replace clipped positions with the per-column median (broadcast safely)
-        correction = np.where(clip_mask, np.broadcast_to(col_median, correction.shape), correction)
-
-    # --- Step 5: Force reference row to exactly 1.0 ---
-    correction[reference_row_idx, :] = 1.0
-
-    # Summary statistics
-    valid_vals = correction[~dead_fibre_mask]
-    valid_vals = valid_vals[~np.isnan(valid_vals)]
-    if len(valid_vals) > 0:
-        logger.info(
-            f"Correction range: [{np.nanmin(valid_vals):.4f}, {np.nanmax(valid_vals):.4f}], "
-            f"median={np.nanmedian(valid_vals):.4f}"
+        logger.debug(f"  Replaced {n_clipped} sigma-clipped correction values with column median")
+        final_correction = np.where(
+            clip_mask, np.broadcast_to(col_median, final_correction.shape), final_correction
         )
 
-    return correction, dead_fibre_mask
+    # Summary statistics
+    alive_vals = final_correction[alive]
+    logger.info(
+        f"  Correction range (alive fibres): "
+        f"[{np.nanmin(alive_vals):.4f}, {np.nanmax(alive_vals):.4f}], "
+        f"median={np.nanmedian(alive_vals):.4f}"
+    )
+
+    return final_correction, dead_fibre_mask
 
 
-def apply_fibre_flat(science_flux, science_error, science_mask, correction,
+def apply_fibre_flat(sci_flux, sci_err, sci_mask, correction,
                      dead_fibre_mask=None):
     """Apply fibre-to-fibre flat-field correction to science spectra.
 
     Parameters
     ----------
-    science_flux : 2D ndarray (n_fibres, n_wave)
-    science_error : 2D ndarray (n_fibres, n_wave)  — sigma values (NOT IVAR)
-    science_mask : 2D int16 array (n_fibres, n_wave) — 0=good
+    sci_flux : 2D ndarray (n_fibres, n_wave)
+    sci_err : 2D ndarray (n_fibres, n_wave)  — sigma values (NOT IVAR)
+    sci_mask : 2D int16 array (n_fibres, n_wave) — 0 = good
     correction : 2D ndarray (n_fibres, n_wave)
         Multiplicative correction from :func:`compute_fibre_flat`.
+        Contains no NaN or inf (dead-fibre rows are 1.0 there).
     dead_fibre_mask : 1D bool array (n_fibres,), optional
+        True for dead fibres (rows that should be NaN'd out).
 
     Returns
     -------
-    corr_flux : 2D ndarray
-    corr_error : 2D ndarray
+    corr_flux : 2D float32 ndarray
+    corr_err : 2D float32 ndarray
     corr_mask : 2D int16 array
+
+    Mask bit conventions
+    --------------------
+    Bit 8 (value 8)  : dead fibre — entire row flagged
+    Bit 4 (value 4)  : alive-fibre pixels where correction was clamped to 1.0
+                       (i.e., the ratio was undefined — un-flat-fielded pixels)
     """
-    corr_flux  = science_flux  * correction
-    corr_error = science_error * np.abs(correction)    # σ_out = σ_in × |correction|
-    corr_mask  = science_mask.copy()
+    corr_flux = sci_flux  * correction
+    corr_err  = sci_err   * np.abs(correction)    # σ_out = σ_in × |correction|
+    corr_mask = sci_mask.copy()
 
-    # Flag pixels where correction is NaN
-    nan_corr = np.isnan(correction)
-    corr_mask[nan_corr] |= 4   # bit flag 4 = flat-field correction unavailable
-
-    # NaN-out dead fibres
+    # Bit 8: dead fibre rows
     if dead_fibre_mask is not None:
+        corr_mask[dead_fibre_mask, :] |= 8
         corr_flux[dead_fibre_mask, :]  = np.nan
-        corr_error[dead_fibre_mask, :] = np.nan
-        corr_mask[dead_fibre_mask, :]  |= 8   # bit flag 8 = dead fibre
+        corr_err[dead_fibre_mask, :]   = np.nan
 
-    return corr_flux.astype(np.float32), corr_error.astype(np.float32), corr_mask
+    # Bit 4: alive-fibre pixels with correction == 1.0 exactly
+    # These are positions clamped from NaN in compute_fibre_flat (un-flat-fielded).
+    # Floating-point division never produces exactly 1.0 for alive pixels, so
+    # this reliably identifies only the clamped values.
+    un_flat = correction == 1.0
+    if dead_fibre_mask is not None:
+        un_flat[dead_fibre_mask, :] = False   # already flagged with bit 8
+    corr_mask[un_flat] |= 4
+
+    return corr_flux.astype(np.float32), corr_err.astype(np.float32), corr_mask
 
 
 # ---------------------------------------------------------------------------
@@ -530,17 +703,98 @@ def plot_before_after_qa(science_flux, corrected_flux, wavelength, output_path, 
 
 
 # ---------------------------------------------------------------------------
+# FIBER_ID alignment helper
+# ---------------------------------------------------------------------------
+
+def _align_correction_to_science(correction, dead_mask,
+                                  flat_fibermap, sci_fibermap, logger):
+    """Reorder correction rows to match the science RSS FIBER_ID ordering.
+
+    Both RSS files cover the same channel and should contain the same set of
+    FIBER_ID values, but may be stored in different row orders (e.g., if the
+    flat and science were extracted from separate runs).
+
+    Parameters
+    ----------
+    correction : 2D ndarray (n_flat_fibres, n_wave)
+    dead_mask : 1D bool array (n_flat_fibres,)
+    flat_fibermap : astropy BinTableHDU data
+    sci_fibermap : astropy BinTableHDU data
+    logger : logging.Logger
+
+    Returns
+    -------
+    aligned_correction : 2D ndarray (n_sci_fibres, n_wave)
+    aligned_dead_mask : 1D bool array (n_sci_fibres,)
+    """
+    flat_fiber_ids = np.array(flat_fibermap['FIBER_ID'], dtype=int)
+    sci_fiber_ids  = np.array(sci_fibermap['FIBER_ID'],  dtype=int)
+
+    _log = logger if logger is not None else type('_NullLog', (), {
+        'debug': staticmethod(lambda *a, **k: None),
+        'info':  staticmethod(lambda *a, **k: None),
+        'warning': staticmethod(lambda *a, **k: None),
+    })()
+
+    # Fast path: identical ordering
+    if np.array_equal(flat_fiber_ids, sci_fiber_ids):
+        _log.debug("  FIBER_ID ordering is identical — no alignment needed")
+        return correction, dead_mask
+
+    n_sci  = len(sci_fiber_ids)
+    n_wave = correction.shape[1]
+
+    # Build lookup: flat_fiber_id → flat_row_index (warn on duplicates)
+    flat_id_to_row = {}
+    for idx, fid in enumerate(flat_fiber_ids):
+        if fid in flat_id_to_row:
+            _log.warning(f"  Duplicate FIBER_ID {fid} in flat fibermap — using last occurrence")
+        flat_id_to_row[int(fid)] = idx
+
+    aligned_correction = np.ones((n_sci, n_wave), dtype=np.float64)
+    aligned_dead_mask  = np.ones(n_sci, dtype=bool)   # default: dead (unmatched)
+
+    unmatched = []
+    for sci_row, fid in enumerate(sci_fiber_ids):
+        flat_row = flat_id_to_row.get(int(fid))
+        if flat_row is None:
+            unmatched.append(int(fid))
+            aligned_correction[sci_row, :] = 1.0
+            aligned_dead_mask[sci_row]     = True
+        else:
+            aligned_correction[sci_row, :] = correction[flat_row, :]
+            aligned_dead_mask[sci_row]     = dead_mask[flat_row]
+
+    if unmatched:
+        _log.warning(
+            f"  {len(unmatched)} science fibre(s) not found in flat FIBER_ID list — "
+            f"correction set to 1.0. Missing IDs: {unmatched[:10]}"
+            + (" ..." if len(unmatched) > 10 else "")
+        )
+    else:
+        _log.info(f"  FIBER_ID alignment complete: {n_sci} fibres matched")
+
+    return aligned_correction, aligned_dead_mask
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
 def run_fibre_flat(science_rss_path, flat_rss_path,
-                   output_dir=None, smooth_kernel=15,
+                   output_dir=None,
+                   savgol_window=FF_SAVGOL_WINDOW,
+                   savgol_polyorder=FF_SAVGOL_POLYORDER,
+                   smooth_kernel=None,       # deprecated alias for savgol_window
                    clip_sigma=3.0, min_throughput=0.1,
-                   reference_fibre=None, generate_qa=True):
+                   n_central_fibres=FF_N_CENTRAL_FIBRES,
+                   reference_fibre=None,     # deprecated, accepted but unused
+                   generate_qa=True):
     """Run the full fibre-to-fibre flat-field correction pipeline.
 
-    Loads a flat RSS file, computes the per-fibre correction, and applies it
-    to one or more science RSS files.  Writes both a straight copy
+    Loads a flat RSS file, computes the per-fibre correction using a synthetic
+    reference built from the central fibres of each detector bench-side, and
+    applies it to one or more science RSS files.  Writes both a straight copy
     (``*_RSS.fits``) and a corrected version (``*_RSSFF.fits``).
 
     Parameters
@@ -551,14 +805,22 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
         Path to the flat-field RSS FITS file (same channel as science).
     output_dir : str, optional
         Output directory.  Defaults to same directory as each science file.
+    savgol_window : int
+        Savitzky-Golay smoothing window in pixels.  Default ``FF_SAVGOL_WINDOW``.
+    savgol_polyorder : int
+        Savitzky-Golay polynomial order.  Default ``FF_SAVGOL_POLYORDER``.
     smooth_kernel : int or None
-        Median filter kernel width (pixels along wavelength).  Default 15.
+        Deprecated alias for ``savgol_window``.  Accepted for backward
+        compatibility with ``reduce.py``.
     clip_sigma : float
-        Sigma-clipping threshold for outlier rejection.  Default 3.0.
+        MAD sigma-clipping threshold for outlier rejection.  Default 3.0.
     min_throughput : float
-        Dead-fibre threshold (fraction of reference median).  Default 0.1.
-    reference_fibre : None, int, or (bench, side, fibre_id) tuple
-        Override for the reference fibre.  None → bench 4A, fibre 150.
+        Dead-fibre threshold (fraction of global maximum median).  Default 0.1.
+    n_central_fibres : int
+        Number of fibres per bench-side closest to detector centre used for
+        the synthetic reference.  Default ``FF_N_CENTRAL_FIBRES``.
+    reference_fibre : ignored
+        Deprecated parameter kept for backward compatibility.  Has no effect.
     generate_qa : bool
         Generate QA PNG plots.  Default True.
 
@@ -567,11 +829,17 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
     list of (str, str)
         List of ``(rss_path, rssff_path)`` tuples, one per science file.
     """
+    # Honour legacy smooth_kernel kwarg from reduce.py
+    if smooth_kernel is not None:
+        savgol_window = int(smooth_kernel)
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     logger = setup_logger(__name__, f'fibre_flat_{timestamp}.log')
     logger.info("=" * 60)
     logger.info("FIBRE-TO-FIBRE FLAT FIELDING")
     logger.info("=" * 60)
+    logger.info(f"Savitzky-Golay window={savgol_window}, polyorder={savgol_polyorder}, "
+                f"n_central_fibres={n_central_fibres}")
 
     # Normalise to list
     if isinstance(science_rss_path, str):
@@ -579,32 +847,26 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
 
     # --- Load flat RSS ---
     logger.info(f"Loading flat RSS: {flat_rss_path}")
-    flat_data = load_rss(flat_rss_path, logger=logger)
-    fibermap   = flat_data['fibermap']
+    flat_data    = load_rss(flat_rss_path, logger=logger)
+    flat_fibermap = flat_data['fibermap']
 
-    # --- Resolve reference row ---
-    ref_row = _resolve_reference_row(fibermap, reference_fibre)
-    fibermap_benchsides = np.array(fibermap['BENCHSIDE'], dtype=str)
-    fibermap_fiber_ids  = np.array(fibermap['FIBER_ID'],  dtype=int)
-    ref_benchside = fibermap_benchsides[ref_row]
-    ref_fiber_id  = fibermap_fiber_ids[ref_row]
-    logger.info(f"Reference fibre: row {ref_row} (bench-side {ref_benchside}, fibre {ref_fiber_id})")
-
-    # --- Representative wavelength array (row 0 of flat, fallback to index) ---
+    # --- Representative wavelength array (first valid row) ---
     wave_arr = flat_data['wave']
-    ref_wave = wave_arr[ref_row, :]
-    if np.all(np.isnan(ref_wave)):
-        valid_rows = ~np.all(np.isnan(wave_arr), axis=1)
-        ref_wave = wave_arr[valid_rows][0] if np.any(valid_rows) else np.arange(wave_arr.shape[1])
+    valid_rows = ~np.all(np.isnan(wave_arr), axis=1)
+    ref_wave = (wave_arr[np.where(valid_rows)[0][0], :]
+                if np.any(valid_rows) else np.arange(wave_arr.shape[1], dtype=np.float64))
 
-    # --- Compute correction ---
+    # --- Compute correction from flat data ---
     correction, dead_mask = compute_fibre_flat(
         flat_data['flux'],
-        reference_row_idx=ref_row,
-        mask=(flat_data['mask'] > 0),
-        smooth_kernel=smooth_kernel,
+        flat_data['error'],
+        flat_data['mask'],
+        flat_fibermap,
+        savgol_window=savgol_window,
+        savgol_polyorder=savgol_polyorder,
         clip_sigma=clip_sigma,
         min_throughput=min_throughput,
+        n_central_fibres=n_central_fibres,
         logger=logger,
     )
 
@@ -626,21 +888,28 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
         # Load science RSS
         sci_data = load_rss(sci_path, logger=logger)
 
-        # Validate shape consistency
-        if sci_data['flux'].shape != flat_data['flux'].shape:
+        # Validate wavelength axis consistency (fibre count may differ — alignment handles it)
+        if sci_data['flux'].shape[1] != flat_data['flux'].shape[1]:
             logger.error(
-                f"Shape mismatch: science {sci_data['flux'].shape} vs flat {flat_data['flux'].shape}. "
-                "Skipping this file."
+                f"Wavelength axis mismatch: science has {sci_data['flux'].shape[1]} pixels, "
+                f"flat has {flat_data['flux'].shape[1]} pixels. Skipping this file."
             )
             continue
+
+        # --- FIBER_ID alignment: reorder correction to match science fibre order ---
+        correction_aligned, dead_aligned = _align_correction_to_science(
+            correction, dead_mask,
+            flat_fibermap, sci_data['fibermap'],
+            logger
+        )
 
         # Apply correction
         corr_flux, corr_error, corr_mask = apply_fibre_flat(
             sci_data['flux'],
             sci_data['error'],
             sci_data['mask'],
-            correction,
-            dead_fibre_mask=dead_mask,
+            correction_aligned,
+            dead_fibre_mask=dead_aligned,
         )
 
         # --- Write _RSS.fits (straight copy of input) ---
@@ -650,10 +919,11 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
 
         # --- Write _RSSFF.fits (corrected) ---
         extra_kw = {
-            'FFREF':  (int(ref_fiber_id),                 'Reference fibre index within bench-side'),
-            'FFBENCH': (str(ref_benchside),               'Reference bench-side for flat-field'),
-            'FFFILE': (os.path.basename(flat_rss_path),   'Flat RSS file used'),
-            'FFMETH': ('fibre_ratio',                     'Fibre flat correction method'),
+            'FFMETH':  ('synthetic_ref',                   'Fibre flat method: synthetic central reference'),
+            'FFFILE':  (os.path.basename(flat_rss_path),   'Flat RSS file used'),
+            'FFSAVGW': (savgol_window,                     'Savitzky-Golay smoothing window (pixels)'),
+            'FFSAVGP': (savgol_polyorder,                  'Savitzky-Golay polynomial order'),
+            'FFNCENT': (n_central_fibres,                  'Central fibres per bench-side used for reference'),
         }
 
         with fits.open(sci_path) as hdul:
@@ -668,10 +938,11 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
                 f'Fibre-to-fibre flat applied from {os.path.basename(flat_rss_path)}'
             )
             hdul[0].header.add_history(
-                f'Reference: bench-side {ref_benchside}, fibre {ref_fiber_id}'
+                f'Method: synthetic reference from {n_central_fibres} central fibres per bench-side'
             )
-            if smooth_kernel:
-                hdul[0].header.add_history(f'Flat smoothing kernel: {smooth_kernel} px')
+            hdul[0].header.add_history(
+                f'SavGol smooth: window={savgol_window}px, polyorder={savgol_polyorder}'
+            )
         logger.info(f"Written flat-fielded RSS: {rssff_path}")
 
         # --- QA plots ---
@@ -685,7 +956,7 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
                     break
 
             qa_flat_path = os.path.join(qa_dir, f'{sci_base}_fibre_flat_correction_{channel.lower()}.png')
-            plot_fibre_flat_qa(correction, dead_mask, ref_wave, qa_flat_path, channel=channel)
+            plot_fibre_flat_qa(correction_aligned, dead_aligned, ref_wave, qa_flat_path, channel=channel)
             logger.info(f"QA plot: {qa_flat_path}")
 
             qa_ba_path = os.path.join(qa_dir, f'{sci_base}_fibre_flat_before_after_{channel.lower()}.png')
@@ -711,31 +982,45 @@ class FibreFlatField:
     ----------
     flat_rss_path : str
         Path to the flat-field RSS FITS file.
-    reference_fibre : None, int, or (bench, side, fibre_id) tuple
-        Override for the reference fibre.  None → bench 4A, fibre 150.
-    smooth_kernel : int or None
-        Median filter width (pixels).  Default 15.
+    savgol_window : int
+        Savitzky-Golay filter window length (pixels, must be odd).  Default 51.
+    savgol_polyorder : int
+        Savitzky-Golay polynomial order.  Default 3.
+    n_central_fibres : int
+        Number of fibres closest to each detector centre used to build the
+        synthetic reference spectrum.  Default 50.
     clip_sigma : float
         Sigma-clipping threshold.  Default 3.0.
     min_throughput : float
         Dead-fibre threshold.  Default 0.1.
     generate_qa : bool
         Write QA plots on :meth:`apply`.  Default True.
+    reference_fibre : ignored
+        Deprecated — accepted for backward compatibility but not used.
+    smooth_kernel : ignored
+        Deprecated alias for ``savgol_window`` — accepted for backward
+        compatibility but not used (the value is ignored when the OO
+        interface is used directly; use ``savgol_window`` instead).
     """
 
-    def __init__(self, flat_rss_path, reference_fibre=None, smooth_kernel=15,
-                 clip_sigma=3.0, min_throughput=0.1, generate_qa=True):
-        self.flat_rss_path   = flat_rss_path
-        self.reference_fibre = reference_fibre
-        self.smooth_kernel   = smooth_kernel
-        self.clip_sigma      = clip_sigma
-        self.min_throughput  = min_throughput
-        self.generate_qa     = generate_qa
+    def __init__(self, flat_rss_path,
+                 savgol_window=FF_SAVGOL_WINDOW,
+                 savgol_polyorder=FF_SAVGOL_POLYORDER,
+                 n_central_fibres=FF_N_CENTRAL_FIBRES,
+                 clip_sigma=3.0, min_throughput=0.1, generate_qa=True,
+                 # deprecated kwargs kept for backward compatibility
+                 reference_fibre=None, smooth_kernel=None):
+        self.flat_rss_path    = flat_rss_path
+        self.savgol_window    = int(smooth_kernel) if smooth_kernel is not None else savgol_window
+        self.savgol_polyorder = savgol_polyorder
+        self.n_central_fibres = n_central_fibres
+        self.clip_sigma       = clip_sigma
+        self.min_throughput   = min_throughput
+        self.generate_qa      = generate_qa
 
-        self.correction      = None
-        self.dead_mask       = None
-        self.reference_row   = None
-        self._flat_data      = None
+        self.correction  = None
+        self.dead_mask   = None
+        self._flat_data  = None
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.logger = setup_logger(__name__, f'FibreFlatField_{timestamp}.log')
@@ -743,18 +1028,17 @@ class FibreFlatField:
     def compute(self):
         """Load the flat RSS and compute the correction array.
 
-        Populates ``self.correction``, ``self.dead_mask``, and
-        ``self.reference_row``.
+        Populates ``self.correction`` and ``self.dead_mask``.
         """
         self._flat_data = load_rss(self.flat_rss_path, logger=self.logger)
-        self.reference_row = _resolve_reference_row(
-            self._flat_data['fibermap'], self.reference_fibre
-        )
         self.correction, self.dead_mask = compute_fibre_flat(
             self._flat_data['flux'],
-            reference_row_idx=self.reference_row,
-            mask=(self._flat_data['mask'] > 0),
-            smooth_kernel=self.smooth_kernel,
+            self._flat_data['error'],
+            self._flat_data['mask'],
+            self._flat_data['fibermap'],
+            savgol_window=self.savgol_window,
+            savgol_polyorder=self.savgol_polyorder,
+            n_central_fibres=self.n_central_fibres,
             clip_sigma=self.clip_sigma,
             min_throughput=self.min_throughput,
             logger=self.logger,
@@ -782,10 +1066,11 @@ class FibreFlatField:
             science_rss_path=science_rss_path,
             flat_rss_path=self.flat_rss_path,
             output_dir=output_dir,
-            smooth_kernel=self.smooth_kernel,
+            savgol_window=self.savgol_window,
+            savgol_polyorder=self.savgol_polyorder,
+            n_central_fibres=self.n_central_fibres,
             clip_sigma=self.clip_sigma,
             min_throughput=self.min_throughput,
-            reference_fibre=self.reference_fibre,
             generate_qa=self.generate_qa,
         )
         return results[0] if results else (None, None)

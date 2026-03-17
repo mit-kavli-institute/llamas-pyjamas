@@ -168,11 +168,13 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
 
     assert len(pkl_files) > 0, "No pickle files provided for concatenation."
 
-    combined_data = {'extractions': [], 'metadata': []}
-    
+    combined_data = {'extractions': [], 'metadata': [], 'primary_header': None}
+
     for pkl_file in pkl_files:
         with open(pkl_file, 'rb') as f:
             data = pickle.load(f)
+            if combined_data['primary_header'] is None:
+                combined_data['primary_header'] = data.get('primary_header', None)
             if 'extractions' in data:
                 combined_data['extractions'].extend(data['extractions'])
             if 'metadata' in data:

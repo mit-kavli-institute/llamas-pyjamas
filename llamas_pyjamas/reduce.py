@@ -79,7 +79,9 @@ def get_input_files_from_config(config, file_keys=None):
       """
       if file_keys is None:
           file_keys = ['science_files', 'bias_file', 'red_flat_file',
-                       'green_flat_file', 'blue_flat_file']
+                       'green_flat_file', 'blue_flat_file',
+                       'red_twilight_flat_file', 'green_twilight_flat_file',
+                       'blue_twilight_flat_file']
 
       input_files = []
 
@@ -318,7 +320,9 @@ def correct_wavelengths(science_extraction_file, soln=None):
     arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
     
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
-    extractions, metadata, primary_hdr = _science['extractions'], _science['metadata'], _science['primary_header']
+    extractions = _science['extractions']
+    metadata    = _science['metadata']
+    primary_hdr = _science.get('primary_header')
     print(f'extractions: {extractions}')
     print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
@@ -327,6 +331,87 @@ def correct_wavelengths(science_extraction_file, soln=None):
     print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
 
     return std_wvcal, primary_hdr
+
+
+def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
+                          bias_file, trace_dir, arc_dict_config,
+                          timestamp, label='flat'):
+    """Apply pixel flat → extract → wavelength-calibrate → generate RSS for a flat frame.
+
+    Used for both dome flats (fibre-flat RSS) and twilight flats.
+    The pixel-to-pixel flat map *must* be applied to the raw flat frame before
+    extraction so that extracted spectra represent pure fibre throughput
+    (detector per-pixel sensitivity removed).
+
+    Parameters
+    ----------
+    flat_files : list of str
+        Raw flat FITS files (dome or twilight).
+    flat_pixel_maps : list of str
+        Pixel flat maps generated from the dome flat.
+    output_dir : str
+        Directory for all intermediate and output files.
+    bias_file : str or None
+        Master bias FITS path (passed to run_extraction).
+    trace_dir : str or None
+        Directory containing fibre trace files.
+    arc_dict_config : object or None
+        Arc solution config forwarded to correct_wavelengths.
+    timestamp : str
+        Timestamp string used in log-file names.
+    label : str
+        Short label used in log filenames (e.g. 'dome', 'twilight').
+
+    Returns
+    -------
+    list of str
+        RSS output file paths (may be empty on failure).
+    """
+    rss_outputs = []
+    for flat_file in flat_files:
+        if flat_file is None:
+            continue
+
+        # Step 1: pixel-to-pixel flat correction (2D)
+        corr_file, _ = apply_flat_field_correction(
+            flat_file, flat_pixel_maps, output_dir,
+            validate_matching=True, require_all_matches=False
+        )
+        if not corr_file:
+            print(f"  WARNING: Pixel flat correction failed for {os.path.basename(flat_file)} — skipping")
+            continue
+
+        # Step 2: extract (bias subtraction is handled inside run_extraction)
+        # run_extraction returns only a basename (from GUI_extract); join with output_dir
+        pkl_basename = run_extraction(corr_file, output_dir, use_bias=bias_file,
+                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR)
+        if not pkl_basename:
+            print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
+            continue
+        pkl = os.path.join(output_dir, pkl_basename)
+
+        # Step 3: wavelength-calibrate and save corrected pickle
+        corr_extr, primary_hdr = correct_wavelengths(pkl, soln=arc_dict_config)
+        base = os.path.splitext(os.path.basename(pkl))[0]
+        corr_pkl = os.path.join(output_dir, f'{base}_corrected_extractions.pkl')
+        save_extractions(
+            corr_extr['extractions'], primary_header=primary_hdr,
+            savefile=corr_pkl, save_dir=output_dir,
+            prefix=f'LLAMASExtract_{label}_corrected',
+        )
+
+        # Step 4: generate RSS
+        rss_base = os.path.join(
+            output_dir,
+            os.path.basename(corr_pkl).replace('_corrected_extractions.pkl', '_RSS.fits')
+        )
+        rss_logger = setup_logger(__name__, f'{label}_RSS_{timestamp}.log')
+        rss_gen = RSSgeneration(logger=rss_logger)
+        out = rss_gen.generate_rss(corr_pkl, rss_base)
+        if out:
+            rss_outputs.extend(out)
+
+    return rss_outputs
 
 
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
@@ -1433,22 +1518,70 @@ def main(config_path):
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
 
-            # Generate a flat-field RSS from the calibrated flat extraction pickle.
-            # This is used later for fibre-to-fibre flat correction of science RSS files.
-            calibrated_flat_pkl = os.path.join(flat_field_dir, 'combined_flat_extractions_calibrated.pkl')
+            # --- Generate flat RSS for fibre-to-fibre correction ---
+            # The flat frames (dome or twilight) must have the pixel map applied
+            # before extraction so that extracted spectra represent pure fibre
+            # throughput (detector per-pixel sensitivity removed).
             config['flat_rss_outputs'] = []
-            if os.path.exists(calibrated_flat_pkl):
-                print("\nGenerating flat-field RSS from calibrated flat extractions...")
-                flat_rss_base = os.path.join(flat_field_dir, 'flat_RSS.fits')
-                timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
-                flat_rss_logger = setup_logger(__name__, f'flat_RSS_{timestamp_ff}.log')
-                flat_rss_gen = RSSgeneration(logger=flat_rss_logger)
-                flat_rss_outputs = flat_rss_gen.generate_rss(calibrated_flat_pkl, flat_rss_base)
-                config['flat_rss_outputs'] = flat_rss_outputs if flat_rss_outputs else []
-                print(f"Flat RSS file(s) generated: {config['flat_rss_outputs']}")
-            else:
-                print(f"WARNING: Calibrated flat pickle not found at {calibrated_flat_pkl}; "
-                      "skipping flat RSS generation.")
+            timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            # Prefer twilight flats when specified
+            twilight_files = [config.get('red_twilight_flat_file'),
+                              config.get('green_twilight_flat_file'),
+                              config.get('blue_twilight_flat_file')]
+
+            if any(f is not None for f in twilight_files) and flat_pixel_maps:
+                print("\nTwilight flat files specified — building fibre-flat RSS from twilight flats...")
+                twi_dir = os.path.join(flat_field_dir, 'twilight')
+                os.makedirs(twi_dir, exist_ok=True)
+                twi_rss = _process_flat_for_rss(
+                    [f for f in twilight_files if f is not None],
+                    flat_pixel_maps, twi_dir,
+                    bias_file=config.get('bias_file'),
+                    trace_dir=final_trace_dir,
+                    arc_dict_config=config.get('arcdict'),
+                    timestamp=timestamp_ff, label='twilight',
+                )
+                if twi_rss:
+                    config['flat_rss_outputs'] = twi_rss
+                    print(f"  Twilight flat RSS: {twi_rss}")
+                else:
+                    print("  WARNING: Twilight flat RSS generation failed.")
+
+            if not config['flat_rss_outputs']:
+                # Fallback: dome flats — also need pixel correction before extraction
+                dome_files = [config.get('red_flat_file'),
+                              config.get('green_flat_file'),
+                              config.get('blue_flat_file')]
+                if any(f is not None for f in dome_files) and flat_pixel_maps:
+                    if any(f is not None for f in twilight_files):
+                        msg = ("No twilight flat RSS — building fibre-flat RSS from "
+                               "pixel-corrected dome flats.")
+                    else:
+                        msg = ("No twilight flat files specified — using dome flat RSS "
+                               "for fibre-to-fibre correction.\n"
+                               "        Provide red/green/blue_twilight_flat_file in "
+                               "config for best results.")
+                    print(f"\n  NOTE: {msg}")
+                    dome_dir = os.path.join(flat_field_dir, 'dome_rss')
+                    os.makedirs(dome_dir, exist_ok=True)
+                    dome_rss = _process_flat_for_rss(
+                        [f for f in dome_files if f is not None],
+                        flat_pixel_maps, dome_dir,
+                        bias_file=config.get('bias_file'),
+                        trace_dir=final_trace_dir,
+                        arc_dict_config=config.get('arcdict'),
+                        timestamp=timestamp_ff, label='dome',
+                    )
+                    if dome_rss:
+                        config['flat_rss_outputs'] = dome_rss
+                        print(f"  Dome flat RSS: {dome_rss}")
+                    else:
+                        print("  WARNING: Dome flat RSS generation also failed — "
+                              "fibre-to-fibre correction will be skipped.")
+                else:
+                    print("  WARNING: No flat files available or pixel maps missing — "
+                          "skipping flat RSS generation.")
 
 
        # Apply flat field corrections to science files before extraction

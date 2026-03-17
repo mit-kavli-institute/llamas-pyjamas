@@ -57,7 +57,7 @@ class RSSgeneration:
         try:
             with open(extraction_file, 'rb') as f:
                 _data = pickle.load(f)
-            primary_hdr = _data['primary_header']    
+            primary_hdr = _data.get('primary_header')
             extraction_objects = _data['extractions']
             _metadata = _data['metadata']
             

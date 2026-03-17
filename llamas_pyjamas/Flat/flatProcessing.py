@@ -290,7 +290,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
             writable_ex = make_writable(result['extraction'])
             extraction_list.append(writable_ex)    
     print(len(extraction_list))
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
+    extracted_filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')
     
     return 
