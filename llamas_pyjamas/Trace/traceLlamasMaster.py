@@ -92,7 +92,7 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.pat
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    bias_hdus = process_fits_by_color(dir)
+    bias_hdus, _ = process_fits_by_color(dir)
 
     # First try to match by header keywords (robust to non-standard extension order)
     target_color = color.lower()
@@ -193,21 +193,19 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
 
 
 
-def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
-    def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
-        """
-        Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.
-        Args:
-            channel (str): The channel name (red, green or blue).
-            benchside (str): The benchside identifier (e.g., '1A').
-            fiber (str): The fiber identifier (e.g., 'fiber_number').
-        Returns:
-            int: The position of the specified fiber.
-        Raises:
-            FileNotFoundError: If the LUT file is not found.
-            KeyError: If the specified channel, benchside, or fiber is not found in the LUT.
-        """
-
+def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
+    """
+    Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.
+    Args:
+        channel (str): The channel name (red, green or blue).
+        benchside (str): The benchside identifier (e.g., '1A').
+        fiber (str): The fiber identifier (e.g., 'fiber_number').
+    Returns:
+        int: The position of the specified fiber.
+    Raises:
+        FileNotFoundError: If the LUT file is not found.
+        KeyError: If the specified channel, benchside, or fiber is not found in the LUT.
+    """
     json_file = os.path.join(LUT_DIR, 'traceLUT.json')
     with open(json_file, 'r') as f:
         lut = json.load(f)
@@ -889,7 +887,9 @@ class TraceRay(TraceLlamas):
         
         result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)
 
-               
+        if result["status"] != "success":
+            return result
+
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
         origfile = self.fitsfile.split('.fits')[0]
@@ -914,9 +914,6 @@ class TraceRay(TraceLlamas):
             
         
         elapsed_time = time.time() - start_time
-        return 
-        if result["status"] != "success":
-                return result
 
 def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None, is_master_calib: bool = True, skip_extension_indices: List[int] = None) -> None:
     """
@@ -946,7 +943,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     futures = []
     results = []
 
-    hdul = process_fits_by_color(fitsfile)
+    hdul, _ = process_fits_by_color(fitsfile)
 
     # Filter HDUs based on channel and exclude placeholders
     if channel is not None and 'COLOR' in hdul[1].header:

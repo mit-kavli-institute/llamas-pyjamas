@@ -94,10 +94,10 @@ The final structure of your repo should look like this to run both the reduction
 ```
 llamas-pyjamas/
 └── llamas_pyjamas/
-    │   └── combined_bias.fits
     ├── Arc/
     ├── Bias/
-    │   └── combined_bias.fits
+    │   └── slow_master_bias.fits
+    │   └── fast_master_bias.fits
     ├── Cube/
     ├── Docs/
     ├── Extract/
@@ -109,7 +109,8 @@ llamas-pyjamas/
     ├── LUT/
     │   └── LLAMAS_reference_arc.pkl
     ├── mastercalib/
-    │   └── combined_bias.fits
+    │   └── slow_master_bias.fits
+    │   └── fast_master_bias.fits
     │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
@@ -132,6 +133,17 @@ To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Py
 
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
+### QuickLook GUI
+The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
+
+To run the QL GUI, execute the following commands from the terminal:
+
+```
+cd llamas-pyjamas/llamas_pyjamas/GUI/
+conda activate myenv
+ds9 &
+python obslog.py
+```
 
 ### QuickLook Demo files
 To test run the quick look pipeline on data, we have provided a standard star raw image, flat field images, and a bias image to create an extracted WhiteLight image. https://mit-kavli.box.com/s/k7s3bmwu98q3iljm4djpzidxj7qg26cl
