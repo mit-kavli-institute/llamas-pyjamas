@@ -102,13 +102,13 @@ class CubeConstructor:
         """
         Load extraction data from RSS FITS file format.
 
-        New RSS file format:
+        RSS file format (as written by llamasRSS.py):
         Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux [NWAVE x NFIBER]
-        Extension 2 - ERROR: the error array [NWAVE x NFIBER]
-        Extension 3 - MASK: the pixel mask array [NWAVE x NFIBER]
-        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-        Extension 5 - FWHM: the full width half max array [NWAVE x NFIBER]
+        Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
+        Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+        Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
+        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
         Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
 
         Parameters:
@@ -125,7 +125,7 @@ class CubeConstructor:
             # Get channel from primary header
             primary_hdr = hdul[0].header
             channel = primary_hdr.get('CHANNEL', 'unknown').lower()
-            
+
             # Initialize extraction dictionary
             extraction = {
                 'channel': channel,
@@ -137,52 +137,48 @@ class CubeConstructor:
                 'fibermap': None,
                 'benchside': None
             }
-            
+
             # Process all extensions
+            # Data arrays are already [NFIBER x NWAVE] as written by llamasRSS.py
             for i, hdu in enumerate(hdul[1:], 1):
                 extname = hdu.header.get('EXTNAME', '').upper()
-                
+
                 try:
                     if extname == 'FLUX':
-                        # FLUX: [NWAVE x NFIBER] array
+                        # FLUX: [NFIBER x NWAVE] array
                         flux = hdu.data
                         self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['flux'] = flux.T
-                        
+                        extraction['flux'] = flux
+
                     elif extname == 'ERROR':
-                        # ERROR: [NWAVE x NFIBER] array
+                        # ERROR: [NFIBER x NWAVE] array
                         error = hdu.data
                         self.logger.info(f"Loaded ERROR extension with shape {error.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['error'] = error.T
-                        
+                        extraction['error'] = error
+
                     elif extname == 'MASK':
-                        # MASK: [NWAVE x NFIBER] array
+                        # MASK: [NFIBER x NWAVE] array
                         mask = hdu.data
                         self.logger.info(f"Loaded MASK extension with shape {mask.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['mask'] = mask.T
-                        
+                        extraction['mask'] = mask
+
                     elif extname == 'WAVE':
-                        # WAVE: [NWAVE x NFIBER] array
+                        # WAVE: [NFIBER x NWAVE] array
                         wave = hdu.data
                         self.logger.info(f"Loaded WAVE extension with shape {wave.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['wave'] = wave.T
-                        
+                        extraction['wave'] = wave
+
                         # Also create a common wavelength grid as the median across all fibers
                         # This is useful for operations that need a single wavelength grid
-                        wave_common = np.nanmedian(wave, axis=1)  # Median across fibers for each wavelength point
+                        wave_common = np.nanmedian(wave, axis=0)  # Median across fibers (rows) for each wavelength point
                         extraction['wave_common'] = wave_common
                         self.logger.info(f"Created common wavelength grid with {len(wave_common)} points")
-                        
+
                     elif extname == 'FWHM':
-                        # FWHM: [NWAVE x NFIBER] array
+                        # FWHM: [NFIBER x NWAVE] array
                         fwhm = hdu.data
                         self.logger.info(f"Loaded FWHM extension with shape {fwhm.shape}")
-                        # Transpose to [NFIBER x NWAVE] for internal processing
-                        extraction['fwhm'] = fwhm.T
+                        extraction['fwhm'] = fwhm
                         
                     elif extname == 'FIBERMAP':
                         # FIBERMAP: binary table with fiber information
@@ -702,6 +698,50 @@ class CubeConstructor:
         channel_wavelength_grids = {}  # Store wavelength grid for each channel
         channel_wcs = {}  # Store WCS for each channel
 
+        # Pre-compute a shared spatial grid from the union of all channels' fibre positions.
+        # This ensures all colour cubes have identical spatial grids.
+        all_x_coords = []
+        all_y_coords = []
+        for ch_name, ch_data in channels_data.items():
+            table_data = ch_data.get('table')
+            if table_data is None:
+                continue
+            for i in range(len(table_data['FIBER_ID'])):
+                benchside = table_data['BENCHSIDE'][i]
+                fiber_id = table_data['FIBER_ID'][i]
+                x, y = self.get_fiber_coordinates(benchside, fiber_id)
+                if x == -1 and y == -1:
+                    continue
+                x_arcsec = x * 0.75
+                y_arcsec = y * 0.75
+                if ref_coords is not None:
+                    ra_ref, dec_ref = ref_coords
+                    ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                    dec = dec_ref + (y_arcsec / 3600.0)
+                    x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
+                    y_sky = (dec - dec_ref) * 3600.0
+                    all_x_coords.append(x_sky)
+                    all_y_coords.append(y_sky)
+                else:
+                    all_x_coords.append(x_arcsec)
+                    all_y_coords.append(y_arcsec)
+
+        if all_x_coords:
+            x_min = min(all_x_coords) - spatial_sampling
+            x_max = max(all_x_coords) + spatial_sampling
+            y_min = min(all_y_coords) - spatial_sampling
+            y_max = max(all_y_coords) + spatial_sampling
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+            shared_grid_x = np.linspace(x_min, x_max, n_x)
+            shared_grid_y = np.linspace(y_min, y_max, n_y)
+            self.logger.info(f"Computed shared spatial grid: {n_x} x {n_y} from "
+                           f"{len(all_x_coords)} fibre positions across {len(channels_data)} channels")
+        else:
+            shared_grid_x = None
+            shared_grid_y = None
+            self.logger.warning("No valid fibre positions found across any channel for shared grid")
+
         # Save original attributes to restore later
         original_wavelength_grid = self.wavelength_grid
         original_wcs = self.wcs
@@ -721,7 +761,9 @@ class CubeConstructor:
                 wavelength_range=wavelength_range,
                 dispersion=dispersion,
                 spatial_sampling=spatial_sampling,
-                reference_coord=ref_coords
+                reference_coord=ref_coords,
+                spatial_grid_x=shared_grid_x,
+                spatial_grid_y=shared_grid_y
             )
 
             if cube is not None:
@@ -758,74 +800,75 @@ class CubeConstructor:
         Load all channel data from an RSS FITS file in the new format.
         Returns a dict: {channel: {'flux':..., 'err':..., 'wave':..., 'mask':..., 'fwhm':..., 'fibermap':...}}
         
-        New RSS file format:
+        RSS file format (as written by llamasRSS.py):
         Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux in units of 10(-17) erg/s/cm2/Ang/fiber [NWAVE x NFIBER]
-        Extension 2 - ERROR: the error array, sigma of above, for each fiber [NWAVE x NFIBER]
-        Extension 3 - MASK: the pixel mask array for each fiber [NWAVE x NFIBER]
-        Extension 4 - WAVE: the wavelength array for each fiber [NWAVE x NFIBER]
-        Extension 5 - FWHM: the full width half max array for each fiber [NWAVE x NFIBER]
+        Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
+        Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+        Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
+        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
         Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
         """
         self.logger.info(f'Loading channels from RSS file: {rss_file}')
         channels = {}
-        
+
         with fits.open(rss_file) as hdul:
             # First get the channel from the primary header
             primary_hdr = hdul[0].header
             channel = primary_hdr.get('CHANNEL', 'UNKNOWN').lower()
-            
+
             # Initialize the channel dictionary
             channels[channel] = {}
-            
+
             # Check if all required extensions are present
             required_extensions = ['FLUX', 'ERROR', 'MASK', 'WAVE', 'FWHM', 'FIBERMAP']
             for ext in required_extensions:
                 if not any(hdu.header.get('EXTNAME', '') == ext for hdu in hdul[1:]):
                     self.logger.warning(f"Required extension {ext} not found in RSS file")
-            
+
             # Process all extensions
+            # Data arrays are already [NFIBER x NWAVE] as written by llamasRSS.py
             for i, hdu in enumerate(hdul[1:], 1):
                 extname = hdu.header.get('EXTNAME', '').upper()
-                
+
                 try:
                     if extname == 'FLUX':
-                        # FLUX: [NWAVE x NFIBER] array
+                        # FLUX: [NFIBER x NWAVE] array
                         flux = hdu.data
                         self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
-                        channels[channel]['flux'] = flux.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['flux'] = flux
+
                     elif extname == 'ERROR':
-                        # ERROR: [NWAVE x NFIBER] array
+                        # ERROR: [NFIBER x NWAVE] array
                         error = hdu.data
                         self.logger.info(f"Loaded ERROR extension with shape {error.shape}")
-                        channels[channel]['err'] = error.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['err'] = error
+
                     elif extname == 'MASK':
-                        # MASK: [NWAVE x NFIBER] array
+                        # MASK: [NFIBER x NWAVE] array
                         mask = hdu.data
                         self.logger.info(f"Loaded MASK extension with shape {mask.shape}")
-                        channels[channel]['dq'] = mask.T  # Transpose to [NFIBER x NWAVE]
-                        
+                        channels[channel]['dq'] = mask
+
                     elif extname == 'WAVE':
-                        # WAVE: [NWAVE x NFIBER] array - now has per-fiber wavelength data
+                        # WAVE: [NFIBER x NWAVE] array - per-fiber wavelength data
                         wave = hdu.data
                         self.logger.info(f"Loaded WAVE extension with shape {wave.shape}")
-                        
-                        # Store the per-fiber wavelength array (transpose to [NFIBER x NWAVE])
-                        channels[channel]['wave'] = wave.T
-                        
+
+                        # Store the per-fiber wavelength array (already [NFIBER x NWAVE])
+                        channels[channel]['wave'] = wave
+
                         # Also compute a common wavelength grid as the median across all fibers
                         # This is useful for operations that need a single wavelength grid
-                        wave_common = np.nanmedian(wave, axis=1)  # Median across fibers for each wavelength point
+                        wave_common = np.nanmedian(wave, axis=0)  # Median across fibers (rows) for each wavelength point
                         channels[channel]['wave_common'] = wave_common
                         self.logger.info(f"Created common wavelength grid with {len(wave_common)} points")
-                        
+
                     elif extname == 'FWHM':
-                        # FWHM: [NWAVE x NFIBER] array
+                        # FWHM: [NFIBER x NWAVE] array
                         fwhm = hdu.data
                         self.logger.info(f"Loaded FWHM extension with shape {fwhm.shape}")
-                        channels[channel]['fwhm'] = fwhm.T  # Transpose to [NFIBER x NWAVE]
+                        channels[channel]['fwhm'] = fwhm
                         
                     elif extname == 'FIBERMAP':
                         # FIBERMAP: binary table with fiber information
@@ -889,7 +932,9 @@ class CubeConstructor:
 
     def construct_cube_from_rss_channel(self, rss_file: str, channel: str, wavelength_range: Optional[Tuple[float, float]] = None,
                                       dispersion: float = 1.0, spatial_sampling: float = 0.75,
-                                      reference_coord: Optional[Tuple[float, float]] = None) -> np.ndarray:
+                                      reference_coord: Optional[Tuple[float, float]] = None,
+                                      spatial_grid_x: Optional[np.ndarray] = None,
+                                      spatial_grid_y: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Construct IFU cube from a single channel in an RSS FITS file.
     
@@ -905,7 +950,12 @@ class CubeConstructor:
             dispersion (float): Wavelength dispersion in Angstroms/pixel
             spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
             reference_coord (tuple, optional): Reference RA/Dec for WCS
-    
+            spatial_grid_x (ndarray, optional): Pre-computed shared X spatial grid.
+                When provided (along with spatial_grid_y), this grid is used instead
+                of computing one from this channel's fibre positions alone. This ensures
+                all colour channels share identical spatial grids.
+            spatial_grid_y (ndarray, optional): Pre-computed shared Y spatial grid.
+
         Returns:
             np.ndarray: 3D cube data with shape [wavelength, y, x]
         """
@@ -1039,27 +1089,33 @@ class CubeConstructor:
             self.logger.error(f"No valid fiber positions found for channel {channel}")
             return None
     
-        # Continue with rest of the method as before...
-        # Determine spatial extent from fiber positions
-        x_coords = [pos[1] for pos in fiber_positions]
-        y_coords = [pos[2] for pos in fiber_positions]
-    
-        x_min, x_max = min(x_coords), max(x_coords)
-        y_min, y_max = min(y_coords), max(y_coords)
-    
-        # Add buffer around edges
-        buffer = spatial_sampling
-        x_min -= buffer
-        x_max += buffer
-        y_min -= buffer
-        y_max += buffer
-    
-        # Create spatial grid with fixed spaxel size (spatial_sampling is in arcsec/pixel)
-        n_x = int((x_max - x_min) / spatial_sampling) + 1
-        n_y = int((y_max - y_min) / spatial_sampling) + 1
-    
-        self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
-        self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
+        # Determine spatial grid
+        if spatial_grid_x is not None and spatial_grid_y is not None:
+            # Use pre-computed shared spatial grid (ensures all channels are aligned)
+            self.spatial_grid_x = spatial_grid_x
+            self.spatial_grid_y = spatial_grid_y
+            self.logger.info(f"Using shared spatial grid: {len(spatial_grid_x)} x {len(spatial_grid_y)}")
+        else:
+            # Compute from this channel's fibre positions alone
+            x_coords = [pos[1] for pos in fiber_positions]
+            y_coords = [pos[2] for pos in fiber_positions]
+
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+
+            # Add buffer around edges
+            buffer = spatial_sampling
+            x_min -= buffer
+            x_max += buffer
+            y_min -= buffer
+            y_max += buffer
+
+            # Create spatial grid with fixed spaxel size (spatial_sampling is in arcsec/pixel)
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+
+            self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
+            self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
     
         # Initialize cube with NaNs
         cube_shape = (len(self.wavelength_grid), len(self.spatial_grid_y), len(self.spatial_grid_x))
@@ -1747,18 +1803,66 @@ class CubeConstructor:
             else:
                 self.logger.warning("No valid reference coordinates found in any channel. Using local coordinates.")
         
+        # Pre-compute a shared spatial grid from the union of all channels' fibre positions.
+        # This ensures all colour cubes have identical spatial grids, preventing alignment offsets
+        # caused by different channels having slightly different sets of valid fibres.
+        all_x_coords = []
+        all_y_coords = []
+        ref_for_grid = common_ref_coord
+        for ch_name, file_path in channel_files.items():
+            ch_data = self.load_rss_channels(file_path)
+            ch_key = list(ch_data.keys())[0]
+            table_data = ch_data[ch_key].get('table')
+            if table_data is None:
+                continue
+            for i in range(len(table_data['FIBER_ID'])):
+                benchside = table_data['BENCHSIDE'][i]
+                fiber_id = table_data['FIBER_ID'][i]
+                x, y = self.get_fiber_coordinates(benchside, fiber_id)
+                if x == -1 and y == -1:
+                    continue
+                x_arcsec = x * 0.75
+                y_arcsec = y * 0.75
+                if ref_for_grid is not None:
+                    ra_ref, dec_ref = ref_for_grid
+                    ra = ra_ref + (x_arcsec / 3600.0) / np.cos(np.radians(dec_ref))
+                    dec = dec_ref + (y_arcsec / 3600.0)
+                    x_sky = (ra - ra_ref) * 3600.0 * np.cos(np.radians(dec_ref))
+                    y_sky = (dec - dec_ref) * 3600.0
+                    all_x_coords.append(x_sky)
+                    all_y_coords.append(y_sky)
+                else:
+                    all_x_coords.append(x_arcsec)
+                    all_y_coords.append(y_arcsec)
+
+        if all_x_coords:
+            x_min = min(all_x_coords) - spatial_sampling
+            x_max = max(all_x_coords) + spatial_sampling
+            y_min = min(all_y_coords) - spatial_sampling
+            y_max = max(all_y_coords) + spatial_sampling
+            n_x = int((x_max - x_min) / spatial_sampling) + 1
+            n_y = int((y_max - y_min) / spatial_sampling) + 1
+            shared_grid_x = np.linspace(x_min, x_max, n_x)
+            shared_grid_y = np.linspace(y_min, y_max, n_y)
+            self.logger.info(f"Computed shared spatial grid: {n_x} x {n_y} from "
+                           f"{len(all_x_coords)} fibre positions across {len(channel_files)} channels")
+        else:
+            shared_grid_x = None
+            shared_grid_y = None
+            self.logger.warning("No valid fibre positions found across any channel for shared grid")
+
         # Save original attributes to restore later
         original_wavelength_grid = self.wavelength_grid
         original_wcs = self.wcs
         original_cube_data = self.cube_data
-        
+
         # Process each channel file to construct cubes
         for channel, file_path in channel_files.items():
             self.logger.info(f"Constructing cube for channel {channel} from file: {file_path}")
-            
+
             # Reset wavelength grid for this channel
             self.wavelength_grid = None
-            
+
             # Construct cube for this channel
             # Use the channel from the filename as the channel identifier
             cube = self.construct_cube_from_rss_channel(
@@ -1767,7 +1871,9 @@ class CubeConstructor:
                 wavelength_range=wavelength_range,
                 dispersion=dispersion,
                 spatial_sampling=spatial_sampling,
-                reference_coord=common_ref_coord or reference_coords_map[channel]
+                reference_coord=common_ref_coord or reference_coords_map[channel],
+                spatial_grid_x=shared_grid_x,
+                spatial_grid_y=shared_grid_y
             )
             
             if cube is not None:

@@ -39,14 +39,14 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 def ExtractLlamasCube(infits, tracefits, optimal=True):
 
-    assert infits.endswith('.fits'), 'File must be a .fits file'  
+    assert infits.endswith('.fits'), 'File must be a .fits file'
     # hdu = fits.open(infits)
-    hdu = process_fits_by_color(infits)
+    hdu, _ = process_fits_by_color(infits)
 
     # Find the trace files
     basefile = os.path.basename(tracefits).split('.fits')[0]
     trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
-    extraction_file = os.path.basename(infits).split('mef.fits')[0] + 'extract.pkl'
+    extraction_file = os.path.splitext(os.path.basename(infits))[0] + '_extract.pkl'
 
     if len(trace_files) == 0:
         logger.error("No trace files found for the indicated file root!")
@@ -161,7 +161,7 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote
+@ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
 
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None):
     """
@@ -368,7 +368,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         file = validate_for_gui(file)
 
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         primary_hdr = hdu[0].header
 
@@ -378,7 +378,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             read_mode = read_mode.strip().upper()
             logger.info(f"Detected READ-MDE: {read_mode}")
 
-        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+        extraction_file = os.path.splitext(os.path.basename(file))[0] + '_extract.pkl'
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]
@@ -617,7 +617,7 @@ def box_extract(file, flat=False):
         ray.init(runtime_env=runtime_env)
 
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]

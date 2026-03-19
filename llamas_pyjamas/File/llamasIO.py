@@ -27,6 +27,11 @@ Example:
             print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
 from astropy.io import fits # type: ignore
+from datetime import datetime
+from llamas_pyjamas.Utils.utils import setup_logger
+
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+logger = setup_logger(__name__, f'file_validation_{timestamp}.log')
 ##############################################################
 
 class llamasOneCamera:
@@ -47,6 +52,7 @@ class llamasOneCamera:
         self.bench  =   -1
         self.side   =   ''
         self.channel =  ''
+        
 
     def readhdu(self, hdu: fits.HDUList) -> None:
         """Read header and data from the given HDU and extract metadata.
@@ -115,39 +121,43 @@ def getBenchSideChannel(fitsfile: str, bench: str, side: str, channel: str)-> No
                     return(hdu.data)
                 
 
-def process_fits_by_color(fits_file):
+def process_fits_by_color(fits_file, output_file=None):
     """Process a FITS file and transform image data based on color attribute.
-    
+
     The function applies the following transformations:
     - Blue: Flip both x and y axes
     - Green: Flip only x axis (horizontally)
     - Red: No transformation
-    
+
     Args:
         fits_file: Path to the FITS file.
-        
+        output_file: Path to save the processed FITS file. If None, defaults to
+                     input filename with '_trimmed' suffix.
+
     Returns:
-        HDUList with color-based transformations applied.
+        tuple: (HDUList, str) containing the processed HDU list and output file path,
+               or (None, None) if processing fails.
     """
     from astropy.io import fits
     import numpy as np
-    
+    import os
+
     try:
         # Open the FITS file
         with fits.open(fits_file) as hdul:
             # Create a new HDU list for the result
             result_hdus = fits.HDUList()
-            
+
             # Add the primary HDU without changes
             result_hdus.append(hdul[0].copy())
-            
+
             # Process each extension HDU
             for i in range(1, len(hdul)):
                 hdu = hdul[i].copy()  # Create a copy to avoid modifying the original
-                
+
                 if 'DATASEC' in hdu.header:
                     datasec = hdu.header['DATASEC']
-                    
+
                     # Parse the DATASEC string '[x1:x2, y1:y2]'
                     import re
                     match = re.match(r'\[(\d+):(\d+),\s*(\d+):(\d+)\]', datasec)
@@ -162,15 +172,15 @@ def process_fits_by_color(fits_file):
                         original_shape = hdu.data.shape
                         if x2 <= original_shape[1] and y2 <= original_shape[0]:
                             hdu.data = hdu.data[y1:y2, x1:x2]
-                            print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
+                            # print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
                         else:
-                            print(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
+                            logger.warning(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
                 
                 # Check if the HDU has data
                 if hdu.data is not None:
                     # Determine the color
                     color = None
-                    
+
                     # If COLOR is in the header, use it directly
                     if 'COLOR' in hdu.header:
                         color = hdu.header['COLOR'].lower()
@@ -180,7 +190,7 @@ def process_fits_by_color(fits_file):
                         camname = hdu.header['CAM_NAME']
                         color = camname.split('_')[1].lower()
                         side = camname.split('_')[0][1]
-                    
+
                     # Apply transformations based on color if we have determined it
                     if color:
                         if color == 'blue':
@@ -192,15 +202,25 @@ def process_fits_by_color(fits_file):
                             # Flip only x axis (flip horizontally)
                             hdu.data = np.fliplr(hdu.data)
                         # No change for red
-                        
-                
+
+
                 result_hdus.append(hdu)
-        
-        return result_hdus
-    
+
+        # Determine output filename
+        if output_file is None:
+            base_name = os.path.basename(fits_file)
+            name, ext = os.path.splitext(base_name)
+            output_file = os.path.join(os.path.dirname(fits_file), f"{name}_trimmed{ext}")
+
+        # Write the processed FITS file
+        result_hdus.writeto(output_file, overwrite=True)
+        print(f"Processed FITS file saved to: {output_file}")
+
+        return result_hdus, output_file
+
     except Exception as e:
         print(f"Error processing FITS file: {e}")
-        return None  
+        return None, None  
     
     
     

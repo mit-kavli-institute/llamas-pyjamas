@@ -184,7 +184,10 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
     return
 
 
-
+def is_wavelength_solution_useable(wvln_solution_dict, extraction_idx=0):
+    """Check if wavelength solution xshift has any non-zero values."""
+    xshifts = wvln_solution_dict['extractions'][extraction_idx].xshift
+    return not np.all(xshifts == 0)
 
 
 def create_peak_lookup(peaks: list) -> dict:
@@ -942,6 +945,256 @@ def check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir=
     return problematic_fibers
 
 
+def assess_pixel_maps(pixel_map_file, output_dir=None, extensions=None, save_figs=True):
+    """Assess pixel-to-pixel flat field maps for imprint patterns and data quality.
+
+    For each extension in ``pixel_map_file`` this function computes:
+
+    - Global statistics (mean, median, std, fraction of pixels outside [0.9, 1.1])
+    - 2D image display with a diverging colormap centred at 1.0
+    - Spatial profile: median collapsed along the spectral axis to reveal
+      cross-fiber sensitivity gradients or block-level imprint patterns
+    - Spectral profile: median collapsed along the spatial axis to reveal
+      large-scale spectral residuals or fringing structure
+    - Power spectrum of the spectral profile via FFT to quantify fringing
+      frequency and amplitude (especially important for the red channel)
+    - Histogram of pixel values
+
+    A multi-panel PNG is saved per extension and a plain-text summary report is
+    written listing per-extension statistics with flags for anomalous structure.
+
+    Args:
+        pixel_map_file (str): Path to the ``pixel_maps.fits`` MEF file produced by
+            ``process_flat_field_complete``.
+        output_dir (str, optional): Directory for output PNGs and the summary report.
+            Defaults to the directory containing ``pixel_map_file``.
+        extensions (list of str, optional): Subset of EXTNAME values to assess
+            (e.g. ``['red1A', 'red2B']``).  If ``None`` all extensions are assessed.
+        save_figs (bool): Whether to write PNG files.  Defaults to True.
+
+    Returns:
+        dict: ``{ext_name: {'mean': float, 'std': float, 'median': float,
+                            'frac_outside': float, 'dominant_fft_freq': float,
+                            'dominant_fft_amp': float}}``
+    """
+    import os
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from astropy.io import fits
+
+    if not os.path.exists(pixel_map_file):
+        raise FileNotFoundError(f"Pixel map file not found: {pixel_map_file}")
+
+    if output_dir is None:
+        output_dir = os.path.dirname(os.path.abspath(pixel_map_file))
+    os.makedirs(output_dir, exist_ok=True)
+
+    summary = {}
+    report_lines = [
+        f"Pixel Map Assessment: {os.path.basename(pixel_map_file)}",
+        "=" * 70,
+        f"{'Extension':<12} {'Mean':>8} {'Median':>8} {'Std':>8} {'%Outside':>9} "
+        f"{'FFT_freq':>9} {'FFT_amp':>9} {'Flags'}",
+        "-" * 70,
+    ]
+
+    with fits.open(pixel_map_file) as hdul:
+        image_exts = [h for h in hdul if h.data is not None and h.data.ndim == 2]
+
+        for hdu in image_exts:
+            ext_name = hdu.header.get('EXTNAME', 'UNKNOWN')
+
+            if extensions is not None and ext_name not in extensions:
+                continue
+
+            data = hdu.data.astype(np.float64)
+
+            # ------------------------------------------------------------------
+            # Statistics
+            # ------------------------------------------------------------------
+            flat_data = data.ravel()
+            finite_mask = np.isfinite(flat_data)
+            flat_finite = flat_data[finite_mask]
+
+            mean_val  = float(np.mean(flat_finite))
+            median_val = float(np.median(flat_finite))
+            std_val   = float(np.std(flat_finite))
+            frac_outside = float(np.mean((flat_finite < 0.9) | (flat_finite > 1.1)))
+
+            # ------------------------------------------------------------------
+            # Collapsed profiles
+            # ------------------------------------------------------------------
+            # Spatial profile: median along spectral axis (axis=1 → along columns)
+            # Result shape = (nrows,) — one value per detector row
+            spatial_profile = np.nanmedian(data, axis=1)
+
+            # Spectral profile: median along spatial axis (axis=0 → along rows)
+            # Result shape = (ncols,) — one value per spectral pixel
+            spectral_profile = np.nanmedian(data, axis=0)
+
+            # ------------------------------------------------------------------
+            # Power spectrum of spectral profile
+            # ------------------------------------------------------------------
+            sp_finite = spectral_profile[np.isfinite(spectral_profile)]
+            sp_detrended = sp_finite - np.mean(sp_finite)
+            fft_coeffs = np.fft.rfft(sp_detrended)
+            fft_power  = np.abs(fft_coeffs) ** 2
+            freqs      = np.fft.rfftfreq(len(sp_finite))
+
+            # Ignore DC (index 0)
+            if len(fft_power) > 1:
+                peak_idx = int(np.argmax(fft_power[1:]) + 1)
+                dominant_fft_freq = float(freqs[peak_idx])
+                dominant_fft_amp  = float(np.sqrt(fft_power[peak_idx]) / len(sp_finite))
+            else:
+                dominant_fft_freq = 0.0
+                dominant_fft_amp  = 0.0
+
+            summary[ext_name] = {
+                'mean': mean_val,
+                'median': median_val,
+                'std': std_val,
+                'frac_outside': frac_outside,
+                'dominant_fft_freq': dominant_fft_freq,
+                'dominant_fft_amp': dominant_fft_amp,
+            }
+
+            # ------------------------------------------------------------------
+            # Flags
+            # ------------------------------------------------------------------
+            flags = []
+            if std_val > 0.05:
+                flags.append('HIGH_STD')
+            if dominant_fft_amp > 0.01:
+                flags.append('FRINGING')
+            if abs(mean_val - 1.0) > 0.02:
+                flags.append('OFFSET')
+            flag_str = ','.join(flags) if flags else 'OK'
+
+            report_lines.append(
+                f"{ext_name:<12} {mean_val:>8.4f} {median_val:>8.4f} {std_val:>8.4f} "
+                f"{frac_outside*100:>8.2f}% {dominant_fft_freq:>9.4f} "
+                f"{dominant_fft_amp:>9.5f}  {flag_str}"
+            )
+
+            # ------------------------------------------------------------------
+            # Multi-panel figure
+            # ------------------------------------------------------------------
+            if save_figs:
+                fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+                fig.suptitle(
+                    f"Pixel Map Assessment: {ext_name}\n"
+                    f"mean={mean_val:.4f}  median={median_val:.4f}  "
+                    f"std={std_val:.4f}  {frac_outside*100:.1f}% outside [0.9, 1.1]",
+                    fontsize=12
+                )
+
+                # Panel 1: 2D image
+                ax = axes[0, 0]
+                vmin = float(np.nanpercentile(data, 2))
+                vmax = float(np.nanpercentile(data, 98))
+                # Centre the diverging colourmap at 1.0
+                half_range = max(abs(vmin - 1.0), abs(vmax - 1.0), 0.01)
+                im = ax.imshow(data, origin='lower', aspect='auto',
+                               cmap='RdBu_r',
+                               vmin=1.0 - half_range, vmax=1.0 + half_range)
+                plt.colorbar(im, ax=ax, label='Pixel ratio')
+                ax.set_title('2D Pixel Map')
+                ax.set_xlabel('Spectral pixel')
+                ax.set_ylabel('Spatial pixel')
+
+                # Panel 2: Spatial profile
+                ax = axes[0, 1]
+                ax.plot(spatial_profile, np.arange(len(spatial_profile)),
+                        color='steelblue', lw=0.8)
+                ax.axvline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.set_title('Spatial Profile\n(median along spectral axis)')
+                ax.set_xlabel('Median pixel ratio')
+                ax.set_ylabel('Detector row')
+                ax.legend(fontsize=8)
+
+                # Panel 3: Spectral profile
+                ax = axes[0, 2]
+                ax.plot(np.arange(len(spectral_profile)), spectral_profile,
+                        color='darkorange', lw=0.8)
+                ax.axhline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.set_title('Spectral Profile\n(median along spatial axis)')
+                ax.set_xlabel('Spectral pixel')
+                ax.set_ylabel('Median pixel ratio')
+                ax.legend(fontsize=8)
+
+                # Panel 4: Power spectrum
+                ax = axes[1, 0]
+                ax.semilogy(freqs[1:], fft_power[1:], color='purple', lw=0.8)
+                ax.axvline(dominant_fft_freq, color='red', ls='--', lw=1.5,
+                           label=f'Peak f={dominant_fft_freq:.4f}')
+                ax.set_title('Power Spectrum of Spectral Profile\n(fringing indicator)')
+                ax.set_xlabel('Spatial frequency (cycles/pixel)')
+                ax.set_ylabel('Power')
+                ax.legend(fontsize=8)
+
+                # Panel 5: Histogram
+                ax = axes[1, 1]
+                clip_lo, clip_hi = 0.5, 1.5
+                hist_data = flat_finite[(flat_finite > clip_lo) & (flat_finite < clip_hi)]
+                ax.hist(hist_data, bins=200, color='#2ab0ff', edgecolor='none', alpha=0.8)
+                ax.axvline(1.0, color='red', ls='--', lw=1.5, label='Ideal (1.0)')
+                ax.axvline(mean_val, color='green', ls=':', lw=1.5,
+                           label=f'Mean={mean_val:.4f}')
+                ax.set_title(f'Pixel Value Histogram\nstd={std_val:.4f}')
+                ax.set_xlabel('Pixel ratio (Actual / Model)')
+                ax.set_ylabel('Count')
+                ax.legend(fontsize=8)
+
+                # Panel 6: Text summary
+                ax = axes[1, 2]
+                ax.axis('off')
+                summary_text = (
+                    f"Extension: {ext_name}\n\n"
+                    f"Statistics:\n"
+                    f"  Mean:    {mean_val:.5f}\n"
+                    f"  Median:  {median_val:.5f}\n"
+                    f"  Std:     {std_val:.5f}\n"
+                    f"  % outside [0.9,1.1]: {frac_outside*100:.2f}%\n\n"
+                    f"Fringing (spectral FFT):\n"
+                    f"  Peak freq:  {dominant_fft_freq:.5f} cyc/px\n"
+                    f"  Peak amp:   {dominant_fft_amp:.5f}\n\n"
+                    f"Flags: {flag_str}"
+                )
+                ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
+                        fontsize=10, verticalalignment='top', fontfamily='monospace',
+                        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+
+                plt.tight_layout()
+                out_png = os.path.join(output_dir, f"assessment_{ext_name}.png")
+                plt.savefig(out_png, dpi=120, bbox_inches='tight')
+                plt.close(fig)
+                print(f"  Saved: {os.path.basename(out_png)}")
+
+    # ------------------------------------------------------------------
+    # Write summary report
+    # ------------------------------------------------------------------
+    report_lines.append("=" * 70)
+    flagged = [k for k, v in summary.items()
+               if v['std'] > 0.05 or v['dominant_fft_amp'] > 0.01 or abs(v['mean'] - 1.0) > 0.02]
+    report_lines.append(f"\nFlagged extensions ({len(flagged)}): {', '.join(flagged) or 'none'}")
+    report_lines.append(
+        "\nFlag definitions:\n"
+        "  HIGH_STD  : std > 0.05 (excessive pixel-to-pixel structure)\n"
+        "  FRINGING  : dominant FFT amplitude > 0.01 (spectral ripple)\n"
+        "  OFFSET    : |mean - 1.0| > 0.02 (calibration level offset)\n"
+    )
+
+    report_file = os.path.join(output_dir, 'pixel_map_assessment.txt')
+    with open(report_file, 'w') as f:
+        f.write('\n'.join(report_lines) + '\n')
+    print(f"\nAssessment report saved to: {report_file}")
+
+    return summary
+
+
 def plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
     """
     Plot individual fiber B-spline fits with original data for detailed inspection.
@@ -1422,6 +1675,71 @@ def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None,
     return results
 
 
+def is_wavelength_solution_useable(arc_dict):
+    """Check if an arc calibration dictionary has useable wavelength solutions.
+
+    Validates that wavelength solutions exist and are properly calibrated
+    for use in wavelength transfer operations. This function samples a few
+    fibers from each extension to verify the wavelength data is valid.
+
+    Parameters
+    ----------
+    arc_dict : dict
+        Dictionary containing 'extractions' (list of ExtractLlamas objects)
+        and 'metadata' for each extension. Typically loaded via
+        ExtractLlamas.loadExtraction().
+
+    Returns
+    -------
+    bool
+        True if wavelength solutions are useable, False otherwise.
+
+    Notes
+    -----
+    This function uses validate_wavelength_solution() from Arc/arcValidation.py
+    to check wavelength data quality including:
+    - Non-zero wavelength values
+    - No NaN/Inf values
+    - Monotonically increasing wavelengths
+    - Reasonable wavelength ranges for each channel
+    """
+    from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
+
+    extractions = arc_dict.get('extractions', [])
+    metadata = arc_dict.get('metadata', [])
+
+    if not extractions:
+        logger.warning("No extractions found in arc_dict")
+        return False
+
+    for idx, extraction in enumerate(extractions):
+        meta = metadata[idx] if idx < len(metadata) else {}
+        channel = meta.get('channel', 'red')
+
+        # Check if wave attribute exists
+        if not hasattr(extraction, 'wave') or extraction.wave is None:
+            logger.warning(f"Extension {idx} has no wavelength data")
+            return False
+
+        # Check a sample of fibers (first, middle, last)
+        n_fibers = extraction.wave.shape[0] if extraction.wave.ndim > 1 else 1
+        if n_fibers == 0:
+            logger.warning(f"Extension {idx} has no fibers")
+            return False
+
+        sample_fibers = [0, n_fibers // 2, n_fibers - 1]
+
+        for fiber_idx in sample_fibers:
+            if fiber_idx >= n_fibers:
+                continue
+            result = validate_wavelength_solution(extraction, channel, fiber_idx)
+            if not result['valid']:
+                logger.warning(f"Extension {idx} fiber {fiber_idx} invalid: {result['errors']}")
+                return False
+
+    return True
+
+
 def _bspline_diagnostic_usage_examples():
     """
     Example usage for B-spline diagnostic functions.
@@ -1486,4 +1804,355 @@ def _bspline_diagnostic_usage_examples():
     "
     """
     pass
-    
+
+
+# =========================================================================
+# Pixel flat-field diagnostic functions
+# =========================================================================
+
+def plot_flat_correction_ratio(uncorrected_pkl, corrected_pkl, output_file=None,
+                               n_fibers=5):
+    """Compare uncorrected vs flat-corrected extractions fiber by fiber.
+
+    For each of the 24 extensions the ratio ``corrected / uncorrected`` is
+    plotted for *n_fibers* representative fibers.  A perfect correction
+    produces a smooth curve near 1.0; high-frequency residual structure
+    indicates under- or over-correction.
+
+    Parameters
+    ----------
+    uncorrected_pkl : str
+        Path to batch extraction pickle **before** flat correction.
+    corrected_pkl : str
+        Path to batch extraction pickle **after** flat correction.
+    output_file : str, optional
+        Path to save the figure.  If ``None``, displays interactively.
+    n_fibers : int
+        Number of representative fibers per extension (evenly spaced).
+
+    Returns
+    -------
+    dict
+        ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    uncorr_data = _load_extraction_pkl(uncorrected_pkl)
+    corr_data = _load_extraction_pkl(corrected_pkl)
+
+    uncorr_exts, uncorr_meta = uncorr_data['extractions'], uncorr_data['metadata']
+    corr_exts, corr_meta = corr_data['extractions'], corr_data['metadata']
+
+    n_ext = min(len(uncorr_exts), len(corr_exts))
+    color_map = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    ncols = 6
+    nrows = int(np.ceil(n_ext / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows),
+                             sharex=True, sharey=True)
+    axes = np.atleast_2d(axes).ravel()
+
+    stats = {}
+    for idx in range(n_ext):
+        ax = axes[idx]
+        u_ext = uncorr_exts[idx]
+        c_ext = corr_exts[idx]
+        meta = uncorr_meta[idx]
+        channel = meta['channel']
+        label = f"{channel[:3].upper()}{meta['bench']}{meta['side']}"
+
+        nfib = min(u_ext.counts.shape[0], c_ext.counts.shape[0])
+        fib_idxs = np.linspace(0, nfib - 1, n_fibers, dtype=int)
+
+        all_ratios = []
+        for fib in fib_idxs:
+            u_counts = u_ext.counts[fib, :]
+            c_counts = c_ext.counts[fib, :]
+            valid = u_counts > 0
+            ratio = np.ones_like(u_counts, dtype=float)
+            ratio[valid] = c_counts[valid] / u_counts[valid]
+            ax.plot(ratio, lw=0.5, alpha=0.7,
+                    color=color_map.get(channel, 'gray'))
+            all_ratios.append(ratio[valid])
+
+        ax.axhline(1.0, color='k', ls='--', lw=0.8, alpha=0.5)
+        ax.set_ylim(0.85, 1.15)
+        ax.set_title(label, fontsize=8)
+
+        combined = np.concatenate(all_ratios) if all_ratios else np.array([1.0])
+        stats[label] = {
+            'median_ratio': float(np.median(combined)),
+            'rms_residual': float(np.std(combined)),
+        }
+
+    for ax in axes[n_ext:]:
+        ax.set_visible(False)
+
+    fig.suptitle('Flat Correction Ratio (corrected / uncorrected)', fontsize=12)
+    fig.supxlabel('Spectral pixel')
+    fig.supylabel('Ratio')
+    plt.tight_layout()
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_channel_flat_summary(extraction_pkl, output_file=None, filter_size=12):
+    """Per-channel histogram of fiber RMS after dividing out a smooth model.
+
+    For every fiber in every extension the extracted counts are divided by
+    a median+Gaussian smooth model to isolate high-frequency residuals.
+    The RMS of those residuals is histogrammed per color channel (red |
+    green | blue).  If one channel has systematically higher RMS, the
+    signal threshold or filter size may need tuning.
+
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. the corrected flat
+        extraction or a corrected science extraction).
+    output_file : str, optional
+        Save path for the figure.
+    filter_size : int
+        Median filter size used to build the smooth model.
+
+    Returns
+    -------
+    dict
+        ``{'red': {'median_rms': float, 'fibers': int}, ...}``
+    """
+    from scipy.ndimage import median_filter as _mf, gaussian_filter as _gf
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = _load_extraction_pkl(extraction_pkl)
+    extractions, metadata = data['extractions'], data['metadata']
+
+    channel_rms = {'red': [], 'green': [], 'blue': []}
+    color_hex = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    for ext, meta in zip(extractions, metadata):
+        channel = meta['channel'].lower()
+        if channel not in channel_rms:
+            continue
+        for fib_idx in range(ext.counts.shape[0]):
+            counts = ext.counts[fib_idx, :].astype(np.float64)
+            smooth = _gf(_mf(counts, size=filter_size), sigma=2.0)
+            valid = smooth > 0
+            if np.sum(valid) < 10:
+                continue
+            ratio = np.ones_like(counts)
+            ratio[valid] = counts[valid] / smooth[valid]
+            rms = float(np.std(ratio[valid]))
+            channel_rms[channel].append(rms)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+    stats = {}
+    for ax, (ch, rms_list) in zip(axes, channel_rms.items()):
+        arr = np.array(rms_list) if rms_list else np.array([0.0])
+        ax.hist(arr * 100, bins=60, range=(0, 6), color=color_hex[ch],
+                alpha=0.75, edgecolor='none')
+        med = float(np.median(arr)) * 100
+        ax.axvline(med, color='k', ls='--', lw=1.5,
+                   label=f'median = {med:.2f}%')
+        ax.set_title(f'{ch.capitalize()} ({len(rms_list)} fibers)', fontsize=10)
+        ax.set_xlabel('Fiber RMS (%)')
+        ax.legend(fontsize=8)
+        stats[ch] = {'median_rms': med, 'fibers': len(rms_list)}
+
+    axes[0].set_ylabel('Fiber count')
+    fig.suptitle('Per-Channel Flat Residual RMS', fontsize=12)
+    plt.tight_layout()
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_fiber_consistency(extraction_pkl, output_file=None):
+    """Fiber-to-fiber scatter as a function of wavelength pixel.
+
+    For each extension the standard deviation across fibers at each
+    spectral pixel is computed.  After good flat correction the
+    fiber-to-fiber scatter should be dominated by photon noise, not
+    systematic structure.  Lines are colored by channel so that
+    red/green/blue can be compared directly.
+
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. corrected flat lamp
+        extraction).
+    output_file : str, optional
+        Save path for the figure.
+
+    Returns
+    -------
+    dict
+        ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = _load_extraction_pkl(extraction_pkl)
+    extractions, metadata = data['extractions'], data['metadata']
+    color_hex = {'red': '#d62728', 'green': '#2ca02c', 'blue': '#1f77b4'}
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+    stats = {}
+
+    for ext, meta in zip(extractions, metadata):
+        channel = meta['channel'].lower()
+        label = f"{channel[:3].upper()}{meta['bench']}{meta['side']}"
+        counts = ext.counts.astype(np.float64)
+
+        # Normalize each fiber by its own median to remove throughput
+        fiber_medians = np.nanmedian(counts, axis=1, keepdims=True)
+        fiber_medians[fiber_medians == 0] = 1.0
+        normed = counts / fiber_medians
+
+        # Scatter across fibers at each spectral pixel
+        scatter = np.nanstd(normed, axis=0)
+
+        ax.plot(scatter * 100, lw=0.6, alpha=0.5,
+                color=color_hex.get(channel, 'gray'), label=label)
+
+        finite = scatter[np.isfinite(scatter)]
+        stats[label] = {
+            'mean_scatter': float(np.mean(finite)) * 100 if len(finite) else 0.0,
+            'max_scatter': float(np.max(finite)) * 100 if len(finite) else 0.0,
+        }
+
+    ax.set_xlabel('Spectral pixel')
+    ax.set_ylabel('Fiber-to-fiber scatter (%)')
+    ax.set_title('Fiber-to-Fiber Consistency After Flat Correction')
+    ax.set_ylim(0, 15)
+
+    # De-duplicate legend entries by color
+    handles, labels = ax.get_legend_handles_labels()
+    seen = {}
+    for h, l in zip(handles, labels):
+        ch = l[:3]
+        if ch not in seen:
+            seen[ch] = h
+    ax.legend(seen.values(), seen.keys(), fontsize=8, loc='upper right')
+
+    plt.tight_layout()
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    return stats
+
+
+def plot_flat_residual_map(pixel_map_file, output_file=None):
+    """4x6 grid of 2D pixel map images for all 24 extensions.
+
+    Each panel shows the sensitivity map with a diverging colormap
+    centred at 1.0.  Residual structure along traces indicates the flat
+    is not fully removing pixel QE variations; structure perpendicular to
+    traces indicates trace-edge artifacts.
+
+    Parameters
+    ----------
+    pixel_map_file : str
+        Path to ``pixel_maps.fits`` (24-extension MEF).
+    output_file : str, optional
+        Save path for the figure.
+
+    Returns
+    -------
+    dict
+        ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    if not os.path.exists(pixel_map_file):
+        raise FileNotFoundError(f"Pixel map file not found: {pixel_map_file}")
+
+    with fits.open(pixel_map_file) as hdul:
+        image_exts = [(h.header.get('EXTNAME', f'EXT{i}'),
+                       h.data.astype(np.float64))
+                      for i, h in enumerate(hdul)
+                      if h.data is not None and h.data.ndim == 2]
+
+    n_ext = len(image_exts)
+    ncols = 6
+    nrows = max(1, int(np.ceil(n_ext / ncols)))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows))
+    axes = np.atleast_2d(axes).ravel()
+
+    stats = {}
+    for i, (ext_name, data) in enumerate(image_exts):
+        ax = axes[i]
+
+        im = ax.imshow(data, aspect='auto', origin='lower',
+                       vmin=0.90, vmax=1.10, cmap='coolwarm')
+        ax.set_title(ext_name, fontsize=8)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        active = data[(data != 1.0) & np.isfinite(data)]
+        med = float(np.median(active)) if len(active) else 1.0
+        std = float(np.std(active)) if len(active) else 0.0
+        frac = float(np.mean((active < 0.9) | (active > 1.1))) if len(active) else 0.0
+        stats[ext_name] = {'median': med, 'std': std, 'frac_outside': frac}
+
+    for ax in axes[n_ext:]:
+        ax.set_visible(False)
+
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
+    fig.colorbar(im, cax=cbar_ax, label='Sensitivity')
+    fig.suptitle('Pixel-to-Pixel Sensitivity Maps', fontsize=13, y=1.01)
+    plt.tight_layout(rect=[0, 0, 0.91, 1])
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {output_file}")
+    else:
+        plt.show()
+
+    # Print summary table
+    print(f"\n{'Extension':<12} {'Median':>8} {'Std (%)':>8} {'%Outside':>9}")
+    print("-" * 40)
+    for name, s in stats.items():
+        flag = ' <-- CHECK' if s['std'] > 0.02 or s['frac_outside'] > 0.01 else ''
+        print(f"{name:<12} {s['median']:>8.4f} {s['std']*100:>7.3f}% "
+              f"{s['frac_outside']*100:>8.2f}%{flag}")
+
+    return stats
+
+
+def _load_extraction_pkl(pkl_path):
+    """Load a batch extraction pickle, returning the dict with
+    'extractions' and 'metadata' keys."""
+    if not os.path.exists(pkl_path):
+        raise FileNotFoundError(f"Extraction file not found: {pkl_path}")
+    with open(pkl_path, 'rb') as f:
+        data = cloudpickle.load(f)
+    return data

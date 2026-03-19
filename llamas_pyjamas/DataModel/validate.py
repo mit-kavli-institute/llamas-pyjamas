@@ -40,6 +40,26 @@ from llamas_pyjamas.Utils.utils import setup_logger
 # Set up logger
 logger = setup_logger(__name__)
 
+def trim_all_frames(input_fits: list, output_fits: str) -> None:
+    """Trim all frames in a FITS file using llamasAllCameras utility.
+
+    Args:
+        input_fits: Path to the input FITS file.
+        output_fits: Path to save the trimmed FITS file.
+    """
+
+    assert isinstance(input_fits, list), "input_fits must be a list of file paths"
+
+
+
+
+
+    return
+
+
+
+
+
 def get_expected_camera_list() -> List[Tuple[str, str, str]]:
     """Get the complete list of expected camera configurations.
 
