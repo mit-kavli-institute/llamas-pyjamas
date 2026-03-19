@@ -48,6 +48,10 @@ import shutil
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
+                                           compute_fibre_flat_twilight,
+                                           reduce_twilight_flat,
+                                           apply_fibre_flat_to_rss)
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -1569,18 +1573,92 @@ def main(config_path):
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
+        # ── Fibre-to-fibre flat correction on RSS files ──
+        if were_flat_corrected and config.get('apply_fibre_flat', True):
+            flat_field_dir = config.get('flat_field_output_dir',
+                                        os.path.join(extraction_path, 'flat'))
+            smooth_models_file = os.path.join(flat_field_dir,
+                                              'flat_smooth_models.fits')
+
+            if os.path.exists(smooth_models_file):
+                print("\n" + "=" * 60)
+                print("FIBRE-TO-FIBRE FLAT CORRECTION")
+                print("=" * 60)
+
+                twilight_file = config.get('twilight_flat')
+                corrections_file = None
+
+                if twilight_file and os.path.exists(twilight_file):
+                    # Branch A: Twilight + Lamp
+                    print(f"Using twilight flat: {os.path.basename(twilight_file)}")
+                    try:
+                        twi_extractions = reduce_twilight_flat(
+                            twilight_file,
+                            flat_pixel_maps[0] if flat_pixel_maps else None,
+                            final_trace_dir,
+                            config.get('arcdict'),
+                            config.get('bias_file'),
+                            extraction_path,
+                        )
+                        corrections_file = compute_fibre_flat_twilight(
+                            twi_extractions, smooth_models_file,
+                            flat_field_dir,
+                            integration_range=config.get(
+                                'fibre_flat_integration_range'),
+                        )
+                        print("Fibre flat computed (twilight + lamp method)")
+                    except Exception as e:
+                        print(f"WARNING: Twilight reduction failed: {e}")
+                        print("Falling back to lamp-only fibre flat")
+                        traceback.print_exc()
+                        corrections_file = None
+
+                if corrections_file is None:
+                    # Branch B: Lamp-only fallback
+                    if twilight_file:
+                        print("Twilight flat not available or failed — "
+                              "using lamp-only fallback")
+                    corrections_file = compute_fibre_flat_lamp_only(
+                        smooth_models_file, flat_field_dir)
+                    print("Fibre flat computed (lamp-only method)")
+
+                # Apply to all RSS files in the extraction directory
+                rss_to_correct = [
+                    os.path.join(extraction_path, f)
+                    for f in os.listdir(extraction_path)
+                    if f.endswith('.fits') and '_RSS' in f
+                    and '_FF' not in f
+                ]
+                for rss_file in rss_to_correct:
+                    ff_output = rss_file.replace('.fits', '_FF.fits')
+                    apply_fibre_flat_to_rss(rss_file, corrections_file,
+                                           ff_output)
+                    print(f"  FF RSS: {os.path.basename(ff_output)}")
+            else:
+                print("WARNING: Smooth models file not found — "
+                      "skipping fibre-to-fibre flat correction")
+
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
-        # Look for RSS files (both flat-corrected and uncorrected patterns)
-        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) 
-                if ('extract_RSS' in f or '_RSS' in f) and f.endswith('.fits')]
+        # Look for RSS files — prefer FF (fibre-flat corrected) when available
+        all_rss = [os.path.join(extraction_path, f)
+                   for f in os.listdir(extraction_path)
+                   if f.endswith('.fits') and '_RSS' in f]
+        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
+        non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
+        rss_files = ff_rss if ff_rss else non_ff_rss
         
         if rss_files:
             print(f"Found {len(rss_files)} RSS files for cube construction:")
             for rss_file in rss_files:
-                is_flat_corrected = '_flat_corrected' in os.path.basename(rss_file)
-                status = " (flat-corrected)" if is_flat_corrected else " (original)"
-                print(f"  - {os.path.basename(rss_file)}{status}")
+                basename = os.path.basename(rss_file)
+                if '_FF' in basename:
+                    status = " (fibre-flat corrected)"
+                elif '_flat_corrected' in basename:
+                    status = " (pixel-flat corrected)"
+                else:
+                    status = ""
+                print(f"  - {basename}{status}")
         else:
             print(f"Found {len(rss_files)} RSS files for cube construction")
 
