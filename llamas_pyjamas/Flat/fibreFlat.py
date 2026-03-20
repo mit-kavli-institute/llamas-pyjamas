@@ -390,11 +390,14 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
     -------
     corrected : dict
         Same structure as *integrals_dict* with gradient removed.
+    diagnostics : dict or None
+        Diagnostic data for saving/plotting, or None if gradient
+        removal was skipped.
     """
     if not integrals_dict:
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"no integrals provided, skipping")
-        return integrals_dict
+        return integrals_dict, None
 
     # ── 1. Map fibres to IFU positions ──
     keys = []
@@ -417,7 +420,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"too few fibres ({n_total}) for gradient fit, "
                        f"skipping gradient removal")
-        return integrals_dict
+        return integrals_dict, None
 
     x_arr = np.array(x_list)
     y_arr = np.array(y_list)
@@ -432,7 +435,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"too few fibres ({np.sum(good)}) after sigma-clip, "
                        f"skipping gradient removal")
-        return integrals_dict
+        return integrals_dict, None
 
     # ── 3. Normalise coordinates to [-1, 1] for numerical stability ──
     x_min, x_max = x_arr[good].min(), x_arr[good].max()
@@ -527,8 +530,271 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
     if corr_median > 0:
         scale = orig_median / corr_median
         corrected = {k: v * scale for k, v in corrected.items()}
+        corr_values = corr_values * scale
 
-    return corrected
+    diagnostics = {
+        'x': x_arr,
+        'y': y_arr,
+        'raw': flux_arr,
+        'model': model,
+        'corrected': corr_values,
+        'keys': keys,
+        'coeffs': coeffs,
+        'coeff_labels': coeff_labels,
+        'poly_order': poly_order,
+        'good': good,
+        'ptp_pct': ptp,
+        'scatter_before': scatter_before,
+        'scatter_after': scatter_after,
+        'n_clipped': n_clipped,
+        'x_min': x_min, 'x_max': x_max,
+        'y_min': y_min, 'y_max': y_max,
+    }
+
+    return corrected, diagnostics
+
+
+def _save_gradient_model(gradient_diagnostics, output_dir):
+    """Save the twilight gradient model to a multi-extension FITS file.
+
+    Parameters
+    ----------
+    gradient_diagnostics : dict
+        ``{channel: diagnostics_dict}`` from ``_remove_twilight_gradient()``.
+    output_dir : str
+        Directory for the output file.
+    """
+    output_path = os.path.join(output_dir, 'twilight_gradient_model.fits')
+
+    primary = fits.PrimaryHDU()
+    primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
+    primary.header['NCHAN'] = (len(gradient_diagnostics), 'Number of channels')
+    primary.header['HISTORY'] = 'Twilight gradient model for fibre flat fielding'
+    hdul = fits.HDUList([primary])
+
+    for channel, diag in gradient_diagnostics.items():
+        poly_order = diag['poly_order']
+        coeffs = diag['coeffs']
+        coeff_labels = diag['coeff_labels']
+
+        # Normalise coefficients for display
+        norm_coeffs = coeffs / coeffs[0] if coeffs[0] != 0 else coeffs
+
+        # ── Coefficient table ──
+        max_label_len = max(len(lbl) for lbl in coeff_labels)
+        cols = [
+            fits.Column(name='LABEL', format=f'{max_label_len}A',
+                        array=np.array(coeff_labels)),
+            fits.Column(name='VALUE', format='D', array=coeffs),
+            fits.Column(name='NORM_VALUE', format='D', array=norm_coeffs),
+        ]
+        coeff_tbl = fits.BinTableHDU.from_columns(cols)
+        coeff_tbl.header['EXTNAME'] = f'{channel.upper()}_COEFF'
+        coeff_tbl.header['CHANNEL'] = channel
+        coeff_tbl.header['POLYORD'] = (poly_order, 'Polynomial order')
+        coeff_tbl.header['PTP_PCT'] = (diag['ptp_pct'],
+                                       'Gradient peak-to-peak %')
+        coeff_tbl.header['SCATBEF'] = (diag['scatter_before'],
+                                       'Scatter before gradient removal %')
+        coeff_tbl.header['SCATAFT'] = (diag['scatter_after'],
+                                       'Scatter after gradient removal %')
+        coeff_tbl.header['NCLIP'] = (diag['n_clipped'],
+                                     'Number of sigma-clipped fibres')
+        coeff_tbl.header['NFIBRES'] = (len(diag['x']),
+                                       'Total fibres in fit')
+        hdul.append(coeff_tbl)
+
+        # ── Per-fibre data table ──
+        keys = diag['keys']
+        benchsides = np.array([k[0] for k in keys])
+        fiber_ids = np.array([k[1] for k in keys], dtype=np.int32)
+        max_bs_len = max(len(bs) for bs in benchsides) if len(benchsides) > 0 else 3
+
+        cols = [
+            fits.Column(name='BENCHSIDE', format=f'{max_bs_len}A',
+                        array=benchsides),
+            fits.Column(name='FIBER_ID', format='J', array=fiber_ids),
+            fits.Column(name='X', format='D', array=diag['x']),
+            fits.Column(name='Y', format='D', array=diag['y']),
+            fits.Column(name='RAW', format='D', array=diag['raw']),
+            fits.Column(name='MODEL', format='D', array=diag['model']),
+            fits.Column(name='CORRECTED', format='D', array=diag['corrected']),
+            fits.Column(name='USED_IN_FIT', format='L',
+                        array=diag['good'].astype(bool)),
+        ]
+        fibre_tbl = fits.BinTableHDU.from_columns(cols)
+        fibre_tbl.header['EXTNAME'] = f'{channel.upper()}_FIBRES'
+        fibre_tbl.header['CHANNEL'] = channel
+        hdul.append(fibre_tbl)
+
+    hdul.writeto(output_path, overwrite=True)
+    logger.info(f"Twilight gradient model written: {output_path} "
+                f"({len(hdul) - 1} extensions)")
+
+
+def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
+                                channel_groups, output_dir):
+    """Generate a multi-panel IFU hex-map diagnostic plot.
+
+    Layout: one row per channel, 4 columns:
+    1. Raw twilight integrals
+    2. Fitted gradient surface
+    3. Corrected integrals
+    4. T_i per fibre
+
+    Parameters
+    ----------
+    gradient_diagnostics : dict
+        ``{channel: diagnostics_dict}`` from ``_remove_twilight_gradient()``.
+    t_i_all : dict
+        ``{ext_name: {fid: t_i_value}}`` from Pass 2.
+    models : dict
+        Smooth models dict (for fiber_ids and bench/side metadata).
+    channel_groups : dict
+        ``{channel: [ext_name, ...]}``
+    output_dir : str
+        Directory for the output plot.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import RegularPolygon
+    from matplotlib.colors import Normalize
+
+    channel_order = ['blue', 'green', 'red']
+    channels = [ch for ch in channel_order if ch in gradient_diagnostics]
+    if not channels:
+        logger.warning("No gradient diagnostics to plot")
+        return
+
+    n_rows = len(channels)
+    fig, axes = plt.subplots(n_rows, 4, figsize=(22, 5.5 * n_rows))
+    if n_rows == 1:
+        axes = axes[np.newaxis, :]
+
+    col_titles = ['Raw Twilight Integrals', 'Fitted Gradient Surface',
+                  'Corrected Integrals', 'T_i (Spatial Throughput)']
+
+    for row_idx, channel in enumerate(channels):
+        diag = gradient_diagnostics[channel]
+        x = diag['x']
+        y = diag['y']
+        raw = diag['raw']
+        model_vals = diag['model']
+        corrected = diag['corrected']
+        good = diag['good']
+
+        # Compute hex size from fibre spacing
+        x_sorted = np.sort(np.unique(x))
+        if len(x_sorted) > 1:
+            hex_size = np.nanmedian(np.diff(x_sorted)) / 1.5
+        else:
+            hex_size = 0.5
+
+        # Build T_i array at same positions
+        keys = diag['keys']
+        ti_vals = np.ones(len(keys))
+        for i, (bs, fid) in enumerate(keys):
+            # Find which ext_name this benchside belongs to
+            for ext_name in channel_groups.get(channel, []):
+                if (f"{models[ext_name]['bench']}{models[ext_name]['side']}"
+                        == bs):
+                    ti_vals[i] = t_i_all.get(ext_name, {}).get(fid, 1.0)
+                    break
+
+        # Data for each column
+        datasets = [raw, model_vals, corrected, ti_vals]
+
+        # Shared scale for columns 1 and 3 (raw & corrected)
+        shared_vmin = min(np.nanmin(raw), np.nanmin(corrected))
+        shared_vmax = max(np.nanmax(raw), np.nanmax(corrected))
+
+        for col_idx, data in enumerate(datasets):
+            ax = axes[row_idx, col_idx]
+
+            if col_idx in (0, 2):
+                # Sequential colormap, shared scale
+                cmap = matplotlib.colormaps['viridis']
+                vmin, vmax = shared_vmin, shared_vmax
+            elif col_idx == 1:
+                # Diverging around mean for gradient surface
+                cmap = matplotlib.colormaps['RdBu_r']
+                mean_val = np.nanmean(data)
+                dev = max(abs(data.max() - mean_val),
+                          abs(data.min() - mean_val))
+                vmin, vmax = mean_val - dev, mean_val + dev
+            else:
+                # T_i: diverging around 1.0
+                cmap = matplotlib.colormaps['RdBu_r']
+                dev = max(abs(data.max() - 1.0), abs(data.min() - 1.0), 0.1)
+                vmin, vmax = 1.0 - dev, 1.0 + dev
+
+            norm = Normalize(vmin=vmin, vmax=vmax)
+
+            for i in range(len(x)):
+                if np.isnan(data[i]):
+                    continue
+                color = cmap(norm(data[i]))
+                hex_patch = RegularPolygon(
+                    (x[i], y[i]), numVertices=6, radius=hex_size,
+                    orientation=np.pi / 6,
+                    facecolor=color, edgecolor='none', linewidth=0.2)
+                ax.add_patch(hex_patch)
+
+            # Mark sigma-clipped fibres in column 1
+            if col_idx == 0:
+                clipped_mask = ~good
+                if np.any(clipped_mask):
+                    ax.scatter(x[clipped_mask], y[clipped_mask],
+                               marker='x', c='red', s=15, linewidths=0.8,
+                               zorder=5)
+
+            ax.set_xlim(x.min() - 2 * hex_size, x.max() + 2 * hex_size)
+            ax.set_ylim(y.min() - 2 * hex_size, y.max() + 2 * hex_size)
+            ax.set_aspect('equal')
+
+            # Colorbar
+            sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+            if col_idx == 3:
+                cbar.set_label('T_i')
+
+            # Titles
+            if row_idx == 0:
+                ax.set_title(col_titles[col_idx], fontsize=11)
+
+            # Row label
+            if col_idx == 0:
+                ax.set_ylabel(f'{channel.upper()}\n'
+                              f'scatter: {diag["scatter_before"]:.1f}%'
+                              f' -> {diag["scatter_after"]:.1f}%',
+                              fontsize=10)
+
+            # Annotation for gradient column
+            if col_idx == 1:
+                coeff_summary = ', '.join(
+                    f'{lbl}: {c / diag["coeffs"][0]:+.3f}'
+                    for lbl, c in zip(diag['coeff_labels'][1:],
+                                      diag['coeffs'][1:])
+                    if lbl in ('x', 'y'))
+                ax.text(0.02, 0.02,
+                        f'PtP: {diag["ptp_pct"]:.1f}%\n{coeff_summary}',
+                        transform=ax.transAxes, fontsize=8,
+                        verticalalignment='bottom',
+                        bbox=dict(boxstyle='round,pad=0.3',
+                                  facecolor='white', alpha=0.8))
+
+            ax.tick_params(labelsize=7)
+
+    fig.suptitle('Fibre Flat Diagnostic: Twilight Gradient Removal',
+                 fontsize=14, fontweight='bold', y=1.01)
+    fig.tight_layout()
+
+    output_path = os.path.join(output_dir, 'fibre_flat_diagnostic.png')
+    fig.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"Fibre flat diagnostic plot saved: {output_path}")
 
 
 def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
@@ -665,11 +931,14 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                     f"benchsides")
 
     # ── Pass 1.5: Remove twilight spatial gradient for ALL channels ──
+    gradient_diagnostics = {}  # {channel: diagnostics_dict}
     for channel, integrals in channel_integrals.items():
         if len(integrals) > 0:
-            corrected = _remove_twilight_gradient(integrals, channel,
-                                                  poly_order=2)
+            corrected, diag = _remove_twilight_gradient(integrals, channel,
+                                                         poly_order=2)
             channel_integrals[channel] = corrected
+            if diag is not None:
+                gradient_diagnostics[channel] = diag
 
     # ══════════════════════════════════════════════════════════════════
     # Pass 2: Compute W_i (per benchside) and T_i (from gradient-
@@ -832,6 +1101,12 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                         f"deviates >5% from 1.0 ***")
 
     _cross_bench_diagnostic(channel_refs)
+
+    # ── Save gradient model and diagnostic plot ──
+    if gradient_diagnostics:
+        _save_gradient_model(gradient_diagnostics, output_dir)
+        _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
+                                    channel_groups, output_dir)
 
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(
