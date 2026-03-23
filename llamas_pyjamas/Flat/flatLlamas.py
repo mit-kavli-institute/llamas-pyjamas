@@ -24,49 +24,7 @@ CHANNEL_SIGNAL_THRESHOLDS = {'red': 5000, 'green': 8000, 'blue': 5000}
 
 
 
-# Set up logging
-def setup_logger(verbose=False):
-    """Setup logger with configurable console verbosity."""
-    log_dir = os.path.join(OUTPUT_DIR, 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = os.path.join(log_dir, f'flatLlamas_{timestamp}.log')
-
-    # Configure the logger
-    logger = logging.getLogger('flatLlamas')
-    logger.setLevel(logging.DEBUG)
-    
-    # Clear existing handlers to avoid duplicates
-    logger.handlers.clear()
-
-    # Create handlers
-    file_handler = logging.FileHandler(log_file)
-    console_handler = logging.StreamHandler()
-
-    # Set levels
-    file_handler.setLevel(logging.DEBUG)
-    console_level = logging.INFO if verbose else logging.WARNING
-    console_handler.setLevel(console_level)
-
-    # Create formatters
-    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
-
-    # Add formatters to handlers
-    file_handler.setFormatter(file_formatter)
-    console_handler.setFormatter(console_formatter)
-
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    if verbose:
-        logger.info(f"Verbose logging enabled. Log file: {log_file}")
-    
-    return logger
-
-# Initialize with default settings
-logger = setup_logger(verbose=False)
+logger = logging.getLogger(__name__)
 
 def create_master_flat(file_list, target_color, output_dir=OUTPUT_DIR):
     """
@@ -594,9 +552,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     Returns:
         dict: Dictionary containing processing results and output file paths
     """
-    # Setup logger with appropriate verbosity level
-    global logger
-    logger = setup_logger(verbose=verbose)
     logger.info("Starting complete flat field processing workflow")
     logger.info(f"Input files:")
     logger.info(f"  Red: {red_flat_file}")
@@ -820,8 +775,6 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
         ``{'combined_flat_file', 'calibrated_flat_file', 'pixel_map_file',
         'processing_status'}``
     """
-    global logger
-    logger = setup_logger(verbose=verbose)
     logger.info("Starting SIMPLE pixel flat processing workflow")
 
     if signal_thresholds is None:

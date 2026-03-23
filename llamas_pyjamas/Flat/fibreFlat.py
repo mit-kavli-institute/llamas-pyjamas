@@ -18,8 +18,6 @@ from astropy.stats import sigma_clip
 from datetime import datetime
 from numpy.polynomial.polynomial import polyvander2d
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
-from llamas_pyjamas.Utils.utils import setup_logger
-
 logger = logging.getLogger(__name__)
 
 # Bounds for the correction factor — prevents catastrophic edge divisions
@@ -496,11 +494,11 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
                 elif ix == 0 and iy == 1:
                     coeff_labels.append('y')
                 elif ix == 2 and iy == 0:
-                    coeff_labels.append('x²')
+                    coeff_labels.append('x2')
                 elif ix == 1 and iy == 1:
                     coeff_labels.append('xy')
                 elif ix == 0 and iy == 2:
-                    coeff_labels.append('y²')
+                    coeff_labels.append('y2')
                 else:
                     coeff_labels.append(f'x{ix}y{iy}')
 

@@ -15,7 +15,6 @@ import traceback
 import pkg_resources
 from pathlib import Path
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
@@ -30,8 +29,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 
 # Set up logging
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 
 

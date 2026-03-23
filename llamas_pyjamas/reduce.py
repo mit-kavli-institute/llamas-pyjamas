@@ -25,6 +25,8 @@ import argparse
 import pickle
 import traceback
 import multiprocessing
+import logging
+import gc
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
@@ -35,7 +37,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
+from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -45,6 +47,10 @@ from astropy.io import fits
 import numpy as np
 
 import shutil
+
+_cached_reference_arc = None
+
+logger = logging.getLogger(__name__)
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
@@ -319,14 +325,19 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 def correct_wavelengths(science_extraction_file, soln=None):
     # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
-    arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
-    
+    global _cached_reference_arc
+    if _cached_reference_arc is None:
+        logger.info("Loading reference arc (first call, will be cached)")
+        _cached_reference_arc = ExtractLlamas.loadExtraction(
+            os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    arcdict = _cached_reference_arc
+
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
     extractions, metadata, primary_hdr = _science['extractions'], _science['metadata'], _science['primary_header']
     print(f'extractions: {extractions}')
     print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
-    
+
     print(f'std_wvcal: {std_wvcal}')
     print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
 
@@ -397,6 +408,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
 
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
+        logger.error(f"Flat field calibration failed: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return []
@@ -492,6 +504,7 @@ def build_flat_field_map(flat_pixel_maps, science_file):
 
     except Exception as e:
         print(f"ERROR building flat field map: {e}")
+        logger.error(f"Failed to build flat field map: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return {}
@@ -642,6 +655,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     
     if not flat_map:
         print("ERROR: Could not build flat field mapping")
+        logger.error("Could not build flat field mapping")
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
     
     # Step 2: Validate matching if requested
@@ -782,6 +796,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
             
     except Exception as e:
         print(f"ERROR: Failed to process science file {science_file}: {str(e)}")
+        logger.error(f"Failed to process science file {science_file}: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
@@ -834,8 +849,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     processed_traditional_bases = set()
 
     # Create a single logger for all cube construction
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+    logger = logging.getLogger(__name__)
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
 
     for rss_file in rss_files:
@@ -1101,6 +1115,15 @@ def main(config_path):
         
     print("Configuration:", config)
 
+    # Configure pipeline logging — log file goes next to the config file
+    if 'log_output_dir' in config:
+        log_dir = config['log_output_dir']
+    else:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
+    log_file = configure_pipeline_logging(log_dir)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Pipeline started. Config: {config_path}")
+
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
@@ -1178,6 +1201,7 @@ def main(config_path):
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
+        logger.info("Stage: Generating new wavelength solution")
         extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
@@ -1273,6 +1297,7 @@ def main(config_path):
                 trace_source = "existing_missing"
         else:
             print("Generating new traces...")
+            logger.info("Stage: Generating new traces")
 
             # Validate flat field files before trace generation
             
@@ -1400,6 +1425,7 @@ def main(config_path):
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
+                logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
         
 
         
@@ -1467,6 +1493,7 @@ def main(config_path):
                         overall_stats['total_errors'] += stats['errors']
                     else:
                         print(f"ERROR: Failed to flat-correct {science_file}")
+                        logger.error(f"Failed to flat-correct {science_file}")
                         # Use original file as fallback
                         flat_corrected_files.append(science_file)
                         
@@ -1493,6 +1520,7 @@ def main(config_path):
                     overall_stats['total_errors'] = stats['errors']
                 else:
                     print(f"ERROR: Failed to flat-correct {science_file}, using original")
+                    logger.error(f"Failed to flat-correct {science_file}, using original")
                     science_files_to_process = science_file
             
             print("\n" + "="*60)
@@ -1513,6 +1541,7 @@ def main(config_path):
         
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
+            logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
             for i, science_file in enumerate(science_files_to_process):
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
@@ -1557,8 +1586,7 @@ def main(config_path):
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
             # Create a logger for RSS generation
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            rss_logger = logging.getLogger(__name__ + '.rss')
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
@@ -1572,6 +1600,10 @@ def main(config_path):
             # Updating RA and Dec in RSS files
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+
+            # Free wavelength-corrected extractions to reduce memory pressure
+            del corr_extractions, corr_extraction_list
+            gc.collect()
 
         # ── Fibre-to-fibre flat correction on RSS files ──
         if were_flat_corrected and config.get('apply_fibre_flat', True):
@@ -1606,11 +1638,20 @@ def main(config_path):
                             integration_range=config.get(
                                 'fibre_flat_integration_range'),
                         )
+                        del twi_extractions
+                        gc.collect()
                         print("Fibre flat computed (twilight + lamp method)")
                     except Exception as e:
                         print(f"WARNING: Twilight reduction failed: {e}")
+                        logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
                         print("Falling back to lamp-only fibre flat")
                         traceback.print_exc()
+                        # Clean up if twi_extractions was created before failure
+                        try:
+                            del twi_extractions
+                        except NameError:
+                            pass
+                        gc.collect()
                         corrections_file = None
 
                 if corrections_file is None:
@@ -1637,9 +1678,11 @@ def main(config_path):
             else:
                 print("WARNING: Smooth models file not found — "
                       "skipping fibre-to-fibre flat correction")
+                logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
+        logger.info("Stage: Constructing cubes from RSS files")
         # Look for RSS files — prefer FF (fibre-flat corrected) when available
         all_rss = [os.path.join(extraction_path, f)
                    for f in os.listdir(extraction_path)
@@ -1695,6 +1738,7 @@ def main(config_path):
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
+        logger.error(f"Pipeline failed: {e}", exc_info=True)
 
 
 
