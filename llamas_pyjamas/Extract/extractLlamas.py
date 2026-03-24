@@ -42,14 +42,12 @@ from pathlib import Path
 
 ####################################################################################
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
 ray.init(ignore_reinit_error=True)
 
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.

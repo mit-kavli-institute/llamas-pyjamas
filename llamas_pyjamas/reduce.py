@@ -25,6 +25,8 @@ import argparse
 import pickle
 import traceback
 import multiprocessing
+import logging
+import gc
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
@@ -35,7 +37,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
+from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -46,8 +48,16 @@ import numpy as np
 
 import shutil
 
+_cached_reference_arc = None
+
+logger = logging.getLogger(__name__)
+
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
+                                           compute_fibre_flat_twilight,
+                                           reduce_twilight_flat,
+                                           apply_fibre_flat_to_rss)
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -317,8 +327,13 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 def correct_wavelengths(science_extraction_file, soln=None):
     # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
-    arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
-    
+    global _cached_reference_arc
+    if _cached_reference_arc is None:
+        logger.info("Loading reference arc (first call, will be cached)")
+        _cached_reference_arc = ExtractLlamas.loadExtraction(
+            os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    arcdict = _cached_reference_arc
+
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
     extractions = _science['extractions']
     metadata    = _science['metadata']
@@ -326,7 +341,7 @@ def correct_wavelengths(science_extraction_file, soln=None):
     print(f'extractions: {extractions}')
     print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
-    
+
     print(f'std_wvcal: {std_wvcal}')
     print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
 
@@ -478,6 +493,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
 
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
+        logger.error(f"Flat field calibration failed: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return []
@@ -609,6 +625,7 @@ def build_flat_field_map(flat_pixel_maps, science_file):
 
     except Exception as e:
         print(f"ERROR building flat field map: {e}")
+        logger.error(f"Failed to build flat field map: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return {}
@@ -759,6 +776,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     
     if not flat_map:
         print("ERROR: Could not build flat field mapping")
+        logger.error("Could not build flat field mapping")
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
     
     # Step 2: Validate matching if requested
@@ -899,6 +917,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
             
     except Exception as e:
         print(f"ERROR: Failed to process science file {science_file}: {str(e)}")
+        logger.error(f"Failed to process science file {science_file}: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
@@ -951,8 +970,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     processed_traditional_bases = set()
 
     # Create a single logger for all cube construction
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+    logger = logging.getLogger(__name__)
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
 
     for rss_file in rss_files:
@@ -1218,6 +1236,15 @@ def main(config_path):
         
     print("Configuration:", config)
 
+    # Configure pipeline logging — log file goes next to the config file
+    if 'log_output_dir' in config:
+        log_dir = config['log_output_dir']
+    else:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
+    log_file = configure_pipeline_logging(log_dir)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Pipeline started. Config: {config_path}")
+
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
@@ -1295,6 +1322,7 @@ def main(config_path):
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
+        logger.info("Stage: Generating new wavelength solution")
         extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
@@ -1390,6 +1418,7 @@ def main(config_path):
                 trace_source = "existing_missing"
         else:
             print("Generating new traces...")
+            logger.info("Stage: Generating new traces")
 
             # Validate flat field files before trace generation
             
@@ -1517,6 +1546,7 @@ def main(config_path):
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
+                logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
 
             # --- Generate flat RSS for fibre-to-fibre correction ---
             # The flat frames (dome or twilight) must have the pixel map applied
@@ -1648,6 +1678,7 @@ def main(config_path):
                         overall_stats['total_errors'] += stats['errors']
                     else:
                         print(f"ERROR: Failed to flat-correct {science_file}")
+                        logger.error(f"Failed to flat-correct {science_file}")
                         # Use original file as fallback
                         flat_corrected_files.append(science_file)
                         
@@ -1674,6 +1705,7 @@ def main(config_path):
                     overall_stats['total_errors'] = stats['errors']
                 else:
                     print(f"ERROR: Failed to flat-correct {science_file}, using original")
+                    logger.error(f"Failed to flat-correct {science_file}, using original")
                     science_files_to_process = science_file
             
             print("\n" + "="*60)
@@ -1694,6 +1726,7 @@ def main(config_path):
         
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
+            logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
             for i, science_file in enumerate(science_files_to_process):
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
@@ -1738,8 +1771,7 @@ def main(config_path):
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
             # Create a logger for RSS generation
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            rss_logger = logging.getLogger(__name__ + '.rss')
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
@@ -1754,46 +1786,107 @@ def main(config_path):
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
-            # --- Fibre-to-fibre flat correction ---
-            # Applied per science RSS file if flat RSS products were generated earlier.
-            # Disable by setting apply_fibre_flat = False in the config file.
-            if config.get('flat_rss_outputs') and config.get('apply_fibre_flat', True):
-                from llamas_pyjamas.Flat.fibre_flat import run_fibre_flat as _run_fibre_flat
-                print("\n" + "="*60)
+            # Free wavelength-corrected extractions to reduce memory pressure
+            del corr_extractions, corr_extraction_list
+            gc.collect()
+
+        # ── Fibre-to-fibre flat correction on RSS files ──
+        if were_flat_corrected and config.get('apply_fibre_flat', True):
+            flat_field_dir = config.get('flat_field_output_dir',
+                                        os.path.join(extraction_path, 'flat'))
+            smooth_models_file = os.path.join(flat_field_dir,
+                                              'flat_smooth_models.fits')
+
+            if os.path.exists(smooth_models_file):
+                print("\n" + "=" * 60)
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
-                print("="*60)
-                ff_smooth = int(config.get('ff_smooth_kernel', 15))
-                for science_rss in (new_rss_outputs or []):
-                    chan = _extract_channel_from_filename(science_rss)
-                    flat_rss = _find_matching_flat_rss(config['flat_rss_outputs'], chan)
-                    if flat_rss and os.path.exists(flat_rss):
-                        print(f"  Applying fibre-flat: {os.path.basename(science_rss)}"
-                              f"  (flat: {os.path.basename(flat_rss)})")
+                print("=" * 60)
+
+                twilight_file = config.get('twilight_flat')
+                corrections_file = None
+
+                if twilight_file and os.path.exists(twilight_file):
+                    # Branch A: Twilight + Lamp
+                    print(f"Using twilight flat: {os.path.basename(twilight_file)}")
+                    try:
+                        twi_extractions = reduce_twilight_flat(
+                            twilight_file,
+                            flat_pixel_maps[0] if flat_pixel_maps else None,
+                            final_trace_dir,
+                            config.get('arcdict'),
+                            config.get('bias_file'),
+                            extraction_path,
+                        )
+                        corrections_file = compute_fibre_flat_twilight(
+                            twi_extractions, smooth_models_file,
+                            flat_field_dir,
+                            integration_range=config.get(
+                                'fibre_flat_integration_range'),
+                        )
+                        del twi_extractions
+                        gc.collect()
+                        print("Fibre flat computed (twilight + lamp method)")
+                    except Exception as e:
+                        print(f"WARNING: Twilight reduction failed: {e}")
+                        logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
+                        print("Falling back to lamp-only fibre flat")
+                        traceback.print_exc()
+                        # Clean up if twi_extractions was created before failure
                         try:
-                            _run_fibre_flat(
-                                science_rss_path=science_rss,
-                                flat_rss_path=flat_rss,
-                                output_dir=extraction_path,
-                                smooth_kernel=ff_smooth,
-                                reference_fibre=None,
-                            )
-                        except Exception as ff_err:
-                            print(f"  WARNING: Fibre-flat failed for {os.path.basename(science_rss)}: {ff_err}")
-                    else:
-                        print(f"  No matching flat RSS for channel '{chan}', skipping fibre-flat.")
+                            del twi_extractions
+                        except NameError:
+                            pass
+                        gc.collect()
+                        corrections_file = None
+
+                if corrections_file is None:
+                    # Branch B: Lamp-only fallback
+                    if twilight_file:
+                        print("Twilight flat not available or failed — "
+                              "using lamp-only fallback")
+                    corrections_file = compute_fibre_flat_lamp_only(
+                        smooth_models_file, flat_field_dir)
+                    print("Fibre flat computed (lamp-only method)")
+
+                # Apply to all RSS files in the extraction directory
+                rss_to_correct = [
+                    os.path.join(extraction_path, f)
+                    for f in os.listdir(extraction_path)
+                    if f.endswith('.fits') and '_RSS' in f
+                    and '_FF' not in f
+                ]
+                for rss_file in rss_to_correct:
+                    ff_output = rss_file.replace('.fits', '_FF.fits')
+                    apply_fibre_flat_to_rss(rss_file, corrections_file,
+                                           ff_output)
+                    print(f"  FF RSS: {os.path.basename(ff_output)}")
+            else:
+                print("WARNING: Smooth models file not found — "
+                      "skipping fibre-to-fibre flat correction")
+                logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
-        # Look for RSS files (both flat-corrected and uncorrected patterns)
-        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) 
-                if ('extract_RSS' in f or '_RSS' in f) and f.endswith('.fits')]
+        logger.info("Stage: Constructing cubes from RSS files")
+        # Look for RSS files — prefer FF (fibre-flat corrected) when available
+        all_rss = [os.path.join(extraction_path, f)
+                   for f in os.listdir(extraction_path)
+                   if f.endswith('.fits') and '_RSS' in f]
+        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
+        non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
+        rss_files = ff_rss if ff_rss else non_ff_rss
         
         if rss_files:
             print(f"Found {len(rss_files)} RSS files for cube construction:")
             for rss_file in rss_files:
-                is_flat_corrected = '_flat_corrected' in os.path.basename(rss_file)
-                status = " (flat-corrected)" if is_flat_corrected else " (original)"
-                print(f"  - {os.path.basename(rss_file)}{status}")
+                basename = os.path.basename(rss_file)
+                if '_FF' in basename:
+                    status = " (fibre-flat corrected)"
+                elif '_flat_corrected' in basename:
+                    status = " (pixel-flat corrected)"
+                else:
+                    status = ""
+                print(f"  - {basename}{status}")
         else:
             print(f"Found {len(rss_files)} RSS files for cube construction")
 
@@ -1830,6 +1923,7 @@ def main(config_path):
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
+        logger.error(f"Pipeline failed: {e}", exc_info=True)
 
 
 

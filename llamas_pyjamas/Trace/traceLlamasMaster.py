@@ -43,7 +43,6 @@ import multiprocessing
 import argparse
 import cloudpickle
 from scipy.signal import find_peaks
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
@@ -52,13 +51,7 @@ import rpdb
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
 
-# Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-# Add timestamp to log filename
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-#logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 
 LOG = []

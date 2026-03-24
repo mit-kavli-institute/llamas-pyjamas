@@ -7,7 +7,6 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import logging
 from datetime import datetime
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 class RSSgeneration:
@@ -20,8 +19,7 @@ class RSSgeneration:
         """
         # Set up logging
         if logger is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            self.logger = logging.getLogger(__name__)
         else:
             self.logger = logger
             
@@ -425,8 +423,7 @@ def update_ra_dec_in_fits(fits_file, logger=None):
     """
     # Set up logging if not provided
     if logger is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        logger = setup_logger(__name__, f'update_ra_dec_{timestamp}.log')
+        logger = logging.getLogger(__name__)
     
     logger.info(f"Updating RA/DEC in FITS file: {fits_file}")
     
