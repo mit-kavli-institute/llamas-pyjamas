@@ -26,12 +26,10 @@ Example:
         for ext in cameras.extensions:
             print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
+import logging
 from astropy.io import fits # type: ignore
-from datetime import datetime
-from llamas_pyjamas.Utils.utils import setup_logger
 
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, f'file_validation_{timestamp}.log')
+logger = logging.getLogger(__name__)
 ##############################################################
 
 class llamasOneCamera:

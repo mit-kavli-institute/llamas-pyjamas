@@ -22,7 +22,6 @@ from astropy.io import fits
 from astropy.table import Table
 
 from llamas_pyjamas.Cube.crr_cube_constructor import RSSData
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 def extract_fiber_positions(fibermap: Table, 
@@ -36,7 +35,7 @@ def extract_fiber_positions(fibermap: Table,
     Returns:
         Fiber positions array (n_fibers, 2) in arcsec
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     
     # Check what columns are available in the fibermap
     available_columns = fibermap.colnames
@@ -147,7 +146,7 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
     Returns:
         RSSData object ready for CRR reconstruction
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info(f"Loading RSS file for CRR conversion: {rss_file}")
     
     with fits.open(rss_file) as hdul:
@@ -300,7 +299,7 @@ def combine_channels_for_crr(rss_files: List[str]) -> RSSData:
     Returns:
         Combined RSSData object
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info(f"Combining {len(rss_files)} RSS files for CRR")
     
     # Load all channels
