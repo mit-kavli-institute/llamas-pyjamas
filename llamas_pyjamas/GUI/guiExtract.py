@@ -185,7 +185,7 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         'detector_background': median background after bias subtraction
         'hdu_index': the HDU index for this extraction
     """
-    _BIAS_INTERFIBRE_THRESHOLD = 10.0  # DN — max tolerated master-bias / frame divergence
+    _BIAS_INTERFIBRE_LOG_THRESHOLD = 10.0  # DN — divergence above which a diagnostic warning is logged
 
     try:
         # Parse camera identifiers
@@ -250,10 +250,13 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
                     bias = None
 
             if bias is not None:
-                # --- Inter-fibre quality check ---
-                # Compare master bias inter-fibre median against the raw frame's
-                # inter-fibre median. A large divergence indicates the master bias
-                # is unsuitable for this frame (e.g. gain/level change), so fall back.
+                # --- Inter-fibre diagnostic (informational only) ---
+                # Log the divergence between the raw frame's inter-fibre median and the
+                # master bias's inter-fibre median.  For science frames, this divergence
+                # is dominated by sky background in the gaps and can legitimately be
+                # hundreds of DN — it does NOT indicate a bad bias file.  The master
+                # bias is never discarded here; hard failures (missing file, read-mode
+                # mismatch, wrong detector) are handled earlier.
                 try:
                     gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
                     n_gap = int(gap_mask.sum())
@@ -261,28 +264,27 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
                         frame_if_level = float(np.nanmedian(hdu_data.astype(float)[gap_mask]))
                         bias_if_level  = float(np.nanmedian(bias.data[gap_mask]))
                         divergence = abs(frame_if_level - bias_if_level)
-                        if divergence > _BIAS_INTERFIBRE_THRESHOLD:
+                        if divergence > _BIAS_INTERFIBRE_LOG_THRESHOLD:
                             logger.warning(
-                                f"Master bias inter-fibre check failed for {bench}{side} {color}: "
+                                f"Master bias inter-fibre divergence for {bench}{side} {color}: "
                                 f"|frame_if={frame_if_level:.2f} - bias_if={bias_if_level:.2f}| = "
-                                f"{divergence:.2f} DN > {_BIAS_INTERFIBRE_THRESHOLD} DN — "
-                                f"discarding master bias, switching to inter-fibre fallback"
+                                f"{divergence:.2f} DN "
+                                f"(expected for sky-illuminated frames; master bias retained)"
                             )
-                            bias = None
                         else:
                             logger.info(
-                                f"Master bias inter-fibre check passed for {bench}{side} {color}: "
+                                f"Master bias inter-fibre check OK for {bench}{side} {color}: "
                                 f"divergence={divergence:.2f} DN"
                             )
                     else:
                         logger.warning(
-                            f"Inter-fibre quality check skipped for {bench}{side} {color}: "
+                            f"Inter-fibre diagnostic skipped for {bench}{side} {color}: "
                             f"only {n_gap} gap pixels (< 100)"
                         )
                 except Exception as exc:
                     logger.warning(
-                        f"Inter-fibre bias quality check failed for {bench}{side} {color} "
-                        f"({exc}); keeping master bias"
+                        f"Inter-fibre bias diagnostic failed for {bench}{side} {color} "
+                        f"({exc}); continuing with master bias"
                     )
 
             if bias is None:

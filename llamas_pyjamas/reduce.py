@@ -1953,6 +1953,8 @@ def main(config_path):
                             flat_field_dir,
                             integration_range=config.get(
                                 'fibre_flat_integration_range'),
+                            poly_order=config.get(
+                                'fibre_flat_poly_order', None),
                         )
                         del twi_extractions
                         gc.collect()

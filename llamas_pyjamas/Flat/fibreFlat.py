@@ -26,6 +26,10 @@ CORRECTION_CLAMP = (0.2, 5.0)
 # Minimum reference flux to apply correction (below this → C_i = 1.0)
 MIN_REF_FLUX = 100.0
 
+# RSS MASK bitmask flags written by apply_fibre_flat_to_rss
+MASK_FLAT_LAMP_ONLY        = np.int16(1)  # benchside T_i derived from lamp, not twilight
+MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # fibre absent from FiberMap_LUT; gradient interpolated from benchside peers
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shared utilities
@@ -156,10 +160,16 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None)
             continue
 
         # BinTable: per-fibre corrections on native grid
+        fibre_flags = data.get('fibre_flags',
+                                np.zeros(len(fiber_ids), dtype=np.int16))
+        correction_var = data.get('correction_var', np.zeros_like(corr))
         cols = [
             fits.Column(name='FIBER_ID', format='J', array=fiber_ids),
             fits.Column(name='CORRECTION', format=f'{naxis1}D', array=corr),
             fits.Column(name='WAVE', format=f'{naxis1}D', array=wave),
+            fits.Column(name='FLAGS', format='I', array=fibre_flags),
+            fits.Column(name='CORRECTION_VAR',
+                        format=f'{naxis1}D', array=correction_var),
         ]
         tbl = fits.BinTableHDU.from_columns(cols)
         tbl.header['EXTNAME'] = ext_name
@@ -277,6 +287,8 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
             'n_ref': n_alive,
             'common_wave': common_wave,
             'reference': reference,
+            # TODO: populate from lamp photon noise when available
+            'correction_var': np.zeros_like(corr_arr),
         }
 
         # Collect for cross-bench diagnostics
@@ -364,7 +376,11 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
     return extraction_dict
 
 
-def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
+_DEFAULT_POLY_ORDER = {'blue': 4, 'green': 3, 'red': 2}
+_EXPECTED_BENCHSIDES = 8  # 4 benches × 2 sides per channel
+
+
+def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     """Remove large-scale spatial gradient from twilight fibre integrals.
 
     The twilight sky has a spatial gradient (Rayleigh scattering, strongest
@@ -383,8 +399,14 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         all benchsides for one colour channel.
     channel : str
         Channel name (for logging).
-    poly_order : int, optional
-        Polynomial order for the 2D surface fit (default 2).
+    poly_order : int, dict, or None, optional
+        Polynomial order for the 2D surface fit.
+        - ``None``  → use channel-specific defaults (blue=4, green=3, red=2).
+        - ``int``   → use that order for every channel.
+        - ``dict``  → ``{'blue': N, 'green': M, 'red': P}``; falls back to 2
+          if the channel is absent.
+        If >2 benchsides are missing twilight data, the order is automatically
+        reduced to 1 (a simple tilt) to avoid oscillation in the spatial gaps.
 
     Returns
     -------
@@ -393,11 +415,36 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
     diagnostics : dict or None
         Diagnostic data for saving/plotting, or None if gradient
         removal was skipped.
+    unmapped_keys : set
+        Set of ``(benchside_str, fiber_id)`` keys that were absent from
+        FiberMap_LUT and had the benchside-median correction applied.
     """
+    # ── Resolve polynomial order ──
+    if poly_order is None:
+        resolved_order = _DEFAULT_POLY_ORDER.get(channel, 2)
+    elif isinstance(poly_order, dict):
+        resolved_order = poly_order.get(channel, 2)
+    else:
+        resolved_order = int(poly_order)
+
+    # ── Dynamic order reduction when spatial coverage has large holes ──
+    represented_benchsides = len({bs for (bs, fid) in integrals_dict.keys()})
+    missing_benchsides = _EXPECTED_BENCHSIDES - represented_benchsides
+    if missing_benchsides > 2 and resolved_order > 1:
+        logger.warning(
+            f"Twilight gradient removal for {channel}: "
+            f"{missing_benchsides} benchsides missing twilight data — "
+            f"reducing poly_order from {resolved_order} to 1 to avoid "
+            f"polynomial oscillation in spatial gaps"
+        )
+        resolved_order = 1
+
+    unmapped_keys = set()
+
     if not integrals_dict:
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"no integrals provided, skipping")
-        return integrals_dict, None
+        return integrals_dict, None, unmapped_keys
 
     # ── 1. Map fibres to IFU positions ──
     keys = []
@@ -420,7 +467,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"too few fibres ({n_total}) for gradient fit, "
                        f"skipping gradient removal")
-        return integrals_dict, None
+        return integrals_dict, None, unmapped_keys
 
     x_arr = np.array(x_list)
     y_arr = np.array(y_list)
@@ -435,7 +482,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         logger.warning(f"Twilight gradient removal for {channel}: "
                        f"too few fibres ({np.sum(good)}) after sigma-clip, "
                        f"skipping gradient removal")
-        return integrals_dict, None
+        return integrals_dict, None, unmapped_keys
 
     # ── 3. Normalise coordinates to [-1, 1] for numerical stability ──
     x_min, x_max = x_arr[good].min(), x_arr[good].max()
@@ -447,17 +494,17 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
 
     # ── 4. Fit 2D polynomial surface ──
     # polyvander2d builds the Vandermonde matrix for terms up to
-    # x^poly_order * y^poly_order.  For order=2: 1, x, y, x², xy, y²,
-    # plus cross terms x²y, xy², x²y² which we trim via column selection
-    # to keep only terms with total degree <= poly_order.
+    # x^resolved_order * y^resolved_order.  For order=2: 1, x, y, x², xy, y²,
+    # plus cross terms which we trim via column selection to keep only terms
+    # with total degree <= resolved_order.
     vander_full = polyvander2d(x_norm[good], y_norm[good],
-                               [poly_order, poly_order])
-    # Select columns where total degree <= poly_order
+                               [resolved_order, resolved_order])
+    # Select columns where total degree <= resolved_order
     col_mask = []
-    for ix in range(poly_order + 1):
-        for iy in range(poly_order + 1):
-            if ix + iy <= poly_order:
-                col_mask.append(ix * (poly_order + 1) + iy)
+    for ix in range(resolved_order + 1):
+        for iy in range(resolved_order + 1):
+            if ix + iy <= resolved_order:
+                col_mask.append(ix * (resolved_order + 1) + iy)
     vander = vander_full[:, col_mask]
 
     coeffs, residuals, rank, sv = np.linalg.lstsq(vander, flux_arr[good],
@@ -465,7 +512,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
 
     # ── 5. Evaluate model at ALL fibre positions ──
     vander_all_full = polyvander2d(x_norm, y_norm,
-                                    [poly_order, poly_order])
+                                    [resolved_order, resolved_order])
     vander_all = vander_all_full[:, col_mask]
     model = vander_all @ coeffs
 
@@ -479,16 +526,36 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
                            f"{key}, keeping raw integral")
             corrected[key] = flux_arr[i]
 
-    # Re-add any fibres that were skipped (not in LUT)
+    # ── Task 4: Re-add fibres absent from FiberMap_LUT using benchside-median ──
+    # Rather than keeping raw integrals (which preserve the spatial gradient),
+    # apply the median gradient correction factor of the fibre's own benchside.
+    benchside_corr_factors = {}
+    for (bs, fid), val in corrected.items():
+        orig = integrals_dict.get((bs, fid), val)
+        if orig > 0:
+            benchside_corr_factors.setdefault(bs, []).append(val / orig)
+    benchside_median_factor = {
+        bs: np.nanmedian(factors)
+        for bs, factors in benchside_corr_factors.items()
+        if factors
+    }
+
     for key, val in integrals_dict.items():
         if key not in corrected:
-            corrected[key] = val
+            bs, fid = key
+            factor = benchside_median_factor.get(bs, 1.0)
+            corrected[key] = val * factor
+            unmapped_keys.add(key)
+            logger.debug(
+                f"  {channel}: unmapped fibre ({bs}, {fid}) — applied "
+                f"benchside-median correction factor {factor:.4f}"
+            )
 
     # ── 7. Log diagnostics ──
     coeff_labels = []
-    for ix in range(poly_order + 1):
-        for iy in range(poly_order + 1):
-            if ix + iy <= poly_order:
+    for ix in range(resolved_order + 1):
+        for iy in range(resolved_order + 1):
+            if ix + iy <= resolved_order:
                 if ix == 0 and iy == 0:
                     coeff_labels.append('const')
                 elif ix == 1 and iy == 0:
@@ -517,11 +584,13 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
     scatter_after = np.std(corr_values) / np.median(corr_values) * 100
 
     logger.info(f"Twilight gradient removal for {channel} channel:")
-    logger.info(f"  Fitted surface (order {poly_order}): {coeff_str}")
+    logger.info(f"  Fitted surface (order {resolved_order}): {coeff_str}")
     logger.info(f"  Gradient peak-to-peak: {ptp:.1f}% of mean")
     logger.info(f"  Sigma-clipped {n_clipped}/{n_total} fibres")
     logger.info(f"  Scatter before: {scatter_before:.1f}%, "
                 f"after: {scatter_after:.1f}%")
+    if unmapped_keys:
+        logger.info(f"  Unmapped fibres (benchside-median applied): {len(unmapped_keys)}")
 
     # Normalise corrected integrals so their median = median of originals
     # (preserves absolute scale for downstream normalisation)
@@ -541,7 +610,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         'keys': keys,
         'coeffs': coeffs,
         'coeff_labels': coeff_labels,
-        'poly_order': poly_order,
+        'poly_order': resolved_order,
         'good': good,
         'ptp_pct': ptp,
         'scatter_before': scatter_before,
@@ -551,7 +620,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=2):
         'y_min': y_min, 'y_max': y_max,
     }
 
-    return corrected, diagnostics
+    return corrected, diagnostics, unmapped_keys
 
 
 def _save_gradient_model(gradient_diagnostics, output_dir):
@@ -797,8 +866,93 @@ def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
     logger.info(f"Fibre flat diagnostic plot saved: {output_path}")
 
 
+def _compute_lamp_benchside_offsets(models):
+    """Compute per-benchside throughput offset relative to channel median from lamp.
+
+    Used as a fallback ``T_i`` value for benchsides that lack twilight data.
+    The lamp already encodes the inter-bench throughput ratio in the relative
+    levels of each benchside's median reference spectrum ``S̄_bs``.
+
+    Parameters
+    ----------
+    models : dict
+        ``{ext_name: data}`` as returned by ``_load_smooth_models``.
+
+    Returns
+    -------
+    dict
+        ``{ext_name: offset_scalar}`` where *offset_scalar* is the scalar
+        ratio ``median(S̄_bs) / median(channel_S̄)`` — values above 1.0 mean
+        brighter-than-average bench, below 1.0 means dimmer.  Benchsides
+        that cannot be computed default to 1.0.
+    """
+    # Group by channel
+    channel_groups = {}
+    for ext_name, data in models.items():
+        channel_groups.setdefault(data['channel'], []).append(ext_name)
+
+    offsets = {}
+
+    for channel, ext_names in channel_groups.items():
+        # Compute per-benchside reference on its common grid
+        bs_refs = []  # [(ext_name, common_wave, reference), ...]
+        for ext_name in ext_names:
+            data = models[ext_name]
+            common_wave, reference = _compute_benchside_reference(
+                data['smooth'], data['wave'])
+            if len(reference) > 0:
+                bs_refs.append((ext_name, common_wave, reference))
+
+        if len(bs_refs) < 2:
+            # Can't compute a channel median — all offsets default to 1.0
+            for ext_name in ext_names:
+                offsets[ext_name] = 1.0
+            continue
+
+        # Resample all references onto the widest common grid
+        all_waves = [w for _, w, _ in bs_refs]
+        w_min = min(w.min() for w in all_waves)
+        w_max = max(w.max() for w in all_waves)
+        n_pts  = max(len(w) for w in all_waves)
+        grid   = np.linspace(w_min, w_max, n_pts)
+
+        resampled = []
+        for name, w, r in bs_refs:
+            rs = np.interp(grid, w, r, left=np.nan, right=np.nan)
+            resampled.append(rs)
+
+        stack = np.array(resampled)  # shape (n_benchsides, n_pts)
+        channel_median = np.nanmedian(stack, axis=0)
+
+        for i, (ext_name, _, _) in enumerate(bs_refs):
+            valid = (np.isfinite(resampled[i])
+                     & np.isfinite(channel_median)
+                     & (channel_median > MIN_REF_FLUX))
+            if np.sum(valid) >= 10:
+                offset = float(np.nanmedian(
+                    resampled[i][valid] / channel_median[valid]))
+            else:
+                offset = 1.0
+                logger.warning(
+                    f"_compute_lamp_benchside_offsets: {ext_name} "
+                    f"has <10 valid overlap pixels with channel median; "
+                    f"defaulting offset to 1.0"
+                )
+            offsets[ext_name] = offset
+            logger.debug(
+                f"_compute_lamp_benchside_offsets: {ext_name} lamp offset={offset:.4f}"
+            )
+
+        # Fill in any ext_names not in bs_refs (empty benchsides)
+        for ext_name in ext_names:
+            offsets.setdefault(ext_name, 1.0)
+
+    return offsets
+
+
 def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
-                                output_dir, integration_range=None):
+                                output_dir, integration_range=None,
+                                poly_order=None):
     """Compute fibre-to-fibre flat using twilight spatial + lamp wavelength shape.
 
     For each benchside:
@@ -829,6 +983,11 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     models = _load_smooth_models(smooth_models_file)
     twi_extractions = twilight_extractions['extractions']
     twi_metadata = twilight_extractions['metadata']
+
+    # Pre-compute lamp-derived inter-bench offsets.  These are used as fallback
+    # T_i values for benchsides that have no usable twilight data.
+    lamp_offsets = _compute_lamp_benchside_offsets(models)
+    lamp_only_benchsides = set()  # ext_names with no twilight → use lamp offset
 
     # Build twilight lookup: (channel, bench, side) → ExtractLlamas
     twi_lookup = {}
@@ -863,8 +1022,9 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
             twi_ext = twi_lookup.get(ext_name)
             if twi_ext is None:
-                logger.warning(f"No twilight extraction for {ext_name}, "
-                               f"using T_i=1.0 (lamp-only for this benchside)")
+                logger.warning(f"No twilight extraction for {ext_name}; "
+                               f"will use lamp-derived inter-bench offset as T_i")
+                lamp_only_benchsides.add(ext_name)
                 continue
 
             twi_counts = twi_ext.counts
@@ -931,12 +1091,14 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                     f"benchsides")
 
     # ── Pass 1.5: Remove twilight spatial gradient for ALL channels ──
-    gradient_diagnostics = {}  # {channel: diagnostics_dict}
+    gradient_diagnostics = {}   # {channel: diagnostics_dict}
+    all_unmapped_keys = set()   # (benchside_str, fid) keys interpolated from benchside peers
     for channel, integrals in channel_integrals.items():
         if len(integrals) > 0:
-            corrected, diag = _remove_twilight_gradient(integrals, channel,
-                                                         poly_order=2)
+            corrected, diag, channel_unmapped = _remove_twilight_gradient(
+                integrals, channel, poly_order=poly_order)
             channel_integrals[channel] = corrected
+            all_unmapped_keys.update(channel_unmapped)
             if diag is not None:
                 gradient_diagnostics[channel] = diag
 
@@ -948,7 +1110,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     channel_refs = {}
     t_i_all = {}  # {ext_name: {fid: t_i_value}} for diagnostics
 
-    for ext_name, data in models.items():
+    for ext_name, data in models.items():  # noqa: C901  (Pass 2 is intentionally long)
         channel = data['channel']
         bench = data['bench']
         side = data['side']
@@ -1003,7 +1165,15 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         channel_ints = channel_integrals.get(channel, {})
         this_bs_integrals = {fid: v for (bs, fid), v in channel_ints.items()
                              if bs == benchside_str}
-        all_channel_values = list(channel_ints.values())
+
+        # Median-of-medians: compute per-benchside median first, then take the
+        # median of those. This prevents benchsides with more alive fibres from
+        # dominating the channel-wide reference level.
+        _bs_buckets = {}
+        for (bs, fid), val in channel_ints.items():
+            _bs_buckets.setdefault(bs, []).append(val)
+        _bs_med_values = [np.nanmedian(vals) for vals in _bs_buckets.values() if vals]
+        all_channel_values = _bs_med_values  # kept for legacy length-check below
 
         if len(this_bs_integrals) > 0 and len(all_channel_values) > 0:
             median_integral = np.median(all_channel_values)
@@ -1016,18 +1186,29 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                         f"[{min(t_i.values()):.3f}, {max(t_i.values()):.3f}] "
                         f"from {len(t_i)} fibres")
         else:
-            logger.warning(f"  {ext_name}: no valid twilight integrals, "
-                           f"using T_i=1.0")
-            t_i = {}
+            # No twilight data — use lamp-derived inter-bench throughput offset
+            lamp_offset = lamp_offsets.get(ext_name, 1.0)
+            t_i = {fid: lamp_offset for fid in fiber_ids}
+            lamp_only_benchsides.add(ext_name)
+            logger.warning(
+                f"  {ext_name}: no valid twilight integrals; "
+                f"falling back to lamp-derived inter-bench offset "
+                f"T_i = {lamp_offset:.4f} (MASK_FLAT_LAMP_ONLY will be set)"
+            )
 
         t_i_all[ext_name] = t_i
 
         # ── Combine C_i = T_i × W_i ──
         fid_to_row = {fid: idx for idx, fid in enumerate(fiber_ids)}
+        fibre_flags = np.zeros(len(fiber_ids), dtype=np.int16)
         for fid in fiber_ids:
             idx = fid_to_row[fid]
             ti = t_i.get(fid, 1.0)
             corr_arr[idx] = ti * w_arr[idx]
+            if ext_name in lamp_only_benchsides:
+                fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
+            if (benchside_str, fid) in all_unmapped_keys:
+                fibre_flags[idx] |= MASK_UNMAPPED_FIBRE_INTERP
 
         # Clamp
         corr_arr = np.clip(corr_arr, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
@@ -1042,6 +1223,9 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
             'n_ref': n_alive,
             'common_wave': common_wave,
             'reference': reference,
+            'fibre_flags': fibre_flags,
+            # TODO: populate from twilight/lamp photon noise when available
+            'correction_var': np.zeros_like(corr_arr),
         }
 
         if channel not in channel_refs:
@@ -1147,18 +1331,24 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                 f"{os.path.basename(output_file)}")
 
     # Load corrections indexed by (ext_name) → {fiber_id → row_index}
-    corr_lookup = {}  # ext_name → {'fiber_ids': array, 'correction': 2D, 'wave': 2D}
+    corr_lookup = {}  # ext_name → {'fiber_ids', 'correction', 'wave', 'flags', 'correction_var'}
     with fits.open(corrections_file) as corr_hdul:
         corr_method = corr_hdul[0].header.get('METHOD', 'unknown')
         for ext in corr_hdul[1:]:
             if ext.header.get('EXTNAME', '').endswith('_REF'):
                 continue  # Skip reference spectrum extensions
             ext_name = ext.header['EXTNAME']
-            corr_lookup[ext_name] = {
+            col_names = ext.data.names if ext.data is not None else []
+            entry = {
                 'fiber_ids': ext.data['FIBER_ID'].copy(),
                 'correction': ext.data['CORRECTION'].copy(),
                 'wave': ext.data['WAVE'].copy(),
+                'flags': (ext.data['FLAGS'].copy()
+                          if 'FLAGS' in col_names else None),
+                'correction_var': (ext.data['CORRECTION_VAR'].copy()
+                                   if 'CORRECTION_VAR' in col_names else None),
             }
+            corr_lookup[ext_name] = entry
 
     with fits.open(rss_file) as hdul:
         channel = hdul[0].header.get('CHANNEL', 'unknown').lower()
@@ -1166,6 +1356,12 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         flux = hdul['FLUX'].data.copy()
         error = hdul['ERROR'].data.copy()
         fibermap = hdul['FIBERMAP'].data
+
+        # Read MASK for per-fibre flag injection
+        try:
+            mask_data = hdul['MASK'].data.copy().astype(np.int16)
+        except KeyError:
+            mask_data = np.zeros(flux.shape, dtype=np.int16)
 
         # Read WAVE for grid-mismatch fallback
         wave_data = hdul['WAVE'].data
@@ -1210,15 +1406,49 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
             # Check if wavelength grids match (same arc solution → should match)
             if len(c_i) != flux.shape[1]:
-                # Fallback: interpolate correction onto science grid
+                # Fallback: interpolate correction onto science grid.
+                # Clamp to boundary values rather than 1.0 to avoid flux spikes
+                # at dichroic edges where throughput may be far from unity.
                 c_wave = corr_data['wave'][match_idx]
                 sci_wave = wave_data[row_idx]
-                c_i = np.interp(sci_wave, c_wave, c_i, left=1.0, right=1.0)
+                finite_mask = np.isfinite(c_wave)
+                left_val  = float(c_i[finite_mask][ 0]) if np.any(finite_mask) else 1.0
+                right_val = float(c_i[finite_mask][-1]) if np.any(finite_mask) else 1.0
+                c_i = np.interp(sci_wave, c_wave, c_i, left=left_val, right=right_val)
+                logger.debug(
+                    f"Row {row_idx} ({ext_name} fid={fid}): wavelength grid mismatch, "
+                    f"extrapolated with boundary values ({left_val:.4f}, {right_val:.4f})"
+                )
 
-            # Apply correction: divide flux and error
+            # Apply correction: divide flux; propagate flat variance into error
             safe_c = np.where(np.isfinite(c_i) & (c_i > 0), c_i, 1.0)
             flux[row_idx] /= safe_c
-            error[row_idx] /= safe_c
+
+            var_c_arr = corr_data.get('correction_var')
+            if var_c_arr is not None:
+                var_c_row = var_c_arr[match_idx]
+                if len(var_c_row) != len(safe_c):
+                    # Resample variance onto the (possibly interpolated) science grid
+                    var_c_row = np.interp(wave_data[row_idx],
+                                          corr_data['wave'][match_idx],
+                                          var_c_row, left=0.0, right=0.0)
+                sigma_c = np.sqrt(np.where(np.isfinite(var_c_row)
+                                           & (var_c_row > 0),
+                                           var_c_row, 0.0))
+                error[row_idx] = np.sqrt(
+                    (error[row_idx] / safe_c) ** 2
+                    + (flux[row_idx] * sigma_c / safe_c ** 2) ** 2
+                )
+            else:
+                error[row_idx] /= safe_c
+
+            # OR per-fibre quality flags into the RSS mask
+            flags_arr = corr_data.get('flags')
+            if flags_arr is not None:
+                fibre_flag = int(flags_arr[match_idx])
+                if fibre_flag:
+                    mask_data[row_idx, :] |= np.int16(fibre_flag)
+
             n_applied += 1
 
         logger.info(f"Applied fibre flat to {n_applied}/{flux.shape[0]} fibres "
@@ -1247,8 +1477,17 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         error_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
         out_hdul.append(error_hdu)
 
-        # Copy remaining extensions unchanged (MASK, WAVE, FWHM, FIBERMAP)
-        for ext_name_copy in ['MASK', 'WAVE', 'FWHM', 'FIBERMAP']:
+        # MASK — write updated mask (flags ORed in above)
+        try:
+            mask_hdu = fits.ImageHDU(mask_data, header=hdul['MASK'].header.copy())
+        except KeyError:
+            mask_hdu = fits.ImageHDU(mask_data)
+        mask_hdu.header['EXTNAME'] = 'MASK'
+        mask_hdu.header['HISTORY'] = 'Fibre flat quality flags ORed in'
+        out_hdul.append(mask_hdu)
+
+        # Copy remaining extensions unchanged (WAVE, FWHM, FIBERMAP)
+        for ext_name_copy in ['WAVE', 'FWHM', 'FIBERMAP']:
             try:
                 out_hdul.append(hdul[ext_name_copy].copy())
             except KeyError:

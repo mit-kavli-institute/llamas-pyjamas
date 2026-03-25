@@ -174,12 +174,11 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
                 f"{_CROSS_CHECK_THRESHOLD} DN); using inter-fibre estimate"
             )
         else:
-            # Estimates diverge — use whichever is closer to the raw frame inter-fibre median
-            # (self-validation: which estimate minimises the inter-fibre residual)
-            interfibre_frame_median = est_interfibre  # already computed from frame gap pixels
-            err_if  = abs(est_interfibre  - interfibre_frame_median)   # always 0 by definition
-            err_tst = abs(est_test_region - interfibre_frame_median)
-            if err_if <= err_tst:
+            # Estimates diverge — prefer the lower value.
+            # A CCD bias pedestal can only be over-estimated (contaminated by sky,
+            # dark current, or source signal); it cannot be under-estimated.
+            # The lower of the two estimates has the least contamination.
+            if est_interfibre <= est_test_region:
                 bias_level = est_interfibre
                 bias_src   = 'interfibre_mask'
             else:
@@ -188,7 +187,8 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
             logger.warning(
                 f"generate_fallback_bias_hdu: estimates diverge "
                 f"({divergence:.2f} DN > {_CROSS_CHECK_THRESHOLD} DN); "
-                f"selected {bias_src} (level={bias_level:.2f} DN)"
+                f"using lower estimate {bias_src} (level={bias_level:.2f} DN) "
+                f"[inter-fibre={est_interfibre:.2f}, test-region={est_test_region:.2f}]"
             )
     elif not np.isnan(est_interfibre):
         bias_level = est_interfibre
