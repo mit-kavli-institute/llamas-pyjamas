@@ -1409,13 +1409,18 @@ def main(config_path):
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
-    # Resolve master bias files — user overrides take priority, otherwise use package defaults
-    slow_bias_file = config.get('slow_bias_file', SLOW_BIAS_FILE)
-    fast_bias_file = config.get('fast_bias_file', FAST_BIAS_FILE)
-
-    # Validate bias file structure (add placeholders for missing cameras)
-    slow_bias_file = validate_for_gui(slow_bias_file)
-    fast_bias_file = validate_for_gui(fast_bias_file)
+    # Resolve master bias files — user overrides take priority, otherwise use package defaults.
+    # Missing extensions are handled per-detector in process_trace() via inter-fibre fallback;
+    # validate_for_gui() is NOT applied to bias files to avoid creating *_GUI_version.fits
+    # artefacts inside the package Bias/ directory.
+    _slow_bias_path = config.get('slow_bias_file', SLOW_BIAS_FILE)
+    _fast_bias_path = config.get('fast_bias_file', FAST_BIAS_FILE)
+    slow_bias_file = _slow_bias_path if os.path.isfile(_slow_bias_path) else None
+    fast_bias_file = _fast_bias_path if os.path.isfile(_fast_bias_path) else None
+    if slow_bias_file is None:
+        logger.warning(f"Slow bias file not found at '{_slow_bias_path}' — inter-fibre fallback will be used")
+    if fast_bias_file is None:
+        logger.warning(f"Fast bias file not found at '{_fast_bias_path}' — inter-fibre fallback will be used")
 
         
     # Parse CRR cube configuration (defaults to True if not specified)
