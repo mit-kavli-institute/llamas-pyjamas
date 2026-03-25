@@ -473,8 +473,36 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     y_arr = np.array(y_list)
     flux_arr = np.array(flux_list)
 
-    # ── 2. Sigma-clip outliers ──
-    clipped = sigma_clip(flux_arr, sigma=3, maxiters=2)
+    # ── 2. Per-bench pre-normalisation ──
+    # Scale each benchside so all benchside medians match the channel-wide
+    # reference level.  This removes detector-level bias-pedestal offsets
+    # BEFORE the polynomial fit so the gradient surface captures the true
+    # sky variation rather than being distorted by artificial detector
+    # discontinuities (the "brick wall" pattern caused by uncorrected bias
+    # pedestal drift between the 24 cameras).
+    bs_arr = np.array([bs for bs, fid in keys])
+    unique_benchsides = np.unique(bs_arr)
+    bs_medians = {}
+    for bs in unique_benchsides:
+        bs_mask = bs_arr == bs
+        med = float(np.nanmedian(flux_arr[bs_mask]))
+        bs_medians[bs] = med if med > 0 else 1.0
+
+    # Median of per-benchside medians (resistant to unequal fibre counts)
+    channel_ref = float(np.nanmedian(list(bs_medians.values()))) or 1.0
+
+    # Per-fibre scale: brings every benchside to channel_ref
+    norm_scale = np.array([channel_ref / bs_medians[bs] for bs in bs_arr])
+    flux_arr_norm = flux_arr * norm_scale
+
+    logger.info(
+        f"Twilight gradient {channel}: per-bench pre-normalisation scales: "
+        + ", ".join(f"{bs}={channel_ref / bs_medians[bs]:.3f}"
+                    for bs in sorted(unique_benchsides))
+    )
+
+    # ── 3. Sigma-clip outliers (on normalised data) ──
+    clipped = sigma_clip(flux_arr_norm, sigma=3, maxiters=2)
     good = ~clipped.mask
     n_clipped = int(np.sum(clipped.mask))
 
@@ -484,7 +512,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
                        f"skipping gradient removal")
         return integrals_dict, None, unmapped_keys
 
-    # ── 3. Normalise coordinates to [-1, 1] for numerical stability ──
+    # ── 4. Normalise coordinates to [-1, 1] for numerical stability ──
     x_min, x_max = x_arr[good].min(), x_arr[good].max()
     y_min, y_max = y_arr[good].min(), y_arr[good].max()
     x_span = x_max - x_min if x_max > x_min else 1.0
@@ -492,7 +520,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     x_norm = 2.0 * (x_arr - x_min) / x_span - 1.0
     y_norm = 2.0 * (y_arr - y_min) / y_span - 1.0
 
-    # ── 4. Fit 2D polynomial surface ──
+    # ── 5. Fit 2D polynomial surface to normalised integrals ──
     # polyvander2d builds the Vandermonde matrix for terms up to
     # x^resolved_order * y^resolved_order.  For order=2: 1, x, y, x², xy, y²,
     # plus cross terms which we trim via column selection to keep only terms
@@ -507,24 +535,27 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
                 col_mask.append(ix * (resolved_order + 1) + iy)
     vander = vander_full[:, col_mask]
 
-    coeffs, residuals, rank, sv = np.linalg.lstsq(vander, flux_arr[good],
+    coeffs, residuals, rank, sv = np.linalg.lstsq(vander, flux_arr_norm[good],
                                                     rcond=None)
 
-    # ── 5. Evaluate model at ALL fibre positions ──
+    # ── 6. Evaluate model at ALL fibre positions ──
     vander_all_full = polyvander2d(x_norm, y_norm,
                                     [resolved_order, resolved_order])
     vander_all = vander_all_full[:, col_mask]
     model = vander_all @ coeffs
 
-    # ── 6. Divide integrals by model ──
+    # ── 7. Divide normalised integrals by gradient model ──
+    # corrected values are in the normalised domain (all benchsides at
+    # channel_ref level).  Downstream Pass 2 multiplies by lamp_offset to
+    # restore the correct absolute inter-benchside throughput scale.
     corrected = {}
     for i, key in enumerate(keys):
         if model[i] > 0:
-            corrected[key] = flux_arr[i] / model[i]
+            corrected[key] = flux_arr_norm[i] / model[i]
         else:
             logger.warning(f"  {channel}: gradient model <= 0 at fibre "
-                           f"{key}, keeping raw integral")
-            corrected[key] = flux_arr[i]
+                           f"{key}, keeping normalised integral")
+            corrected[key] = flux_arr_norm[i]
 
     # ── Task 4: Re-add fibres absent from FiberMap_LUT using benchside-median ──
     # Rather than keeping raw integrals (which preserve the spatial gradient),
@@ -579,7 +610,9 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     model_good = model[good]
     ptp = (model_good.max() - model_good.min()) / np.mean(model_good) * 100
 
-    scatter_before = np.std(flux_arr) / np.median(flux_arr) * 100
+    # Three-stage scatter: raw → per-bench normalised → gradient corrected
+    scatter_raw    = np.std(flux_arr)      / np.median(flux_arr)      * 100
+    scatter_before = np.std(flux_arr_norm) / np.median(flux_arr_norm) * 100
     corr_values = np.array([corrected[k] for k in keys])
     scatter_after = np.std(corr_values) / np.median(corr_values) * 100
 
@@ -587,24 +620,22 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     logger.info(f"  Fitted surface (order {resolved_order}): {coeff_str}")
     logger.info(f"  Gradient peak-to-peak: {ptp:.1f}% of mean")
     logger.info(f"  Sigma-clipped {n_clipped}/{n_total} fibres")
-    logger.info(f"  Scatter before: {scatter_before:.1f}%, "
-                f"after: {scatter_after:.1f}%")
+    logger.info(f"  Scatter: raw={scatter_raw:.1f}% → "
+                f"per-bench normalised={scatter_before:.1f}% → "
+                f"gradient corrected={scatter_after:.1f}%")
     if unmapped_keys:
         logger.info(f"  Unmapped fibres (benchside-median applied): {len(unmapped_keys)}")
 
-    # Normalise corrected integrals so their median = median of originals
-    # (preserves absolute scale for downstream normalisation)
-    orig_median = np.median(flux_arr)
-    corr_median = np.median(corr_values)
-    if corr_median > 0:
-        scale = orig_median / corr_median
-        corrected = {k: v * scale for k, v in corrected.items()}
-        corr_values = corr_values * scale
+    # NOTE: corrected values are intentionally kept at the per-bench-normalised
+    # scale (all benchsides at channel_ref level).  The final rescaling back to
+    # the raw median is deliberately omitted so that downstream Pass 2 can
+    # apply lamp-derived inter-benchside offsets cleanly.
 
     diagnostics = {
         'x': x_arr,
         'y': y_arr,
-        'raw': flux_arr,
+        'raw': flux_arr_norm,   # show normalised (detector-offset-free) for plot Column 1
+        'raw_unnorm': flux_arr, # original (brick-wall) for reference if needed
         'model': model,
         'corrected': corr_values,
         'keys': keys,
@@ -613,11 +644,14 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
         'poly_order': resolved_order,
         'good': good,
         'ptp_pct': ptp,
+        'scatter_raw': scatter_raw,
         'scatter_before': scatter_before,
         'scatter_after': scatter_after,
         'n_clipped': n_clipped,
         'x_min': x_min, 'x_max': x_max,
         'y_min': y_min, 'y_max': y_max,
+        'bs_medians': bs_medians,
+        'channel_ref': channel_ref,
     }
 
     return corrected, diagnostics, unmapped_keys
@@ -663,8 +697,10 @@ def _save_gradient_model(gradient_diagnostics, output_dir):
         coeff_tbl.header['POLYORD'] = (poly_order, 'Polynomial order')
         coeff_tbl.header['PTP_PCT'] = (diag['ptp_pct'],
                                        'Gradient peak-to-peak %')
+        coeff_tbl.header['SCATRAW'] = (diag.get('scatter_raw', float('nan')),
+                                       'Scatter of raw integrals (pre-normalisation) %')
         coeff_tbl.header['SCATBEF'] = (diag['scatter_before'],
-                                       'Scatter before gradient removal %')
+                                       'Scatter after per-bench normalisation %')
         coeff_tbl.header['SCATAFT'] = (diag['scatter_after'],
                                        'Scatter after gradient removal %')
         coeff_tbl.header['NCLIP'] = (diag['n_clipped'],
@@ -793,9 +829,13 @@ def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
                           abs(data.min() - mean_val))
                 vmin, vmax = mean_val - dev, mean_val + dev
             else:
-                # T_i: diverging around 1.0
+                # T_i: diverging colourmap centred on 1.0.
+                # Use 95th-percentile absolute deviation so that a small number of
+                # outlier fibres do not compress all real variation into a tiny
+                # colour range.
                 cmap = matplotlib.colormaps['RdBu_r']
-                dev = max(abs(data.max() - 1.0), abs(data.min() - 1.0), 0.1)
+                dev = float(np.nanpercentile(np.abs(data - 1.0), 95))
+                dev = max(dev, 0.05)   # guarantee at least ±5% range
                 vmin, vmax = 1.0 - dev, 1.0 + dev
 
             norm = Normalize(vmin=vmin, vmax=vmax)
@@ -835,10 +875,12 @@ def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
 
             # Row label
             if col_idx == 0:
-                ax.set_ylabel(f'{channel.upper()}\n'
-                              f'scatter: {diag["scatter_before"]:.1f}%'
-                              f' -> {diag["scatter_after"]:.1f}%',
-                              fontsize=10)
+                ax.set_ylabel(
+                    f'{channel.upper()}\n'
+                    f'raw={diag.get("scatter_raw", diag["scatter_before"]):.1f}%'
+                    f' → norm={diag["scatter_before"]:.1f}%'
+                    f' → final={diag["scatter_after"]:.1f}%',
+                    fontsize=10)
 
             # Annotation for gradient column
             if col_idx == 1:
@@ -1176,13 +1218,18 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         all_channel_values = _bs_med_values  # kept for legacy length-check below
 
         if len(this_bs_integrals) > 0 and len(all_channel_values) > 0:
+            # Corrected integrals are at the per-bench-normalised scale
+            # (all benchsides equalised to channel_ref by _remove_twilight_gradient).
+            # Multiply by the lamp-derived inter-benchside offset to restore the
+            # correct absolute throughput scale for this benchside.
+            lamp_offset = lamp_offsets.get(ext_name, 1.0)
             median_integral = np.median(all_channel_values)
             if median_integral > 0:
-                t_i = {fid: val / median_integral
+                t_i = {fid: val / median_integral * lamp_offset
                        for fid, val in this_bs_integrals.items()}
             else:
-                t_i = {fid: 1.0 for fid in this_bs_integrals}
-            logger.info(f"  {ext_name}: T_i range "
+                t_i = {fid: lamp_offset for fid in this_bs_integrals}
+            logger.info(f"  {ext_name}: T_i (lamp_offset={lamp_offset:.4f}) range "
                         f"[{min(t_i.values()):.3f}, {max(t_i.values()):.3f}] "
                         f"from {len(t_i)} fibres")
         else:
@@ -1278,11 +1325,16 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                 ti_vals = [ti_dict.get(fid, 1.0)
                            for fid in models[ext_name]['fiber_ids']
                            if fid in ti_dict]
-                if ti_vals and abs(np.median(ti_vals) - 1.0) > 0.05:
-                    logger.warning(
-                        f"  *** {bs_str} median T_i = "
-                        f"{np.median(ti_vals):.4f} — "
-                        f"deviates >5% from 1.0 ***")
+                if ti_vals:
+                    _arr = np.array(ti_vals)
+                    _med = float(np.median(_arr))
+                    _rms_pct = (float(np.sqrt(np.mean((_arr - _med) ** 2)))
+                                / _med * 100 if _med > 0 else 0.0)
+                    if _rms_pct > 5.0:
+                        logger.warning(
+                            f"  *** {bs_str} within-bench T_i scatter = "
+                            f"{_rms_pct:.1f}% (median={_med:.4f}) — "
+                            f"high intra-bench throughput variation ***")
 
     _cross_bench_diagnostic(channel_refs)
 
@@ -1550,8 +1602,9 @@ def _cross_bench_diagnostic(channel_refs):
             if np.sum(valid) == 0:
                 continue
             ratio = stack[i, valid] / channel_median[valid]
-            rms = np.std(ratio) * 100
-            bias = (np.median(ratio) - 1.0) * 100
+            med_ratio = np.median(ratio)
+            rms  = np.sqrt(np.mean((ratio - med_ratio) ** 2)) * 100  # RMS around bench median
+            bias = (med_ratio - 1.0) * 100                           # offset from channel level
             flag = " *** CHECK ***" if rms > 5.0 or abs(bias) > 10.0 else ""
             logger.info(f"  {name}: median offset={bias:+.2f}%  "
                         f"RMS={rms:.2f}%{flag}")
