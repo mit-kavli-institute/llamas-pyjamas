@@ -304,7 +304,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
-                         bias_file, output_dir):
+                         slow_bias, output_dir, fast_bias=None):
     """Reduce a twilight flat: bias/P2P correct, extract, wavelength calibrate.
 
     Reuses existing pipeline infrastructure for each step.
@@ -319,10 +319,12 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
         Directory containing trace pickle files.
     arc_soln : object or None
         Arc solution dict, or None to use reference arc.
-    bias_file : str or None
-        Path to bias file.
+    slow_bias : str or None
+        Path to SLOW-mode master bias FITS file.
     output_dir : str
         Output directory for intermediates.
+    fast_bias : str or None
+        Path to FAST-mode master bias FITS file.
 
     Returns
     -------
@@ -349,7 +351,7 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
     logger.info("Twilight: extracting 1D spectra using lamp traces")
     extraction_file = run_extraction(
         corrected_file, twi_output_dir,
-        use_bias=bias_file, trace_dir=trace_dir)
+        slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir)
     logger.info(f"Twilight extraction: {extraction_file}")
 
     # Step 3: Wavelength calibration

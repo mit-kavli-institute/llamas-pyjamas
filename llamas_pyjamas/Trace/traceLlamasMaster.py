@@ -21,6 +21,7 @@ Example:
 """
 import os
 import sys
+import tempfile
 from   astropy.io import fits
 import scipy
 import numpy as np
@@ -50,6 +51,7 @@ import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
+from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,9 @@ logger = logging.getLogger(__name__)
 LOG = []
 
 
-def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(BIAS_DIR, 'slow_master_bias.fits')) -> fits.ImageHDU:
+def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
+                   dir=os.path.join(BIAS_DIR, 'slow_master_bias.fits'),
+                   required_readmode=None) -> fits.ImageHDU:
     """
     Retrieves the appropriate bias HDU from a combined bias file.
     
@@ -85,7 +89,30 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.pat
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    bias_hdus, _ = process_fits_by_color(dir)
+    with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf:
+        _tmp_path = _tf.name
+    bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
+
+    if bias_hdus is None:
+        # Try BIAS_DIR fallback before giving up
+        if required_readmode:
+            calib_path = os.path.join(BIAS_DIR, f'{required_readmode.lower()}_master_bias.fits')
+        else:
+            calib_path = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+        with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf2:
+            _tmp_path2 = _tf2.name
+        bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
+        if bias_hdus is None:
+            raise BiasNotFoundError(dir)
+        logger.warning(
+            f"Bias file '{dir}' unreadable; using BIAS_DIR fallback '{calib_path}'"
+        )
+
+    # Read-mode mismatch check
+    if required_readmode is not None:
+        bias_mode = bias_hdus[0].header.get('READ-MDE', None)
+        if bias_mode is not None and bias_mode.strip().upper() != required_readmode.upper():
+            raise BiasReadModeError(required_readmode, bias_mode, dir)
 
     # First try to match by header keywords (robust to non-standard extension order)
     target_color = color.lower()
@@ -908,7 +935,9 @@ class TraceRay(TraceLlamas):
         
         elapsed_time = time.time() - start_time
 
-def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None, is_master_calib: bool = True, skip_extension_indices: List[int] = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR,
+                    slow_bias: str = None, fast_bias: str = None,
+                    is_master_calib: bool = True, skip_extension_indices: List[int] = None) -> None:
     """
     Run fiber tracing on a FITS file using Ray multiprocessing.
 
@@ -916,7 +945,8 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         fitsfile: Path to FITS file to process
         channel: Optional channel filter ('red', 'green', 'blue')
         outpath: Output directory for trace files
-        use_bias: Optional path to bias file for correction
+        slow_bias: Optional path to SLOW-mode master bias FITS file
+        fast_bias: Optional path to FAST-mode master bias FITS file
         is_master_calib: Whether this is master calibration (affects output naming)
         skip_extension_indices: Optional list of extension indices to skip (for placeholder extensions)
 
@@ -925,10 +955,25 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     """
 
     NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    # Initialize Ray with logging config
+
+    import pkg_resources as _pkgr, shutil as _shutil, glob as _glob2
+    _package_path = _pkgr.resource_filename('llamas_pyjamas', '')
+    _package_root = os.path.dirname(_package_path)
+    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+        _shutil.rmtree(_stale, ignore_errors=True)
+    _runtime_env = {
+        "working_dir": _package_root,
+        "env_vars": {"PYTHONPATH": f"{_package_root}:{os.environ.get('PYTHONPATH', '')}"},
+        "excludes": [
+            "**/*.fits", "**/*.pkl", "**/.git/**",
+            "**/*.zip/**", "**/*.tar.gz/**", "**/mastercalib*/**", "**/*.zip",
+            "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+            "**/testing/**",
+        ],
+    }
+
     ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
+    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES, runtime_env=_runtime_env)
 
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
@@ -971,6 +1016,15 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         
     #hdu_processor = TraceRay.remote(fitsfile)
         
+    # Select bias per-file based on primary header READ-MDE
+    read_mode = hdul[0].header.get('READ-MDE', 'SLOW').strip().upper()
+    if read_mode == 'FAST' and fast_bias is not None:
+        use_bias = fast_bias
+    elif slow_bias is not None:
+        use_bias = slow_bias
+    else:
+        use_bias = None  # TraceRay / _grab_bias_hdu will use its own defaults
+
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
         future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias, is_master_calib=is_master_calib)
         futures.append(future)

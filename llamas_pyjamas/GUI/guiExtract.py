@@ -27,6 +27,7 @@ import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -182,18 +183,66 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        # use_bias is the resolved bias file path from GUI_extract
-        if use_bias is None:
-            use_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-        bias_file = os.fspath(use_bias)
-        print(f'Bias file: {bias_file}')
-        #### fix the directory here!
-        bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
-        
-        bias_data = bias.data
+        # Guard against double-subtraction
+        if header.get('BIASSUB', False):
+            logger.warning(
+                f"BIASSUB already set for {bench}{side} {color} — skipping bias subtraction"
+            )
+            bias_subtracted_data = hdu_data.astype(float)
+        else:
+            # use_bias is the resolved bias file path from GUI_extract (may be None)
+            frame_mode = header.get('READ-MDE', None)
+            bias = None
 
-        # Compute bias-subtracted data
-        bias_subtracted_data = hdu_data.astype(float) - bias_data
+            if use_bias is not None:
+                bias_file = os.fspath(use_bias)
+                print(f'Bias file: {bias_file}')
+                try:
+                    bias = _grab_bias_hdu(bench=bench, side=side, color=color,
+                                          dir=bias_file, required_readmode=frame_mode)
+                    logger.info(f"Loaded master bias for {bench}{side} {color}")
+                except (BiasNotFoundError, BiasReadModeError) as e:
+                    logger.warning(f"Master bias failed for {bench}{side} {color}: {e}")
+                    bias = None
+            else:
+                logger.info(f"No bias file path received for {bench}{side} {color}; using test-region fallback")
+
+            if bias is not None:
+                # --- Bench/side/color verification before subtraction ---
+                bias_bench = str(bias.header.get('BENCH', '')).strip()
+                bias_side  = str(bias.header.get('SIDE',  '')).strip().upper()
+                bias_color = str(bias.header.get('COLOR', '')).strip().lower()
+                # CAM_NAME fallback if individual keywords are absent
+                if not (bias_bench and bias_side and bias_color) and 'CAM_NAME' in bias.header:
+                    cam = bias.header['CAM_NAME']
+                    parts = cam.split('_')
+                    bias_color = parts[1].lower() if len(parts) >= 2 else ''
+                    bias_bench = parts[0][0] if parts else ''
+                    bias_side  = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
+
+                if (bias_bench and bias_side and bias_color and
+                        (bias_bench != str(bench) or bias_side != str(side).upper() or
+                         bias_color != str(color).lower())):
+                    logger.error(
+                        f"Bias BSC mismatch: expected {bench}{side} {color}, "
+                        f"got {bias_bench}{bias_side} {bias_color} — using test-region fallback"
+                    )
+                    bias = None
+
+            if bias is None:
+                logger.warning(f"Generating test-region fallback bias HDU for {bench}{side} {color} (rows 30-50).")
+                bias = generate_fallback_bias_hdu(hdu_data)
+                logger.info(f"Fallback bias source: {bias.header['BIASSRC']}")
+
+            bias_data = bias.data
+
+            # Compute bias-subtracted data
+            bias_subtracted_data = hdu_data.astype(float) - bias_data
+
+            # Record bias subtraction in the header
+            header['BIASSUB'] = (True, 'True = bias was subtracted')
+            header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
+            header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
 
         # Compute detector background AFTER bias subtraction
         detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
@@ -299,7 +348,9 @@ def compute_detector_background(data, rows=(30, 50)):
 ##Main function currently used by the Quicklook for full extraction
 
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None, mastercalib_trace_dir=None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
+                slow_bias: str = None, fast_bias: str = None,
+                method='optimal', trace_dir=None, mastercalib_trace_dir=None) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -307,11 +358,17 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     Supports hybrid trace selection: uses user traces for real camera data and
     mastercalib traces for placeholder extensions (missing cameras).
 
+    The correct bias file is selected per-file based on the READ-MDE primary header keyword.
+    If slow_bias and/or fast_bias are provided they take priority over the package defaults.
+    If neither is provided the function falls back to package-default paths in BIAS_DIR.
+    If no bias files exist at all, process_trace() applies a test-region (rows 30-50) fallback.
+
     Parameters:
     file (str): Path to the FITS file to be processed. Must have a .fits extension.
     flatfiles (str, optional): Path to the flat files for generating new traces. Defaults to None.
     output_dir (str, optional): Output directory for extraction files. Defaults to None.
-    use_bias (str, optional): Path to bias file for calibration. Defaults to None.
+    slow_bias (str, optional): Path to the SLOW-mode master bias FITS file. Defaults to None.
+    fast_bias (str, optional): Path to the FAST-mode master bias FITS file. Defaults to None.
     method (str, optional): Extraction method ('optimal' or 'boxcar'). Defaults to 'optimal'.
     trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
     mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
@@ -333,24 +390,33 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             raise ValueError("No master calibration files found in CALIB_DIR")
         
         #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package
+        # Get absolute path to llamas_pyjamas package directory
         package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
         package_root = os.path.dirname(package_path)
 
-        # Configure Ray runtime environment
+        # Clear stale Ray py_modules cache so updated source files are always re-bundled
+        import shutil as _shutil, glob as _glob2
+        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+            _shutil.rmtree(_stale, ignore_errors=True)
+
+        # Configure Ray runtime environment.
+        # py_modules ships the repo root so workers can `import llamas_pyjamas`
+        # and resolve all subpackages including Bias/.
+        # (working_dir is not used because the repo root exceeds Ray's 512 MB limit.)
         runtime_env = {
             "py_modules": [package_root],
             "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
                 str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
                 "**/*.zip/**",
                 "**/*.tar.gz/**",
                 "**/mastercalib*/**",
                 "**/*.zip",
-                
+                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+                "**/testing/**",
             ]
         }
 
@@ -382,42 +448,42 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
 
-        if use_bias is not None:
-            # User-specified bias file takes priority
-            if os.path.isfile(use_bias):
-                masterbiasfile = use_bias
+        if slow_bias is not None or fast_bias is not None:
+            # Caller supplied explicit paths — use READ-MDE to pick the right one per file
+            if read_mode == 'FAST' and fast_bias is not None:
+                masterbiasfile = fast_bias
+                logger.info(f"READ-MDE=FAST: using caller-supplied fast bias: {masterbiasfile}")
+            elif slow_bias is not None:
+                masterbiasfile = slow_bias
+                logger.info(f"READ-MDE={read_mode}: using caller-supplied slow bias: {masterbiasfile}")
             else:
-                raise ValueError(f"Bias file {use_bias} does not exist.")
+                # FAST data but no fast_bias supplied by caller
+                logger.warning(
+                    f"READ-MDE=FAST but no fast_bias supplied; "
+                    f"process_trace() will use test-region fallback if no bias can be loaded"
+                )
+                masterbiasfile = None  # process_trace() handles the fallback
         else:
-            # Auto-select bias based on READ-MDE
-            # Default fallback is slow_master_bias.fits (standard readout mode)
-            default_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-
-            if read_mode == 'FAST':
-                candidate_bias = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
-                if os.path.isfile(candidate_bias):
-                    masterbiasfile = candidate_bias
-                    logger.info(f"Using FAST mode bias: {masterbiasfile}")
-                else:
-                    logger.warning(f"fast_master_bias.fits not found, falling back to slow_master_bias.fits")
-                    masterbiasfile = default_bias
-            elif read_mode == 'SLOW':
-                candidate_bias = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-                if os.path.isfile(candidate_bias):
-                    masterbiasfile = candidate_bias
-                    logger.info(f"Using SLOW mode bias: {masterbiasfile}")
-                else:
-                    raise FileNotFoundError(f"slow_master_bias.fits not found in {BIAS_DIR}")
+            # No caller paths supplied — check package-default locations in BIAS_DIR
+            slow_default = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            fast_default = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+            if read_mode == 'FAST' and os.path.isfile(fast_default):
+                masterbiasfile = fast_default
+                logger.info(f"READ-MDE=FAST: auto-selected fast bias from BIAS_DIR: {masterbiasfile}")
+            elif os.path.isfile(slow_default):
+                masterbiasfile = slow_default
+                logger.info(f"READ-MDE={read_mode}: auto-selected slow bias from BIAS_DIR: {masterbiasfile}")
             else:
-                # Unknown or missing READ-MDE, use slow mode as default
-                masterbiasfile = default_bias
-                if read_mode is None:
-                    logger.warning(f"READ-MDE header not found, defaulting to slow_master_bias.fits")
-                else:
-                    logger.warning(f"Unknown READ-MDE value '{read_mode}', defaulting to slow_master_bias.fits")
+                # Neither package default exists — process_trace() will use test-region fallback
+                masterbiasfile = None
+                logger.warning(
+                    "No master bias files found in BIAS_DIR; "
+                    "process_trace() will use test-region fallback bias per extension"
+                )
 
         # Validate bias file structure (add placeholders for missing cameras)
-        masterbiasfile = validate_for_gui(masterbiasfile)
+        if masterbiasfile is not None:
+            masterbiasfile = validate_for_gui(masterbiasfile)
 
         #Debug statements
         print(f'basefile = {basefile}')
@@ -591,9 +657,14 @@ def box_extract(file, flat=False):
             raise ValueError("No master calibration files found in CALIB_DIR")
         
         #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package
+        # Get absolute path to llamas_pyjamas package directory
         package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
         package_root = os.path.dirname(package_path)
+
+        # Clear stale Ray py_modules cache so updated source files are always re-bundled
+        import shutil as _shutil, glob as _glob2
+        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+            _shutil.rmtree(_stale, ignore_errors=True)
 
         # Configure Ray runtime environment
         runtime_env = {
@@ -601,12 +672,14 @@ def box_extract(file, flat=False):
             "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
                 str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
                 "**/*.zip/**",
                 "**/*.tar.gz/**",
                 "**/mastercalib*/**",
+                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+                "**/testing/**",
             ]
         }
 

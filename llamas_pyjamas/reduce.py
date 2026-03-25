@@ -30,7 +30,7 @@ import gc
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR, SLOW_BIAS_FILE, FAST_BIAS_FILE
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
@@ -88,10 +88,9 @@ def get_input_files_from_config(config, file_keys=None):
           List of all file paths found in the config
       """
       if file_keys is None:
-          file_keys = ['science_files', 'bias_file', 'red_flat_file',
-                       'green_flat_file', 'blue_flat_file',
-                       'red_twilight_flat_file', 'green_twilight_flat_file',
-                       'blue_twilight_flat_file']
+          file_keys = ['science_files', 'slow_bias_file', 'fast_bias_file',
+                       'red_flat_file', 'green_flat_file', 'blue_flat_file',
+                       'twilight_flat']
 
       input_files = []
 
@@ -106,6 +105,153 @@ def get_input_files_from_config(config, file_keys=None):
                   input_files.append(value)
 
       return input_files
+
+
+def validate_pipeline_config(config: dict, config_path: str) -> bool:
+    """
+    Pre-flight validation of the pipeline configuration.
+
+    Checks package directories, required master bias files, required config keys,
+    and file/directory path existence before any processing begins.  On failure,
+    prints a clear itemised summary and calls sys.exit(1).
+
+    Parameters
+    ----------
+    config : dict
+        Parsed configuration dictionary from the config .txt file.
+    config_path : str
+        Path to the config file (used in error messages for context).
+
+    Returns
+    -------
+    bool
+        True if all checks pass (warnings are allowed).
+    """
+    import sys
+
+    errors = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("PIPELINE PRE-FLIGHT CHECK")
+    print("=" * 60)
+
+    # ------------------------------------------------------------------
+    # 1. Package directory checks — fail immediately if missing
+    # ------------------------------------------------------------------
+    if not os.path.isdir(CALIB_DIR):
+        errors.append(
+            f"Package mastercalib directory not found: '{CALIB_DIR}'. "
+            f"This directory is required for trace fallbacks."
+        )
+    if not os.path.isdir(LUT_DIR):
+        errors.append(
+            f"Package LUT directory not found: '{LUT_DIR}'. "
+            f"This directory is required for the reference arc and trace LUT."
+        )
+
+    if errors:
+        for e in errors:
+            print(f"  \u2717  ERROR: {e}")
+        print(f"\nPipeline pre-flight check FAILED — {len(errors)} error(s).")
+        print("Fix the above issues and re-run.")
+        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # 2. Master bias file checks
+    # ------------------------------------------------------------------
+    # Check packaged default locations
+    for label, path in [('slow_master_bias', SLOW_BIAS_FILE),
+                         ('fast_master_bias', FAST_BIAS_FILE)]:
+        if not os.path.isfile(path):
+            errors.append(
+                f"Required master bias not found: '{path}'. "
+                f"Create it from raw bias frames using BiasLlamas and place it in the Bias/ directory, "
+                f"or set 'slow_bias_file'/'fast_bias_file' in your config to a custom path."
+            )
+
+    # Check user-supplied overrides if present
+    for key in ('slow_bias_file', 'fast_bias_file'):
+        if key in config:
+            p = config[key]
+            if not os.path.isfile(p):
+                errors.append(f"'{key}' path does not exist: '{p}'")
+
+    # ------------------------------------------------------------------
+    # 3. Required config keys
+    # ------------------------------------------------------------------
+    required_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file']
+    for key in required_keys:
+        if key not in config:
+            errors.append(f"Required key '{key}' is missing from config.")
+
+    if config.get('generate_new_wavelength_soln') is True and 'arc_file' not in config:
+        errors.append(
+            "'generate_new_wavelength_soln' is true but 'arc_file' is not set in config."
+        )
+
+    # ------------------------------------------------------------------
+    # 4. File path existence checks
+    # ------------------------------------------------------------------
+    file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
+                 'twilight_flat']
+    if config.get('generate_new_wavelength_soln') is True:
+        file_keys.append('arc_file')
+
+    for key in file_keys:
+        if key not in config:
+            continue  # already caught by required check or truly optional
+        val = config[key]
+        paths = val if isinstance(val, list) else [val]
+        for p in paths:
+            if not os.path.isfile(p):
+                errors.append(f"'{key}' path does not exist: '{p}'")
+
+    # Directory keys — warn only (pipeline creates them if missing)
+    dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
+                'flat_field_output_dir', 'log_output_dir', 'cube_output_dir', 'flat_file_dir']
+    for key in dir_keys:
+        if key in config and config[key]:
+            p = config[key]
+            if not os.path.isdir(p):
+                warnings.append(
+                    f"'{key}' directory does not exist yet: '{p}' — it will be created."
+                )
+
+    # ------------------------------------------------------------------
+    # 5. LUT reference arc check
+    # ------------------------------------------------------------------
+    if not config.get('generate_new_wavelength_soln'):
+        ref_arc = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+        if not os.path.isfile(ref_arc):
+            errors.append(
+                f"Reference arc not found: '{ref_arc}'. "
+                f"Set 'generate_new_wavelength_soln = true' and provide 'arc_file' to generate one, "
+                f"or place the reference arc pickle at the expected location."
+            )
+
+    # ------------------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------------------
+    for w in warnings:
+        print(f"  \u26a0  WARNING: {w}")
+    for e in errors:
+        print(f"  \u2717  ERROR: {e}")
+
+    if errors:
+        print(
+            f"\nPipeline pre-flight check FAILED — "
+            f"{len(errors)} error(s), {len(warnings)} warning(s)."
+        )
+        print("Fix the above issues and re-run.")
+        sys.exit(1)
+
+    if warnings:
+        print(f"\nPipeline pre-flight check passed with {len(warnings)} warning(s).")
+    else:
+        print("\nPipeline pre-flight check passed.")
+
+    return True
 
 
 def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
@@ -163,7 +309,8 @@ def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, plac
 
 
 
-def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, missing_cams=False):
+def generate_traces(red_flat, green_flat, blue_flat, output_dir,
+                    slow_bias=None, fast_bias=None, missing_cams=False):
     """Generate fiber traces from flat field observations for all three channels.
 
     This function intelligently handles missing camera extensions by:
@@ -176,7 +323,8 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
         green_flat: Path to green flat field FITS file.
         blue_flat: Path to blue flat field FITS file.
         output_dir: Directory to save trace files.
-        bias: Optional bias frame for correction.
+        slow_bias: Path to SLOW-mode master bias FITS file.
+        fast_bias: Path to FAST-mode master bias FITS file.
         missing_cams: Deprecated parameter, kept for backwards compatibility.
 
     Raises:
@@ -214,11 +362,13 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
             print(f"No placeholder extensions found in {os.path.basename(flat_file)}")
 
         # Run trace generation, skipping placeholder extensions
+        # slow_bias/fast_bias are forwarded; run_ray_tracing selects per READ-MDE via GUI_extract
         run_ray_tracing(
             flat_file,
             outpath=output_dir,
             channel=channel,
-            use_bias=bias,
+            slow_bias=slow_bias,
+            fast_bias=fast_bias,
             is_master_calib=False,
             skip_extension_indices=placeholder_indices
         )
@@ -244,24 +394,26 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
 ###need to edit GUI extract to give custom output_dir
 #currently designed to use skyflats
 #only used for generating new wl solutions
-def extract_flat_field(flat_file_dir, output_dir, use_bias=None):
-    
+def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None):
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    ge.GUI_extract(flat_file_dir, output_dir=output_dir, use_bias=use_bias)
+    ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
 
     return
 
 
-def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mastercalib_trace_dir=None):
+def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
+                   trace_dir=None, mastercalib_trace_dir=None):
     """
     Run spectrum extraction with hybrid trace support.
 
     Args:
         science_file: Path to science FITS file or list of paths
         output_dir: Output directory for extractions
-        use_bias: Bias file for calibration
+        slow_bias: Path to SLOW-mode master bias FITS file
+        fast_bias: Path to FAST-mode master bias FITS file
         trace_dir: User trace directory (for real extensions)
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
 
@@ -282,7 +434,8 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
             extraction_file_path = ge.GUI_extract(
                 file,
                 output_dir=output_dir,
-                use_bias=use_bias,
+                slow_bias=slow_bias,
+                fast_bias=fast_bias,
                 trace_dir=trace_dir,
                 mastercalib_trace_dir=mastercalib_trace_dir
             )
@@ -291,7 +444,8 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
         extraction_file_path, _ = ge.GUI_extract(
             science_file,
             output_dir=output_dir,
-            use_bias=use_bias,
+            slow_bias=slow_bias,
+            fast_bias=fast_bias,
             trace_dir=trace_dir,
             mastercalib_trace_dir=mastercalib_trace_dir
         )
@@ -300,9 +454,9 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
 
 
 #this isn't quite right -> nneeds checking
-def calc_wavelength_soln(arc_file, output_dir, bias=None):
+def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
-    ge.GUI_extract(arc_file, use_bias=bias, output_dir=output_dir)
+    ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
 
     arc_picklename = os.path.join(output_dir, os.path.basename(arc_file).replace('_mef.fits', '_extract.pkl'))
 
@@ -349,8 +503,9 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
-                          bias_file, trace_dir, arc_dict_config,
-                          timestamp, label='flat'):
+                          trace_dir, arc_dict_config,
+                          timestamp, label='flat',
+                          slow_bias=None, fast_bias=None):
     """Apply pixel flat → extract → wavelength-calibrate → generate RSS for a flat frame.
 
     Used for both dome flats (fibre-flat RSS) and twilight flats.
@@ -366,8 +521,10 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
         Pixel flat maps generated from the dome flat.
     output_dir : str
         Directory for all intermediate and output files.
-    bias_file : str or None
-        Master bias FITS path (passed to run_extraction).
+    slow_bias : str or None
+        Path to SLOW-mode master bias FITS (passed to run_extraction).
+    fast_bias : str or None
+        Path to FAST-mode master bias FITS (passed to run_extraction).
     trace_dir : str or None
         Directory containing fibre trace files.
     arc_dict_config : object or None
@@ -398,7 +555,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
 
         # Step 2: extract (bias subtraction is handled inside run_extraction)
         # run_extraction returns only a basename (from GUI_extract); join with output_dir
-        pkl_basename = run_extraction(corr_file, output_dir, use_bias=bias_file,
+        pkl_basename = run_extraction(corr_file, output_dir,
+                                      slow_bias=slow_bias, fast_bias=fast_bias,
                                       trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR)
         if not pkl_basename:
             print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
@@ -1245,54 +1403,19 @@ def main(config_path):
     logger = logging.getLogger(__name__)
     logger.info(f"Pipeline started. Config: {config_path}")
 
+    # Pre-flight validation — exits cleanly if anything is wrong
+    validate_pipeline_config(config, config_path)
+
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
-
-
-    #code to handle bias file input
-    if 'bias_file' not in config:
-        raise ValueError("No bias file provided in the configuration.")
-    
-    if isinstance(config['bias_file'], str):
-        bias_file = config['bias_file']
-        if 'bias_dir' in config:
-            # If bias_file is just a basename, join with bias_dir
-            if bias_file == os.path.basename(bias_file):
-                bias_file = os.path.join(config['bias_dir'], bias_file)
-            bias = BiasLlamas(bias_file)
-        else:
-            # bias_dir not provided; ensure bias_file is an absolute path
-            if not os.path.isabs(bias_file):
-                raise ValueError("Bias file is provided as a relative path and 'bias_dir' is missing in configuration.")
-            bias = BiasLlamas(bias_file)
-
-    elif isinstance(config['bias_file'], list):
-        
-        bias_list = config['bias_file']
-        print(f"Using a list of bias files {bias_list}")
-        if 'bias_dir' in config:
-            bias_dir = config['bias_dir']
-            updated_bias_list = []
-            for b in bias_list:
-                # If each bias file is provided as a basename, join with bias_dir
-                if b == os.path.basename(b):
-                    updated_bias_list.append(os.path.join(bias_dir, b))
-                else:
-                    updated_bias_list.append(b)
-            bias_list = updated_bias_list
-        else:
-            # Ensure all bias file paths in the list are absolute
-            for b in bias_list:
-                if not os.path.isabs(b):
-                    raise ValueError("One or more bias files are provided as relative paths and 'bias_dir' is missing in configuration.")
-        
-        
-        bias = BiasLlamas(bias_list)
-    bias_file = bias.master_bias()
+    # Resolve master bias files — user overrides take priority, otherwise use package defaults
+    slow_bias_file = config.get('slow_bias_file', SLOW_BIAS_FILE)
+    fast_bias_file = config.get('fast_bias_file', FAST_BIAS_FILE)
 
     # Validate bias file structure (add placeholders for missing cameras)
-    bias_file = validate_for_gui(bias_file)
+    slow_bias_file = validate_for_gui(slow_bias_file)
+    fast_bias_file = validate_for_gui(fast_bias_file)
 
         
     # Parse CRR cube configuration (defaults to True if not specified)
@@ -1323,11 +1446,13 @@ def main(config_path):
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
         logger.info("Stage: Generating new wavelength solution")
-        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
+        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'),
+                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
         relative_throughput(config.get('shift_picklename'), config.get('flat_picklename'))
-        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=bias_file)
+        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'),
+                                       slow_bias=slow_bias_file, fast_bias=fast_bias_file)
         config['arcdict'] = arcdict
 
     else:
@@ -1441,7 +1566,8 @@ def main(config_path):
             )
 
             generate_traces(red_flat_validated, green_flat_validated, blue_flat_validated,
-                           config.get('trace_output_dir'), bias=config.get('bias_file'))
+                           config.get('trace_output_dir'),
+                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
 
             # Validate newly generated traces with per-trace fallback
             from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
@@ -1555,22 +1681,20 @@ def main(config_path):
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flats when specified
-            twilight_files = [config.get('red_twilight_flat_file'),
-                              config.get('green_twilight_flat_file'),
-                              config.get('blue_twilight_flat_file')]
+            # Prefer twilight flat when specified
+            twilight_file = config.get('twilight_flat')
 
-            if any(f is not None for f in twilight_files) and flat_pixel_maps:
-                print("\nTwilight flat files specified — building fibre-flat RSS from twilight flats...")
+            if twilight_file is not None and flat_pixel_maps:
+                print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
                 twi_dir = os.path.join(flat_field_dir, 'twilight')
                 os.makedirs(twi_dir, exist_ok=True)
                 twi_rss = _process_flat_for_rss(
-                    [f for f in twilight_files if f is not None],
+                    [twilight_file],
                     flat_pixel_maps, twi_dir,
-                    bias_file=config.get('bias_file'),
                     trace_dir=final_trace_dir,
                     arc_dict_config=config.get('arcdict'),
                     timestamp=timestamp_ff, label='twilight',
+                    slow_bias=slow_bias_file, fast_bias=fast_bias_file,
                 )
                 if twi_rss:
                     config['flat_rss_outputs'] = twi_rss
@@ -1584,24 +1708,23 @@ def main(config_path):
                               config.get('green_flat_file'),
                               config.get('blue_flat_file')]
                 if any(f is not None for f in dome_files) and flat_pixel_maps:
-                    if any(f is not None for f in twilight_files):
+                    if twilight_file is not None:
                         msg = ("No twilight flat RSS — building fibre-flat RSS from "
                                "pixel-corrected dome flats.")
                     else:
-                        msg = ("No twilight flat files specified — using dome flat RSS "
+                        msg = ("No twilight_flat specified — using dome flat RSS "
                                "for fibre-to-fibre correction.\n"
-                               "        Provide red/green/blue_twilight_flat_file in "
-                               "config for best results.")
+                               "        Provide twilight_flat in config for best results.")
                     print(f"\n  NOTE: {msg}")
                     dome_dir = os.path.join(flat_field_dir, 'dome_rss')
                     os.makedirs(dome_dir, exist_ok=True)
                     dome_rss = _process_flat_for_rss(
                         [f for f in dome_files if f is not None],
                         flat_pixel_maps, dome_dir,
-                        bias_file=config.get('bias_file'),
                         trace_dir=final_trace_dir,
                         arc_dict_config=config.get('arcdict'),
                         timestamp=timestamp_ff, label='dome',
+                        slow_bias=slow_bias_file, fast_bias=fast_bias_file,
                     )
                     if dome_rss:
                         config['flat_rss_outputs'] = dome_rss
@@ -1734,7 +1857,8 @@ def main(config_path):
                 extracted_file = run_extraction(
                     science_file,
                     extraction_path,
-                    use_bias=config.get('bias_file'),
+                    slow_bias=slow_bias_file,
+                    fast_bias=fast_bias_file,
                     trace_dir=final_trace_dir,              # User traces
                     mastercalib_trace_dir=CALIB_DIR         # Mastercalib fallback
                 )
@@ -1744,7 +1868,8 @@ def main(config_path):
             extracted_file = run_extraction(
                 science_files_to_process,
                 extraction_path,
-                use_bias=config.get('bias_file'),
+                slow_bias=slow_bias_file,
+                fast_bias=fast_bias_file,
                 trace_dir=final_trace_dir,                  # User traces
                 mastercalib_trace_dir=CALIB_DIR             # Mastercalib fallback
             )
@@ -1814,8 +1939,9 @@ def main(config_path):
                             flat_pixel_maps[0] if flat_pixel_maps else None,
                             final_trace_dir,
                             config.get('arcdict'),
-                            config.get('bias_file'),
+                            slow_bias_file,
                             extraction_path,
+                            fast_bias=fast_bias_file,
                         )
                         corrections_file = compute_fibre_flat_twilight(
                             twi_extractions, smooth_models_file,

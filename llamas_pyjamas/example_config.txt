@@ -3,9 +3,21 @@
 #The paths must be given as complete paths to ensure they can be found
 #if files cannot be found or processed correctly then the pipeline defaults to the master calibration files
 
-bias_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMAS_2025-05-22T23_00_33.152_mef.fits
-#example of a list of bias files to combine into a median master bias
-#bias_file = file1.fits, file2.fits, file3.fits
+#==============================================================================
+# BIAS CALIBRATION
+#==============================================================================
+# The pipeline requires two pre-combined master bias FITS files — one for each
+# CCD readout mode. These must be created from your own raw bias exposures using
+# the BiasLlamas class and placed in the Bias/ directory, OR supplied here as
+# full paths. The correct file is selected automatically from the READ-MDE header.
+#
+# Default locations (pipeline looks here if no path is specified below):
+#   llamas_pyjamas/Bias/slow_master_bias.fits
+#   llamas_pyjamas/Bias/fast_master_bias.fits
+#
+# To use custom locations, uncomment and set the paths below:
+#slow_bias_file = /path/to/your/slow_master_bias.fits
+#fast_bias_file = /path/to/your/fast_master_bias.fits
 
 #calibration files to include
 red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_34_47.516_mef.fits
