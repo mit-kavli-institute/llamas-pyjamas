@@ -486,7 +486,7 @@ def validate_for_gui(fits_file: str, expected_extensions: int = 24) -> str:
     base, ext = os.path.splitext(fits_file)
     gui_file = f"{base}_GUI_version{ext}"
     shutil.copy2(fits_file, gui_file)
-    logger.info(f"Copied science file to: {gui_file}")
+    logger.info(f"Copied FITS file to: {gui_file}")
 
     # Fix the copy in-place (modifies gui_file, not original)
     return validate_and_fix_extensions(gui_file, expected_extensions=expected_extensions,
