@@ -45,8 +45,6 @@ from pathlib import Path
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
-ray.init(ignore_reinit_error=True)
-
 logger = logging.getLogger(__name__)
 
 class ExtractLlamas:
@@ -549,7 +547,7 @@ def parse_args()-> list:
 
 if __name__ == '__main__':
     # Example of how to run the extraction
-
+    # ray.init(ignore_reinit_error=True)
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     
