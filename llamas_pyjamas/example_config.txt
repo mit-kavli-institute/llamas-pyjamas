@@ -24,6 +24,11 @@ red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/t
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 blue_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 
+####NEW: added for fibre to fibre flat fielding routine
+#If missing, pipeline will default to using the lamp flat files i.e. red_flat_file, green_flat_file, blue_flat_file
+twilight_flat =  /Users/slh/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/ut20260106/LLAMAS_2026-01-06_23-49-00.7_CAL22_mef.fits
+
+
 #science files to reduce
 science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMAS_2025-05-23T00_51_25.019_mef.fits
 
