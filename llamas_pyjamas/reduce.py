@@ -1852,14 +1852,24 @@ def main(config_path):
         # Track whether files were flat-corrected
         were_flat_corrected = config.get('apply_flat_field_correction', True) and flat_pixel_maps and len(flat_pixel_maps) > 0
         
+        # Build a list of (pkl_path, original_science_fits_path) pairs during extraction.
+        # This avoids re-globbing (which could pick up flat/calibration pkls) and keeps
+        # each pkl explicitly linked to the original science file for header extraction.
+        science_pkl_pairs = []  # list of (pkl_path, original_science_fits_path)
+
+        # Normalise original science files to a list for uniform handling
+        original_science_files = config['science_files']
+        if not isinstance(original_science_files, list):
+            original_science_files = [original_science_files]
+
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
             logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
-            for i, science_file in enumerate(science_files_to_process):
+            for i, (science_file, orig_file) in enumerate(zip(science_files_to_process, original_science_files)):
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
                 # Process each science file with hybrid trace support
-                extracted_file = run_extraction(
+                extracted_basename = run_extraction(
                     science_file,
                     extraction_path,
                     slow_bias=slow_bias_file,
@@ -1867,10 +1877,12 @@ def main(config_path):
                     trace_dir=final_trace_dir,              # User traces
                     mastercalib_trace_dir=CALIB_DIR         # Mastercalib fallback
                 )
-                print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_file}")
+                print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
+                if extracted_basename:
+                    science_pkl_pairs.append((os.path.join(extraction_path, extracted_basename), orig_file))
         else:
             print(f"Extracting science file: {os.path.basename(science_files_to_process)}")
-            extracted_file = run_extraction(
+            extracted_basename = run_extraction(
                 science_files_to_process,
                 extraction_path,
                 slow_bias=slow_bias_file,
@@ -1878,25 +1890,30 @@ def main(config_path):
                 trace_dir=final_trace_dir,                  # User traces
                 mastercalib_trace_dir=CALIB_DIR             # Mastercalib fallback
             )
-            print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_file}")
+            print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
+            if extracted_basename:
+                science_pkl_pairs.append((os.path.join(extraction_path, extracted_basename), original_science_files[0]))
 
-        # print("Correcting wavelengths in the extracted file...")
-        # correction_path = os.path.join(extraction_path, extracted_file)
-        pkl_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) if f.endswith('.pkl') and 'corrected_extractions' not in f]
-        
-        for index, file in enumerate(pkl_files):
-            print(f"Processing extraction file {index+1}/{len(pkl_files)}: {file}")
-            correction_path = file
+        for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
+            print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
             if not os.path.exists(correction_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
-            
+
             # Correct wavelengths for each extraction file
-            corr_extractions, primary_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict'))
-            
+            corr_extractions, _ = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+
             corr_extraction_list = corr_extractions['extractions']
-            
+
+            # Read primary header directly from the original science FITS file.
+            # This guarantees correct RA/DEC and telescope pointing regardless of what
+            # may have been stored in intermediate pickle files (flat-corrected copies,
+            # concat'd flat pkls, etc. all share the same primary HDU data but the
+            # pkl chain is fragile — the original file is authoritative).
+            with fits.open(orig_science_file) as _sci_hdul:
+                primary_hdr = _sci_hdul[0].header.copy()
+
             # Save the corrected extractions using the current file's base name
-            base_name = os.path.splitext(os.path.basename(file))[0]
+            base_name = os.path.splitext(os.path.basename(correction_path))[0]
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
