@@ -443,12 +443,14 @@ def update_ra_dec_in_fits(fits_file, logger=None):
                 tel_dec = primary_hdr.get('HIERARCH TEL DEC')
 
                 if tel_ra is None or tel_dec is None:
-                    error_msg = "Primary header missing HIERARCH TEL RA and/or HIERARCH TEL DEC"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
+                    logger.warning("HIERARCH TEL RA and/or HIERARCH TEL DEC not found in primary header; "
+                                   "leaving RA/DEC unchanged")
+                    hdul.flush()
+                    return
 
-                # Convert telescope coordinates from sexagesimal to decimal assuming both are in degrees.
-                c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.deg, u.deg))
+                # Convert telescope coordinates from sexagesimal to decimal.
+                # TEL RA is in HH:MM:SS.s (hourangle), TEL DEC is in DD:MM:SS.s (degrees).
+                c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.hourangle, u.deg))
                 
                 logger.info(f"Converted HIERARCH TEL coordinates: RA={c.ra.deg}, DEC={c.dec.deg}")
 
