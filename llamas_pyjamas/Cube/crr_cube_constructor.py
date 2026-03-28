@@ -28,7 +28,6 @@ from astropy.wcs import WCS
 from scipy.interpolate import RegularGridInterpolator
 import warnings
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.Cube.crr_kernels import (
     build_kernel_matrix, wavelength_dependent_seeing, 
     double_gaussian_kernel, measure_kernel_properties
@@ -242,7 +241,7 @@ class CRRCubeConstructor:
             config: CRR configuration parameters
         """
         self.config = config
-        self.logger = setup_logger(__name__)
+        self.logger = logging.getLogger(__name__)
         
         # Will be set during reconstruction
         self.output_grid_x = None

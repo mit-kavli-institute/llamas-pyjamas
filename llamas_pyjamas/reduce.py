@@ -25,17 +25,19 @@ import argparse
 import pickle
 import traceback
 import multiprocessing
+import logging
+import gc
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
-from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR
+from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR, LUT_DIR, SLOW_BIAS_FILE, FAST_BIAS_FILE
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, setup_logger, check_header
+from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -46,8 +48,16 @@ import numpy as np
 
 import shutil
 
+_cached_reference_arc = None
+
+logger = logging.getLogger(__name__)
+
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
+                                           compute_fibre_flat_twilight,
+                                           reduce_twilight_flat,
+                                           apply_fibre_flat_to_rss)
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -78,8 +88,9 @@ def get_input_files_from_config(config, file_keys=None):
           List of all file paths found in the config
       """
       if file_keys is None:
-          file_keys = ['science_files', 'bias_file', 'red_flat_file',
-                       'green_flat_file', 'blue_flat_file']
+          file_keys = ['science_files', 'slow_bias_file', 'fast_bias_file',
+                       'red_flat_file', 'green_flat_file', 'blue_flat_file',
+                       'twilight_flat']
 
       input_files = []
 
@@ -94,6 +105,153 @@ def get_input_files_from_config(config, file_keys=None):
                   input_files.append(value)
 
       return input_files
+
+
+def validate_pipeline_config(config: dict, config_path: str) -> bool:
+    """
+    Pre-flight validation of the pipeline configuration.
+
+    Checks package directories, required master bias files, required config keys,
+    and file/directory path existence before any processing begins.  On failure,
+    prints a clear itemised summary and calls sys.exit(1).
+
+    Parameters
+    ----------
+    config : dict
+        Parsed configuration dictionary from the config .txt file.
+    config_path : str
+        Path to the config file (used in error messages for context).
+
+    Returns
+    -------
+    bool
+        True if all checks pass (warnings are allowed).
+    """
+    import sys
+
+    errors = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("PIPELINE PRE-FLIGHT CHECK")
+    print("=" * 60)
+
+    # ------------------------------------------------------------------
+    # 1. Package directory checks — fail immediately if missing
+    # ------------------------------------------------------------------
+    if not os.path.isdir(CALIB_DIR):
+        errors.append(
+            f"Package mastercalib directory not found: '{CALIB_DIR}'. "
+            f"This directory is required for trace fallbacks."
+        )
+    if not os.path.isdir(LUT_DIR):
+        errors.append(
+            f"Package LUT directory not found: '{LUT_DIR}'. "
+            f"This directory is required for the reference arc and trace LUT."
+        )
+
+    if errors:
+        for e in errors:
+            print(f"  \u2717  ERROR: {e}")
+        print(f"\nPipeline pre-flight check FAILED — {len(errors)} error(s).")
+        print("Fix the above issues and re-run.")
+        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # 2. Master bias file checks
+    # ------------------------------------------------------------------
+    # Check packaged default locations
+    for label, path in [('slow_master_bias', SLOW_BIAS_FILE),
+                         ('fast_master_bias', FAST_BIAS_FILE)]:
+        if not os.path.isfile(path):
+            errors.append(
+                f"Required master bias not found: '{path}'. "
+                f"Create it from raw bias frames using BiasLlamas and place it in the Bias/ directory, "
+                f"or set 'slow_bias_file'/'fast_bias_file' in your config to a custom path."
+            )
+
+    # Check user-supplied overrides if present
+    for key in ('slow_bias_file', 'fast_bias_file'):
+        if key in config:
+            p = config[key]
+            if not os.path.isfile(p):
+                errors.append(f"'{key}' path does not exist: '{p}'")
+
+    # ------------------------------------------------------------------
+    # 3. Required config keys
+    # ------------------------------------------------------------------
+    required_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file']
+    for key in required_keys:
+        if key not in config:
+            errors.append(f"Required key '{key}' is missing from config.")
+
+    if config.get('generate_new_wavelength_soln') is True and 'arc_file' not in config:
+        errors.append(
+            "'generate_new_wavelength_soln' is true but 'arc_file' is not set in config."
+        )
+
+    # ------------------------------------------------------------------
+    # 4. File path existence checks
+    # ------------------------------------------------------------------
+    file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
+                 'twilight_flat']
+    if config.get('generate_new_wavelength_soln') is True:
+        file_keys.append('arc_file')
+
+    for key in file_keys:
+        if key not in config:
+            continue  # already caught by required check or truly optional
+        val = config[key]
+        paths = val if isinstance(val, list) else [val]
+        for p in paths:
+            if not os.path.isfile(p):
+                errors.append(f"'{key}' path does not exist: '{p}'")
+
+    # Directory keys — warn only (pipeline creates them if missing)
+    dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
+                'flat_field_output_dir', 'log_output_dir', 'cube_output_dir', 'flat_file_dir']
+    for key in dir_keys:
+        if key in config and config[key]:
+            p = config[key]
+            if not os.path.isdir(p):
+                warnings.append(
+                    f"'{key}' directory does not exist yet: '{p}' — it will be created."
+                )
+
+    # ------------------------------------------------------------------
+    # 5. LUT reference arc check
+    # ------------------------------------------------------------------
+    if not config.get('generate_new_wavelength_soln'):
+        ref_arc = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+        if not os.path.isfile(ref_arc):
+            errors.append(
+                f"Reference arc not found: '{ref_arc}'. "
+                f"Set 'generate_new_wavelength_soln = true' and provide 'arc_file' to generate one, "
+                f"or place the reference arc pickle at the expected location."
+            )
+
+    # ------------------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------------------
+    for w in warnings:
+        print(f"  \u26a0  WARNING: {w}")
+    for e in errors:
+        print(f"  \u2717  ERROR: {e}")
+
+    if errors:
+        print(
+            f"\nPipeline pre-flight check FAILED — "
+            f"{len(errors)} error(s), {len(warnings)} warning(s)."
+        )
+        print("Fix the above issues and re-run.")
+        sys.exit(1)
+
+    if warnings:
+        print(f"\nPipeline pre-flight check passed with {len(warnings)} warning(s).")
+    else:
+        print("\nPipeline pre-flight check passed.")
+
+    return True
 
 
 def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
@@ -151,7 +309,8 @@ def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, plac
 
 
 
-def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, missing_cams=False):
+def generate_traces(red_flat, green_flat, blue_flat, output_dir,
+                    slow_bias=None, fast_bias=None, missing_cams=False):
     """Generate fiber traces from flat field observations for all three channels.
 
     This function intelligently handles missing camera extensions by:
@@ -164,7 +323,8 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
         green_flat: Path to green flat field FITS file.
         blue_flat: Path to blue flat field FITS file.
         output_dir: Directory to save trace files.
-        bias: Optional bias frame for correction.
+        slow_bias: Path to SLOW-mode master bias FITS file.
+        fast_bias: Path to FAST-mode master bias FITS file.
         missing_cams: Deprecated parameter, kept for backwards compatibility.
 
     Raises:
@@ -202,11 +362,13 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
             print(f"No placeholder extensions found in {os.path.basename(flat_file)}")
 
         # Run trace generation, skipping placeholder extensions
+        # slow_bias/fast_bias are forwarded; run_ray_tracing selects per READ-MDE via GUI_extract
         run_ray_tracing(
             flat_file,
             outpath=output_dir,
             channel=channel,
-            use_bias=bias,
+            slow_bias=slow_bias,
+            fast_bias=fast_bias,
             is_master_calib=False,
             skip_extension_indices=placeholder_indices
         )
@@ -232,24 +394,26 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir, bias=None, miss
 ###need to edit GUI extract to give custom output_dir
 #currently designed to use skyflats
 #only used for generating new wl solutions
-def extract_flat_field(flat_file_dir, output_dir, use_bias=None):
-    
+def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None):
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    ge.GUI_extract(flat_file_dir, output_dir=output_dir, use_bias=use_bias)
+    ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
 
     return
 
 
-def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mastercalib_trace_dir=None):
+def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
+                   trace_dir=None, mastercalib_trace_dir=None):
     """
     Run spectrum extraction with hybrid trace support.
 
     Args:
         science_file: Path to science FITS file or list of paths
         output_dir: Output directory for extractions
-        use_bias: Bias file for calibration
+        slow_bias: Path to SLOW-mode master bias FITS file
+        fast_bias: Path to FAST-mode master bias FITS file
         trace_dir: User trace directory (for real extensions)
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
 
@@ -270,7 +434,8 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
             extraction_file_path = ge.GUI_extract(
                 file,
                 output_dir=output_dir,
-                use_bias=use_bias,
+                slow_bias=slow_bias,
+                fast_bias=fast_bias,
                 trace_dir=trace_dir,
                 mastercalib_trace_dir=mastercalib_trace_dir
             )
@@ -279,7 +444,8 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
         extraction_file_path, _ = ge.GUI_extract(
             science_file,
             output_dir=output_dir,
-            use_bias=use_bias,
+            slow_bias=slow_bias,
+            fast_bias=fast_bias,
             trace_dir=trace_dir,
             mastercalib_trace_dir=mastercalib_trace_dir
         )
@@ -288,9 +454,9 @@ def run_extraction(science_file, output_dir, use_bias=None, trace_dir=None, mast
 
 
 #this isn't quite right -> nneeds checking
-def calc_wavelength_soln(arc_file, output_dir, bias=None):
+def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
-    ge.GUI_extract(arc_file, use_bias=bias, output_dir=output_dir)
+    ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
 
     arc_picklename = os.path.join(output_dir, os.path.basename(arc_file).replace('_mef.fits', '_extract.pkl'))
 
@@ -315,18 +481,110 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 def correct_wavelengths(science_extraction_file, soln=None):
     # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
-    arcdict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
-    
+    global _cached_reference_arc
+    if _cached_reference_arc is None:
+        logger.info("Loading reference arc (first call, will be cached)")
+        _cached_reference_arc = ExtractLlamas.loadExtraction(
+            os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    arcdict = _cached_reference_arc
+
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
-    extractions, metadata, primary_hdr = _science['extractions'], _science['metadata'], _science['primary_header']
+    extractions = _science['extractions']
+    metadata    = _science['metadata']
+    primary_hdr = _science.get('primary_header')
     print(f'extractions: {extractions}')
     print(f'metadata: {metadata}')
     std_wvcal = arc.arcTransfer(_science, arcdict,)
-    
+
     print(f'std_wvcal: {std_wvcal}')
     print(f'std_wvcal metadata: {std_wvcal.get("metadata", {})}')
 
     return std_wvcal, primary_hdr
+
+
+def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
+                          trace_dir, arc_dict_config,
+                          timestamp, label='flat',
+                          slow_bias=None, fast_bias=None):
+    """Apply pixel flat → extract → wavelength-calibrate → generate RSS for a flat frame.
+
+    Used for both dome flats (fibre-flat RSS) and twilight flats.
+    The pixel-to-pixel flat map *must* be applied to the raw flat frame before
+    extraction so that extracted spectra represent pure fibre throughput
+    (detector per-pixel sensitivity removed).
+
+    Parameters
+    ----------
+    flat_files : list of str
+        Raw flat FITS files (dome or twilight).
+    flat_pixel_maps : list of str
+        Pixel flat maps generated from the dome flat.
+    output_dir : str
+        Directory for all intermediate and output files.
+    slow_bias : str or None
+        Path to SLOW-mode master bias FITS (passed to run_extraction).
+    fast_bias : str or None
+        Path to FAST-mode master bias FITS (passed to run_extraction).
+    trace_dir : str or None
+        Directory containing fibre trace files.
+    arc_dict_config : object or None
+        Arc solution config forwarded to correct_wavelengths.
+    timestamp : str
+        Timestamp string used in log-file names.
+    label : str
+        Short label used in log filenames (e.g. 'dome', 'twilight').
+
+    Returns
+    -------
+    list of str
+        RSS output file paths (may be empty on failure).
+    """
+    rss_outputs = []
+    for flat_file in flat_files:
+        if flat_file is None:
+            continue
+
+        # Step 1: pixel-to-pixel flat correction (2D)
+        corr_file, _ = apply_flat_field_correction(
+            flat_file, flat_pixel_maps, output_dir,
+            validate_matching=True, require_all_matches=False
+        )
+        if not corr_file:
+            print(f"  WARNING: Pixel flat correction failed for {os.path.basename(flat_file)} — skipping")
+            continue
+
+        # Step 2: extract (bias subtraction is handled inside run_extraction)
+        # run_extraction returns only a basename (from GUI_extract); join with output_dir
+        pkl_basename = run_extraction(corr_file, output_dir,
+                                      slow_bias=slow_bias, fast_bias=fast_bias,
+                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR)
+        if not pkl_basename:
+            print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
+            continue
+        pkl = os.path.join(output_dir, pkl_basename)
+
+        # Step 3: wavelength-calibrate and save corrected pickle
+        corr_extr, primary_hdr = correct_wavelengths(pkl, soln=arc_dict_config)
+        base = os.path.splitext(os.path.basename(pkl))[0]
+        corr_pkl = os.path.join(output_dir, f'{base}_corrected_extractions.pkl')
+        save_extractions(
+            corr_extr['extractions'], primary_header=primary_hdr,
+            savefile=corr_pkl, save_dir=output_dir,
+            prefix=f'LLAMASExtract_{label}_corrected',
+        )
+
+        # Step 4: generate RSS
+        rss_base = os.path.join(
+            output_dir,
+            os.path.basename(corr_pkl).replace('_corrected_extractions.pkl', '_RSS.fits')
+        )
+        rss_logger = setup_logger(__name__, f'{label}_RSS_{timestamp}.log')
+        rss_gen = RSSgeneration(logger=rss_logger)
+        out = rss_gen.generate_rss(corr_pkl, rss_base)
+        if out:
+            rss_outputs.extend(out)
+
+    return rss_outputs
 
 
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
@@ -393,9 +651,46 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
 
     except Exception as e:
         print(f"Error in flat field calibration: {str(e)}")
+        logger.error(f"Flat field calibration failed: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return []
+
+
+def _extract_channel_from_filename(path):
+    """Extract the colour channel name ('red', 'green', or 'blue') from a filename.
+
+    Parses the last occurrence of _red, _green, or _blue before the extension.
+
+    Args:
+        path (str): File path.
+
+    Returns:
+        str or None: Channel name lower-cased, or None if not found.
+    """
+    basename = os.path.basename(path).lower()
+    for ch in ('red', 'green', 'blue'):
+        if f'_{ch}' in basename or basename.endswith(f'{ch}.fits'):
+            return ch
+    return None
+
+
+def _find_matching_flat_rss(flat_rss_list, channel):
+    """Return the flat RSS path that matches a given colour channel.
+
+    Args:
+        flat_rss_list (list): List of flat RSS file paths from RSSgeneration.
+        channel (str or None): Channel to match ('red', 'green', 'blue').
+
+    Returns:
+        str or None: Path of the matching flat RSS file, or None.
+    """
+    if not flat_rss_list or channel is None:
+        return None
+    for path in flat_rss_list:
+        if f'_{channel}' in os.path.basename(path).lower():
+            return path
+    return None
 
 
 def build_flat_field_map(flat_pixel_maps, science_file):
@@ -488,6 +783,7 @@ def build_flat_field_map(flat_pixel_maps, science_file):
 
     except Exception as e:
         print(f"ERROR building flat field map: {e}")
+        logger.error(f"Failed to build flat field map: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return {}
@@ -638,6 +934,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     
     if not flat_map:
         print("ERROR: Could not build flat field mapping")
+        logger.error("Could not build flat field mapping")
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
     
     # Step 2: Validate matching if requested
@@ -778,6 +1075,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
             
     except Exception as e:
         print(f"ERROR: Failed to process science file {science_file}: {str(e)}")
+        logger.error(f"Failed to process science file {science_file}: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         return None, {'corrected': 0, 'skipped': 0, 'errors': 1}
@@ -830,8 +1128,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     processed_traditional_bases = set()
 
     # Create a single logger for all cube construction
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+    logger = logging.getLogger(__name__)
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
 
     for rss_file in rss_files:
@@ -1097,54 +1394,33 @@ def main(config_path):
         
     print("Configuration:", config)
 
+    # Configure pipeline logging — log file goes next to the config file
+    if 'log_output_dir' in config:
+        log_dir = config['log_output_dir']
+    else:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
+    log_file = configure_pipeline_logging(log_dir)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Pipeline started. Config: {config_path}")
+
+    # Pre-flight validation — exits cleanly if anything is wrong
+    validate_pipeline_config(config, config_path)
+
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
-
-
-    #code to handle bias file input
-    if 'bias_file' not in config:
-        raise ValueError("No bias file provided in the configuration.")
-    
-    if isinstance(config['bias_file'], str):
-        bias_file = config['bias_file']
-        if 'bias_dir' in config:
-            # If bias_file is just a basename, join with bias_dir
-            if bias_file == os.path.basename(bias_file):
-                bias_file = os.path.join(config['bias_dir'], bias_file)
-            bias = BiasLlamas(bias_file)
-        else:
-            # bias_dir not provided; ensure bias_file is an absolute path
-            if not os.path.isabs(bias_file):
-                raise ValueError("Bias file is provided as a relative path and 'bias_dir' is missing in configuration.")
-            bias = BiasLlamas(bias_file)
-
-    elif isinstance(config['bias_file'], list):
-        
-        bias_list = config['bias_file']
-        print(f"Using a list of bias files {bias_list}")
-        if 'bias_dir' in config:
-            bias_dir = config['bias_dir']
-            updated_bias_list = []
-            for b in bias_list:
-                # If each bias file is provided as a basename, join with bias_dir
-                if b == os.path.basename(b):
-                    updated_bias_list.append(os.path.join(bias_dir, b))
-                else:
-                    updated_bias_list.append(b)
-            bias_list = updated_bias_list
-        else:
-            # Ensure all bias file paths in the list are absolute
-            for b in bias_list:
-                if not os.path.isabs(b):
-                    raise ValueError("One or more bias files are provided as relative paths and 'bias_dir' is missing in configuration.")
-        
-        
-        bias = BiasLlamas(bias_list)
-    bias_file = bias.master_bias()
-
-    # Validate bias file structure (add placeholders for missing cameras)
-    bias_file = validate_for_gui(bias_file)
+    # Resolve master bias files — user overrides take priority, otherwise use package defaults.
+    # Missing extensions are handled per-detector in process_trace() via inter-fibre fallback;
+    # validate_for_gui() is NOT applied to bias files to avoid creating *_GUI_version.fits
+    # artefacts inside the package Bias/ directory.
+    _slow_bias_path = config.get('slow_bias_file', SLOW_BIAS_FILE)
+    _fast_bias_path = config.get('fast_bias_file', FAST_BIAS_FILE)
+    slow_bias_file = _slow_bias_path if os.path.isfile(_slow_bias_path) else None
+    fast_bias_file = _fast_bias_path if os.path.isfile(_fast_bias_path) else None
+    if slow_bias_file is None:
+        logger.warning(f"Slow bias file not found at '{_slow_bias_path}' — inter-fibre fallback will be used")
+    if fast_bias_file is None:
+        logger.warning(f"Fast bias file not found at '{_fast_bias_path}' — inter-fibre fallback will be used")
 
         
     # Parse CRR cube configuration (defaults to True if not specified)
@@ -1174,11 +1450,14 @@ def main(config_path):
         
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
-        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'), bias_file=bias_file)
+        logger.info("Stage: Generating new wavelength solution")
+        extract_flat_field(config.get('flat_file_dir'), config.get('output_dir'),
+                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
         if 'arc_file' not in config:
             raise ValueError("No arc file provided in the configuration.")
         relative_throughput(config.get('shift_picklename'), config.get('flat_picklename'))
-        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'), bias=bias_file)
+        arcdict = calc_wavelength_soln(config['arc_file'], config.get('output_dir'),
+                                       slow_bias=slow_bias_file, fast_bias=fast_bias_file)
         config['arcdict'] = arcdict
 
     else:
@@ -1269,6 +1548,7 @@ def main(config_path):
                 trace_source = "existing_missing"
         else:
             print("Generating new traces...")
+            logger.info("Stage: Generating new traces")
 
             # Validate flat field files before trace generation
             
@@ -1291,7 +1571,8 @@ def main(config_path):
             )
 
             generate_traces(red_flat_validated, green_flat_validated, blue_flat_validated,
-                           config.get('trace_output_dir'), bias=config.get('bias_file'))
+                           config.get('trace_output_dir'),
+                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
 
             # Validate newly generated traces with per-trace fallback
             from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
@@ -1396,9 +1677,71 @@ def main(config_path):
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
-        
+                logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
 
-        
+            # --- Generate flat RSS for fibre-to-fibre correction ---
+            # The flat frames (dome or twilight) must have the pixel map applied
+            # before extraction so that extracted spectra represent pure fibre
+            # throughput (detector per-pixel sensitivity removed).
+            config['flat_rss_outputs'] = []
+            timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            # Prefer twilight flat when specified
+            twilight_file = config.get('twilight_flat')
+
+            if twilight_file is not None and flat_pixel_maps:
+                print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
+                twi_dir = os.path.join(flat_field_dir, 'twilight')
+                os.makedirs(twi_dir, exist_ok=True)
+                twi_rss = _process_flat_for_rss(
+                    [twilight_file],
+                    flat_pixel_maps, twi_dir,
+                    trace_dir=final_trace_dir,
+                    arc_dict_config=config.get('arcdict'),
+                    timestamp=timestamp_ff, label='twilight',
+                    slow_bias=slow_bias_file, fast_bias=fast_bias_file,
+                )
+                if twi_rss:
+                    config['flat_rss_outputs'] = twi_rss
+                    print(f"  Twilight flat RSS: {twi_rss}")
+                else:
+                    print("  WARNING: Twilight flat RSS generation failed.")
+
+            if not config['flat_rss_outputs']:
+                # Fallback: dome flats — also need pixel correction before extraction
+                dome_files = [config.get('red_flat_file'),
+                              config.get('green_flat_file'),
+                              config.get('blue_flat_file')]
+                if any(f is not None for f in dome_files) and flat_pixel_maps:
+                    if twilight_file is not None:
+                        msg = ("No twilight flat RSS — building fibre-flat RSS from "
+                               "pixel-corrected dome flats.")
+                    else:
+                        msg = ("No twilight_flat specified — using dome flat RSS "
+                               "for fibre-to-fibre correction.\n"
+                               "        Provide twilight_flat in config for best results.")
+                    print(f"\n  NOTE: {msg}")
+                    dome_dir = os.path.join(flat_field_dir, 'dome_rss')
+                    os.makedirs(dome_dir, exist_ok=True)
+                    dome_rss = _process_flat_for_rss(
+                        [f for f in dome_files if f is not None],
+                        flat_pixel_maps, dome_dir,
+                        trace_dir=final_trace_dir,
+                        arc_dict_config=config.get('arcdict'),
+                        timestamp=timestamp_ff, label='dome',
+                        slow_bias=slow_bias_file, fast_bias=fast_bias_file,
+                    )
+                    if dome_rss:
+                        config['flat_rss_outputs'] = dome_rss
+                        print(f"  Dome flat RSS: {dome_rss}")
+                    else:
+                        print("  WARNING: Dome flat RSS generation also failed — "
+                              "fibre-to-fibre correction will be skipped.")
+                else:
+                    print("  WARNING: No flat files available or pixel maps missing — "
+                          "skipping flat RSS generation.")
+
+
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
         
@@ -1463,6 +1806,7 @@ def main(config_path):
                         overall_stats['total_errors'] += stats['errors']
                     else:
                         print(f"ERROR: Failed to flat-correct {science_file}")
+                        logger.error(f"Failed to flat-correct {science_file}")
                         # Use original file as fallback
                         flat_corrected_files.append(science_file)
                         
@@ -1489,6 +1833,7 @@ def main(config_path):
                     overall_stats['total_errors'] = stats['errors']
                 else:
                     print(f"ERROR: Failed to flat-correct {science_file}, using original")
+                    logger.error(f"Failed to flat-correct {science_file}, using original")
                     science_files_to_process = science_file
             
             print("\n" + "="*60)
@@ -1509,6 +1854,7 @@ def main(config_path):
         
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
+            logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
             for i, science_file in enumerate(science_files_to_process):
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
@@ -1516,7 +1862,8 @@ def main(config_path):
                 extracted_file = run_extraction(
                     science_file,
                     extraction_path,
-                    use_bias=config.get('bias_file'),
+                    slow_bias=slow_bias_file,
+                    fast_bias=fast_bias_file,
                     trace_dir=final_trace_dir,              # User traces
                     mastercalib_trace_dir=CALIB_DIR         # Mastercalib fallback
                 )
@@ -1526,7 +1873,8 @@ def main(config_path):
             extracted_file = run_extraction(
                 science_files_to_process,
                 extraction_path,
-                use_bias=config.get('bias_file'),
+                slow_bias=slow_bias_file,
+                fast_bias=fast_bias_file,
                 trace_dir=final_trace_dir,                  # User traces
                 mastercalib_trace_dir=CALIB_DIR             # Mastercalib fallback
             )
@@ -1553,8 +1901,7 @@ def main(config_path):
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
             # Create a logger for RSS generation
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            rss_logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            rss_logger = logging.getLogger(__name__ + '.rss')
             rss_logger.info(f"Starting RSS generation for {base_name}")
             
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
@@ -1569,18 +1916,110 @@ def main(config_path):
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
 
+            # Free wavelength-corrected extractions to reduce memory pressure
+            del corr_extractions, corr_extraction_list
+            gc.collect()
+
+        # ── Fibre-to-fibre flat correction on RSS files ──
+        if were_flat_corrected and config.get('apply_fibre_flat', True):
+            flat_field_dir = config.get('flat_field_output_dir',
+                                        os.path.join(extraction_path, 'flat'))
+            smooth_models_file = os.path.join(flat_field_dir,
+                                              'flat_smooth_models.fits')
+
+            if os.path.exists(smooth_models_file):
+                print("\n" + "=" * 60)
+                print("FIBRE-TO-FIBRE FLAT CORRECTION")
+                print("=" * 60)
+
+                twilight_file = config.get('twilight_flat')
+                corrections_file = None
+
+                if twilight_file and os.path.exists(twilight_file):
+                    # Branch A: Twilight + Lamp
+                    print(f"Using twilight flat: {os.path.basename(twilight_file)}")
+                    try:
+                        twi_extractions = reduce_twilight_flat(
+                            twilight_file,
+                            flat_pixel_maps[0] if flat_pixel_maps else None,
+                            final_trace_dir,
+                            config.get('arcdict'),
+                            slow_bias_file,
+                            extraction_path,
+                            fast_bias=fast_bias_file,
+                        )
+                        corrections_file = compute_fibre_flat_twilight(
+                            twi_extractions, smooth_models_file,
+                            flat_field_dir,
+                            integration_range=config.get(
+                                'fibre_flat_integration_range'),
+                            poly_order=config.get(
+                                'fibre_flat_poly_order', None),
+                        )
+                        del twi_extractions
+                        gc.collect()
+                        print("Fibre flat computed (twilight + lamp method)")
+                    except Exception as e:
+                        print(f"WARNING: Twilight reduction failed: {e}")
+                        logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
+                        print("Falling back to lamp-only fibre flat")
+                        traceback.print_exc()
+                        # Clean up if twi_extractions was created before failure
+                        try:
+                            del twi_extractions
+                        except NameError:
+                            pass
+                        gc.collect()
+                        corrections_file = None
+
+                if corrections_file is None:
+                    # Branch B: Lamp-only fallback
+                    if twilight_file:
+                        print("Twilight flat not available or failed — "
+                              "using lamp-only fallback")
+                    corrections_file = compute_fibre_flat_lamp_only(
+                        smooth_models_file, flat_field_dir)
+                    print("Fibre flat computed (lamp-only method)")
+
+                # Apply to all RSS files in the extraction directory
+                rss_to_correct = [
+                    os.path.join(extraction_path, f)
+                    for f in os.listdir(extraction_path)
+                    if f.endswith('.fits') and '_RSS' in f
+                    and '_FF' not in f
+                ]
+                for rss_file in rss_to_correct:
+                    ff_output = rss_file.replace('.fits', '_FF.fits')
+                    apply_fibre_flat_to_rss(rss_file, corrections_file,
+                                           ff_output)
+                    print(f"  FF RSS: {os.path.basename(ff_output)}")
+            else:
+                print("WARNING: Smooth models file not found — "
+                      "skipping fibre-to-fibre flat correction")
+                logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
+
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
-        # Look for RSS files (both flat-corrected and uncorrected patterns)
-        rss_files = [os.path.join(extraction_path, f) for f in os.listdir(extraction_path) 
-                if ('extract_RSS' in f or '_RSS' in f) and f.endswith('.fits')]
+        logger.info("Stage: Constructing cubes from RSS files")
+        # Look for RSS files — prefer FF (fibre-flat corrected) when available
+        all_rss = [os.path.join(extraction_path, f)
+                   for f in os.listdir(extraction_path)
+                   if f.endswith('.fits') and '_RSS' in f]
+        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
+        non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
+        rss_files = ff_rss if ff_rss else non_ff_rss
         
         if rss_files:
             print(f"Found {len(rss_files)} RSS files for cube construction:")
             for rss_file in rss_files:
-                is_flat_corrected = '_flat_corrected' in os.path.basename(rss_file)
-                status = " (flat-corrected)" if is_flat_corrected else " (original)"
-                print(f"  - {os.path.basename(rss_file)}{status}")
+                basename = os.path.basename(rss_file)
+                if '_FF' in basename:
+                    status = " (fibre-flat corrected)"
+                elif '_flat_corrected' in basename:
+                    status = " (pixel-flat corrected)"
+                else:
+                    status = ""
+                print(f"  - {basename}{status}")
         else:
             print(f"Found {len(rss_files)} RSS files for cube construction")
 
@@ -1617,6 +2056,7 @@ def main(config_path):
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
+        logger.error(f"Pipeline failed: {e}", exc_info=True)
 
 
 

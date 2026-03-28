@@ -24,49 +24,7 @@ CHANNEL_SIGNAL_THRESHOLDS = {'red': 5000, 'green': 8000, 'blue': 5000}
 
 
 
-# Set up logging
-def setup_logger(verbose=False):
-    """Setup logger with configurable console verbosity."""
-    log_dir = os.path.join(OUTPUT_DIR, 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = os.path.join(log_dir, f'flatLlamas_{timestamp}.log')
-
-    # Configure the logger
-    logger = logging.getLogger('flatLlamas')
-    logger.setLevel(logging.DEBUG)
-    
-    # Clear existing handlers to avoid duplicates
-    logger.handlers.clear()
-
-    # Create handlers
-    file_handler = logging.FileHandler(log_file)
-    console_handler = logging.StreamHandler()
-
-    # Set levels
-    file_handler.setLevel(logging.DEBUG)
-    console_level = logging.INFO if verbose else logging.WARNING
-    console_handler.setLevel(console_level)
-
-    # Create formatters
-    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
-
-    # Add formatters to handlers
-    file_handler.setFormatter(file_formatter)
-    console_handler.setFormatter(console_formatter)
-
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    if verbose:
-        logger.info(f"Verbose logging enabled. Log file: {log_file}")
-    
-    return logger
-
-# Initialize with default settings
-logger = setup_logger(verbose=False)
+logger = logging.getLogger(__name__)
 
 def create_master_flat(file_list, target_color, output_dir=OUTPUT_DIR):
     """
@@ -239,7 +197,8 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
 
 
 def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
-                                  signal_threshold=None, clip_range=(0.90, 1.10)):
+                                  signal_threshold=None, clip_range=(0.90, 1.10),
+                                  return_smooth_models=False):
     """Fiber-by-fiber 1D pixel sensitivity map for a single extension.
 
     Smooths extracted counts in wavelength (xshift) space using a median +
@@ -264,11 +223,18 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         ``CHANNEL_SIGNAL_THRESHOLDS`` based on *channel*.
     clip_range : tuple of float
         (min, max) clipping range for the output sensitivity map.
+    return_smooth_models : bool
+        If True, also return the smooth lamp-envelope models per fibre
+        (keyed by array index) for use in fibre-to-fibre flat fielding.
 
     Returns
     -------
     sensitivity_map : ndarray, shape (naxis2, naxis1)
         2D pixel sensitivity map clipped to *clip_range*.
+    smooth_models : dict, optional
+        Only returned when ``return_smooth_models=True``.  Dictionary
+        ``{fib_idx: smooth_1d_array}`` containing the smooth lamp-envelope
+        model for each fibre.
     """
     trace_obj = extraction_obj.trace
     naxis1, naxis2 = trace_obj.naxis1, trace_obj.naxis2
@@ -287,6 +253,7 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
                 f"wavelength_space={xshift_available}")
 
     sensitivity_map = np.ones((naxis2, naxis1), dtype=np.float32)
+    smooth_models = {} if return_smooth_models else None
 
     for fib_idx in range(trace_obj.nfibers):
         raw_1d = extraction_obj.counts[fib_idx, :]
@@ -313,6 +280,9 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
             smooth_1d = median_filter(raw_1d.astype(np.float64), size=filter_size)
             smooth_1d = gaussian_filter(smooth_1d, sigma=2.0)
 
+        if return_smooth_models:
+            smooth_models[fib_idx] = smooth_1d.copy()
+
         # 1D sensitivity ratio where signal is reliable
         valid = smooth_1d > signal_threshold
         ratio_1d = np.ones_like(raw_1d, dtype=np.float32)
@@ -325,6 +295,8 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
     # Clip to remove outliers
     sensitivity_map = np.clip(sensitivity_map, clip_range[0], clip_range[1])
 
+    if return_smooth_models:
+        return sensitivity_map, smooth_models
     return sensitivity_map
 
 
@@ -580,9 +552,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     Returns:
         dict: Dictionary containing processing results and output file paths
     """
-    # Setup logger with appropriate verbosity level
-    global logger
-    logger = setup_logger(verbose=verbose)
     logger.info("Starting complete flat field processing workflow")
     logger.info(f"Input files:")
     logger.info(f"  Red: {red_flat_file}")
@@ -707,6 +676,61 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     return results
 
 
+def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
+                              gaussian_sigma=2.0):
+    """Write lamp smooth models to a multi-extension FITS file.
+
+    Creates one BinTableHDU per benchside with columns FIBER_ID, SMOOTH,
+    and WAVE.  Dead fibres are excluded.
+
+    Parameters
+    ----------
+    all_smooth_data : dict
+        ``{ext_name: {'fiber_ids': array, 'smooth': 2D array,
+        'wave': 2D array, 'channel': str, 'bench': str, 'side': str}}``
+    output_path : str
+        Output FITS file path.
+    filter_size : int
+        Median filter kernel size used (recorded in header).
+    gaussian_sigma : float
+        Gaussian sigma used (recorded in header).
+    """
+    primary = fits.PrimaryHDU()
+    primary.header['FILTSZ'] = (filter_size, 'Median filter kernel size')
+    primary.header['GSIGMA'] = (gaussian_sigma, 'Gaussian smoothing sigma')
+    primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
+    primary.header['HISTORY'] = 'Smooth lamp-envelope models from P2P flat step'
+    hdul = fits.HDUList([primary])
+
+    for ext_name in sorted(all_smooth_data.keys()):
+        data = all_smooth_data[ext_name]
+        fiber_ids = data['fiber_ids']
+        smooth = data['smooth']
+        wave = data['wave']
+        naxis1 = smooth.shape[1] if smooth.ndim == 2 else 0
+
+        if len(fiber_ids) == 0:
+            logger.warning(f"No alive fibres for {ext_name}, skipping")
+            continue
+
+        cols = [
+            fits.Column(name='FIBER_ID', format='J', array=fiber_ids),
+            fits.Column(name='SMOOTH', format=f'{naxis1}D', array=smooth),
+            fits.Column(name='WAVE', format=f'{naxis1}D', array=wave),
+        ]
+        tbl = fits.BinTableHDU.from_columns(cols)
+        tbl.header['EXTNAME'] = ext_name
+        tbl.header['CHANNEL'] = data['channel']
+        tbl.header['BENCH'] = data['bench']
+        tbl.header['SIDE'] = data['side']
+        tbl.header['NALIVE'] = (len(fiber_ids), 'Number of alive fibres')
+        hdul.append(tbl)
+
+    hdul.writeto(output_path, overwrite=True)
+    logger.info(f"Smooth models FITS written: {output_path} "
+                f"({len(hdul) - 1} extensions)")
+
+
 def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
                               arc_calib_file=None, use_bias=None,
                               output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR,
@@ -751,8 +775,6 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
         ``{'combined_flat_file', 'calibrated_flat_file', 'pixel_map_file',
         'processing_status'}``
     """
-    global logger
-    logger = setup_logger(verbose=verbose)
     logger.info("Starting SIMPLE pixel flat processing workflow")
 
     if signal_thresholds is None:
@@ -836,6 +858,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     trace_files = glob.glob(os.path.join(trace_dir, 'LLAMAS*traces.pkl'))
 
     pixel_maps = {}  # keyed by underscore-separated ext_name
+    all_smooth_data = {}  # keyed by ext_name, for fibre flat
 
     for ext_idx, (ext_obj, meta) in enumerate(zip(extractions, metadata)):
         channel = meta['channel']
@@ -856,31 +879,64 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
                 ext_obj.trace = pickle.load(tf)
 
         threshold = signal_thresholds.get(channel, 8000)
-        pixel_map = generate_pixel_flat_extension(
+        pixel_map, smooth_models = generate_pixel_flat_extension(
             ext_obj, channel=channel,
             filter_size=filter_size,
             signal_threshold=threshold,
             clip_range=clip_range,
+            return_smooth_models=True,
         )
         pixel_maps[ext_name] = pixel_map
 
+        # Build FIBER_ID list keyed by physical ID, excluding dead fibres
+        dead_set = set(getattr(ext_obj, 'dead_fibers', []) or [])
+        total_fibers = ext_obj.counts.shape[0]
+        alive_ids = [i for i in range(total_fibers) if i not in dead_set]
+
+        # Collect smooth models and wavelength arrays for alive fibres only
+        alive_smooth = []
+        alive_wave = []
+        for fid in alive_ids:
+            if fid in smooth_models:
+                alive_smooth.append(smooth_models[fid])
+                alive_wave.append(ext_obj.wave[fid, :] if ext_obj.wave is not None
+                                  else np.full(ext_obj.counts.shape[1], np.nan))
+
+        all_smooth_data[ext_name] = {
+            'fiber_ids': np.array(alive_ids, dtype=np.int32),
+            'smooth': np.array(alive_smooth, dtype=np.float64),
+            'wave': np.array(alive_wave, dtype=np.float64),
+            'channel': channel,
+            'bench': bench,
+            'side': side,
+        }
+
         logger.info(f"  {ext_name}: shape={pixel_map.shape} "
                      f"median={np.nanmedian(pixel_map):.4f} "
-                     f"std={np.nanstd(pixel_map):.4f}")
+                     f"std={np.nanstd(pixel_map):.4f} "
+                     f"smooth_models={len(alive_ids)} alive fibres")
 
-    # ── Step 5: Write FITS ──
+    # ── Step 5: Write pixel maps FITS ──
     logger.info("Step 5: Writing pixel maps FITS")
     pixel_map_path = os.path.join(output_dir, 'pixel_maps.fits')
     sort_and_write_pixel_maps(
         pixel_maps, pixel_map_path,
         header_info={'FLATMTHD': 'simple_median_gaussian'})
 
+    # ── Step 6: Write smooth models FITS for fibre-to-fibre flat ──
+    logger.info("Step 6: Writing smooth models FITS for fibre flat")
+    smooth_models_path = os.path.join(output_dir, 'flat_smooth_models.fits')
+    _write_smooth_models_fits(all_smooth_data, smooth_models_path,
+                              filter_size=filter_size)
+
     logger.info(f"Pixel flat processing complete: {pixel_map_path}")
+    logger.info(f"Smooth models saved to: {smooth_models_path}")
 
     return {
         'combined_flat_file': combined_flat_file,
         'calibrated_flat_file': calibrated_flat_file,
         'pixel_map_file': pixel_map_path,
+        'smooth_models_file': smooth_models_path,
         'processing_status': 'completed',
     }
 

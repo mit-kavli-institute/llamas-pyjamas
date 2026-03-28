@@ -31,7 +31,6 @@ import psutil
 import time
 from dataclasses import asdict
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.Cube.crr_cube_constructor import (
     CRRCubeConstructor, CRRCubeConfig, RSSData, CRRDataCube
 )
@@ -50,8 +49,8 @@ def setup_ray_cluster(n_workers: Optional[int] = None,
     Returns:
         Dictionary with cluster information
     """
-    logger = setup_logger(__name__)
-    
+    logger = logging.getLogger(__name__)
+
     if ray.is_initialized():
         logger.info("Ray already initialized")
         return ray.cluster_resources()
@@ -171,7 +170,7 @@ class CRRWorker:
         """
         self.config = config
         self.constructor = CRRCubeConstructor(config)
-        self.logger = setup_logger(f"{__name__}.Worker")
+        self.logger = logging.getLogger(f"{__name__}.Worker")
         
     def setup_worker(self, fiber_positions: np.ndarray) -> bool:
         """Setup worker with grid information.
@@ -261,7 +260,7 @@ class ParallelCRRManager:
             config: CRR configuration parameters
         """
         self.config = config
-        self.logger = setup_logger(__name__)
+        self.logger = logging.getLogger(__name__)
         self.workers = []
         
     def create_workers(self, n_workers: int) -> List:
@@ -360,7 +359,7 @@ def parallel_cube_construction(rss_data: RSSData,
     Returns:
         Reconstructed CRR data cube
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info("Starting parallel CRR cube reconstruction")
     
     # Estimate memory requirements
@@ -426,7 +425,7 @@ def assemble_cube_from_batches(batch_results: List[Dict[str, Any]],
     Returns:
         Assembled CRR data cube
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info("Assembling cube from parallel results")
     
     # Determine cube dimensions from first result

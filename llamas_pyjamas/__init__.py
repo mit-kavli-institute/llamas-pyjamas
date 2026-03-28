@@ -36,6 +36,7 @@ from .config import *
 from .File import llamasOneCamera, llamasAllCameras, getBenchSideChannel
 from .LUT import *
 from .Cube import *
+from .Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
 # Import for Ray pickling compatibility
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 import cloudpickle
