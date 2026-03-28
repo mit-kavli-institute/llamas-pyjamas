@@ -300,6 +300,36 @@ class ExtractLlamas:
         return x_spec,f_spec,weights
 
 
+    # Set to False to include full 2D detector images in pickled files (for QA/troubleshooting).
+    # Default True strips ~7 GB of per-pixel arrays that are not needed after extraction.
+    _slim_pickle = True
+
+    def __getstate__(self):
+        """Custom pickle state: optionally strip large 2D detector images.
+
+        When _slim_pickle is True (default), removes frame, ximage, and the trace's
+        2D images (data, fiberimg, profimg, bpmask), which together account for ~7 GB
+        per extraction batch.  Per-fiber arrays (counts, sky, wave, xshift,
+        relative_throughput, sensfunc, flux, flux_err, etc.) are always preserved.
+
+        To keep the full images for QA, set before saving:
+            ExtractLlamas._slim_pickle = False
+        """
+        import copy
+        state = self.__dict__.copy()
+        if ExtractLlamas._slim_pickle:
+            # Strip large per-pixel 2D arrays from the extraction object itself
+            state['frame']  = None
+            state['ximage'] = None
+            # Strip trace.data (raw detector image copy in the trace) but keep
+            # fiberimg and profimg — they are needed by generate_pixel_flat_extension
+            # when the flat extraction pkl is reloaded for flat field generation.
+            if state.get('trace') is not None:
+                slim_trace = copy.copy(state['trace'])
+                slim_trace.data = None
+                state['trace'] = slim_trace
+        return state
+
     def saveExtraction(self, save_dir: str)-> None:
         """Save the current extraction object to a file in the specified directory.
 
