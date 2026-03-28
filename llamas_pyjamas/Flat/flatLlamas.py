@@ -322,6 +322,17 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         fiber_mask = (trace_obj.fiberimg == fib_idx)
         sensitivity_map[fiber_mask] = ratio_1d[np.where(fiber_mask)[1]]
 
+    # Un-flip to match raw FITS coordinates.
+    # process_fits_by_color applies channel-specific flips before extraction, so the
+    # sensitivity_map is in flipped space.  The flat is applied to the raw (un-flipped)
+    # science FITS, so we must invert those flips here.
+    ch = (channel or getattr(extraction_obj, 'channel', 'green')).lower()
+    if ch == 'green':
+        sensitivity_map = np.fliplr(sensitivity_map)
+    elif ch == 'blue':
+        sensitivity_map = np.flipud(np.fliplr(sensitivity_map))
+    # red: no flip applied by process_fits_by_color, nothing to undo
+
     # Clip to remove outliers
     sensitivity_map = np.clip(sensitivity_map, clip_range[0], clip_range[1])
 
@@ -780,6 +791,14 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     concat_extractions([red_pkl, green_pkl, blue_pkl], combined_flat_file)
     logger.info(f"Combined extractions saved to {combined_flat_file}")
 
+    # Remove per-color intermediate pkls now that they are merged
+    for _pkl in [red_pkl, green_pkl, blue_pkl]:
+        try:
+            os.remove(_pkl)
+            logger.info(f"Removed intermediate file: {os.path.basename(_pkl)}")
+        except OSError:
+            pass
+
     # ── Step 3: Apply wavelength solution (mandatory) ──
     logger.info("Step 3: Applying wavelength solution from arc calibration")
 
@@ -824,6 +843,13 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     with open(calibrated_flat_file, 'wb') as f:
         pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
+
+    # Raw combined pkl is superseded by the calibrated version; remove it
+    try:
+        os.remove(combined_flat_file)
+        logger.info(f"Removed intermediate file: {os.path.basename(combined_flat_file)}")
+    except OSError:
+        pass
 
     # ── Step 4: Generate pixel maps using wavelength-calibrated extractions ──
     logger.info("Step 4: Generating pixel sensitivity maps (simple method)")
