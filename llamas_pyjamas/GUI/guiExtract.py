@@ -358,8 +358,12 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         # Initialize Ray
         num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
+        object_store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB', 2048))
+        os.environ['RAY_ENABLE_MAC_LARGE_OBJECT_STORE'] = '1'
+        os.environ['RAY_local_fs_capacity_threshold'] = '0.99'
         ray.shutdown()
-        ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
+        ray.init(num_cpus=num_cpus, object_store_memory=object_store_mb * 1024 * 1024,
+                 runtime_env=runtime_env)
 
         # Import placeholder detection utilities
         from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
