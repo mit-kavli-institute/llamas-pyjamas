@@ -270,6 +270,99 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
 
     return whitelight, xdata, ydata, flux
 
+
+def WhiteLightFromRSS(rss_file: str, outfile: str = None,
+                      wave_min: float = None, wave_max: float = None) -> str:
+    """Create a white light image by summing the sky-subtracted FLUX extension of an RSS file.
+
+    Reads the FLUX (extension 1), WAVE (extension 5), and FIBERMAP extensions,
+    collapses each fiber's spectrum to a scalar by nansum within the requested
+    wavelength range, looks up the spatial position via FiberMap_LUT, interpolates
+    onto a regular grid, and writes a FITS file.
+
+    Args:
+        rss_file (str): Path to an RSS FITS file produced by generate_rss().
+        outfile (str, optional): Output path.  Defaults to rss_file with
+            '_whitelight.fits' substituted for '.fits'.
+        wave_min (float, optional): Minimum wavelength in Angstroms.  If None,
+            no lower bound is applied.
+        wave_max (float, optional): Maximum wavelength in Angstroms.  If None,
+            no upper bound is applied.
+
+    Returns:
+        str: Path to the written white light FITS file.
+    """
+
+    if outfile is None:
+        outfile = rss_file.replace('.fits', '_whitelight.fits')
+
+    with fits.open(rss_file) as hdul:
+        flux     = hdul['FLUX'].data          # shape: (n_fibers, n_wave)
+        wave     = hdul['WAVE'].data          # shape: (n_fibers, n_wave)
+        fibermap = hdul['FIBERMAP'].data
+        channel  = hdul[0].header.get('CHANNEL', 'UNKNOWN')
+
+    fiber_ids  = fibermap['FIBER_ID']
+    benchsides = fibermap['BENCHSIDE']
+
+    xdata = np.array([])
+    ydata = np.array([])
+    fdata = np.array([])
+
+    for i in range(len(fiber_ids)):
+        benchside = str(benchsides[i]).strip()
+        fiber_id  = int(fiber_ids[i])
+        try:
+            x, y = FiberMap_LUT(benchside, fiber_id)
+        except Exception:
+            continue
+
+        fiber_wave = wave[i, :]
+        mask = np.ones(fiber_wave.shape, dtype=bool)
+        if wave_min is not None:
+            mask &= fiber_wave >= wave_min
+        if wave_max is not None:
+            mask &= fiber_wave <= wave_max
+
+        thisflux = np.nansum(flux[i, mask])
+        xdata = np.append(xdata, x)
+        ydata = np.append(ydata, y)
+        fdata = np.append(fdata, thisflux)
+
+    if len(xdata) == 0:
+        logger.error(f'WhiteLightFromRSS: no fibers mapped for {rss_file}')
+        return None
+
+    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), fdata,
+                                             fill_value=np.nan)
+    subsample = 1.5
+    xx = (1.0 / subsample) * np.arange(int(53 * subsample))
+    yy = (1.0 / subsample) * np.arange(int(53 * subsample))
+    x_grid, y_grid = np.meshgrid(xx / subsample, yy / subsample)
+    whitelight = flux_interpolator(x_grid, y_grid)
+
+    primary_hdu = fits.PrimaryHDU()
+    primary_hdu.header['ORIGFILE'] = os.path.basename(rss_file)
+    primary_hdu.header['CHANNEL']  = channel
+    if wave_min is not None:
+        primary_hdu.header['WAVEMIN'] = (wave_min, 'Minimum wavelength (Angstroms)')
+    if wave_max is not None:
+        primary_hdu.header['WAVEMAX'] = (wave_max, 'Maximum wavelength (Angstroms)')
+
+    img_hdu = fits.ImageHDU(data=whitelight.astype(np.float32), name=channel.upper())
+
+    tab_hdu = fits.BinTableHDU.from_columns([
+        fits.Column(name='XDATA', format='E', array=xdata.astype(np.float32)),
+        fits.Column(name='YDATA', format='E', array=ydata.astype(np.float32)),
+        fits.Column(name='FLUX',  format='E', array=fdata.astype(np.float32)),
+    ], name=f'{channel.upper()}_TAB')
+
+    hdul_out = fits.HDUList([primary_hdu, img_hdu, tab_hdu])
+    hdul_out.writeto(outfile, overwrite=True)
+    print(f'White light image written to {outfile}')
+    return outfile
+
+
 def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Generate a quick look white light image from trace data and image data.
