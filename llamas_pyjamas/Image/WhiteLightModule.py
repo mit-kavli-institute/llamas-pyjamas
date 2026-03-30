@@ -16,6 +16,7 @@ Functions:
     rerun: Reruns the white light generation process.
 """
 
+import logging
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
@@ -28,7 +29,6 @@ from astropy.table import Table
 import os
 import json
 from matplotlib.tri import Triangulation, LinearTriInterpolator
-from llamas_pyjamas.Utils.utils import setup_logger
 from datetime import datetime
 import traceback
 from llamas_pyjamas.config import LUT_DIR
@@ -47,8 +47,7 @@ from matplotlib.colors import Normalize
 
 
 
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, f'WhiteLight_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')

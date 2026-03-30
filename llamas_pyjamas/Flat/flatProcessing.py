@@ -115,11 +115,14 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     assert type(idxs) == list, 'idxs must be a list of integers'
     package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
     package_root = os.path.dirname(package_path)
+    import shutil as _shutil, glob as _glob2
+    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+        _shutil.rmtree(_stale, ignore_errors=True)
     runtime_env = {
-            "py_modules": [package_path],  # Use package_path instead of package_root
-            "env_vars": {"PYTHONPATH": f"{package_path}:{os.environ.get('PYTHONPATH', '')}"},
+            "working_dir": package_root,
+            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
-                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
                 "**/*.pkl",                  # Exclude all pickle files anywhere (too large for Ray)
                 "**/.git/**",               # Exclude git directory
                 "**/*.zip",
@@ -128,9 +131,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
                 "**/Test/**",               # Exclude test data directory
                 "**/Docs/**",               # Exclude documentation builds
                 "**/arc_testing/**",        # Exclude testing directories
-                "**/Bias/**",               # Exclude bias files
                 "**/__pycache__/**",        # Exclude Python cache
                 "**/*.pyc",                 # Exclude compiled Python files
+                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+                "**/testing/**",
             ]
         }
 
@@ -290,7 +294,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
             writable_ex = make_writable(result['extraction'])
             extraction_list.append(writable_ex)    
     print(len(extraction_list))
-    extracted_filename = save_extractions(extraction_list, savefile=extraction_file, save_dir=save_dir)
+    extracted_filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=save_dir)
     logger.info(f'Extractions saved to {extracted_filename}')
     
     return 

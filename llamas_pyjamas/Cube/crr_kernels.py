@@ -28,7 +28,6 @@ from scipy.ndimage import gaussian_filter
 from scipy.sparse import csr_matrix
 import warnings
 
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 def fiber_top_hat_profile(r: np.ndarray, fiber_diameter: float) -> np.ndarray:
@@ -159,7 +158,7 @@ def build_kernel_matrix(fiber_positions: np.ndarray,
     Returns:
         Kernel matrix A with shape (n_pixels, n_fibers)
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     
     n_fibers = fiber_positions.shape[0]
     n_x, n_y = len(output_grid_x), len(output_grid_y)

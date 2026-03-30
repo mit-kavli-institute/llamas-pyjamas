@@ -62,54 +62,85 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-def setup_logger(name, log_filename=None)-> logging.Logger:
-    """Setup logger with file and console handlers.
+def configure_pipeline_logging(log_dir, level=logging.INFO):
+    """Configure centralized pipeline logging — one file per run.
 
-    Creates a logger with both file and console output, automatically creating
-    a logs directory if it doesn't exist.
+    Sets up handlers on the ``llamas_pyjamas`` parent logger.
+    All child loggers (e.g. ``llamas_pyjamas.Extract.extractLlamas``)
+    inherit these handlers automatically via Python's logger hierarchy.
+
+    Call this **once** at pipeline startup in ``reduce.py:main()``.
+
+    Parameters
+    ----------
+    log_dir : str
+        Directory for the log file.
+    level : int
+        File logging level (default: ``logging.INFO``).
+
+    Returns
+    -------
+    str
+        Path to the created log file.
+    """
+    os.makedirs(log_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = os.path.join(log_dir, f'llamas_pipeline_{timestamp}.log')
+
+    parent_logger = logging.getLogger('llamas_pyjamas')
+    parent_logger.setLevel(logging.DEBUG)
+    parent_logger.handlers.clear()
+    parent_logger.propagate = False
+
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(level)
+    fh.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    parent_logger.addHandler(fh)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    parent_logger.addHandler(ch)
+
+    parent_logger.info(f"Pipeline logging configured. Log file: {log_file}")
+    return log_file
+
+
+def setup_logger(name, log_filename=None):
+    """Setup logger — defers to pipeline logger if configured.
+
+    During pipeline runs (after :func:`configure_pipeline_logging` is
+    called), returns ``logging.getLogger(name)`` with no new handlers —
+    the parent logger's file + console handlers are inherited
+    automatically.
+
+    In standalone / notebook mode, adds a console-only handler.
 
     Args:
-        name (str): Logger name (usually __name__).
-        log_filename (str, optional): Custom log filename. If None, a default 
-            filename will be used. Defaults to None.
+        name (str): Logger name (usually ``__name__``).
+        log_filename (str, optional): Ignored during pipeline runs.
 
     Returns:
         logging.Logger: Configured logger instance.
     """
-    # Create logs directory
-    log_dir = os.path.join(os.path.dirname(__file__), 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # Create default filename if none provided
-    if log_filename is None:
-        log_filename = f"{name.replace('.', '_')}.log"
-    
-    # Create logger
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    # Clear existing handlers
-    logger.handlers = []
-    
-    # Create file handler
-    log_file = os.path.join(log_dir, log_filename)
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)  # Set desired console log level
-    
-    
-    # Create formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Add only file handler
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
+
+    # If pipeline logging is active, short-circuit
+    parent = logging.getLogger('llamas_pyjamas')
+    if parent.handlers:
+        return logger
+
+    # Standalone mode: console handler only (no file clutter)
+    if not logger.handlers:
+        logger.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(ch)
+
     return logger
 
 
@@ -168,11 +199,13 @@ def concat_extractions(pkl_files: list, outfile: str) -> None:
 
     assert len(pkl_files) > 0, "No pickle files provided for concatenation."
 
-    combined_data = {'extractions': [], 'metadata': []}
-    
+    combined_data = {'extractions': [], 'metadata': [], 'primary_header': None}
+
     for pkl_file in pkl_files:
         with open(pkl_file, 'rb') as f:
             data = pickle.load(f)
+            if combined_data['primary_header'] is None:
+                combined_data['primary_header'] = data.get('primary_header', None)
             if 'extractions' in data:
                 combined_data['extractions'].extend(data['extractions'])
             if 'metadata' in data:

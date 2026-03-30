@@ -7,7 +7,6 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import logging
 from datetime import datetime
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 class RSSgeneration:
@@ -20,8 +19,7 @@ class RSSgeneration:
         """
         # Set up logging
         if logger is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.logger = setup_logger(__name__, f'RSSgeneration_{timestamp}.log')
+            self.logger = logging.getLogger(__name__)
         else:
             self.logger = logger
             
@@ -84,7 +82,7 @@ class RSSgeneration:
         try:
             with open(extraction_file, 'rb') as f:
                 _data = pickle.load(f)
-            primary_hdr = _data['primary_header']
+            primary_hdr = _data.get('primary_header')
             extraction_objects = _data['extractions']
             _metadata = _data['metadata']
 
@@ -570,8 +568,7 @@ def update_ra_dec_in_fits(fits_file, logger=None):
     """
     # Set up logging if not provided
     if logger is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        logger = setup_logger(__name__, f'update_ra_dec_{timestamp}.log')
+        logger = logging.getLogger(__name__)
     
     logger.info(f"Updating RA/DEC in FITS file: {fits_file}")
     
@@ -591,12 +588,14 @@ def update_ra_dec_in_fits(fits_file, logger=None):
                 tel_dec = primary_hdr.get('HIERARCH TEL DEC')
 
                 if tel_ra is None or tel_dec is None:
-                    error_msg = "Primary header missing HIERARCH TEL RA and/or HIERARCH TEL DEC"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
+                    logger.warning("HIERARCH TEL RA and/or HIERARCH TEL DEC not found in primary header; "
+                                   "leaving RA/DEC unchanged")
+                    hdul.flush()
+                    return
 
-                # Convert telescope coordinates from sexagesimal to decimal assuming both are in degrees.
-                c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.deg, u.deg))
+                # Convert telescope coordinates from sexagesimal to decimal.
+                # TEL RA is in HH:MM:SS.s (hourangle), TEL DEC is in DD:MM:SS.s (degrees).
+                c = SkyCoord(ra=str(tel_ra), dec=str(tel_dec), unit=(u.hourangle, u.deg))
                 
                 logger.info(f"Converted HIERARCH TEL coordinates: RA={c.ra.deg}, DEC={c.dec.deg}")
 

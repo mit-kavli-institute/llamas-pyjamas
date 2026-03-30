@@ -40,7 +40,6 @@ import logging
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
 from llamas_pyjamas.Image.processWhiteLight import quartile_bias, remove_striping
 from llamas_pyjamas.config import OUTPUT_DIR, LUT_DIR
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 class CubeConstructor:
@@ -84,8 +83,7 @@ class CubeConstructor:
         
         # Set up logging
         if logger is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.logger = setup_logger(__name__, f'CubeConstruct_{timestamp}.log')
+            self.logger = logging.getLogger(__name__)
         else:
             self.logger = logger
             

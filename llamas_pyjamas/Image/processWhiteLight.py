@@ -36,6 +36,7 @@ Dependencies:
         numpy.ndarray: The image with the striping pattern removed.
     pass
 """
+import logging
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
@@ -47,12 +48,9 @@ from astropy.io import fits
 from astropy.table import Table
 import os
 from matplotlib.tri import Triangulation, LinearTriInterpolator
-from llamas_pyjamas.Utils.utils import setup_logger
-from datetime import datetime
 import traceback
 
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, f'ProcessWhiteLight_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 
 def quartile_bias(frame: np.ndarray, quartile=20)-> np.ndarray:
