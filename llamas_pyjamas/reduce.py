@@ -58,6 +58,7 @@ from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
                                            reduce_twilight_flat,
                                            apply_fibre_flat_to_rss)
+from llamas_pyjamas.Flat.flatProcessing import produce_twilight_extractions
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -1941,23 +1942,46 @@ def main(config_path):
         if were_flat_corrected and config.get('apply_fibre_flat', True):
             flat_field_dir = config.get('flat_field_output_dir',
                                         os.path.join(extraction_path, 'flat'))
-            smooth_models_file = os.path.join(flat_field_dir,
-                                              'flat_smooth_models.fits')
 
-            if os.path.exists(smooth_models_file):
-                print("\n" + "=" * 60)
-                print("FIBRE-TO-FIBRE FLAT CORRECTION")
-                print("=" * 60)
+            print("\n" + "=" * 60)
+            print("FIBRE-TO-FIBRE FLAT CORRECTION")
+            print("=" * 60)
 
-                twilight_file = config.get('twilight_flat')
-                corrections_file = None
+            corrections_file = None
 
-                if twilight_file and os.path.exists(twilight_file):
-                    # Branch A: Twilight + Lamp
-                    print(f"Using twilight flat: {os.path.basename(twilight_file)}")
-                    try:
+            # Resolve twilight file(s): prefer separate R/G/B, fall back to
+            # a single multi-extension FITS (legacy config key 'twilight_flat').
+            red_twi    = config.get('red_twilight_flat')
+            green_twi  = config.get('green_twilight_flat')
+            blue_twi   = config.get('blue_twilight_flat')
+            single_twi = config.get('twilight_flat')
+
+            have_rgb = (red_twi and green_twi and blue_twi
+                        and all(os.path.exists(f)
+                                for f in [red_twi, green_twi, blue_twi]))
+            have_single = single_twi and os.path.exists(single_twi)
+
+            # Branch A: Twilight-only (preferred)
+            if have_rgb or have_single:
+                try:
+                    if have_rgb:
+                        print(f"Using separate R/G/B twilight flats")
+                        twi_extractions_list, twi_metadata = produce_twilight_extractions(
+                            red_twi, green_twi, blue_twi,
+                            tracedir=final_trace_dir,
+                            outpath=extraction_path,
+                            use_bias=slow_bias_file,
+                        )
+                        twi_extractions = {
+                            'extractions':    twi_extractions_list,
+                            'metadata':       twi_metadata,
+                            'primary_header': None,
+                        }
+                    else:
+                        # Legacy single-MEF path
+                        print(f"Using twilight flat: {os.path.basename(single_twi)}")
                         twi_extractions = reduce_twilight_flat(
-                            twilight_file,
+                            single_twi,
                             flat_pixel_maps[0] if flat_pixel_maps else None,
                             final_trace_dir,
                             config.get('arcdict'),
@@ -1965,39 +1989,53 @@ def main(config_path):
                             extraction_path,
                             fast_bias=fast_bias_file,
                         )
-                        corrections_file = compute_fibre_flat_twilight(
-                            twi_extractions, smooth_models_file,
-                            flat_field_dir,
-                            integration_range=config.get(
-                                'fibre_flat_integration_range'),
-                            poly_order=config.get(
-                                'fibre_flat_poly_order', None),
-                        )
-                        del twi_extractions
-                        gc.collect()
-                        print("Fibre flat computed (twilight + lamp method)")
-                    except Exception as e:
-                        print(f"WARNING: Twilight reduction failed: {e}")
-                        logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
-                        print("Falling back to lamp-only fibre flat")
-                        traceback.print_exc()
-                        # Clean up if twi_extractions was created before failure
-                        try:
-                            del twi_extractions
-                        except NameError:
-                            pass
-                        gc.collect()
-                        corrections_file = None
+                        # Save combined pickle for reproducibility
+                        import pickle as _pkl
+                        _twi_pkl = os.path.join(extraction_path,
+                                                'combined_twilight_extractions.pkl')
+                        with open(_twi_pkl, 'wb') as _f:
+                            _pkl.dump(twi_extractions, _f)
+                        logger.info(f"Saved twilight extractions: {_twi_pkl}")
 
-                if corrections_file is None:
-                    # Branch B: Lamp-only fallback
-                    if twilight_file:
-                        print("Twilight flat not available or failed — "
-                              "using lamp-only fallback")
+                    corrections_file = compute_fibre_flat_twilight(
+                        twi_extractions,
+                        flat_field_dir,
+                        integration_range=config.get('fibre_flat_integration_range'),
+                        poly_order=config.get('fibre_flat_poly_order', None),
+                    )
+                    del twi_extractions
+                    gc.collect()
+                    print("Fibre flat computed (twilight-only method)")
+                except Exception as e:
+                    print(f"WARNING: Twilight fibre flat failed: {e}")
+                    logger.warning(f"Twilight fibre flat failed: {e}", exc_info=True)
+                    traceback.print_exc()
+                    try:
+                        del twi_extractions
+                    except NameError:
+                        pass
+                    gc.collect()
+                    corrections_file = None
+
+            # Branch B: Lamp-only fallback
+            if corrections_file is None:
+                smooth_models_file = os.path.join(flat_field_dir,
+                                                  'flat_smooth_models.fits')
+                if os.path.exists(smooth_models_file):
+                    if have_rgb or have_single:
+                        print("Twilight failed — falling back to lamp-only fibre flat")
+                    else:
+                        print("No twilight flat supplied — using lamp-only fibre flat")
                     corrections_file = compute_fibre_flat_lamp_only(
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")
+                else:
+                    print("WARNING: No twilight flat and no smooth models — "
+                          "skipping fibre-to-fibre flat correction")
+                    logger.warning("No twilight flat and smooth models file not found — "
+                                   "skipping fibre-to-fibre flat correction")
 
+            if corrections_file is not None:
                 # Apply to all RSS files in the extraction directory
                 rss_to_correct = [
                     os.path.join(extraction_path, f)
@@ -2008,12 +2046,8 @@ def main(config_path):
                 for rss_file in rss_to_correct:
                     ff_output = rss_file.replace('.fits', '_FF.fits')
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
-                                           ff_output)
+                                            ff_output)
                     print(f"  FF RSS: {os.path.basename(ff_output)}")
-            else:
-                print("WARNING: Smooth models file not found — "
-                      "skipping fibre-to-fibre flat correction")
-                logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
 
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")

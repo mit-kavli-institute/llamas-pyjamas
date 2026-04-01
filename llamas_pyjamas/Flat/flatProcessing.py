@@ -451,6 +451,112 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
     return None
 
 
+def produce_twilight_extractions(red_twi, green_twi, blue_twi,
+                                  tracedir=None, outpath=None,
+                                  verbose=False, use_bias=None):
+    """Produce extracted twilight flat spectra for each colour channel.
+
+    Mirrors :func:`produce_flat_extractions` but for twilight flat FITS files.
+    Saves per-colour pickle files (``red_extractions_twilight.pkl`` etc.) and
+    a combined ``combined_twilight_extractions.pkl`` to *outpath*.
+
+    Parameters
+    ----------
+    red_twi : str
+        Path to the red-channel twilight flat FITS file.
+    green_twi : str
+        Path to the green-channel twilight flat FITS file.
+    blue_twi : str
+        Path to the blue-channel twilight flat FITS file.
+    tracedir : str, optional
+        Directory containing trace pickle files.
+    outpath : str, optional
+        Directory for output files. Defaults to OUTPUT_DIR.
+    verbose : bool, optional
+        Enable verbose logging.
+    use_bias : str, optional
+        Path to bias file. Defaults to None (uses default bias).
+
+    Returns
+    -------
+    tuple
+        ``(all_extractions, all_metadata)`` — concatenated lists from all
+        three colour channels, identical in structure to the lamp flat output.
+    """
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(logging.INFO)
+
+    output_directory = outpath if outpath else OUTPUT_DIR
+    os.makedirs(output_directory, exist_ok=True)
+    logger.info(f'Twilight extractions: output directory = {output_directory}')
+
+    # Extract each colour channel using the same reduce_flat machinery
+    reduce_flat(red_twi,   RED_IDXS,   tracedir=tracedir, channel='red',
+                save_dir=output_directory, use_bias=use_bias)
+    reduce_flat(green_twi, GREEN_IDXS, tracedir=tracedir, channel='green',
+                save_dir=output_directory, use_bias=use_bias)
+    reduce_flat(blue_twi,  BLUE_IDXS,  tracedir=tracedir, channel='blue',
+                save_dir=output_directory, use_bias=use_bias)
+
+    logger.info('Twilight flat extractions complete.')
+
+    # Rename per-colour pickles to twilight-specific names
+    rename_map = {
+        'red_extractions_flat.pkl':   'red_extractions_twilight.pkl',
+        'green_extractions_flat.pkl': 'green_extractions_twilight.pkl',
+        'blue_extractions_flat.pkl':  'blue_extractions_twilight.pkl',
+    }
+    import shutil
+    for src_name, dst_name in rename_map.items():
+        src = os.path.join(output_directory, src_name)
+        dst = os.path.join(output_directory, dst_name)
+        if os.path.exists(src):
+            shutil.move(src, dst)
+            logger.info(f'  Renamed {src_name} -> {dst_name}')
+        else:
+            logger.warning(f'  Expected twilight extraction file not found: {src}')
+
+    # Load and concatenate all three colour channels
+    all_extractions = []
+    all_metadata    = []
+    missing = []
+    for fname in ['red_extractions_twilight.pkl',
+                  'green_extractions_twilight.pkl',
+                  'blue_extractions_twilight.pkl']:
+        fpath = os.path.join(output_directory, fname)
+        if not os.path.exists(fpath):
+            missing.append(fpath)
+        else:
+            with open(fpath, 'rb') as f:
+                data = pickle.load(f)
+            all_extractions.extend(data.get('extractions', []))
+            all_metadata.extend(data.get('metadata', []))
+
+    if missing:
+        raise FileNotFoundError(
+            f"Missing twilight extraction files: {missing}\n"
+            f"Check that twilight flat reduction completed successfully.")
+
+    logger.info(f"Twilight extractions loaded: {len(all_extractions)} extensions, "
+                f"{len(all_metadata)} metadata entries")
+
+    # Save combined pickle for reproducibility / debugging
+    combined_pkl = os.path.join(output_directory, 'combined_twilight_extractions.pkl')
+    combined = {
+        'extractions': all_extractions,
+        'metadata':    all_metadata,
+        'primary_header': None,   # no single primary header for multi-file input
+    }
+    with open(combined_pkl, 'wb') as f:
+        pickle.dump(combined, f)
+    logger.info(f"Combined twilight extractions saved: {combined_pkl}")
+
+    return all_extractions, all_metadata
+
+
 def apply_flat_field(science_file, flat_file, output_file):
     """
     Divide the science image by the normalized flat field image and write the result as a new FITS file.

@@ -1,7 +1,10 @@
+import logging
 import numpy as np
 from scipy import ndimage, stats
 from sklearn.decomposition import PCA
 import warnings
+
+_logger = logging.getLogger(__name__)
 
 
 def qa_rss_residual_uniformity(rss_data, variance_threshold=0.02):
@@ -233,3 +236,287 @@ def qa_cube_spatial_autocorrelation(cube_data):
         'morans_i': morans_i,
         'passed': -0.1 < morans_i < 0.1,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Twilight fibre-flat QA functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+def qa_twilight_correction_uniformity(twilight_extractions, corrections_file,
+                                       variance_threshold=0.02):
+    """Validate that the fibre-flat correction renders the twilight uniform.
+
+    Divides each twilight fibre's spectrum by its C_i(lambda) correction and
+    measures the residual fibre-to-fibre scatter.  A well-behaved correction
+    should leave the corrected twilight with an RMS < 2% across fibres.
+
+    Parameters
+    ----------
+    twilight_extractions : dict
+        Calibrated twilight extraction dict (keys: 'extractions', 'metadata').
+    corrections_file : str
+        Path to ``fibre_flat_corrections.fits``.
+    variance_threshold : float, optional
+        Maximum allowed global median RMS (default 0.02 = 2%).
+
+    Returns
+    -------
+    dict
+        ``{'global_rms': float, 'passed': bool, 'per_fibre_rms': ndarray}``
+    """
+    from astropy.io import fits
+
+    twi_list = twilight_extractions['extractions']
+    twi_meta = twilight_extractions['metadata']
+
+    with fits.open(corrections_file) as corr_hdul:
+        corr_index = {hdu.name: hdu for hdu in corr_hdul
+                      if hdu.name not in ('PRIMARY',)}
+
+    per_fibre_rms = []
+
+    for ext, meta in zip(twi_list, twi_meta):
+        ext_name = (f"{meta['channel']}_{meta['bench']}_{meta['side']}"
+                    ).upper()
+        # Corrections FITS stores extension names like RED_1_A
+        if ext_name not in corr_index:
+            continue
+
+        corr_tbl   = corr_index[ext_name].data
+        fiber_ids  = corr_tbl['FIBER_ID']
+        correction = corr_tbl['CORRECTION']   # shape (n_fibres, n_pix)
+
+        twi_counts = ext.counts.astype(np.float64)
+        dead_set   = set(getattr(ext, 'dead_fibers', []) or [])
+
+        for row_idx, fid in enumerate(fiber_ids):
+            if fid >= twi_counts.shape[0] or fid in dead_set:
+                continue
+            tc  = twi_counts[fid]
+            c_i = correction[row_idx]
+            valid = (np.isfinite(tc) & np.isfinite(c_i)
+                     & (tc > 0) & (c_i > 0))
+            if np.sum(valid) < 20:
+                continue
+            corrected_ratio = tc[valid] / c_i[valid]
+            # Normalise per fibre so spectral shape does not inflate RMS
+            med = np.nanmedian(corrected_ratio)
+            if med > 0:
+                per_fibre_rms.append(float(np.nanstd(corrected_ratio / med)))
+
+    if not per_fibre_rms:
+        _logger.warning("qa_twilight_correction_uniformity: no valid fibres found")
+        return {'global_rms': np.nan, 'passed': False,
+                'per_fibre_rms': np.array([])}
+
+    rms_arr    = np.array(per_fibre_rms)
+    global_rms = float(np.nanmedian(rms_arr))
+    passed     = global_rms < variance_threshold
+
+    if not passed:
+        _logger.warning(
+            f"qa_twilight_correction_uniformity: global RMS = {global_rms:.3f} "
+            f"exceeds threshold {variance_threshold:.3f} — "
+            "fibre flat may be striped or under-corrected")
+
+    return {'global_rms': global_rms, 'passed': passed, 'per_fibre_rms': rms_arr}
+
+
+def qa_dichroic_continuity(corrections_file, jump_threshold=0.05):
+    """Check for flux discontinuities at dichroic boundaries.
+
+    For each fibre, stitches the blue, green, and red C_i(lambda) correction
+    curves end-to-end and measures the fractional flux jump where the colour
+    channels meet.  Jumps > 5% indicate inconsistent gradient removal or T_i
+    normalisation between channels.
+
+    Parameters
+    ----------
+    corrections_file : str
+        Path to ``fibre_flat_corrections.fits``.
+    jump_threshold : float, optional
+        Maximum allowed fractional jump at a dichroic boundary (default 0.05).
+
+    Returns
+    -------
+    dict
+        ``{'max_jump_bg': float, 'max_jump_gr': float,
+           'n_bad_bg': int, 'n_bad_gr': int, 'passed': bool}``
+    """
+    from astropy.io import fits
+
+    # Organise extensions by benchside
+    bench_data = {}   # {benchside: {'blue': ..., 'green': ..., 'red': ...}}
+    with fits.open(corrections_file) as hdul:
+        for hdu in hdul:
+            if hdu.name in ('PRIMARY', '') or not hasattr(hdu, 'data'):
+                continue
+            hdr = hdu.header
+            channel = hdr.get('CHANNEL', '').lower()
+            bench   = str(hdr.get('BENCH', ''))
+            side    = str(hdr.get('SIDE', ''))
+            if not channel or not bench or not side:
+                continue
+            bs_key = f"{bench}{side}"
+            bench_data.setdefault(bs_key, {})[channel] = hdu.data
+
+    max_jump_bg = 0.0
+    max_jump_gr = 0.0
+    n_bad_bg    = 0
+    n_bad_gr    = 0
+
+    for bs_key, channels in bench_data.items():
+        blue_tbl  = channels.get('blue')
+        green_tbl = channels.get('green')
+        red_tbl   = channels.get('red')
+
+        if blue_tbl is None or green_tbl is None or green_tbl is None:
+            continue
+
+        # Build fiber_id → row dicts
+        def fid_map(tbl):
+            return {int(fid): i
+                    for i, fid in enumerate(tbl['FIBER_ID'])}
+
+        b_map = fid_map(blue_tbl)
+        g_map = fid_map(green_tbl)
+        r_map = (fid_map(red_tbl) if red_tbl is not None else {})
+
+        common_bg = set(b_map) & set(g_map)
+        common_gr = set(g_map) & set(r_map)
+
+        for fid in common_bg:
+            b_corr = blue_tbl['CORRECTION'][b_map[fid]]
+            g_corr = green_tbl['CORRECTION'][g_map[fid]]
+            # Value at blue red-end and green blue-end
+            b_finite = b_corr[np.isfinite(b_corr)]
+            g_finite = g_corr[np.isfinite(g_corr)]
+            if len(b_finite) == 0 or len(g_finite) == 0:
+                continue
+            jump = abs(float(b_finite[-1]) - float(g_finite[0])) / max(
+                abs(float(g_finite[0])), 1e-6)
+            max_jump_bg = max(max_jump_bg, jump)
+            if jump > jump_threshold:
+                n_bad_bg += 1
+
+        for fid in common_gr:
+            g_corr = green_tbl['CORRECTION'][g_map[fid]]
+            r_corr = red_tbl['CORRECTION'][r_map[fid]]
+            g_finite = g_corr[np.isfinite(g_corr)]
+            r_finite = r_corr[np.isfinite(r_corr)]
+            if len(g_finite) == 0 or len(r_finite) == 0:
+                continue
+            jump = abs(float(g_finite[-1]) - float(r_finite[0])) / max(
+                abs(float(r_finite[0])), 1e-6)
+            max_jump_gr = max(max_jump_gr, jump)
+            if jump > jump_threshold:
+                n_bad_gr += 1
+
+    passed = (max_jump_bg <= jump_threshold and max_jump_gr <= jump_threshold)
+    if not passed:
+        _logger.warning(
+            f"qa_dichroic_continuity: max B-G jump={max_jump_bg:.3f}, "
+            f"max G-R jump={max_jump_gr:.3f} (threshold={jump_threshold:.3f}). "
+            "Check gradient removal consistency across colour channels.")
+
+    return {
+        'max_jump_bg': max_jump_bg,
+        'max_jump_gr': max_jump_gr,
+        'n_bad_bg':    n_bad_bg,
+        'n_bad_gr':    n_bad_gr,
+        'passed':      passed,
+    }
+
+
+def qa_fraunhofer_residuals(smooth_ratio_arr, wave_arr,
+                             line_to_cont_threshold=2.0):
+    """Check for Fraunhofer line residuals in twilight smooth-ratio curves.
+
+    If the Savitzky-Golay smoothing window is too small it fits the absorption
+    lines rather than smoothing over them, leaving sharp spikes in
+    smooth_ratio_i(lambda) at Halpha (6563 A) and Na D (5890 A).  This
+    function compares the RMS inside a 20-A window around each line to the
+    RMS in adjacent continuum windows.
+
+    Parameters
+    ----------
+    smooth_ratio_arr : 2D ndarray, shape (n_fibres, n_wave)
+        Smoothed ratio curves from ``compute_fibre_flat_twilight`` Pass 1.
+    wave_arr : 2D ndarray, shape (n_fibres, n_wave)
+        Corresponding wavelength arrays.
+    line_to_cont_threshold : float, optional
+        Maximum allowed ratio of in-line RMS to continuum RMS (default 2.0).
+
+    Returns
+    -------
+    dict
+        ``{'halpha_line_to_cont': float, 'nad_line_to_cont': float,
+           'passed': bool}``
+        If a line falls outside the wavelength coverage the corresponding
+        value is ``np.nan`` and does not affect ``passed``.
+    """
+    LINES = {'halpha': 6563.0, 'nad': 5890.0}
+    HALF_LINE_WIN  = 10.0   # +/- 10 A around line centre
+    CONT_OFFSET    = 50.0   # continuum window starts 50 A from line centre
+    HALF_CONT_WIN  = 20.0   # +/- 20 A around continuum centre
+
+    results = {}
+
+    for line_name, line_centre in LINES.items():
+        line_rms_vals = []
+        cont_rms_vals = []
+
+        for i in range(smooth_ratio_arr.shape[0]):
+            wave = wave_arr[i]
+            ratio = smooth_ratio_arr[i]
+
+            valid = np.isfinite(wave) & np.isfinite(ratio)
+            if np.sum(valid) < 10:
+                continue
+
+            w = wave[valid]
+            r = ratio[valid]
+
+            # Check line falls in coverage
+            if line_centre < w.min() or line_centre > w.max():
+                continue
+
+            # In-line window
+            in_line = np.abs(w - line_centre) < HALF_LINE_WIN
+            # Continuum window (blue side)
+            cont_centre = line_centre - CONT_OFFSET
+            in_cont = np.abs(w - cont_centre) < HALF_CONT_WIN
+
+            if np.sum(in_line) < 3 or np.sum(in_cont) < 3:
+                continue
+
+            line_rms_vals.append(float(np.std(r[in_line])))
+            cont_rms_vals.append(float(np.std(r[in_cont])))
+
+        if line_rms_vals and cont_rms_vals:
+            median_line = float(np.median(line_rms_vals))
+            median_cont = float(np.median(cont_rms_vals))
+            ratio_val = (median_line / median_cont
+                         if median_cont > 0 else np.nan)
+        else:
+            ratio_val = np.nan
+
+        results[f'{line_name}_line_to_cont'] = ratio_val
+
+    halpha_ok = (np.isnan(results.get('halpha_line_to_cont', np.nan))
+                 or results['halpha_line_to_cont'] <= line_to_cont_threshold)
+    nad_ok    = (np.isnan(results.get('nad_line_to_cont', np.nan))
+                 or results['nad_line_to_cont'] <= line_to_cont_threshold)
+    passed    = halpha_ok and nad_ok
+
+    if not passed:
+        for key, val in results.items():
+            if not np.isnan(val) and val > line_to_cont_threshold:
+                _logger.warning(
+                    f"qa_fraunhofer_residuals: {key} = {val:.2f} "
+                    f"(threshold {line_to_cont_threshold:.1f}) — "
+                    "consider increasing savgol_window in "
+                    "compute_fibre_flat_twilight()")
+
+    results['passed'] = passed
+    return results

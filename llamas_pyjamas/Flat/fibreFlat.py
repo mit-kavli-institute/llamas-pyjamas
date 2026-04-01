@@ -16,8 +16,10 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from datetime import datetime
+from scipy.signal import savgol_filter
 from numpy.polynomial.polynomial import polyvander2d
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.Flat._flat_utils import _load_fibermap_lut
 logger = logging.getLogger(__name__)
 
 # Bounds for the correction factor — prevents catastrophic edge divisions
@@ -29,6 +31,7 @@ MIN_REF_FLUX = 100.0
 # RSS MASK bitmask flags written by apply_fibre_flat_to_rss
 MASK_FLAT_LAMP_ONLY        = np.int16(1)  # benchside T_i derived from lamp, not twilight
 MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # fibre absent from FiberMap_LUT; gradient interpolated from benchside peers
+MASK_BAD_FLAT              = np.int16(4)  # C_i hit correction clamp for >10% of wavelength range
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -992,310 +995,393 @@ def _compute_lamp_benchside_offsets(models):
     return offsets
 
 
-def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
-                                output_dir, integration_range=None,
-                                poly_order=None):
-    """Compute fibre-to-fibre flat using twilight spatial + lamp wavelength shape.
+def compute_fibre_flat_twilight(twilight_extractions, output_dir,
+                                integration_range=None, poly_order=None,
+                                n_central_fibres=50, savgol_window=51,
+                                savgol_polyorder=3):
+    """Compute fibre-to-fibre flat using twilight spectra only.
 
-    For each benchside:
-    1. Integrate twilight flux per fibre to get spatial throughput ``T_i``.
-    2. Compute wavelength shape ``W_i(λ) = smooth_i / S̄_bs``,
-       normalised to mean 1.0.
-    3. Combine: ``C_i(λ) = T_i × W_i(λ)``.
+    Derives both the wavelength-dependent throughput shape W_i(lambda) and the
+    spatial throughput scalar T_i exclusively from twilight extractions.
+    The lamp flat is NOT used in this function.
+
+    Algorithm per extension (bench/side/color):
+
+    1. Build a master twilight reference M(lambda) = median of the ~N fibres
+       physically closest to the IFU centre for that bench-side.
+    2. Divide each fibre by M(lambda):
+       ``raw_ratio_i(lambda) = twilight_i(lambda) / M(lambda)``
+       Fraunhofer absorption lines cancel in this ratio, leaving only the
+       smooth throughput curve plus photon noise.
+    3. Savitzky-Golay smooth raw_ratio_i -> smooth_ratio_i(lambda).
+    4. Extract scalar throughput: T_i = median(smooth_ratio_i) over the
+       central 80% of the wavelength range.
+    5. Pass all T_i values through ``_remove_twilight_gradient()`` to remove
+       the sky brightness gradient across the IFU -> T_corr_i.
+    6. Reassemble: ``C_i(lambda) = smooth_ratio_i(lambda) * (T_corr_i / T_i)``.
 
     Parameters
     ----------
     twilight_extractions : dict
-        Calibrated twilight extractions (from ``reduce_twilight_flat``).
-    smooth_models_file : str
-        Path to ``flat_smooth_models.fits``.
+        Calibrated twilight extractions (from ``reduce_twilight_flat`` or
+        ``produce_twilight_extractions``).  Keys: ``'extractions'``,
+        ``'metadata'``, ``'primary_header'``.
     output_dir : str
         Directory for the output corrections file.
     integration_range : dict, optional
         Per-channel wavelength ranges for T_i integration:
         ``{'red': (w_min, w_max), ...}``.  Defaults to central 80%.
+    poly_order : int, dict, or None, optional
+        Polynomial order for gradient removal (passed to
+        ``_remove_twilight_gradient``).
+    n_central_fibres : int, optional
+        Number of fibres closest to IFU centre used for M(lambda). Default 50.
+    savgol_window : int, optional
+        Savitzky-Golay smoothing window in pixels. Default 51.
+    savgol_polyorder : int, optional
+        Savitzky-Golay polynomial order. Default 3.
 
     Returns
     -------
     corrections_file : str
         Path to ``fibre_flat_corrections.fits``.
     """
-    logger.info("Computing fibre flat: Twilight + Lamp method")
+    logger.info("Computing fibre flat: Twilight-only method")
 
-    models = _load_smooth_models(smooth_models_file)
-    twi_extractions = twilight_extractions['extractions']
+    twi_extractions_list = twilight_extractions['extractions']
     twi_metadata = twilight_extractions['metadata']
 
-    # Pre-compute lamp-derived inter-bench offsets.  These are used as fallback
-    # T_i values for benchsides that have no usable twilight data.
-    lamp_offsets = _compute_lamp_benchside_offsets(models)
-    lamp_only_benchsides = set()  # ext_names with no twilight → use lamp offset
-
-    # Build twilight lookup: (channel, bench, side) → ExtractLlamas
+    # Build lookup: ext_name -> ExtractLlamas
     twi_lookup = {}
-    for ext, meta in zip(twi_extractions, twi_metadata):
+    for ext, meta in zip(twi_extractions_list, twi_metadata):
         key = f"{meta['channel']}_{meta['bench']}_{meta['side']}"
         twi_lookup[key] = ext
 
-    # ── Group models by channel for cross-benchside T_i computation ──
-    channel_groups = {}  # {channel: [ext_name, ...]}
-    for ext_name, data in models.items():
-        channel_groups.setdefault(data['channel'], []).append(ext_name)
+    # Group by channel for gradient removal
+    channel_groups = {}
+    for ext_name in twi_lookup:
+        channel = ext_name.split('_')[0]
+        channel_groups.setdefault(channel, []).append(ext_name)
+
+    # Load spatial LUT for central-fibre selection
+    try:
+        spatial_lut = _load_fibermap_lut()
+    except Exception as exc:
+        logger.warning(f"Could not load spatial fibermap LUT: {exc}. "
+                       "Will use all alive fibres as M(lambda) reference per bench-side.")
+        spatial_lut = {}
+
+    lamp_only_benchsides = set()
 
     # ══════════════════════════════════════════════════════════════════
-    # Pass 1: Gather raw twilight integrals across ALL benchsides
-    #         per channel, then remove the spatial gradient.
+    # Pass 1: Per extension -- build M(lambda), divide, smooth, extract T_i
     # ══════════════════════════════════════════════════════════════════
-    channel_integrals = {}  # {channel: {(benchside_str, fid): integral}}
+    channel_integrals = {}     # {channel: {(benchside_str, fid): T_i}}
+    ext_smooth_ratios = {}     # {ext_name: {fid: smooth_ratio_1d}}
+    ext_fiber_data    = {}     # {ext_name: metadata + arrays for Pass 2}
 
-    for channel, ext_names in channel_groups.items():
-        all_integrals = {}
+    for ext_name, twi_ext in twi_lookup.items():
+        parts = ext_name.split('_')
+        channel, bench, side = parts[0], parts[1], parts[2]
+        benchside_str = f"{bench}{side}"
 
-        for ext_name in ext_names:
-            data = models[ext_name]
-            bench = data['bench']
-            side = data['side']
-            fiber_ids = data['fiber_ids']
-            wave_arr = data['wave']
-            benchside_str = f"{bench}{side}"
+        twi_counts = twi_ext.counts.astype(np.float64)  # (total_fibres, n_pix)
+        twi_wave   = twi_ext.wave
+        dead_set   = set(getattr(twi_ext, 'dead_fibers', []) or [])
+        total_fibres = twi_counts.shape[0]
+        n_pix        = twi_counts.shape[1]
 
-            if len(fiber_ids) == 0:
-                continue
+        # Alive fibre IDs (excluding dead rows)
+        fiber_ids = np.array([i for i in range(total_fibres)
+                               if i not in dead_set], dtype=int)
 
-            twi_ext = twi_lookup.get(ext_name)
-            if twi_ext is None:
-                logger.warning(f"No twilight extraction for {ext_name}; "
-                               f"will use lamp-derived inter-bench offset as T_i")
-                lamp_only_benchsides.add(ext_name)
-                continue
+        if len(fiber_ids) == 0:
+            logger.warning(f"  {ext_name}: no alive fibres, skipping")
+            lamp_only_benchsides.add(ext_name)
+            continue
 
-            twi_counts = twi_ext.counts
-            twi_wave = twi_ext.wave
-            dead_set = set(getattr(twi_ext, 'dead_fibers', []) or [])
-            total_twi = twi_counts.shape[0]
-
-            # Handle wave/counts shape mismatch (dead fibre expansion)
-            n_wave_rows = twi_wave.shape[0] if twi_wave is not None else 0
-            wave_expanded = (n_wave_rows == total_twi)
-            if not wave_expanded and n_wave_rows > 0:
-                fid_to_wave_row = {}
-                wave_row = 0
-                for phys_id in range(total_twi):
-                    if phys_id in dead_set:
-                        continue
-                    if wave_row < n_wave_rows:
-                        fid_to_wave_row[phys_id] = wave_row
-                        wave_row += 1
-                logger.debug(f"  {ext_name}: wave/counts shape mismatch "
-                             f"(wave={n_wave_rows}, counts={total_twi}), "
-                             f"mapped {len(fid_to_wave_row)} alive fibres")
-            else:
-                fid_to_wave_row = None
-
-            # Determine integration window
-            if integration_range and channel in integration_range:
-                w_lo, w_hi = integration_range[channel]
-            else:
-                all_valid_w = wave_arr[np.isfinite(wave_arr) & (wave_arr > 0)]
-                if len(all_valid_w) > 0:
-                    w_range = np.max(all_valid_w) - np.min(all_valid_w)
-                    w_lo = np.min(all_valid_w) + 0.1 * w_range
-                    w_hi = np.max(all_valid_w) - 0.1 * w_range
-                else:
-                    w_lo, w_hi = 0, np.inf
-
-            # Integrate twilight per fibre
-            for fid in fiber_ids:
-                if fid >= total_twi or fid in dead_set:
+        # ── Handle wave/counts shape mismatch (dead fibre expansion) ──
+        n_wave_rows = twi_wave.shape[0] if twi_wave is not None else 0
+        if n_wave_rows > 0 and n_wave_rows != total_fibres:
+            fid_to_wave_row = {}
+            wave_row = 0
+            for phys_id in range(total_fibres):
+                if phys_id in dead_set:
                     continue
+                if wave_row < n_wave_rows:
+                    fid_to_wave_row[phys_id] = wave_row
+                    wave_row += 1
+            logger.debug(f"  {ext_name}: wave/counts shape mismatch "
+                         f"(wave={n_wave_rows}, counts={total_fibres})")
+        else:
+            fid_to_wave_row = None
 
-                if fid_to_wave_row is not None:
-                    wave_idx = fid_to_wave_row.get(fid)
-                    if wave_idx is None:
-                        continue
-                else:
-                    wave_idx = fid
+        # Build wave_arr (n_alive, n_pix)
+        wave_arr = np.full((len(fiber_ids), n_pix), np.nan)
+        if twi_wave is not None and n_wave_rows > 0:
+            for row_idx, fid in enumerate(fiber_ids):
+                w_idx = fid_to_wave_row.get(fid, fid) if fid_to_wave_row else fid
+                if w_idx < n_wave_rows:
+                    wave_arr[row_idx] = twi_wave[w_idx]
 
-                tw = twi_wave[wave_idx] if twi_wave is not None else None
-                tc = twi_counts[fid]
+        # ── Integration window ──
+        all_valid_w = wave_arr[np.isfinite(wave_arr) & (wave_arr > 0)]
+        if integration_range and channel in integration_range:
+            w_lo, w_hi = integration_range[channel]
+        elif len(all_valid_w) > 0:
+            w_range = float(np.max(all_valid_w) - np.min(all_valid_w))
+            w_lo = float(np.min(all_valid_w)) + 0.1 * w_range
+            w_hi = float(np.max(all_valid_w)) - 0.1 * w_range
+        else:
+            w_lo, w_hi = 0.0, np.inf
 
-                if tw is not None and np.any(np.isfinite(tw)):
-                    mask = (np.isfinite(tw) & (tw >= w_lo)
-                            & (tw <= w_hi) & (tc > 0))
-                    if np.sum(mask) > 10:
-                        all_integrals[(benchside_str, fid)] = np.nansum(
-                            tc[mask])
+        # ── Select central fibres for M(lambda) ──
+        if benchside_str in spatial_lut:
+            fib_xpos = np.array(spatial_lut[benchside_str])  # (M, 2)
+            xpos_centre = float(np.median(fib_xpos[:, 1]))
+            dist = np.abs(fib_xpos[:, 1] - xpos_centre)
+            sorted_idx = np.argsort(dist)
+            n_sel = min(n_central_fibres, len(sorted_idx))
+            central_fib_ids = set(int(fib_xpos[sorted_idx[k], 0])
+                                  for k in range(n_sel))
+            central_alive = [fid for fid in central_fib_ids
+                             if fid in set(fiber_ids.tolist())]
+        else:
+            logger.warning(f"  {ext_name}: bench-side {benchside_str} not in LUT; "
+                           "using all alive fibres as M(lambda) reference")
+            central_alive = fiber_ids.tolist()
 
-        channel_integrals[channel] = all_integrals
-        logger.info(f"  {channel}: gathered {len(all_integrals)} twilight "
-                    f"integrals across "
-                    f"{sum(1 for en in ext_names if twi_lookup.get(en) is not None)} "
-                    f"benchsides")
+        # Data integrity check
+        expected = len(spatial_lut.get(benchside_str, []))
+        if expected > 0 and abs(len(fiber_ids) - expected) > 5:
+            logger.warning(f"  {ext_name}: fibre count mismatch -- "
+                           f"got {len(fiber_ids)} alive, LUT expects ~{expected}")
 
-    # ── Pass 1.5: Remove twilight spatial gradient for ALL channels ──
-    gradient_diagnostics = {}   # {channel: diagnostics_dict}
-    all_unmapped_keys = set()   # (benchside_str, fid) keys interpolated from benchside peers
+        if len(central_alive) == 0:
+            logger.warning(f"  {ext_name}: no central alive fibres, "
+                           "using all alive fibres as reference")
+            central_alive = fiber_ids.tolist()
+
+        # ── Build M(lambda) ──
+        central_counts = twi_counts[np.array(central_alive, dtype=int), :]
+        central_counts[central_counts <= 0] = np.nan
+        M_lambda = np.nanmedian(central_counts, axis=0)  # (n_pix,)
+        M_peak   = float(np.nanmax(M_lambda)) if np.any(np.isfinite(M_lambda)) else 0.0
+        if M_peak > 0:
+            M_lambda[M_lambda < 0.01 * M_peak] = np.nan   # guard dichroic edges
+
+        logger.info(f"  {ext_name}: M(lambda) from {len(central_alive)} central fibres, "
+                    f"peak={M_peak:.1f}")
+
+        # ── SavGol window validation ──
+        actual_window = min(savgol_window, n_pix)
+        if actual_window % 2 == 0:
+            actual_window -= 1
+        actual_window = max(actual_window, savgol_polyorder + 2)
+        if actual_window % 2 == 0:
+            actual_window += 1
+
+        # ── Divide, smooth, extract T_i per fibre ──
+        smooth_ratios = {}   # {fid: 1D smooth_ratio}
+        bs_integrals  = {}   # {fid: T_i} for this bench-side
+
+        m_valid = np.isfinite(M_lambda) & (M_lambda > 0)
+
+        for row_idx, fid in enumerate(fiber_ids):
+            tc = twi_counts[fid]
+
+            both_valid = m_valid & np.isfinite(tc) & (tc > 0)
+
+            raw_ratio = np.ones(n_pix, dtype=np.float64)
+            if np.sum(both_valid) < 10:
+                # Too few valid pixels -- leave neutral
+                smooth_ratios[fid] = raw_ratio
+                continue
+
+            raw_ratio[both_valid]          = tc[both_valid] / M_lambda[both_valid]
+            raw_ratio[~m_valid]            = 1.0    # M NaN -> neutral (edge/dichroic)
+            raw_ratio[~np.isfinite(tc)]    = np.nan # bad fibre pixels -> NaN
+
+            # Savitzky-Golay smoothing (NaN-safe, same pattern as fibre_flat.py)
+            nan_mask = ~np.isfinite(raw_ratio)
+            if np.all(nan_mask):
+                smooth_ratios[fid] = np.ones(n_pix)
+                continue
+
+            row_filled = raw_ratio.copy()
+            if np.any(nan_mask):
+                valid_idx   = np.where(~nan_mask)[0]
+                invalid_idx = np.where(nan_mask)[0]
+                row_filled[invalid_idx] = np.interp(
+                    invalid_idx, valid_idx, raw_ratio[valid_idx])
+
+            row_smooth = savgol_filter(row_filled, actual_window, savgol_polyorder)
+            row_smooth[nan_mask] = np.nan
+            smooth_ratios[fid] = row_smooth
+
+            # T_i = median over integration window
+            wave_row_1d = wave_arr[row_idx]
+            if np.any(np.isfinite(wave_row_1d)):
+                int_mask = (np.isfinite(wave_row_1d) & (wave_row_1d >= w_lo)
+                            & (wave_row_1d <= w_hi) & np.isfinite(row_smooth))
+            else:
+                int_mask = np.isfinite(row_smooth)
+
+            if np.sum(int_mask) > 10:
+                T_i = float(np.nanmedian(row_smooth[int_mask]))
+                if np.isfinite(T_i) and T_i > 0:
+                    bs_integrals[fid] = T_i
+
+        # Accumulate into per-channel dict
+        ch_ints = channel_integrals.setdefault(channel, {})
+        for fid, val in bs_integrals.items():
+            ch_ints[(benchside_str, fid)] = val
+
+        logger.info(f"  {ext_name}: {len(bs_integrals)} T_i values from "
+                    f"{len(fiber_ids)} fibres")
+
+        ext_smooth_ratios[ext_name] = smooth_ratios
+        ext_fiber_data[ext_name] = {
+            'fiber_ids':     fiber_ids,
+            'wave_arr':      wave_arr,
+            'channel':       channel,
+            'bench':         bench,
+            'side':          side,
+            'benchside_str': benchside_str,
+            'n_pix':         n_pix,
+            'M_lambda':      M_lambda,
+            'n_central':     len(central_alive),
+        }
+
+    # ── Pass 1.5: Remove twilight sky gradient per channel ──
+    gradient_diagnostics = {}
+    all_unmapped_keys    = set()
     for channel, integrals in channel_integrals.items():
         if len(integrals) > 0:
-            corrected, diag, channel_unmapped = _remove_twilight_gradient(
+            corrected, diag, ch_unmapped = _remove_twilight_gradient(
                 integrals, channel, poly_order=poly_order)
             channel_integrals[channel] = corrected
-            all_unmapped_keys.update(channel_unmapped)
+            all_unmapped_keys.update(ch_unmapped)
             if diag is not None:
                 gradient_diagnostics[channel] = diag
 
     # ══════════════════════════════════════════════════════════════════
-    # Pass 2: Compute W_i (per benchside) and T_i (from gradient-
-    #         corrected integrals, normalised per channel), then combine.
+    # Pass 2: Assemble C_i(lambda) = smooth_ratio_i * (T_corr_i / T_i)
     # ══════════════════════════════════════════════════════════════════
-    corrections = {}
+    corrections  = {}
     channel_refs = {}
-    t_i_all = {}  # {ext_name: {fid: t_i_value}} for diagnostics
+    t_i_all      = {}   # {ext_name: {fid: T_corr_i}} for diagnostics
 
-    for ext_name, data in models.items():  # noqa: C901  (Pass 2 is intentionally long)
-        channel = data['channel']
-        bench = data['bench']
-        side = data['side']
-        smooth_arr = data['smooth']
-        wave_arr = data['wave']
-        fiber_ids = data['fiber_ids']
+    for ext_name, data in ext_fiber_data.items():
+        channel       = data['channel']
+        bench         = data['bench']
+        side          = data['side']
+        benchside_str = data['benchside_str']
+        fiber_ids     = data['fiber_ids']
+        wave_arr      = data['wave_arr']
+        n_pix         = data['n_pix']
+        M_lambda      = data['M_lambda']
+        smooth_ratios = ext_smooth_ratios[ext_name]
 
-        if len(fiber_ids) == 0:
-            logger.warning(f"No fibres for {ext_name}, skipping")
-            continue
+        # Gradient-corrected T_i for this bench-side
+        ch_ints  = channel_integrals.get(channel, {})
+        this_bs  = {fid: v for (bs, fid), v in ch_ints.items()
+                    if bs == benchside_str}
 
-        # ── Compute per-benchside reference S̄_bs ──
-        common_wave, reference = _compute_benchside_reference(
-            smooth_arr, wave_arr)
-        if len(reference) == 0:
-            logger.warning(f"Could not compute reference for {ext_name}")
-            continue
-
-        n_fibres, n_pix = smooth_arr.shape
-        corr_arr = np.ones_like(smooth_arr)
-
-        # ── Compute W_i(λ) from lamp (unchanged) ──
-        w_arr = np.ones_like(smooth_arr)
-        n_alive = 0
-        for i in range(n_fibres):
-            w = wave_arr[i]
-            s = smooth_arr[i]
-            good = np.isfinite(w) & (w > 0)
-            if np.sum(good) < 10:
-                continue
-            n_alive += 1
-
-            ref_native = np.interp(w, common_wave, reference,
-                                   left=np.nan, right=np.nan)
-            valid = (np.isfinite(ref_native) & (ref_native > MIN_REF_FLUX)
-                     & np.isfinite(s) & (s > 0))
-
-            wi = np.ones_like(s)
-            wi[valid] = s[valid] / ref_native[valid]
-            wi[~valid] = 1.0
-
-            valid_wi = wi[valid]
-            if len(valid_wi) > 0:
-                wi_mean = np.nanmean(valid_wi)
-                if wi_mean > 0:
-                    wi /= wi_mean
-
-            w_arr[i] = wi
-
-        # ── Compute T_i from gradient-corrected integrals ──
-        benchside_str = f"{bench}{side}"
-        channel_ints = channel_integrals.get(channel, {})
-        this_bs_integrals = {fid: v for (bs, fid), v in channel_ints.items()
-                             if bs == benchside_str}
-
-        # Median-of-medians: compute per-benchside median first, then take the
-        # median of those. This prevents benchsides with more alive fibres from
-        # dominating the channel-wide reference level.
-        _bs_buckets = {}
-        for (bs, fid), val in channel_ints.items():
-            _bs_buckets.setdefault(bs, []).append(val)
-        _bs_med_values = [np.nanmedian(vals) for vals in _bs_buckets.values() if vals]
-        all_channel_values = _bs_med_values  # kept for legacy length-check below
-
-        if len(this_bs_integrals) > 0 and len(all_channel_values) > 0:
-            # Corrected integrals are at the per-bench-normalised scale
-            # (all benchsides equalised to channel_ref by _remove_twilight_gradient).
-            # Multiply by the lamp-derived inter-benchside offset to restore the
-            # correct absolute throughput scale for this benchside.
-            lamp_offset = lamp_offsets.get(ext_name, 1.0)
-            median_integral = np.median(all_channel_values)
-            if median_integral > 0:
-                t_i = {fid: val / median_integral * lamp_offset
-                       for fid, val in this_bs_integrals.items()}
-            else:
-                t_i = {fid: lamp_offset for fid in this_bs_integrals}
-            logger.info(f"  {ext_name}: T_i (lamp_offset={lamp_offset:.4f}) range "
-                        f"[{min(t_i.values()):.3f}, {max(t_i.values()):.3f}] "
-                        f"from {len(t_i)} fibres")
-        else:
-            # No twilight data — use lamp-derived inter-bench throughput offset
-            lamp_offset = lamp_offsets.get(ext_name, 1.0)
-            t_i = {fid: lamp_offset for fid in fiber_ids}
+        if len(this_bs) == 0:
+            logger.warning(f"  {ext_name}: no gradient-corrected T_i; "
+                           "C_i = 1.0 (MASK_FLAT_LAMP_ONLY set)")
             lamp_only_benchsides.add(ext_name)
-            logger.warning(
-                f"  {ext_name}: no valid twilight integrals; "
-                f"falling back to lamp-derived inter-bench offset "
-                f"T_i = {lamp_offset:.4f} (MASK_FLAT_LAMP_ONLY will be set)"
-            )
 
-        t_i_all[ext_name] = t_i
+        n_fibres    = len(fiber_ids)
+        corr_arr    = np.ones((n_fibres, n_pix), dtype=np.float64)
+        fibre_flags = np.zeros(n_fibres, dtype=np.int16)
 
-        # ── Combine C_i = T_i × W_i ──
-        fid_to_row = {fid: idx for idx, fid in enumerate(fiber_ids)}
-        fibre_flags = np.zeros(len(fiber_ids), dtype=np.int16)
-        for fid in fiber_ids:
-            idx = fid_to_row[fid]
-            ti = t_i.get(fid, 1.0)
-            corr_arr[idx] = ti * w_arr[idx]
+        # Reference wavelength grid for diagnostics
+        all_valid_w = wave_arr[np.isfinite(wave_arr) & (wave_arr > 0)]
+        common_wave = (np.linspace(float(np.min(all_valid_w)),
+                                   float(np.max(all_valid_w)),
+                                   min(n_pix, 1000))
+                       if len(all_valid_w) > 0 else np.array([]))
+
+        t_i_ext = {}
+
+        for row_idx, fid in enumerate(fiber_ids):
+            smooth_ratio = smooth_ratios.get(fid)
+            if smooth_ratio is None:
+                corr_arr[row_idx] = 1.0
+                continue
+
+            # Raw T_i from Pass 1 (pre-gradient-removal scalar)
+            wave_row_1d = wave_arr[row_idx]
+            if np.any(np.isfinite(wave_row_1d)):
+                int_mask = np.isfinite(wave_row_1d) & np.isfinite(smooth_ratio)
+            else:
+                int_mask = np.isfinite(smooth_ratio)
+            T_i_raw = (float(np.nanmedian(smooth_ratio[int_mask]))
+                       if np.sum(int_mask) > 0 else 1.0)
+            if not np.isfinite(T_i_raw) or T_i_raw <= 0:
+                T_i_raw = 1.0
+
+            # Gradient-corrected scalar (falls back to raw if not mapped)
+            T_corr_i = this_bs.get(fid, T_i_raw)
+
+            # Scale smooth shape by gradient correction
+            scale = (T_corr_i / T_i_raw) if T_i_raw > 0 else 1.0
+            c_i   = smooth_ratio * scale
+
+            # NaN -> neutral
+            c_i[~np.isfinite(c_i)] = 1.0
+
+            # Clamp + flag if >10% of wavelength range hits the clamp
+            bad_frac = float(np.mean(
+                (c_i < CORRECTION_CLAMP[0]) | (c_i > CORRECTION_CLAMP[1])))
+            if bad_frac > 0.10:
+                fibre_flags[row_idx] |= MASK_BAD_FLAT
+
+            corr_arr[row_idx] = np.clip(c_i, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
+            t_i_ext[fid] = float(T_corr_i)
+
             if ext_name in lamp_only_benchsides:
-                fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
+                fibre_flags[row_idx] |= MASK_FLAT_LAMP_ONLY
             if (benchside_str, fid) in all_unmapped_keys:
-                fibre_flags[idx] |= MASK_UNMAPPED_FIBRE_INTERP
+                fibre_flags[row_idx] |= MASK_UNMAPPED_FIBRE_INTERP
 
-        # Clamp
-        corr_arr = np.clip(corr_arr, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
+        t_i_all[ext_name] = t_i_ext
 
         corrections[ext_name] = {
-            'fiber_ids': fiber_ids,
-            'correction': corr_arr,
-            'wave': wave_arr,
-            'channel': channel,
-            'bench': bench,
-            'side': side,
-            'n_ref': n_alive,
-            'common_wave': common_wave,
-            'reference': reference,
-            'fibre_flags': fibre_flags,
-            # TODO: populate from twilight/lamp photon noise when available
+            'fiber_ids':     fiber_ids,
+            'correction':    corr_arr,
+            'wave':          wave_arr,
+            'channel':       channel,
+            'bench':         bench,
+            'side':          side,
+            'n_ref':         data['n_central'],
+            'common_wave':   common_wave,
+            'reference':     M_lambda,
+            'fibre_flags':   fibre_flags,
             'correction_var': np.zeros_like(corr_arr),
         }
 
         if channel not in channel_refs:
             channel_refs[channel] = []
-        channel_refs[channel].append((ext_name, common_wave, reference))
+        channel_refs[channel].append((ext_name, common_wave, M_lambda))
 
         logger.info(f"  {ext_name}: C_i median={np.nanmedian(corr_arr):.4f} "
                     f"std={np.nanstd(corr_arr):.4f}")
 
-    # ── Pass 2.5: Cross-bench T_i diagnostics per channel ──
+    # ── Pass 2.5: Cross-bench T_i diagnostics ──
     for channel, ext_names in channel_groups.items():
-        logger.info(f"Cross-bench T_i diagnostic for {channel} channel:")
+        logger.info(f"Cross-bench T_i diagnostic for {channel}:")
         logger.info(f"  {'Benchside':<12} {'N_fib':>6} {'median(T_i)':>12} "
                     f"{'std(T_i)':>10} {'min':>8} {'max':>8}")
         all_ti_values = []
         for ext_name in ext_names:
             if ext_name not in t_i_all:
                 continue
-            bs_str = f"{models[ext_name]['bench']}{models[ext_name]['side']}"
+            bs_str  = ext_fiber_data[ext_name]['benchside_str']
             ti_dict = t_i_all[ext_name]
-            ti_vals = [ti_dict.get(fid, 1.0)
-                       for fid in models[ext_name]['fiber_ids']
-                       if fid in ti_dict]
+            ti_vals = list(ti_dict.values())
             if ti_vals:
                 all_ti_values.extend(ti_vals)
                 logger.info(
@@ -1315,16 +1401,11 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                 f"{np.min(all_ti_values):>8.4f} "
                 f"{np.max(all_ti_values):>8.4f}")
 
-            # Flag benchsides deviating > 5% from 1.0
             for ext_name in ext_names:
                 if ext_name not in t_i_all:
                     continue
-                bs_str = (f"{models[ext_name]['bench']}"
-                          f"{models[ext_name]['side']}")
-                ti_dict = t_i_all[ext_name]
-                ti_vals = [ti_dict.get(fid, 1.0)
-                           for fid in models[ext_name]['fiber_ids']
-                           if fid in ti_dict]
+                bs_str  = ext_fiber_data[ext_name]['benchside_str']
+                ti_vals = list(t_i_all[ext_name].values())
                 if ti_vals:
                     _arr = np.array(ti_vals)
                     _med = float(np.median(_arr))
@@ -1333,7 +1414,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                     if _rms_pct > 5.0:
                         logger.warning(
                             f"  *** {bs_str} within-bench T_i scatter = "
-                            f"{_rms_pct:.1f}% (median={_med:.4f}) — "
+                            f"{_rms_pct:.1f}% (median={_med:.4f}) -- "
                             f"high intra-bench throughput variation ***")
 
     _cross_bench_diagnostic(channel_refs)
@@ -1341,13 +1422,22 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     # ── Save gradient model and diagnostic plot ──
     if gradient_diagnostics:
         _save_gradient_model(gradient_diagnostics, output_dir)
-        _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
-                                    channel_groups, output_dir)
+        # Build a models-compatible dict for the plot function
+        _models_for_plot = {
+            ext_name: {
+                'fiber_ids': d['fiber_ids'],
+                'bench':     d['bench'],
+                'side':      d['side'],
+                'channel':   d['channel'],
+            }
+            for ext_name, d in ext_fiber_data.items()
+        }
+        _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all,
+                                    _models_for_plot, channel_groups,
+                                    output_dir)
 
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
-    _write_corrections_fits(
-        corrections, output_path, method='twilight',
-        header_extra={'SMTHFILE': os.path.basename(smooth_models_file)})
+    _write_corrections_fits(corrections, output_path, method='twilight-only')
     return output_path
 
 
