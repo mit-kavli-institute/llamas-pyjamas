@@ -520,6 +520,27 @@ def produce_twilight_extractions(red_twi, green_twi, blue_twi,
         else:
             logger.warning(f'  Expected twilight extraction file not found: {src}')
 
+    # Apply wavelength calibration to each renamed channel pickle.
+    # reduce_flat leaves .wave = zeros; correct_wavelengths transfers the
+    # master arc solution (LUT/LLAMAS_reference_arc.pkl) onto each fibre.
+    # This must happen before the extractions are used by compute_fibre_flat_twilight,
+    # which requires valid wavelength arrays to build the common grid and reference spectrum.
+    # Import locally to avoid circular imports (reduce.py imports flatProcessing).
+    from llamas_pyjamas.reduce import correct_wavelengths
+    for twi_pkl_name in ['red_extractions_twilight.pkl',
+                         'green_extractions_twilight.pkl',
+                         'blue_extractions_twilight.pkl']:
+        twi_pkl_path = os.path.join(output_directory, twi_pkl_name)
+        if not os.path.exists(twi_pkl_path):
+            logger.warning(f'  Skipping wavelength calibration — file not found: {twi_pkl_name}')
+            continue
+        cal_dict, _ = correct_wavelengths(twi_pkl_path)
+        # Overwrite the pickle so both the in-memory load below and any future
+        # reload are consistent with the calibrated state.
+        with open(twi_pkl_path, 'wb') as f:
+            cloudpickle.dump(cal_dict, f)
+        logger.info(f'  Wavelength calibration applied: {twi_pkl_name}')
+
     # Load and concatenate all three colour channels
     all_extractions = []
     all_metadata    = []

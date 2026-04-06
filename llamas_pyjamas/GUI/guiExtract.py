@@ -305,8 +305,8 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
             header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
 
-        # Compute detector background AFTER bias subtraction
-        detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
+        # Compute detector background AFTER bias subtraction using inter-fibre gaps
+        detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50), tracer=tracer)
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
 
         # Create an ExtractLlamas object with bias-subtracted data
@@ -387,20 +387,34 @@ def is_placeholder_camera(data):
     # Check if all values are 1.0 (or very close due to floating point)
     return np.allclose(data, 1.0, rtol=1e-5)
 
-def compute_detector_background(data, rows=(30, 50)):
+def compute_detector_background(data, rows=(30, 50), tracer=None):
     """
-    Compute median background from specified detector rows.
-    
+    Compute median background from inter-fibre gap pixels.
+
+    When a tracer is provided its fiberimg is used to select only genuine
+    inter-fibre gap pixels, avoiding contamination from fibre signal (which
+    starts as early as row 2 on some detectors).  Falls back to the fixed
+    row-range estimate when no tracer is available or when fewer than 100
+    gap pixels are found.
+
     Args:
         data: numpy array of detector data
-        rows: tuple of (start_row, end_row) for background region
-        
+        rows: tuple of (start_row, end_row) fallback region when tracer absent
+        tracer: optional TraceLlamas object with a fiberimg attribute
+
     Returns:
-        float: median background value
+        float: median background value in DN
     """
+    if tracer is not None:
+        try:
+            gap_mask = build_interfibre_mask(tracer, data.shape, image_type='science')
+            n_gap = int(gap_mask.sum())
+            if n_gap >= 100:
+                return float(np.nanmedian(data[gap_mask]))
+        except Exception:
+            pass
     upper_det = data[rows[0]:rows[1], :]
-    upper_background_value = np.median(upper_det)
-    return upper_background_value
+    return float(np.median(upper_det))
 
 ##Main function currently used by the Quicklook for full extraction
 

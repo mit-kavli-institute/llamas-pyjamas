@@ -57,7 +57,6 @@ from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_p
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
 from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
-                                           reduce_twilight_flat,
                                            apply_fibre_flat_to_rss)
 from llamas_pyjamas.Flat.flatProcessing import produce_twilight_extractions
 
@@ -92,7 +91,7 @@ def get_input_files_from_config(config, file_keys=None):
       if file_keys is None:
           file_keys = ['science_files', 'slow_bias_file', 'fast_bias_file',
                        'red_flat_file', 'green_flat_file', 'blue_flat_file',
-                       'twilight_flat']
+                       'red_twilight_flat', 'green_twilight_flat', 'blue_twilight_flat']
 
       input_files = []
 
@@ -196,7 +195,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # 4. File path existence checks
     # ------------------------------------------------------------------
     file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
-                 'twilight_flat']
+                 'red_twilight_flat', 'green_twilight_flat', 'blue_twilight_flat']
     if config.get('generate_new_wavelength_soln') is True:
         file_keys.append('arc_file')
 
@@ -1689,67 +1688,37 @@ def main(config_path):
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
                 logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
 
-            # --- Generate flat RSS for fibre-to-fibre correction ---
-            # The flat frames (dome or twilight) must have the pixel map applied
-            # before extraction so that extracted spectra represent pure fibre
-            # throughput (detector per-pixel sensitivity removed).
+            # --- Generate flat RSS for pixel-level correction ---
+            # Lamp (dome) flats are used here by design: they have smooth continua
+            # and are the best reference for per-pixel detector QE correction.
+            # Twilight flats are reserved for Stage 2 fibre-to-fibre throughput correction.
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flat when specified
-            twilight_file = config.get('twilight_flat')
-
-            if twilight_file is not None and flat_pixel_maps:
-                print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
-                twi_dir = os.path.join(flat_field_dir, 'twilight')
-                os.makedirs(twi_dir, exist_ok=True)
-                twi_rss = _process_flat_for_rss(
-                    [twilight_file],
-                    flat_pixel_maps, twi_dir,
+            dome_files = [config.get('red_flat_file'),
+                          config.get('green_flat_file'),
+                          config.get('blue_flat_file')]
+            if any(f is not None for f in dome_files) and flat_pixel_maps:
+                print("\nBuilding fibre-flat RSS from lamp (dome) flats...")
+                dome_dir = os.path.join(flat_field_dir, 'dome_rss')
+                os.makedirs(dome_dir, exist_ok=True)
+                dome_rss = _process_flat_for_rss(
+                    [f for f in dome_files if f is not None],
+                    flat_pixel_maps, dome_dir,
                     trace_dir=final_trace_dir,
                     arc_dict_config=config.get('arcdict'),
-                    timestamp=timestamp_ff, label='twilight',
+                    timestamp=timestamp_ff, label='dome',
                     slow_bias=slow_bias_file, fast_bias=fast_bias_file,
                 )
-                if twi_rss:
-                    config['flat_rss_outputs'] = twi_rss
-                    print(f"  Twilight flat RSS: {twi_rss}")
+                if dome_rss:
+                    config['flat_rss_outputs'] = dome_rss
+                    print(f"  Lamp flat RSS: {dome_rss}")
                 else:
-                    print("  WARNING: Twilight flat RSS generation failed.")
-
-            if not config['flat_rss_outputs']:
-                # Fallback: dome flats — also need pixel correction before extraction
-                dome_files = [config.get('red_flat_file'),
-                              config.get('green_flat_file'),
-                              config.get('blue_flat_file')]
-                if any(f is not None for f in dome_files) and flat_pixel_maps:
-                    if twilight_file is not None:
-                        msg = ("No twilight flat RSS — building fibre-flat RSS from "
-                               "pixel-corrected dome flats.")
-                    else:
-                        msg = ("No twilight_flat specified — using dome flat RSS "
-                               "for fibre-to-fibre correction.\n"
-                               "        Provide twilight_flat in config for best results.")
-                    print(f"\n  NOTE: {msg}")
-                    dome_dir = os.path.join(flat_field_dir, 'dome_rss')
-                    os.makedirs(dome_dir, exist_ok=True)
-                    dome_rss = _process_flat_for_rss(
-                        [f for f in dome_files if f is not None],
-                        flat_pixel_maps, dome_dir,
-                        trace_dir=final_trace_dir,
-                        arc_dict_config=config.get('arcdict'),
-                        timestamp=timestamp_ff, label='dome',
-                        slow_bias=slow_bias_file, fast_bias=fast_bias_file,
-                    )
-                    if dome_rss:
-                        config['flat_rss_outputs'] = dome_rss
-                        print(f"  Dome flat RSS: {dome_rss}")
-                    else:
-                        print("  WARNING: Dome flat RSS generation also failed — "
-                              "fibre-to-fibre correction will be skipped.")
-                else:
-                    print("  WARNING: No flat files available or pixel maps missing — "
-                          "skipping flat RSS generation.")
+                    logger.error("Lamp flat RSS generation failed — fibre-to-fibre correction will be skipped.")
+                    print("  ERROR: Lamp flat RSS generation failed — skipping fibre-to-fibre correction.")
+            else:
+                logger.error("No lamp flat files or pixel maps available — skipping flat RSS generation.")
+                print("  ERROR: No lamp flat files or pixel maps available — skipping flat RSS generation.")
 
 
        # Apply flat field corrections to science files before extraction
@@ -1960,54 +1929,32 @@ def main(config_path):
 
             corrections_file = None
 
-            # Resolve twilight file(s): prefer separate R/G/B, fall back to
-            # a single multi-extension FITS (legacy config key 'twilight_flat').
-            red_twi    = config.get('red_twilight_flat')
-            green_twi  = config.get('green_twilight_flat')
-            blue_twi   = config.get('blue_twilight_flat')
-            single_twi = config.get('twilight_flat')
+            # Resolve per-channel twilight flat files.
+            # Each key points to a per-channel MEF (same convention as
+            # red_flat_file / green_flat_file / blue_flat_file for lamp flats).
+            red_twi   = config.get('red_twilight_flat')
+            green_twi = config.get('green_twilight_flat')
+            blue_twi  = config.get('blue_twilight_flat')
 
             have_rgb = (red_twi and green_twi and blue_twi
                         and all(os.path.exists(f)
                                 for f in [red_twi, green_twi, blue_twi]))
-            have_single = single_twi and os.path.exists(single_twi)
 
-            # Branch A: Twilight-only (preferred)
-            if have_rgb or have_single:
+            # Branch A: Twilight per-channel (preferred)
+            if have_rgb:
                 try:
-                    if have_rgb:
-                        print(f"Using separate R/G/B twilight flats")
-                        twi_extractions_list, twi_metadata = produce_twilight_extractions(
-                            red_twi, green_twi, blue_twi,
-                            tracedir=final_trace_dir,
-                            outpath=extraction_path,
-                            use_bias=slow_bias_file,
-                        )
-                        twi_extractions = {
-                            'extractions':    twi_extractions_list,
-                            'metadata':       twi_metadata,
-                            'primary_header': None,
-                        }
-                    else:
-                        # Legacy single-MEF path
-                        print(f"Using twilight flat: {os.path.basename(single_twi)}")
-                        twi_extractions = reduce_twilight_flat(
-                            single_twi,
-                            flat_pixel_maps[0] if flat_pixel_maps else None,
-                            final_trace_dir,
-                            config.get('arcdict'),
-                            slow_bias_file,
-                            extraction_path,
-                            fast_bias=fast_bias_file,
-                        )
-                        # Save combined pickle for reproducibility
-                        import pickle as _pkl
-                        _twi_pkl = os.path.join(extraction_path,
-                                                'combined_twilight_extractions.pkl')
-                        with open(_twi_pkl, 'wb') as _f:
-                            _pkl.dump(twi_extractions, _f)
-                        logger.info(f"Saved twilight extractions: {_twi_pkl}")
-
+                    print(f"Using per-channel R/G/B twilight flats for fibre-to-fibre correction")
+                    twi_extractions_list, twi_metadata = produce_twilight_extractions(
+                        red_twi, green_twi, blue_twi,
+                        tracedir=final_trace_dir,
+                        outpath=extraction_path,
+                        use_bias=slow_bias_file,
+                    )
+                    twi_extractions = {
+                        'extractions':    twi_extractions_list,
+                        'metadata':       twi_metadata,
+                        'primary_header': None,
+                    }
                     corrections_file = compute_fibre_flat_twilight(
                         twi_extractions,
                         flat_field_dir,
@@ -2016,7 +1963,7 @@ def main(config_path):
                     )
                     del twi_extractions
                     gc.collect()
-                    print("Fibre flat computed (twilight-only method)")
+                    print("Fibre flat computed (twilight method)")
                 except Exception as e:
                     print(f"WARNING: Twilight fibre flat failed: {e}")
                     logger.warning(f"Twilight fibre flat failed: {e}", exc_info=True)
@@ -2033,10 +1980,11 @@ def main(config_path):
                 smooth_models_file = os.path.join(flat_field_dir,
                                                   'flat_smooth_models.fits')
                 if os.path.exists(smooth_models_file):
-                    if have_rgb or have_single:
-                        print("Twilight failed — falling back to lamp-only fibre flat")
+                    if have_rgb:
+                        print("Twilight fibre flat failed — falling back to lamp-only fibre flat")
                     else:
-                        print("No twilight flat supplied — using lamp-only fibre flat")
+                        print("No twilight flat supplied — using lamp-only fibre flat "
+                              "(provide red/green/blue_twilight_flat in config for best results)")
                     corrections_file = compute_fibre_flat_lamp_only(
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")

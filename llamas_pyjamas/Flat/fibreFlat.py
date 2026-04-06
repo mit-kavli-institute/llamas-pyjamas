@@ -187,7 +187,7 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None)
         # ImageHDU: benchside reference spectrum on common grid
         common_wave = data.get('common_wave', np.array([]))
         reference = data.get('reference', np.array([]))
-        if len(reference) > 0:
+        if len(reference) > 0 and len(common_wave) > 0:
             ref_hdu = fits.ImageHDU(data=reference.astype(np.float64))
             ref_hdu.header['EXTNAME'] = f'{ext_name}_REF'
             ref_hdu.header['CRVAL1'] = (common_wave[0], 'Start wavelength (A)')
@@ -1298,12 +1298,17 @@ def compute_fibre_flat_twilight(twilight_extractions, output_dir,
         corr_arr    = np.ones((n_fibres, n_pix), dtype=np.float64)
         fibre_flags = np.zeros(n_fibres, dtype=np.int16)
 
-        # Reference wavelength grid for diagnostics
-        all_valid_w = wave_arr[np.isfinite(wave_arr) & (wave_arr > 0)]
-        common_wave = (np.linspace(float(np.min(all_valid_w)),
-                                   float(np.max(all_valid_w)),
-                                   min(n_pix, 1000))
-                       if len(all_valid_w) > 0 else np.array([]))
+        # Wavelength axis for M_lambda: must have the same length as M_lambda
+        # (n_pix) so that common_wave and reference are correctly paired in
+        # _write_corrections_fits (FITS WCS) and _cross_bench_diagnostic.
+        # Use the median per-pixel wavelength across alive fibres as the axis.
+        med_wave_1d = np.nanmedian(wave_arr, axis=0)   # (n_pix,)
+        valid_med = np.isfinite(med_wave_1d) & (med_wave_1d > 0)
+        if np.sum(valid_med) > 1:
+            common_wave = med_wave_1d.copy()
+            common_wave[~valid_med] = np.nan
+        else:
+            common_wave = np.array([])
 
         t_i_ext = {}
 
