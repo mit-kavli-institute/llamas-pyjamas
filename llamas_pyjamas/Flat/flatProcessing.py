@@ -14,6 +14,7 @@ from llamas_pyjamas.GUI.guiExtract import process_trace, make_writable
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 from llamas_pyjamas.GUI.guiExtract import match_hdu_to_traces
 import pickle
+import cloudpickle
 from typing import List, Tuple
 from astropy.io import fits
 import numpy as np
@@ -551,7 +552,7 @@ def produce_twilight_extractions(red_twi, green_twi, blue_twi,
         'primary_header': None,   # no single primary header for multi-file input
     }
     with open(combined_pkl, 'wb') as f:
-        pickle.dump(combined, f)
+        cloudpickle.dump(combined, f)
     logger.info(f"Combined twilight extractions saved: {combined_pkl}")
 
     return all_extractions, all_metadata

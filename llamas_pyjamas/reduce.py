@@ -23,6 +23,7 @@ Example:
 import os
 import argparse
 import pickle
+import re
 import traceback
 import multiprocessing
 import logging
@@ -1050,7 +1051,7 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
             
             # Save corrected science frame
             base_name = os.path.splitext(os.path.basename(science_file))[0]
-            output_file = os.path.join(output_dir, f"{base_name}_flat_corrected.fits")
+            output_file = os.path.join(output_dir, f"{base_name}_P2P.fits")
             
             corrected_hdul = fits.HDUList(corrected_hdus)
             
@@ -1085,7 +1086,8 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
                    use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
-                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
+                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled',
+                   no_ff=False):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -1122,6 +1124,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         rss_files = [rss_files]
         
     cube_files = []
+    noff_suffix = "_noFF" if no_ff else ""
 
     # Track base names already processed by the traditional method to avoid
     # redundant work when rss_files contains multiple channel-specific files
@@ -1137,25 +1140,23 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         base_name = os.path.splitext(os.path.basename(rss_file))[0]
         channel = None
         
-        # Check for channel-specific naming pattern (handle both old and new patterns)
+        # Check for channel-specific naming pattern (new names first, then legacy)
         for color in ['red', 'green', 'blue']:
-            if f'_extract_RSS_{color}' in base_name:
-                # Extract the base name and channel color
-                channel = color
-                base_name = base_name.split(f'_extract_RSS_{color}')[0]
-                logger.info(f"Detected {color} channel file, using base name: {base_name}")
+            for suffix in [f'_P2P_FF_RSS_{color}', f'_RSS_{color}',
+                           f'_extract_RSS_{color}', f'_flat_corrected_RSS_{color}']:
+                if base_name.endswith(suffix):
+                    channel = color
+                    base_name = base_name[:-len(suffix)]
+                    logger.info(f"Detected {color} channel file (suffix '{suffix}'), "
+                                f"using base name: {base_name}")
+                    break
+            if channel:
                 break
-        
-        # If no channel-specific pattern found, check for generic RSS pattern
+
+        # If no channel-specific pattern found, strip any bare _RSS suffix
         if not channel and '_RSS' in base_name:
-            # This handles the new flat-corrected naming pattern: {base}_flat_corrected_RSS_{channel}.fits
-            # or fallback pattern: {base}_RSS.fits (single file with all channels)
-            if '_flat_corrected_RSS' in base_name:
-                base_name = base_name.split('_flat_corrected_RSS')[0]
-                logger.info(f"Detected flat-corrected RSS file, using base name: {base_name}")
-            elif '_RSS' in base_name:
-                base_name = base_name.split('_RSS')[0]
-                logger.info(f"Detected generic RSS file, using base name: {base_name}")
+            base_name = base_name.split('_RSS')[0]
+            logger.info(f"Detected generic RSS file, using base name: {base_name}")
         
         if channel:
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
@@ -1204,9 +1205,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
 
                 # Save cube
                 if channel:
-                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                    cube_filename = f"{base_name}_cube_{channel}{noff_suffix}.fits"
                 else:
-                    cube_filename = f"{base_name}_cube.fits"
+                    cube_filename = f"{base_name}_cube{noff_suffix}.fits"
 
                 cube_path = os.path.join(output_dir, cube_filename)
                 constructor.save_cube(cube_path, overwrite=True)
@@ -1263,9 +1264,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 if parallel:
                     output_suffix += "_parallel"
                 
-                cube_filename = f"{base_name}{output_suffix}.fits"
+                cube_filename = f"{base_name}{output_suffix}{noff_suffix}.fits"
                 cube_path = os.path.join(output_dir, cube_filename)
-                
+
                 crr_cube.save_to_fits(cube_path)
                 cube_files.append(cube_path)
                 
@@ -1293,10 +1294,14 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             # all 3 cubes.  Skip if this base name has already been handled.
             trad_base = os.path.splitext(rss_file)[0]
             for color in ['red', 'green', 'blue']:
-                for pattern in [f'_extract_RSS_{color}', f'_flat_corrected_RSS_{color}']:
-                    if pattern in trad_base:
-                        trad_base = trad_base.split(pattern)[0]
+                for suffix in [f'_P2P_FF_RSS_{color}', f'_RSS_{color}',
+                               f'_extract_RSS_{color}', f'_flat_corrected_RSS_{color}']:
+                    if trad_base.endswith(suffix):
+                        trad_base = trad_base[:-len(suffix)]
                         break
+                else:
+                    continue
+                break
 
             if trad_base in processed_traditional_bases:
                 logger.info(f"Skipping {rss_file}: base '{os.path.basename(trad_base)}' already processed")
@@ -1324,10 +1329,14 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 logger.info(f"Found channels for {os.path.basename(rss_file)}: {list(channel_cubes.keys())}")
                 
                 # Save each channel cube
+                _header_info = {'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling}
+                if no_ff:
+                    _header_info['NOFF'] = True
+                    _header_info['COMMENT'] = 'WARNING: no fibre-flat correction applied'
                 saved_paths = constructor.save_channel_cubes(
                     channel_cubes,
-                    output_prefix=os.path.join(output_dir, f"{base_name}"),
-                    header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+                    output_prefix=os.path.join(output_dir, f"{base_name}{noff_suffix}"),
+                    header_info=_header_info,
                     spatial_sampling=spatial_sampling
                 )
                 
@@ -1920,9 +1929,11 @@ def main(config_path):
 
             # Create a logger for RSS generation
             rss_logger = logging.getLogger(__name__ + '.rss')
-            rss_logger.info(f"Starting RSS generation for {base_name}")
-            
-            rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
+            # Use the original science file basename for RSS output (clean, no pkl infix)
+            sci_base_name = os.path.splitext(os.path.basename(orig_science_file))[0]
+            rss_logger.info(f"Starting RSS generation for {sci_base_name}")
+
+            rss_output_file = os.path.join(extraction_path, f'{sci_base_name}_RSS.fits')
             
             #RSS generation
             rss_gen = RSSgeneration(logger=rss_logger)
@@ -2036,15 +2047,16 @@ def main(config_path):
                                    "skipping fibre-to-fibre flat correction")
 
             if corrections_file is not None:
-                # Apply to all RSS files in the extraction directory
+                # Apply to all plain RSS files (no P2P_FF yet)
                 rss_to_correct = [
                     os.path.join(extraction_path, f)
                     for f in os.listdir(extraction_path)
-                    if f.endswith('.fits') and '_RSS' in f
-                    and '_FF' not in f
+                    if re.search(r'_RSS_(blue|green|red)\.fits$', f)
+                    and '_P2P_FF_' not in f
                 ]
                 for rss_file in rss_to_correct:
-                    ff_output = rss_file.replace('.fits', '_FF.fits')
+                    ff_output = re.sub(r'_RSS_(blue|green|red)\.fits$',
+                                       r'_P2P_FF_RSS_\1.fits', rss_file)
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
                                             ff_output)
                     print(f"  FF RSS: {os.path.basename(ff_output)}")
@@ -2052,22 +2064,25 @@ def main(config_path):
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
         logger.info("Stage: Constructing cubes from RSS files")
-        # Look for RSS files — prefer FF (fibre-flat corrected) when available
-        all_rss = [os.path.join(extraction_path, f)
-                   for f in os.listdir(extraction_path)
-                   if f.endswith('.fits') and '_RSS' in f]
-        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
-        non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
-        rss_files = ff_rss if ff_rss else non_ff_rss
-        
+        # Look for RSS files — prefer P2P+FF corrected when available
+        all_rss = [
+            os.path.join(extraction_path, f)
+            for f in os.listdir(extraction_path)
+            if re.search(r'_RSS_(blue|green|red)\.fits$', f)
+        ]
+        ff_rss    = [f for f in all_rss if '_P2P_FF_RSS_' in os.path.basename(f)]
+        plain_rss = [f for f in all_rss if '_P2P_FF_RSS_' not in os.path.basename(f)]
+        rss_files = ff_rss if ff_rss else plain_rss
+        use_noff  = bool(plain_rss) and not ff_rss
+
         if rss_files:
             print(f"Found {len(rss_files)} RSS files for cube construction:")
             for rss_file in rss_files:
                 basename = os.path.basename(rss_file)
-                if '_FF' in basename:
-                    status = " (fibre-flat corrected)"
-                elif '_flat_corrected' in basename:
-                    status = " (pixel-flat corrected)"
+                if '_P2P_FF_RSS_' in basename:
+                    status = " (P2P + fibre-flat corrected)"
+                elif '_RSS_' in basename:
+                    status = " (P2P corrected, no fibre-flat)"
                 else:
                     status = ""
                 print(f"  - {basename}{status}")
@@ -2096,7 +2111,8 @@ def main(config_path):
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
                 cube_radius=float(config.get('cube_radius', 1.5)),
                 cube_min_weight=float(config.get('cube_min_weight', 0.01)),
-                cube_grid_method=config.get('cube_grid_method', 'oversampled')
+                cube_grid_method=config.get('cube_grid_method', 'oversampled'),
+                no_ff=use_noff
             )
             print(f"Cubes constructed: {cube_files}")
         else:

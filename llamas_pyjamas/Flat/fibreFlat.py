@@ -11,6 +11,7 @@ applied to science RSS files by dividing the FLUX and ERROR arrays.
 """
 
 import os
+import re
 import logging
 import numpy as np
 from astropy.io import fits
@@ -1466,8 +1467,12 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         Path to the corrected RSS file.
     """
     if output_file is None:
-        base, ext = os.path.splitext(rss_file)
-        output_file = f"{base}_FF{ext}"
+        if re.search(r'_RSS_(blue|green|red)\.fits$', rss_file):
+            output_file = re.sub(r'_RSS_(blue|green|red)\.fits$',
+                                 r'_P2P_FF_RSS_\1.fits', rss_file)
+        else:
+            base, ext = os.path.splitext(rss_file)
+            output_file = f"{base}_FF{ext}"
 
     logger.info(f"Applying fibre flat: {os.path.basename(rss_file)} → "
                 f"{os.path.basename(output_file)}")

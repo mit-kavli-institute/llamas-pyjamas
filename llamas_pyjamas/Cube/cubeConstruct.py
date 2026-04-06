@@ -588,10 +588,15 @@ class CubeConstructor:
             base_path = os.path.splitext(rss_file)[0]
             
             # If it already includes a channel suffix, remove it to get the real base name
-            if '_extract_RSS_' in base_path:
-                parts = base_path.split('_extract_RSS_')
-                if len(parts) > 1:
-                    base_path = parts[0]
+            for _color in ['blue', 'green', 'red']:
+                for _suffix in [f'_P2P_FF_RSS_{_color}', f'_RSS_{_color}',
+                                f'_extract_RSS_{_color}', f'_flat_corrected_RSS_{_color}']:
+                    if base_path.endswith(_suffix):
+                        base_path = base_path[:-len(_suffix)]
+                        break
+                else:
+                    continue
+                break
         
         # Check if any channel-specific files exist
         channel_files = self.find_channel_rss_files(base_path)
@@ -1610,27 +1615,23 @@ class CubeConstructor:
             # Extract base name without extension
             base_name = os.path.splitext(base_name)[0]
             
-            # Check if it's already a channel-specific file (handle both old and new formats)
-            rss_patterns = ['_extract_RSS_', '_flat_corrected_RSS_']
+            # Check if it's already a channel-specific file (new formats first, then legacy)
             detected_channel = None
             detected_base_name = None
-            
-            for pattern in rss_patterns:
-                if pattern in base_name:
-                    # Extract the channel from the filename
-                    parts = base_name.split(pattern)
-                    if len(parts) == 2 and parts[1] in ['blue', 'green', 'red']:
-                        detected_channel = parts[1]
-                        detected_base_name = parts[0]
-                        # Just return this file with its detected channel
-                        self.logger.info(f"Input is already a channel-specific file for channel: {detected_channel} (pattern: {pattern})")
+
+            for _color in ['blue', 'green', 'red']:
+                for _suffix in [f'_P2P_FF_RSS_{_color}', f'_RSS_{_color}',
+                                f'_extract_RSS_{_color}', f'_flat_corrected_RSS_{_color}']:
+                    if base_name.endswith(_suffix):
+                        detected_channel = _color
+                        detected_base_name = base_name[:-len(_suffix)]
+                        self.logger.info(f"Input is already a channel-specific file for channel: "
+                                         f"{detected_channel} (suffix: '{_suffix}')")
                         return {detected_channel: base_path}
-                    # Get the base name without channel suffix for further processing
-                    elif len(parts) == 2:
-                        detected_base_name = parts[0]
-                        break
-            
-            # Update base_name if we found a pattern
+                if detected_channel:
+                    break
+
+            # Update base_name if we stripped a non-channel suffix
             if detected_base_name is not None:
                 base_name = detected_base_name
         
@@ -1642,16 +1643,22 @@ class CubeConstructor:
         
         # Define common channel names and RSS patterns to try
         channels = ['blue', 'green', 'red']
-        rss_patterns = ['_flat_corrected_RSS_', '_extract_RSS_']  # Try new format first
-        
-        # Check for existence of each channel file using both patterns
+        # Path templates in priority order: FF-corrected new → plain new → legacy formats
+        path_templates = [
+            "{base}_P2P_FF_RSS_{channel}.fits",
+            "{base}_RSS_{channel}.fits",
+            "{base}_flat_corrected_RSS_{channel}.fits",
+            "{base}_extract_RSS_{channel}.fits",
+        ]
+
+        # Check for existence of each channel file using templates in priority order
         for channel in channels:
-            for pattern in rss_patterns:
-                channel_path = f"{base_path_no_ext}{pattern}{channel}.fits"
+            for template in path_templates:
+                channel_path = template.format(base=base_path_no_ext, channel=channel)
                 if os.path.isfile(channel_path):
                     self.logger.info(f"Found {channel} channel RSS file: {channel_path}")
                     channel_files[channel] = channel_path
-                    break  # Found the file, no need to try other patterns
+                    break  # Use highest-priority match for this channel
         
         if not channel_files:
             # If no channel-specific files found, check if the original file exists

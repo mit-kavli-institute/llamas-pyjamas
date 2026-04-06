@@ -1084,7 +1084,7 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
         # Generate output filename
         science_basename = os.path.basename(science_file)
         science_name, science_ext = os.path.splitext(science_basename)
-        output_filename = f"{science_name}_flat_corrected{science_ext}"
+        output_filename = f"{science_name}_P2P{science_ext}"
         # Determine output directory
         if output_dir is None:
             output_dir = os.path.dirname(science_file)
