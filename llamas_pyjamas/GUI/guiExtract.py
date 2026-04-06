@@ -29,6 +29,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
 from llamas_pyjamas.Bias.biasChecking import build_interfibre_mask
+from llamas_pyjamas.Flat.scattered2dLlamas import subtract_scattered_light
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -163,7 +164,8 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
 
-def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None):
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
+                  image_type='science'):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
 
@@ -209,6 +211,9 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
                 f"BIASSUB already set for {bench}{side} {color} — skipping bias subtraction"
             )
             bias_subtracted_data = hdu_data.astype(float)
+            bias_subtracted_data, _ = subtract_scattered_light(
+                bias_subtracted_data, tracer, image_type=image_type
+            )
         else:
             # use_bias is the resolved bias file path from GUI_extract (may be None)
             frame_mode = header.get('READ-MDE', None)
@@ -305,7 +310,12 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
             header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
 
-        # Compute detector background AFTER bias subtraction using inter-fibre gaps
+            # 2D scattered light subtraction (after bias, before extraction)
+            bias_subtracted_data, _ = subtract_scattered_light(
+                bias_subtracted_data, tracer, image_type=image_type
+            )
+
+        # Compute detector background AFTER bias+scatter subtraction using inter-fibre gaps
         detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50), tracer=tracer)
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
 

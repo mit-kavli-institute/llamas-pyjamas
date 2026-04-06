@@ -283,7 +283,8 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
-        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal',
+                                      use_bias=masterbiasfile, image_type='lamp_flat')
         futures.append(future)
     
     _extractions = ray.get(futures)
