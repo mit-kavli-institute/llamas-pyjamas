@@ -29,6 +29,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
 from llamas_pyjamas.Bias.biasChecking import build_interfibre_mask
+from llamas_pyjamas.Masking.cosmicLlamas import clean_cosmic_rays, save_cosmic_ray_masks
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -163,7 +164,7 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 # Define a Ray remote function for processing a single trace extraction.
 @ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
 
-def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None):
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None, remove_cosmic_rays=True):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
 
@@ -305,6 +306,16 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
             header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
 
+        # Cosmic ray removal (after bias subtraction, before extraction)
+        cr_mask = None
+        if remove_cosmic_rays:
+            bias_subtracted_data, cr_mask = clean_cosmic_rays(
+                bias_subtracted_data,
+                color=color, bench=bench, side=side
+            )
+            header['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
+            header['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+
         # Compute detector background AFTER bias subtraction
         detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
@@ -318,12 +329,13 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         return {
             'extraction': extraction,
             'detector_background': detector_background,
-            'hdu_index': hdu_index
+            'hdu_index': hdu_index,
+            'cr_mask': cr_mask
         }
     except Exception as e:
         logger.error(f"Error extracting trace from {trace_file}")
         logger.error(traceback.format_exc())
-        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index}
+        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index, 'cr_mask': None}
 
 
 def make_writable(extraction_obj):
@@ -407,7 +419,8 @@ def compute_detector_background(data, rows=(30, 50)):
 
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
-                method='optimal', trace_dir=None, mastercalib_trace_dir=None) -> None:
+                method='optimal', trace_dir=None, mastercalib_trace_dir=None,
+                remove_cosmic_rays=True, mask_output_dir=None) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -615,9 +628,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdr = hdu[hdu_index].header
 
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile)
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
             futures.append(future)
 
         # Wait for all remote tasks to complete
@@ -631,7 +644,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 writable_results.append({
                     'extraction': writable_ex,
                     'detector_background': result['detector_background'],
-                    'hdu_index': result['hdu_index']
+                    'hdu_index': result['hdu_index'],
+                    'cr_mask': result.get('cr_mask')
                 })
 
         # Set placeholder cameras to zero (no real data)
@@ -641,6 +655,16 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             if is_placeholder_camera(hdu_data):
                 result['extraction'].counts[:] = 0.0
                 logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
+
+        # Save cosmic ray masks if CR removal was enabled
+        if remove_cosmic_rays:
+            cr_masks = {}
+            for result in writable_results:
+                if result.get('cr_mask') is not None:
+                    cr_masks[result['hdu_index']] = result['cr_mask']
+            if cr_masks:
+                mask_dir = mask_output_dir if mask_output_dir else (output_dir or OUTPUT_DIR)
+                save_cosmic_ray_masks(cr_masks, primary_hdr, file, mask_dir)
 
         # Build extraction list from writable results
         extraction_list = [result['extraction'] for result in writable_results]
@@ -703,7 +727,7 @@ def make_ifuimage(extraction_file, flat=False):
     print(f'white_light_file = {white_light_file}')
 
 
-def box_extract(file, flat=False):
+def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None):
     try:
     
         assert file.endswith('.fits'), 'File must be a .fits file'
@@ -766,35 +790,55 @@ def box_extract(file, flat=False):
 
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
-        
+
         print(f'trace_files = {trace_files}')
         extraction_list = []
+        original_file = file  # preserve before loop variable shadows it
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
         #print(hdu_trace_pairs)
-        
+
+        cr_masks = {}
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
-            
+
             data = hdu[hdu_index].data.astype(float)
-            
+
             bias = np.nanmedian(data)
-            
+            bias_subtracted = data - bias
+
+            if remove_cosmic_rays:
+                color = hdr.get('COLOR', '').lower()
+                bench = hdr.get('BENCH', '')
+                side = hdr.get('SIDE', '')
+                bias_subtracted, cr_mask = clean_cosmic_rays(
+                    bias_subtracted, color=color, bench=bench, side=side
+                )
+                cr_masks[hdu_index] = cr_mask
+                hdr['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
+                hdr['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+
             #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
-            
+
             try:
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
-      
-                extraction = ExtractLlamas(tracer, data-bias, hdu[hdu_index].header, optimal=False)
+
+                extraction = ExtractLlamas(tracer, bias_subtracted, hdu[hdu_index].header, optimal=False)
                 extraction_list.append(extraction)
                 
             except Exception as e:
                 print(f"Error extracting trace from {file}")
                 print(traceback.format_exc())
         
-        print(f'Extraction list = {extraction_list}')        
+        # Save cosmic ray masks
+        if remove_cosmic_rays and cr_masks:
+            primary_hdr = hdu[0].header
+            mask_dir = mask_output_dir if mask_output_dir else OUTPUT_DIR
+            save_cosmic_ray_masks(cr_masks, primary_hdr, original_file, mask_dir)
+
+        print(f'Extraction list = {extraction_list}')
         filename = save_extractions(extraction_list)
         print(f'extraction saved filename = {filename}')
 

@@ -61,3 +61,11 @@ gain_noise_lookup ={
     ("green", "4", "B"): {'noise': 2.4, 'gain': 1.25},
     ("blue", "4", "B"): {'noise': 2.4, 'gain': 1.25}
 }
+
+LACOSMIC_DEFAULTS = {
+    'contrast': 2.0,
+    'cr_threshold': 4.5,
+    'neighbor_threshold': 0.3,
+    'effective_gain': 1.25,
+    'readnoise': 6.9,
+}
