@@ -5,7 +5,7 @@ import numpy as np
 from astropy.io import fits
 from lacosmic import remove_cosmics
 
-from llamas_pyjamas.constants import LACOSMIC_DEFAULTS, gain_noise_lookup
+from llamas_pyjamas.constants import LACOSMIC_DEFAULTS, LACOSMIC_COLOR_OVERRIDES, gain_noise_lookup
 
 logger = logging.getLogger("llamas_pyjamas")
 
@@ -33,6 +33,13 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
     """
     params = dict(LACOSMIC_DEFAULTS)
 
+    if color is not None:
+        color_overrides = LACOSMIC_COLOR_OVERRIDES.get(color.lower(), {})
+        if color_overrides.get('skip', False):
+            logger.info(f"Skipping cosmic ray cleaning for {color} channel")
+            return data.copy(), np.zeros(data.shape, dtype=bool)
+        params.update(color_overrides)
+
     if color is not None and bench is not None and side is not None:
         key = (color.lower(), str(bench), str(side).upper())
         detector_props = gain_noise_lookup.get(key)
@@ -47,6 +54,7 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
         neighbor_threshold=params['neighbor_threshold'],
         effective_gain=params['effective_gain'],
         readnoise=params['readnoise'],
+        maxiter=params['maxiter'],
     )
 
     n_cr = int(mask.sum())
