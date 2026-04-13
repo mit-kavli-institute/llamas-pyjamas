@@ -196,7 +196,7 @@ def is_placeholder_extension(hdu: fits.ImageHDU) -> bool:
     if hdu.data is not None:
         try:
             unique_vals = np.unique(hdu.data)
-            if len(unique_vals) == 1 and np.isclose(unique_vals[0], 1.0):
+            if len(unique_vals) == 1 and np.isclose(unique_vals[0], 0.0):
                 return True
         except Exception:
             # If we can't analyze the data, assume not a placeholder
@@ -256,7 +256,7 @@ def get_placeholder_extension_indices(fits_file: str) -> List[int]:
 def create_placeholder_hdu(camera_config: Tuple[str, str, str],
                           reference_shape: Tuple[int, int],
                           extension_name: Optional[str] = None) -> fits.ImageHDU:
-    """Create a placeholder HDU with 1.0-valued arrays for a missing camera.
+    """Create a placeholder HDU with 0.0-valued arrays for a missing camera.
 
     Args:
         camera_config: Tuple of (channel, bench, side) for the missing camera.
@@ -268,8 +268,9 @@ def create_placeholder_hdu(camera_config: Tuple[str, str, str],
     """
     channel, bench, side = camera_config
 
-    # Create array filled with 1.0 values
-    data = np.ones(reference_shape, dtype=np.float32)
+    # Create array filled with 0.0 values
+    # Make these unsigned ints, just like the real data, to avoid type issues in the pipeline
+    data = np.zeros(reference_shape, dtype=np.uint16)
 
     # Create header with camera metadata
     header = fits.Header()
@@ -278,7 +279,7 @@ def create_placeholder_hdu(camera_config: Tuple[str, str, str],
     header['COLOR'] = (channel.upper(), 'Color channel')
     header['EXTNAME'] = (extension_name or f"{channel.upper()}{bench}{side}", 'Extension name')
     header['COMMENT'] = 'Placeholder extension created for missing camera'
-    header['COMMENT'] = 'Data filled with 1.0 values to maintain pipeline compatibility'
+    header['COMMENT'] = 'Data filled with 0.0 values to maintain pipeline compatibility'
 
     # Create ImageHDU
     hdu = fits.ImageHDU(data=data, header=header)
