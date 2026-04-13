@@ -6,7 +6,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 from pypeit.core.fitting import iterfit, robust_fit
 from pypeit.core.wavecal.wvutils import arc_lines_from_spec
 from astropy.io import fits
@@ -193,7 +193,7 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
     return outputfile
 
 
-def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False):
+def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, arc_file=None, show_plots=False):
     """
     Create a 1D sky model from the sky extraction.
 
@@ -225,7 +225,9 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
     else:
         sky_dict = ExtractLlamas.loadExtraction(sky_extraction_file)
 
-    arc_dict = ExtractLlamas.loadExtraction(os.path.join(OUTPUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    if arc_file is None:
+        arc_file = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+    arc_dict = ExtractLlamas.loadExtraction(arc_file)
     sky_wvcal = arc.arcTransfer(sky_dict, arc_dict)
     
     sky = sky_wvcal['extractions']

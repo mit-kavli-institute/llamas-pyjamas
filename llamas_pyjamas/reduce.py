@@ -1709,7 +1709,6 @@ def main(config_path):
                 arc_calib_file=config.get('arc_calib_file'),
                 verbose=config.get('verbose_flat_processing', False),
                 method=flat_field_method,
-                use_bias=bias_file,
                 filter_size=filter_size,
                 signal_thresholds=signal_thresholds,
                 clip_range=(clip_min, clip_max),
@@ -1749,10 +1748,6 @@ def main(config_path):
                     print("WARNING: throughput pkl not found after fiberRelativeThroughput — using original arcdict")
             else:
                 print("WARNING: combined flat extraction not found, skipping throughput computation")
-
-
-                logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
-
             """
 
             # --- Generate flat RSS for fibre-to-fibre correction ---
@@ -2028,6 +2023,7 @@ def main(config_path):
                 sky_extraction_file = config.get('sky_extraction_file', None)
                 print(f"Running sky subtraction on {os.path.basename(savefile)}...")
                 sky1d_file = skyModel_1d(savefile, color=None, sky_extraction_file=sky_extraction_file,
+                                         arc_file=config.get('arcdict'),
                                          show_plots=config.get('sky_qa_plots', False))
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
@@ -2060,7 +2056,8 @@ def main(config_path):
                         try:
                             noflat_extracted = run_extraction(
                                 orig_science, extraction_path,
-                                use_bias=config.get('bias_file'),
+                                slow_bias=slow_bias_file,
+                                fast_bias=fast_bias_file,
                                 trace_dir=final_trace_dir,
                                 mastercalib_trace_dir=CALIB_DIR
                             )

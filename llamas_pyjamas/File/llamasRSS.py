@@ -430,7 +430,14 @@ class RSSgeneration:
                 hdul.append(flux_hdu)
                 self.logger.info(f"Added FLUX extension with shape {flux_stack.shape}")
 
-                # Extension 2 (optional) - NOFLAT: sky-subtracted, throughput-corrected,
+                # Extension 2 - ERROR: the error array [NFIBER x NWAVE]
+                error_hdu = fits.ImageHDU(error_stack, header=common_header)
+                error_hdu.header['EXTNAME'] = 'ERROR'
+                error_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
+                hdul.append(error_hdu)
+                self.logger.info(f"Added ERROR extension with shape {error_stack.shape}")
+
+                # Extension 3 (optional) - NOFLAT: sky-subtracted, throughput-corrected,
                 # but extracted from the un-flat-corrected FITS (no 2D pixel flat applied).
                 if noflat_channel_groups.get(channel):
                     nf_obj_list = noflat_channel_groups[channel]

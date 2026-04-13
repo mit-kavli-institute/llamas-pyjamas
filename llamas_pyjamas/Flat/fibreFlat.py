@@ -1410,6 +1410,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         error = hdul['ERROR'].data.copy()
         fibermap = hdul['FIBERMAP'].data
 
+        # Read optional extensions added by sky-subtraction merge
+        counts = hdul['COUNTS'].data.copy() if 'COUNTS' in hdul else None
+        sky = hdul['SKY'].data.copy() if 'SKY' in hdul else None
+        noflat = hdul['NOFLAT'].data.copy() if 'NOFLAT' in hdul else None
+
         # Read MASK for per-fibre flag injection
         try:
             mask_data = hdul['MASK'].data.copy().astype(np.int16)
@@ -1473,9 +1478,14 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                     f"extrapolated with boundary values ({left_val:.4f}, {right_val:.4f})"
                 )
 
-            # Apply correction: divide flux; propagate flat variance into error
+            # Apply correction: divide flux (and COUNTS/NOFLAT if present);
+            # propagate flat variance into error
             safe_c = np.where(np.isfinite(c_i) & (c_i > 0), c_i, 1.0)
             flux[row_idx] /= safe_c
+            if counts is not None:
+                counts[row_idx] /= safe_c
+            if noflat is not None:
+                noflat[row_idx] /= safe_c
 
             var_c_arr = corr_data.get('correction_var')
             if var_c_arr is not None:
@@ -1529,6 +1539,23 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         error_hdu = fits.ImageHDU(error, header=hdul['ERROR'].header.copy())
         error_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
         out_hdul.append(error_hdu)
+
+        # NOFLAT — corrected (optional, only if present in input)
+        if noflat is not None:
+            noflat_hdu = fits.ImageHDU(noflat, header=hdul['NOFLAT'].header.copy())
+            noflat_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
+            out_hdul.append(noflat_hdu)
+
+        # COUNTS — corrected (optional, only if present in input)
+        if counts is not None:
+            counts_hdu = fits.ImageHDU(counts, header=hdul['COUNTS'].header.copy())
+            counts_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
+            out_hdul.append(counts_hdu)
+
+        # SKY — copied through unchanged (sky model is already in
+        # throughput-corrected units, fibre flat does not apply)
+        if sky is not None:
+            out_hdul.append(hdul['SKY'].copy())
 
         # MASK — write updated mask (flags ORed in above)
         try:
