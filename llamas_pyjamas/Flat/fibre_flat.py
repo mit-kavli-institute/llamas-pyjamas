@@ -225,18 +225,16 @@ def clean_output_filename(science_filepath, suffix, output_dir=None):
 def load_rss(filepath, logger=None):
     """Load a single-channel RSS FITS file into memory.
 
-    Parameters
-    ----------
-    filepath : str
-        Path to the RSS FITS file.
-    logger : logging.Logger, optional
+    Args:
+        filepath (str): Path to the RSS FITS file.
+        logger (logging.Logger, optional): Logger to use; defaults to the module logger.
 
-    Returns
-    -------
-    dict with keys:
-        flux, error, mask, wave, fwhm  — 2D float32/int16 arrays (n_fibres × n_wave)
-        fibermap                        — astropy BinTableHDU data
-        header                          — primary header
+    Returns:
+        dict: Dictionary with the following keys:
+
+        * ``flux``, ``error``, ``mask``, ``wave``, ``fwhm`` — 2D float32/int16 arrays (n_fibres × n_wave)
+        * ``fibermap`` — astropy BinTableHDU data
+        * ``header`` — primary header
     """
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -290,38 +288,33 @@ def compute_fibre_flat(flat_flux, flat_err, flat_mask, fibermap,
     The raw ratio is smoothed along the wavelength axis with a Savitzky-Golay
     filter to remove noise while preserving smooth throughput gradients.
 
-    Parameters
-    ----------
-    flat_flux : 2D ndarray, shape (n_fibres, n_wave)
-        Extracted flat-field spectra (FLUX extension of flat RSS).
-    flat_err : 2D ndarray, shape (n_fibres, n_wave)
-        Corresponding error spectra (currently unused in computation but
-        accepted for API consistency and future use).
-    flat_mask : 2D int16 array, shape (n_fibres, n_wave)
-        Pixel mask (0 = good, non-zero = bad).
-    fibermap : astropy BinTableHDU data
-        FIBERMAP extension data with BENCHSIDE and FIBER_ID columns.
-    savgol_window : int
-        Savitzky-Golay smoothing window in pixels.  Must be odd.
-    savgol_polyorder : int
-        Savitzky-Golay polynomial order (< savgol_window).
-    clip_sigma : float
-        MAD sigma-clipping threshold for column-wise outlier rejection.
-    min_throughput : float
-        Fibres with median flux below this fraction of the global maximum
-        median are flagged as dead.
-    n_central_fibres : int
-        Number of fibres per bench-side closest to the detector xpos centre
-        used to build the synthetic reference.
-    logger : logging.Logger, optional
+    Args:
+        flat_flux (2D ndarray): Extracted flat-field spectra (FLUX extension of
+            flat RSS), shape (n_fibres, n_wave).
+        flat_err (2D ndarray): Corresponding error spectra (currently unused in
+            computation but accepted for API consistency and future use), shape
+            (n_fibres, n_wave).
+        flat_mask (2D int16 array): Pixel mask (0 = good, non-zero = bad), shape
+            (n_fibres, n_wave).
+        fibermap: FIBERMAP extension data (astropy BinTableHDU data) with BENCHSIDE
+            and FIBER_ID columns.
+        savgol_window (int): Savitzky-Golay smoothing window in pixels. Must be odd.
+        savgol_polyorder (int): Savitzky-Golay polynomial order (< savgol_window).
+        clip_sigma (float): MAD sigma-clipping threshold for column-wise outlier rejection.
+        min_throughput (float): Fibres with median flux below this fraction of the
+            global maximum median are flagged as dead.
+        n_central_fibres (int): Number of fibres per bench-side closest to the
+            detector xpos centre used to build the synthetic reference.
+        logger (logging.Logger, optional): Logger to use; defaults to the module logger.
 
-    Returns
-    -------
-    correction : 2D ndarray, shape (n_fibres, n_wave)
-        Multiplicative correction.  No NaN or inf values — dead-fibre rows
-        are set to 1.0 (flagging is handled by :func:`apply_fibre_flat`).
-    dead_fibre_mask : 1D bool array, shape (n_fibres,)
-        True for fibres flagged as dead/unreliable.
+    Returns:
+        tuple: A 2-tuple ``(correction, dead_fibre_mask)`` where
+
+        * ``correction`` (2D ndarray, shape (n_fibres, n_wave)) -- Multiplicative
+          correction. No NaN or inf values; dead-fibre rows are set to 1.0
+          (flagging is handled by :func:`apply_fibre_flat`).
+        * ``dead_fibre_mask`` (1D bool array, shape (n_fibres,)) -- True for fibres
+          flagged as dead/unreliable.
     """
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -500,26 +493,34 @@ def apply_fibre_flat(sci_flux, sci_err, sci_mask, correction,
 
     Parameters
     ----------
-    sci_flux : 2D ndarray (n_fibres, n_wave)
-    sci_err : 2D ndarray (n_fibres, n_wave)  — sigma values (NOT IVAR)
-    sci_mask : 2D int16 array (n_fibres, n_wave) — 0 = good
-    correction : 2D ndarray (n_fibres, n_wave)
+    sci_flux : 2D ndarray, shape (n_fibres, n_wave)
+        Science flux array.
+    sci_err : 2D ndarray, shape (n_fibres, n_wave)
+        Sigma values (NOT IVAR).
+    sci_mask : 2D int16 array, shape (n_fibres, n_wave)
+        Pixel mask (0 = good).
+    correction : 2D ndarray, shape (n_fibres, n_wave)
         Multiplicative correction from :func:`compute_fibre_flat`.
         Contains no NaN or inf (dead-fibre rows are 1.0 there).
-    dead_fibre_mask : 1D bool array (n_fibres,), optional
+    dead_fibre_mask : 1D bool array, shape (n_fibres,), optional
         True for dead fibres (rows that should be NaN'd out).
 
     Returns
     -------
     corr_flux : 2D float32 ndarray
+        Corrected flux array.
     corr_err : 2D float32 ndarray
+        Corrected error array.
     corr_mask : 2D int16 array
+        Updated mask array.
 
-    Mask bit conventions
-    --------------------
-    Bit 8 (value 8)  : dead fibre — entire row flagged
-    Bit 4 (value 4)  : alive-fibre pixels where correction was clamped to 1.0
-                       (i.e., the ratio was undefined — un-flat-fielded pixels)
+    Notes
+    -----
+    Mask bit conventions:
+
+    * Bit 8 (value 8) — dead fibre: entire row flagged.
+    * Bit 4 (value 4) — alive-fibre pixels where correction was clamped to 1.0
+      (i.e., the ratio was undefined — un-flat-fielded pixels).
     """
     corr_flux = sci_flux  * correction
     corr_err  = sci_err   * np.abs(correction)    # σ_out = σ_in × |correction|

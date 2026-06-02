@@ -4,111 +4,55 @@ Installation
 Requirements
 ------------
 
-LLAMAS Pyjamas requires Python 3.8 or later and has the following dependencies:
+LLAMAS Pyjamas requires **Python 3.11 or 3.12**. Its main dependencies (declared in
+``pyproject.toml``) are:
 
-Core Dependencies
-~~~~~~~~~~~~~~~~~
+* ``numpy``, ``scipy``, ``astropy``, ``matplotlib`` — core numerics and FITS I/O
+* ``pypeit`` — wavelength-calibration algorithms
+* ``ray`` + ``cloudpickle`` — parallel processing across cameras
+* ``lacosmic`` — cosmic-ray rejection
+* ``pyqt6`` — GUI tools (optional at runtime)
 
-* numpy >= 1.21.0
-* scipy >= 1.7.0
-* matplotlib >= 3.5.0
-* astropy >= 5.0.0
+From source (recommended)
+-------------------------
 
-Spectroscopy Tools
-~~~~~~~~~~~~~~~~~~
-
-* pypeit (for wavelength calibration algorithms)
-
-Data Handling
-~~~~~~~~~~~~~
-
-* h5py >= 3.0.0
-* pandas >= 1.3.0
-
-Parallel Processing
-~~~~~~~~~~~~~~~~~~~
-
-* ray >= 1.0.0 (optional, for parallel extraction)
-
-GUI Components
-~~~~~~~~~~~~~~
-
-* PyQt5 >= 5.15.0 (optional, for GUI tools)
-
-Installation Methods
---------------------
-
-From Source (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Clone the repository and install in development mode:
+The project uses `Poetry <https://python-poetry.org/>`_ for dependency management:
 
 .. code-block:: bash
 
-   git clone https://github.com/your-org/llamas-pyjamas.git
+   git clone https://github.com/mit-kavli-institute/llamas-pyjamas.git
+   cd llamas-pyjamas
+   poetry install
+
+Alternatively, install into an existing environment with ``pip``:
+
+.. code-block:: bash
+
+   git clone https://github.com/mit-kavli-institute/llamas-pyjamas.git
    cd llamas-pyjamas
    pip install -e .
 
-This allows you to modify the code and see changes immediately.
-
-Using pip
-~~~~~~~~~
-
-Once available on PyPI:
+Using a conda environment
+-------------------------
 
 .. code-block:: bash
 
-   pip install llamas-pyjamas
-
-Conda Environment
-~~~~~~~~~~~~~~~~~
-
-For a clean installation, create a new conda environment:
-
-.. code-block:: bash
-
-   conda create -n llamas python=3.9
+   conda create -n llamas python=3.12
    conda activate llamas
    pip install -e .
 
-Verification
-------------
-
-Test your installation by importing the package:
+Verifying the installation
+--------------------------
 
 .. code-block:: python
 
    import llamas_pyjamas
-   from llamas_pyjamas.Trace import traceLlamas
-   from llamas_pyjamas.Extract import extractLlamas
-   
-   print("LLAMAS Pyjamas successfully installed!")
+   print(llamas_pyjamas.__version__)
 
 Troubleshooting
 ---------------
 
-Common Issues
-~~~~~~~~~~~~~
-
-**pypeit installation fails**: pypeit has specific dependencies. Try installing it separately:
-
-.. code-block:: bash
-
-   pip install pypeit
-
-**Qt/GUI issues**: If you don't need GUI functionality, the package will work without PyQt5.
-
-**Ray import errors**: Ray is optional. The package will work without parallel processing capabilities.
-
-Development Installation
-------------------------
-
-For developers who want to contribute:
-
-.. code-block:: bash
-
-   git clone https://github.com/your-org/llamas-pyjamas.git
-   cd llamas-pyjamas
-   pip install -e ".[dev]"
-
-This installs additional development dependencies for testing and documentation.
+* **PypeIt** has heavy, version-sensitive dependencies; if installation fails, install it
+  on its own first (``pip install pypeit``) and re-run the project install.
+* **Ray** signal-handler conflicts with PypeIt are handled automatically by the package
+  ``__init__`` (a guarded ``signal.signal`` shim).

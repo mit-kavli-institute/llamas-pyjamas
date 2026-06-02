@@ -186,20 +186,23 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
 
 
 def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Generate a white light image from an array of extraction files or objects.
-    Parameters:
-    extraction_array (list): A list of extraction files (str) or ExtractLlamas objects.
-    ds9plot (bool, optional): If True, plot the white light image using DS9. Default is True.
+    """Generate a white light image from an array of extraction files or objects.
+
+    Args:
+        extraction_array (list): A list of extraction files (str) or ExtractLlamas objects.
+        ds9plot (bool, optional): If True, plot the white light image using DS9. Default is True.
+
     Returns:
-    tuple: A tuple containing:
-        - whitelight (numpy.ndarray): The interpolated white light image.
-        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
-        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
-        - flux (numpy.ndarray): The flux values for each fiber.
+        tuple: A tuple containing:
+
+            - whitelight (numpy.ndarray): The interpolated white light image.
+            - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
+            - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
+            - flux (numpy.ndarray): The flux values for each fiber.
+
     Raises:
-    AssertionError: If extraction_array is not a list.
-    TypeError: If an element in extraction_array is not a string or ExtractLlamas object.
+        AssertionError: If extraction_array is not a list.
+        TypeError: If an element in extraction_array is not a string or ExtractLlamas object.
     """
 
     
@@ -270,23 +273,26 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
     return whitelight, xdata, ydata, flux
 
 def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Generate a quick look white light image from trace data and image data.
-    Parameters:
-    tracefile (str): Path to the trace file containing the trace object.
-    data (numpy.ndarray): Image data array.
+    """Generate a quick look white light image from trace data and image data.
+
+    Args:
+        tracefile (str): Path to the trace file containing the trace object.
+        data (numpy.ndarray): Image data array.
+
     Returns:
-    tuple: A tuple containing:
-        - whitelight (numpy.ndarray): Interpolated white light image.
-        - xdata (numpy.ndarray): Array of x-coordinates for fibers.
-        - ydata (numpy.ndarray): Array of y-coordinates for fibers.
-        - flux (numpy.ndarray): Array of flux values for fibers.
-    Notes:
-    - The function reads the trace object from the provided tracefile.
-    - It uses a fiber map lookup table (FiberMap_LUT) to get x and y coordinates for each fiber.
-    - The flux for each fiber is calculated by summing the data values where the fiber image matches the fiber index.
-    - A linear interpolator (LinearNDInterpolator) is used to create the white light image.
-    - Optionally, the white light image can be plotted using DS9 (if ds9plot is set to True).
+        tuple: A tuple containing:
+
+            - whitelight (numpy.ndarray): Interpolated white light image.
+            - xdata (numpy.ndarray): Array of x-coordinates for fibers.
+            - ydata (numpy.ndarray): Array of y-coordinates for fibers.
+            - flux (numpy.ndarray): Array of flux values for fibers.
+
+    Note:
+        * The function reads the trace object from the provided tracefile.
+        * It uses a fiber map lookup table (FiberMap_LUT) to get x and y coordinates for each fiber.
+        * The flux for each fiber is calculated by summing the data values where the fiber image matches the fiber index.
+        * A linear interpolator (LinearNDInterpolator) is used to create the white light image.
+        * Optionally, the white light image can be plotted using DS9 (if ds9plot is set to True).
     """
 
     #    hdul = fits.open(data)
@@ -856,23 +862,23 @@ def compute_residual_background(data, regions=((5, 20), (20, 50), (30, 50))):
 
 
 def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None, use_dir: str = None) -> str:
-        """
-        Generates a cube FITS file with quick-look white light images for each color.
+        """Generate a cube FITS file with quick-look white light images for each color.
+
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
         calls QuickWhiteLight for each color group, and creates an HDU for the image and an
         associated binary table HDU with fiber positions and flux data.
-        
-        Parameters:
-            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key, 
+
+        Args:
+            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key,
                 the value should be a dict with the following entries:
-                    'traces'   - list of trace objects,
-                    'data'     - list of corresponding data arrays,
-                    'metadata' - (optional) list of metadata dictionaries.
+                'traces' - list of trace objects,
+                'data' - list of corresponding data arrays,
+                'metadata' - (optional) list of metadata dictionaries.
             ds9plot (bool, optional): If True, display each generated white light image using DS9.
-                                        Default is True.
+                Default is True.
             outfile (str, optional): Output FITS file name. If None, a file name is generated
-                                     with the current timestamp.
-        
+                with the current timestamp.
+
         Returns:
             str: The file path of the created quick-look white light cube FITS file.
         """

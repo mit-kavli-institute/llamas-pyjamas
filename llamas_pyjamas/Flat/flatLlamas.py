@@ -303,17 +303,18 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
 def _parse_extension_name(ext_name):
     """
     Parse extension name into (channel, bench, side) components.
-    
+
     Handles formats like:
-        - 'red_1_A'
-        - 'red1A' 
-        - 'RED_1_A'
-    
+
+    * ``'red_1_A'``
+    * ``'red1A'``
+    * ``'RED_1_A'``
+
     Args:
-        ext_name: Extension name string
-    
+        ext_name: Extension name string.
+
     Returns:
-        tuple: (channel, bench, side) or None if parsing fails
+        tuple: (channel, bench, side) or None if parsing fails.
     """
     ext_name = ext_name.lower()
     
@@ -528,12 +529,13 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     """Process complete flat field workflow with wavelength calibration and pixel mapping.
 
     This function implements the complete flat field processing workflow:
-    1. Extract individual color flat fields using produce_flat_extractions
-    2. Combine all extractions into a single .pkl file
-    3. Apply wavelength solution from arc calibration
-    4. Fit B-splines to xshift vs counts for each fiber
-    5. Generate per-pixel flat field correction images
-    6. (Optional) Generate true 2D pixel QE maps
+
+    1. Extract individual color flat fields using produce_flat_extractions.
+    2. Combine all extractions into a single .pkl file.
+    3. Apply wavelength solution from arc calibration.
+    4. Fit B-splines to xshift vs counts for each fiber.
+    5. Generate per-pixel flat field correction images.
+    6. (Optional) Generate true 2D pixel QE maps.
 
     Args:
         red_flat_file (str): Path to red flat field FITS file
@@ -739,6 +741,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     """Generate pixel-to-pixel sensitivity maps using the simple median+Gaussian method.
 
     Workflow:
+
     1. Extract flat spectra via ``produce_flat_extractions`` (shared with B-spline method)
     2. Concatenate into combined 24-extension file (shared)
     3. Apply wavelength solution via ``arcTransfer`` (mandatory — smoothing is

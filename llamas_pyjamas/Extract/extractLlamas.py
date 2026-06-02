@@ -6,15 +6,17 @@ Multi-Object Spectrograph) observations. It includes classes and functions for p
 optimal and boxcar extractions, saving and loading extraction results, and parallel 
 processing using Ray.
 
-Classes:
-    ExtractLlamas: A class for extracting data from LLAMAS observations using optimal 
-        or boxcar methods.
-    ExtractLlamasRay: A Ray remote class for parallel processing of LLAMAS extractions.
+**Classes**
 
-Functions:
-    save_extractions: Save multiple extraction objects to a single file.
-    load_extractions: Load a batch of extraction objects from a file.
-    parse_args: Parse command-line arguments for input pkl files.
+* ``ExtractLlamas`` -- A class for extracting data from LLAMAS observations using
+  optimal or boxcar methods.
+* ``ExtractLlamasRay`` -- A Ray remote class for parallel processing of LLAMAS extractions.
+
+**Functions**
+
+* ``save_extractions`` -- Save multiple extraction objects to a single file.
+* ``load_extractions`` -- Load a batch of extraction objects from a file.
+* ``parse_args`` -- Parse command-line arguments for input pkl files.
 
 Example:
     This module can be run as a script to process LLAMAS pkl files using parallel 
@@ -516,7 +518,7 @@ def parse_args()-> list:
     """Parse command-line arguments to process LLAMAS pkl files.
 
     This function sets up an argument parser to accept one or more file paths
-    (with support for wildcards like *.pkl), expands the wildcards, validates
+    (with support for wildcards like ``*.pkl``), expands the wildcards, validates
     the files, and returns a list of valid .pkl files.
 
     Returns:

@@ -1,7 +1,9 @@
 # llamas_pyjamas/utils.py
 """Utils module for llamas_pyjamas package.
+
 This module provides various utility functions for logging, file handling,
 data processing, and visualization related to the llamas_pyjamas project.
+
 Functions:
     setup_logger(name, log_filename=None):
         Setup logger with file and console handlers.
@@ -474,25 +476,31 @@ def trace_dump_LUT(trace_obj: 'TraceLlamas')-> None:
 def flip_b_side_positions()-> None:
     """
     Flips the fiber positions for the 'B' side in the lookup table (LUT) for each color.
+
     This function reads a JSON file containing a lookup table (LUT) of fiber positions,
     processes the positions for each color ('green', 'blue', 'red'), and flips the positions
     for the 'B' side. The flipped positions are then saved to a new JSON file.
-    The LUT is expected to have the following structure:
-    {
-        "fib_pos": {
-            "color": {
-                "benchside": {
-                    "fiber_number": "position"
+
+    The LUT is expected to have the following structure::
+
+        {
+            "fib_pos": {
+                "color": {
+                    "benchside": {
+                        "fiber_number": "position"
+                    }
                 }
             }
         }
-    }
+
     The function performs the following steps:
+
     1. Loads the LUT from 'LUT/traceLUT.json'.
     2. Iterates over each color ('green', 'blue', 'red').
     3. For each color, checks if the 'B' side exists in the LUT.
     4. If the 'B' side exists, flips the fiber positions by reversing the fiber numbers.
     5. Saves the updated LUT to 'LUT/traceLUT_copy.json'.
+
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.
@@ -640,12 +648,14 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
         mastercalib_dir: Mastercalib directory for fallback traces
 
     Returns:
-        dict: {
-            'valid_traces': [(channel, bench, side, filepath), ...],
-            'invalid_traces': [(channel, bench, side, expected, actual), ...],
-            'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
-            'all_valid': bool
-        }
+        dict: Result dictionary with the following keys::
+
+            {
+                'valid_traces': [(channel, bench, side, filepath), ...],
+                'invalid_traces': [(channel, bench, side, expected, actual), ...],
+                'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
+                'all_valid': bool
+            }
 
     Example:
         >>> results = validate_and_fix_trace_fibres('/user/traces')
@@ -1006,9 +1016,11 @@ def assess_pixel_maps(pixel_map_file, output_dir=None, extensions=None, save_fig
         save_figs (bool): Whether to write PNG files.  Defaults to True.
 
     Returns:
-        dict: ``{ext_name: {'mean': float, 'std': float, 'median': float,
-                            'frac_outside': float, 'dominant_fft_freq': float,
-                            'dominant_fft_amp': float}}``
+        dict: Mapping of extension name to statistics::
+
+            {ext_name: {'mean': float, 'std': float, 'median': float,
+                        'frac_outside': float, 'dominant_fft_freq': float,
+                        'dominant_fft_amp': float}}
     """
     import os
     import numpy as np
@@ -1397,7 +1409,8 @@ def check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
             If False, only prints channel summaries. Defaults to True.
 
     Returns:
-        dict: Dictionary containing wavelength ranges organized by channel:
+        dict: Dictionary containing wavelength ranges organized by channel::
+
             {
                 'extensions': [
                     {
@@ -1538,7 +1551,8 @@ def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None,
             If False, only prints channel summaries. Defaults to True.
 
     Returns:
-        dict: Dictionary containing wavelength ranges and comparison results:
+        dict: Dictionary containing wavelength ranges and comparison results::
+
             {
                 'extensions': [...],  # Same format as check_reference_arc_wavelength_ranges
                 'channels': {...},

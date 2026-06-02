@@ -5,13 +5,14 @@ Diagnostic module for bias quality assessment in the LLAMAS IFU pipeline.
 
 Key components
 --------------
-build_interfibre_mask  -- build boolean gap mask from a TraceLlamas object's
-                          fiberimg attribute (pixels where fiberimg == -1).
-_check_single_detector -- compute per-detector bias residual statistics.
-run_bias_checks        -- orchestrate checks over all 24 science detectors.
-check_calibration_biases -- self-consistency check on a bias FITS file.
 
-The mask cache (_MASK_CACHE) avoids recomputing the inter-fibre mask for
+* ``build_interfibre_mask`` -- build boolean gap mask from a TraceLlamas object's
+  fiberimg attribute (pixels where fiberimg == -1).
+* ``_check_single_detector`` -- compute per-detector bias residual statistics.
+* ``run_bias_checks`` -- orchestrate checks over all 24 science detectors.
+* ``check_calibration_biases`` -- self-consistency check on a bias FITS file.
+
+The mask cache (``_MASK_CACHE``) avoids recomputing the inter-fibre mask for
 repeated calls with the same tracer object.
 """
 
@@ -286,22 +287,18 @@ def run_bias_checks(science_hdul,
     """
     Run bias quality checks across all science detector extensions.
 
-    Parameters
-    ----------
-    science_hdul : astropy.io.fits.HDUList
-        Science (or flat) FITS HDUList, extensions 1-24.
-    bias_hdul : astropy.io.fits.HDUList
-        Bias FITS HDUList, extensions 1-24.
-    tracers_by_cam : dict
-        Keys are (bench, side, color) tuples; values are loaded TraceLlamas
-        objects. Pass an empty dict if no tracers are available.
-    image_type : str
-        Frame type string passed through to _check_single_detector.
-    thresholds : BiasCheckThresholds, optional
+    Args:
+        science_hdul (astropy.io.fits.HDUList): Science (or flat) FITS HDUList,
+            extensions 1-24.
+        bias_hdul (astropy.io.fits.HDUList): Bias FITS HDUList, extensions 1-24.
+        tracers_by_cam (dict): Keys are (bench, side, color) tuples; values are
+            loaded TraceLlamas objects. Pass an empty dict if no tracers are available.
+        image_type (str): Frame type string passed through to _check_single_detector.
+        thresholds (BiasCheckThresholds, optional): Pass/fail thresholds; defaults
+            to ``BiasCheckThresholds()`` when not provided.
 
-    Returns
-    -------
-    BiasCheckReport
+    Returns:
+        BiasCheckReport: The aggregated bias-check report.
     """
     if thresholds is None:
         thresholds = BiasCheckThresholds()
@@ -369,17 +366,14 @@ def check_calibration_biases(bias_hdul,
     Self-consistency check: compare each bias extension against the median
     of all 24 bias extensions.
 
-    Parameters
-    ----------
-    bias_hdul : astropy.io.fits.HDUList
-        Bias FITS HDUList with 24 camera extensions.
-    tracers_by_cam : dict
-        Keys are (bench, side, color); values are TraceLlamas objects.
-    thresholds : BiasCheckThresholds, optional
+    Args:
+        bias_hdul (astropy.io.fits.HDUList): Bias FITS HDUList with 24 camera extensions.
+        tracers_by_cam (dict): Keys are (bench, side, color); values are TraceLlamas objects.
+        thresholds (BiasCheckThresholds, optional): Pass/fail thresholds; defaults
+            to ``BiasCheckThresholds()`` when not provided.
 
-    Returns
-    -------
-    BiasCheckReport
+    Returns:
+        BiasCheckReport: The aggregated bias-check report.
     """
     if thresholds is None:
         thresholds = BiasCheckThresholds()

@@ -1095,34 +1095,37 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                    use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
                    cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
-    """
-    Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
+    """Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
-    This function can handle both:
-    1. Single RSS files with multiple channels
-    2. Multiple channel-specific RSS files with names like:
-       "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
+    This function can handle both single RSS files with multiple channels and
+    multiple channel-specific RSS files with names like
+    ``_extract_RSS_blue.fits``, ``_extract_RSS_green.fits``,
+    ``_extract_RSS_red.fits``.
 
-    Parameters:
-        rss_files (str or list): Path to RSS FITS file(s) or base paths
-        output_dir (str): Directory to save output cubes
-        wavelength_range (tuple, optional): Min/max wavelength range for output cubes
-        dispersion (float): Wavelength dispersion in Angstroms/pixel (legacy, for traditional/CRR)
-        spatial_sampling (float): Spatial sampling in arcsec/pixel (legacy, for traditional/CRR)
-        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
-        crr_config (CRRCubeConfig, optional): CRR configuration parameters
-        parallel (bool): Use parallel processing for CRR method
-        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
-        cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
-        cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
-        cube_wave_sampling (float): Wavelength sampling factor (for simple method)
-        cube_radius (float): Interpolation radius in arcsec (for simple method)
-        cube_min_weight (float): Minimum weight threshold (for simple method)
+    Args:
+        rss_files (str or list): Path to RSS FITS file(s) or base paths.
+        output_dir (str): Directory to save output cubes.
+        wavelength_range (tuple, optional): Min/max wavelength range for output cubes.
+        dispersion (float): Wavelength dispersion in Angstroms/pixel (legacy, for
+            traditional/CRR).
+        spatial_sampling (float): Spatial sampling in arcsec/pixel (legacy, for
+            traditional/CRR).
+        use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method
+            (overrides cube_method).
+        crr_config (CRRCubeConfig, optional): CRR configuration parameters.
+        parallel (bool): Use parallel processing for CRR method.
+        cube_method (str): Cube construction method: ``'simple'`` (default),
+            ``'crr'``, or ``'traditional'``.
+        cube_pixel_size (float): Spatial pixel size in arcsec (for simple method).
+        cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method).
+        cube_wave_sampling (float): Wavelength sampling factor (for simple method).
+        cube_radius (float): Interpolation radius in arcsec (for simple method).
+        cube_min_weight (float): Minimum weight threshold (for simple method).
         cube_grid_method (str): Spatial grid method for simple constructor:
-            'oversampled' (default), 'native_hex', or 'nearest_hex'
+            ``'oversampled'`` (default), ``'native_hex'``, or ``'nearest_hex'``.
 
     Returns:
-        list: Paths to constructed cube files
+        list: Paths to constructed cube files.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -1351,19 +1354,32 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     return cube_files
 
 def main(config_path):
-    """
-    Main entry point for the data reduction pipeline.
-    This function reads a configuration file containing key-value pairs and processes the parameters to drive a series of data reduction operations. The configuration file is expected to include various settings such as file paths for flat-fields, science files, bias files, and other optional parameters. It sets up the necessary output directories (like the reduced data directory, traces, and extractions), performs trace generation, handles science file extractions, corrects wavelengths, and finally constructs a data cube.
-    The configuration file format:
-        - Each non-empty line should contain a key and a value separated by '='.
-        - Lines starting with '#' are treated as comments and skipped.
-        - Values may not be quoted, but can be comma-separated lists.
+    """Main entry point for the data reduction pipeline.
+
+    Reads a configuration file containing key-value pairs and processes the
+    parameters to drive a series of data reduction operations.  The configuration
+    file is expected to include various settings such as file paths for flat-fields,
+    science files, bias files, and other optional parameters.  It sets up the
+    necessary output directories (like the reduced data directory, traces, and
+    extractions), performs trace generation, handles science file extractions,
+    corrects wavelengths, and finally constructs a data cube.
+
+    **Configuration file format**
+
+    * Each non-empty line should contain a key and a value separated by ``=``.
+    * Lines starting with ``#`` are treated as comments and skipped.
+    * Values may not be quoted, but can be comma-separated lists.
+
     Args:
         config_path (str): The file path to the configuration file.
+
     Raises:
-        ValueError: If required configuration keys (e.g., 'arc_file' or 'science_files') are missing.
+        ValueError: If required configuration keys (e.g., ``'arc_file'`` or
+            ``'science_files'``) are missing.
         FileNotFoundError: If specified science or extraction files do not exist.
-        Exception: Propagates any other exceptions that occur during processing, with a traceback printed for debugging purposes.
+        Exception: Propagates any other exceptions that occur during processing,
+            with a traceback printed for debugging purposes.
+
     Examples:
         >>> main("/path/to/config.cfg")
         Loaded configuration from /path/to/config.cfg

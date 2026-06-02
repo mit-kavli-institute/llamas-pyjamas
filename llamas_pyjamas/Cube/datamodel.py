@@ -8,14 +8,14 @@ class dataCube():
         The datamodel attributes are:
 
         Args:
-            flux (`numpy.ndarray`_):
+            flux (``numpy.ndarray``):
                 The science datacube (nwave, nspaxel_y, nspaxel_x)
-            sig (`numpy.ndarray`_):
+            sig (``numpy.ndarray``):
                 The error datacube (nwave, nspaxel_y, nspaxel_x)
-            bpm (`numpy.ndarray`_):
+            bpm (``numpy.ndarray``):
                 The bad pixel mask of the datacube (nwave, nspaxel_y, nspaxel_x).
                 True values indicate a bad pixel
-            wave (`numpy.ndarray`_):
+            wave (``numpy.ndarray``):
                 A 1D numpy array containing the wavelength array for convenience (nwave)
                 
                 """

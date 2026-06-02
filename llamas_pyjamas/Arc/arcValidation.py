@@ -25,12 +25,14 @@ def validate_wavelength_solution(extraction_obj, channel, fiber_idx):
         fiber_idx: Fiber index to validate
 
     Returns:
-        dict: {
-            'valid': bool - True if wavelength solution is valid
-            'errors': list of error messages
-            'warnings': list of warning messages
-            'metrics': dict of quality metrics
-        }
+        dict: Result dictionary with the following keys::
+
+            {
+                'valid': bool,      # True if wavelength solution is valid
+                'errors': list,     # list of error messages
+                'warnings': list,   # list of warning messages
+                'metrics': dict     # dict of quality metrics
+            }
     """
     wave_data = extraction_obj.wave[fiber_idx, :]
     errors = []

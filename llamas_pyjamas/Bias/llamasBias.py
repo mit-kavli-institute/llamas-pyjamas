@@ -2,34 +2,20 @@
 
 """
 This module provides functionality to create a master bias frame from a directory of bias images or a list of files.
+
 Classes:
     BiasLlamas: A class to handle bias image processing and creation of a master bias frame.
+
 Usage:
-    To use this module, instantiate the BiasLlamas class with a directory path containing bias images or a list of bias image files.
-    Then call the `master_bias` method to create and save the master bias frame.
-Example:
+    To use this module, instantiate the BiasLlamas class with a directory path containing
+    bias images or a list of bias image files. Then call the ``master_bias`` method to create
+    and save the master bias frame.
+
+Example::
+
     bias_llamas = BiasLlamas('/path/to/bias/images')
-
-    A class to handle bias image processing and creation of a master bias frame.
-    Attributes:
-        bias_path (str): The directory path containing bias images.
-        files (list): A list of bias image files.
-    Methods:
-        master_bias(): Creates and saves the master bias frame from the provided bias images.
-
-        Initializes the BiasLlamas class with the provided input data.
-        Args:
-            input_data (str or list): A directory path containing bias images or a list of bias image files.
-        Raises:
-            ValueError: If the provided directory does not exist or no .fits files are found.
-            TypeError: If the input data is not a string or a list.
-
-        Creates and saves the master bias frame from the provided bias images.
-        The method reads bias images from the specified directory or list, combines them using average method with sigma clipping,
-        and saves the combined bias frame as 'combined_bias.fit' in the specified directory.
-        Raises:
-            ValueError: If no bias images are found in the specified directory or list.
-        """
+    bias_llamas.master_bias()
+"""
 import os
 from astropy.nddata import CCDData
 from astropy.stats import mad_std
@@ -91,17 +77,19 @@ class BiasLlamas:
 
         
     def master_bias(self) -> None:
-        """
-        Create a master bias frame from a list of bias images.
+        """Create a master bias frame from a list of bias images.
+
         Each input FITS file is assumed to have a primary HDU and one or more extensions,
         where each extension contains a bias image from a detector.
         The function first asserts that each file’s primary HDU has matching EXPTIME and READOUT
-        values. Then, for each file, it groups the extensions by the 'COLOR' and 'BENCHSIDE' header
+        values. Then, for each file, it groups the extensions by the ‘COLOR’ and ‘BENCHSIDE’ header
         keywords, stacks the corresponding images across all files, computes their median (using nanmedian),
         and builds a new FITS file with:
-          - A primary HDU (using the primary header from the first file)
-          - One ImageHDU per group, where the data is the median combination of all matching extensions.
-        The resulting combined FITS file is written to 'combined_bias.fits' in the bias_path.
+
+        * A primary HDU (using the primary header from the first file)
+        * One ImageHDU per group, where the data is the median combination of all matching extensions.
+
+        The resulting combined FITS file is written to ‘combined_bias.fits’ in the bias_path.
         """
         # Open the first file to get the primary header as reference
         first_file = os.path.join(self.bias_path, self.files[0]) if not os.path.isabs(self.files[0]) else self.files[0]

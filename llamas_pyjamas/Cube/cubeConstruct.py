@@ -6,19 +6,22 @@ from multiple fibers across different detectors and reconstructs a full 3D data 
 with spatial (x,y) and spectral (λ) dimensions.
 
 The module supports two modes of operation:
-1. Processing a single RSS file containing all channels
-2. Processing multiple channel-specific RSS files with names like:
-   "_extract_RSS_blue.fits", "_extract_RSS_green.fits", "_extract_RSS_red.fits"
+
+1. Processing a single RSS file containing all channels.
+2. Processing multiple channel-specific RSS files with names like
+   ``_extract_RSS_blue.fits``, ``_extract_RSS_green.fits``, ``_extract_RSS_red.fits``.
 
 Classes:
-    CubeConstructor: Main class for IFU cube reconstruction from extraction data.
+
+* ``CubeConstructor`` — Main class for IFU cube reconstruction from extraction data.
 
 Dependencies:
-    - numpy
-    - scipy
-    - astropy
-    - matplotlib
-    - llamas_pyjamas modules
+
+* numpy
+* scipy
+* astropy
+* matplotlib
+* llamas_pyjamas modules
 """
 
 import numpy as np
@@ -101,19 +104,20 @@ class CubeConstructor:
         Load extraction data from RSS FITS file format.
 
         RSS file format (as written by llamasRSS.py):
-        Extension 0 - PRIMARY: primary header only, no data
-        Extension 1 - FLUX: extracted fiber flux [NFIBER x NWAVE]
-        Extension 2 - ERROR: the error array [NFIBER x NWAVE]
-        Extension 3 - MASK: the pixel mask array [NFIBER x NWAVE]
-        Extension 4 - WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
-        Extension 5 - FWHM: the full width half max array [NFIBER x NWAVE]
-        Extension 6 - FIBERMAP: the complete fibermap [BINARY FITS TABLE]
 
-        Parameters:
-            rss_file (str): Path to RSS FITS file
+        * Extension 0 — PRIMARY: primary header only, no data
+        * Extension 1 — FLUX: extracted fiber flux [NFIBER x NWAVE]
+        * Extension 2 — ERROR: the error array [NFIBER x NWAVE]
+        * Extension 3 — MASK: the pixel mask array [NFIBER x NWAVE]
+        * Extension 4 — WAVE: the wavelength array for each fiber [NFIBER x NWAVE]
+        * Extension 5 — FWHM: the full width half max array [NFIBER x NWAVE]
+        * Extension 6 — FIBERMAP: the complete fibermap [BINARY FITS TABLE]
+
+        Args:
+            rss_file (str): Path to RSS FITS file.
 
         Returns:
-            Tuple[List[Dict], List[Dict]]: List of extraction data dictionaries and metadata
+            Tuple[List[Dict], List[Dict]]: List of extraction data dictionaries and metadata.
         """
         self.logger.info(f'Loading RSS data from {rss_file}')
         extractions = []
@@ -562,22 +566,23 @@ class CubeConstructor:
         Construct IFU cubes from an RSS file or a set of channel-specific RSS files.
 
         This method can handle two scenarios:
-        1. A single RSS file with all channels included
-        2. Multiple channel-specific RSS files with the naming pattern: 
-           {base_name}_extract_RSS_{channel}.fits (e.g., blue, green, red)
+
+        1. A single RSS file with all channels included.
+        2. Multiple channel-specific RSS files with the naming pattern:
+           ``{base_name}_extract_RSS_{channel}.fits`` (e.g., blue, green, red).
 
         The method first checks if channel-specific files exist. If found, it processes
         those files individually. Otherwise, it loads all channels from the single RSS file.
 
-        Parameters:
-            rss_file (str): Path to RSS FITS file or base path to channel-specific files
-            wavelength_range (tuple, optional): Min/max wavelength range
-            dispersion (float): Wavelength dispersion in Angstroms/pixel
-            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75)
-            reference_coord (tuple, optional): Reference RA/Dec for WCS
+        Args:
+            rss_file (str): Path to RSS FITS file or base path to channel-specific files.
+            wavelength_range (tuple, optional): Min/max wavelength range.
+            dispersion (float): Wavelength dispersion in Angstroms/pixel.
+            spatial_sampling (float): Spatial sampling in arcsec/pixel (default: 0.75).
+            reference_coord (tuple, optional): Reference RA/Dec for WCS.
 
         Returns:
-            Dict[str, np.ndarray]: Dictionary of channel cubes {channel: cube_data}
+            Dict[str, np.ndarray]: Dictionary of channel cubes {channel: cube_data}.
         """
         # First, check if we have channel-specific RSS files
         self.logger.info(f"Checking for channel-specific RSS files for: {rss_file}")
@@ -1588,17 +1593,18 @@ class CubeConstructor:
     def find_channel_rss_files(self, base_path: str) -> Dict[str, str]:
         """
         Find all channel-specific RSS files for a given base path.
-        
+
         This method searches for RSS files with channel-specific suffixes like:
-        - '_extract_RSS_blue.fits', '_extract_RSS_green.fits', '_extract_RSS_red.fits' (old format)
-        - '_flat_corrected_RSS_blue.fits', '_flat_corrected_RSS_green.fits', '_flat_corrected_RSS_red.fits' (new format)
-        - '_extract_RSS_blue_FF.fits', etc. (fibre-flat corrected, preferred when available)
-        
-        Parameters:
-            base_path (str): Base path/prefix to the RSS files or a single RSS file
-        
+
+        * ``_extract_RSS_blue.fits``, ``_extract_RSS_green.fits``, ``_extract_RSS_red.fits`` (old format)
+        * ``_flat_corrected_RSS_blue.fits``, ``_flat_corrected_RSS_green.fits``, ``_flat_corrected_RSS_red.fits`` (new format)
+        * ``_extract_RSS_blue_FF.fits``, etc. (fibre-flat corrected, preferred when available)
+
+        Args:
+            base_path (str): Base path/prefix to the RSS files or a single RSS file.
+
         Returns:
-            Dict[str, str]: Dictionary mapping channel names to file paths
+            Dict[str, str]: Dictionary mapping channel names to file paths.
         """
         self.logger.info(f"Looking for channel-specific RSS files using base path: {base_path}")
         

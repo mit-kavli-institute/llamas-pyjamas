@@ -1,9 +1,10 @@
 """Fibre-to-fibre flat fielding for LLAMAS.
 
 Computes and applies relative throughput corrections per fibre using either:
-- **Twilight + Lamp** (Branch A): spatial throughput from a twilight flat,
+
+* **Twilight + Lamp** (Branch A): spatial throughput from a twilight flat,
   wavelength-dependent shape from lamp smooth models.
-- **Lamp-only** (Branch B): direct ratio of each fibre's smooth model to the
+* **Lamp-only** (Branch B): direct ratio of each fibre's smooth model to the
   per-benchside median reference.
 
 The correction ``C_i(λ)`` is stored in a multi-extension FITS file and
@@ -402,10 +403,12 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
         Channel name (for logging).
     poly_order : int, dict, or None, optional
         Polynomial order for the 2D surface fit.
-        - ``None``  → use channel-specific defaults (blue=4, green=3, red=2).
-        - ``int``   → use that order for every channel.
-        - ``dict``  → ``{'blue': N, 'green': M, 'red': P}``; falls back to 2
+
+        * ``None``  → use channel-specific defaults (blue=4, green=3, red=2).
+        * ``int``   → use that order for every channel.
+        * ``dict``  → ``{'blue': N, 'green': M, 'red': P}``; falls back to 2
           if the channel is absent.
+
         If >2 benchsides are missing twilight data, the order is automatically
         reduced to 1 (a simple tilt) to avoid oscillation in the spatial gaps.
 
@@ -743,6 +746,7 @@ def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
     """Generate a multi-panel IFU hex-map diagnostic plot.
 
     Layout: one row per channel, 4 columns:
+
     1. Raw twilight integrals
     2. Fitted gradient surface
     3. Corrected integrals
@@ -999,6 +1003,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     """Compute fibre-to-fibre flat using twilight spatial + lamp wavelength shape.
 
     For each benchside:
+
     1. Integrate twilight flux per fibre to get spatial throughput ``T_i``.
     2. Compute wavelength shape ``W_i(λ) = smooth_i / S̄_bs``,
        normalised to mean 1.0.

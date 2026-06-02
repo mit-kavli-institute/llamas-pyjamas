@@ -5,10 +5,11 @@ Bias calibration package for LLAMAS IFU pipeline.
 
 Public API
 ----------
-BiasNotFoundError        -- raised when a bias FITS file cannot be read/located.
-BiasReadModeError        -- raised when bias read-mode does not match science frame.
-generate_fallback_bias_hdu -- returns a valid fits.ImageHDU even when no bias
-                              file is available.
+
+* ``BiasNotFoundError`` -- raised when a bias FITS file cannot be read/located.
+* ``BiasReadModeError`` -- raised when bias read-mode does not match science frame.
+* ``generate_fallback_bias_hdu`` -- returns a valid fits.ImageHDU even when no bias
+  file is available.
 
 The BiasLlamas class (master bias stacking) is in llamasBias.py and is not
 re-exported here to avoid circular imports with astropy during Ray worker init.
@@ -81,9 +82,11 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
     1. **Inter-fibre estimate** (preferred when tracer available):
        Median of ``frame_data`` in the inter-fibre gap pixels identified by
        ``tracer.fiberimg == -1`` via ``biasChecking.build_interfibre_mask``.
+
     2. **Test-region estimate**: Median of rows 30–50 of ``frame_data``.
 
     Cross-validation rule (``cross_check_threshold = 5 DN``):
+
     * If the two estimates agree within 5 DN → use the inter-fibre estimate
       (more spatially representative).
     * If they diverge → use whichever is closer to the raw frame's
@@ -93,6 +96,7 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
     test-region estimate is used.
 
     The returned HDU has the following header keywords:
+
     * ``BIASSRC``  -- which estimate was selected.
     * ``BIASWARN`` -- ``True`` to flag that no master bias HDU was available.
     * ``BIASLVL``  -- the constant value subtracted (DN).

@@ -324,11 +324,14 @@ def compare_combs(channel1: str, benchside1: str, channel2: str, benchside2: str
 def plot_trace(traceobj: 'TraceLlamas')-> None:
     """
     Plots the trace data from a given trace object.
+
     Parameters:
-    traceobj (object): An object containing trace data. It should have the following attributes:
-        - tracearr (numpy.ndarray): A 2D array where each row represents a trace.
-        - xtracefit (numpy.ndarray): A 2D array where the first row represents the x-coordinates for the trace.
-        - traces (list or numpy.ndarray): A list or array of traces to be plotted.
+        traceobj (object): An object containing trace data. It should have the following attributes:
+
+            - tracearr (numpy.ndarray): A 2D array where each row represents a trace.
+            - xtracefit (numpy.ndarray): A 2D array where the first row represents the x-coordinates for the trace.
+            - traces (list or numpy.ndarray): A list or array of traces to be plotted.
+
     The function iterates over each trace in tracearr, plots the y-coordinates against the x-coordinates,
     and attempts to plot an additional trace using the traces attribute. If an error occurs during plotting,
     it prints an error message with the index of the trace that caused the error.

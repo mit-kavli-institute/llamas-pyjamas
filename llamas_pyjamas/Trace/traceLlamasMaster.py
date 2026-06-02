@@ -1,21 +1,30 @@
 
-"""
-Module: traceLlamasMaster
-This module provides functionality for processing and tracing fiber positions in LLAMAS FITS files using Ray multiprocessing to produce a set of Master traces. 
-It includes classes and functions to handle FITS file data, detect peaks, fit B-splines, and generate trace profiles for fibers.
-Classes:
-    TraceLlamas: 
-        A class for processing and tracing fiber positions in LLAMAS FITS files. 
-        It includes methods for detecting peaks, fitting B-splines, generating trace profiles, and saving trace data.
-    TraceRay(TraceLlamas): 
-        A subclass of TraceLlamas that uses Ray for parallel processing of HDU data in FITS files.
-Functions:
-    run_ray_tracing(fitsfile: str, channel: str = None) -> None:
-        Runs the tracing process on the specified FITS file using Ray multiprocessing.
-Usage:
-    This module can be run as a standalone script to process LLAMAS FITS files. 
-    Use the command line arguments to specify the input FITS file and optional parameters.
-Example:
+"""Trace fibre positions in LLAMAS FITS files using Ray multiprocessing (master traces).
+
+This module provides functionality for processing and tracing fiber positions in
+LLAMAS FITS files using Ray multiprocessing to produce a set of Master traces.
+It includes classes and functions to handle FITS file data, detect peaks, fit
+B-splines, and generate trace profiles for fibers.
+
+**Classes**
+
+* ``TraceLlamas`` -- A class for processing and tracing fiber positions in LLAMAS
+  FITS files.  It includes methods for detecting peaks, fitting B-splines,
+  generating trace profiles, and saving trace data.
+* ``TraceRay(TraceLlamas)`` -- A subclass of TraceLlamas that uses Ray for parallel
+  processing of HDU data in FITS files.
+
+**Functions**
+
+* ``run_ray_tracing(fitsfile, channel=None)`` -- Runs the tracing process on the
+  specified FITS file using Ray multiprocessing.
+
+This module can be run as a standalone script to process LLAMAS FITS files.
+Use the command-line arguments to specify the input FITS file and optional
+parameters.
+
+Example::
+
     python traceLlamasMaster.py filename.fits --channel blue
 
 """
@@ -240,44 +249,35 @@ class TraceLlamas:
 
     _EXCLUDED_FROM_PICKLE = ['hdr', 'dead_fibres', 'LUT', 'mph', 'first_peaks', 'first_pkht', 'xmax', 'xmin', 'benchside', 'peak_properties']
 
-    """
-    A class used to trace and process fiber data from FITS files.
-    Attributes
-    ----------
-    fitsfile : str
-        The path to the FITS file.
-    mph : Optional[int]
-        Minimum peak height for peak detection.
-    master_trace : Optional[str]
-        Path to the master trace file.
-    xmin : int
-        Minimum x-coordinate for trace fitting.
-    fitspace : int
-        Space for fitting.
-    min_pkheight : int
-        Minimum peak height for peak detection.
-    window : int
-        Window size for median calculation.
-    offset_cutoff : int
-        Cutoff for offset calculation.
-    Methods
-    -------
-    insert_dead_fibers(LUT, benchside, pkhts)
-        Inserts dead fibers into the peak heights array.
-    generate_valleys(tslice: float) -> Tuple[np.ndarray, ...]
-        Generates valleys in the given slice.
-    fit_bspline(valley_indices: np.ndarray, valley_depths: np.ndarray, invvar: np.ndarray) -> Tuple[np.ndarray, ...]
-        Fits a B-spline to the given valleys.
-    fit_grid_single(xtmp) -> Tuple[float, bspline, int, np.ndarray]
-        Fits a grid to a single x-window.
-    find_comb(rownum=None)
-        Finds the comb for the given row number.
-    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict
-        Processes data from a specific HDU array.
-    profileFit()
-        Fits the profile of the data.
-    saveTraces(outfile='LLAMASTrace.pkl')
-        Saves the traces to a file.
+    """A class used to trace and process fiber data from FITS files.
+
+    Attributes:
+        fitsfile (str): The path to the FITS file.
+        mph (Optional[int]): Minimum peak height for peak detection.
+        master_trace (Optional[str]): Path to the master trace file.
+        xmin (int): Minimum x-coordinate for trace fitting.
+        fitspace (int): Space for fitting.
+        min_pkheight (int): Minimum peak height for peak detection.
+        window (int): Window size for median calculation.
+        offset_cutoff (int): Cutoff for offset calculation.
+
+    Methods:
+        insert_dead_fibers(LUT, benchside, pkhts):
+            Inserts dead fibers into the peak heights array.
+        generate_valleys(tslice):
+            Generates valleys in the given slice.
+        fit_bspline(valley_indices, valley_depths, invvar):
+            Fits a B-spline to the given valleys.
+        fit_grid_single(xtmp):
+            Fits a grid to a single x-window.
+        find_comb(rownum=None):
+            Finds the comb for the given row number.
+        process_hdu_data(hdu_data, hdu_header, find_LUT=False):
+            Processes data from a specific HDU array.
+        profileFit():
+            Fits the profile of the data.
+        saveTraces(outfile='LLAMASTrace.pkl'):
+            Saves the traces to a file.
     """
 
     
@@ -368,22 +368,22 @@ class TraceLlamas:
     
             
     def generate_valleys(self, tslice: float) -> Tuple[np.ndarray, ...]:
-        """
-        Detects valleys in the given data slice and returns their indices, depths, and an array of ones.
-        Parameters:
-        -----------
-        tslice : float
-            The data slice in which to detect valleys.
+        """Detect valleys in the given data slice and return their indices, depths, and an array of ones.
+
+        Args:
+            tslice (float): The data slice in which to detect valleys.
+
         Returns:
-        --------
-        Tuple[np.ndarray, ...]
-            A tuple containing:
-            - valley_indices (np.ndarray): The indices of the detected valleys.
-            - valley_depths (np.ndarray): The depths of the detected valleys.
-            - invvar (np.ndarray): An array of ones with the same length as the number of detected valleys.
-        Notes:
-        ------
-        If no valleys are detected, a log message is generated indicating that no valleys were found and suggesting to check the threshold.
+            Tuple[np.ndarray, ...]: A tuple containing:
+
+            * ``valley_indices`` (np.ndarray) -- The indices of the detected valleys.
+            * ``valley_depths`` (np.ndarray) -- The depths of the detected valleys.
+            * ``invvar`` (np.ndarray) -- An array of ones with the same length as the
+              number of detected valleys.
+
+        Note:
+            If no valleys are detected, a log message is generated indicating that no
+            valleys were found and suggesting to check the threshold.
         """
 
 
@@ -403,14 +403,16 @@ class TraceLlamas:
         return valley_indices, valley_depths, invvar
     
     def fit_bspline(self, valley_indices: np.ndarray, valley_depths: np.ndarray, invvar: np.ndarray) -> Tuple[np.ndarray, ...]:
-        """
-        Fit a B-spline to the given valley indices and depths.
-        Parameters:
-        valley_indices (np.ndarray): Array of indices where valleys are located.
-        valley_depths (np.ndarray): Array of depths corresponding to the valley indices.
-        invvar (np.ndarray): Inverse variance of the valley depths.
+        """Fit a B-spline to the given valley indices and depths.
+
+        Args:
+            valley_indices (np.ndarray): Array of indices where valleys are located.
+            valley_depths (np.ndarray): Array of depths corresponding to the valley indices.
+            invvar (np.ndarray): Inverse variance of the valley depths.
+
         Returns:
-        Tuple[np.ndarray, ...]: A tuple containing the x_model and the fitted y_model values.
+            Tuple[np.ndarray, ...]: A tuple containing the x_model and the fitted
+            y_model values.
         """
 
         
@@ -424,22 +426,18 @@ class TraceLlamas:
     
     # takes in location of xwindow, and the y_model which the the dark base level along the comb
     def fit_grid_single(self, xtmp: int) -> Tuple[float, bspline, int, np.ndarray]:
-        """
-        Fits a B-spline to a slice of the data at a given x-window point.
-        Parameters:
-        -----------
-        xtmp : int
-            The x-coordinate around which the y-slice is taken.
+        """Fit a B-spline to a slice of the data at a given x-window point.
+
+        Args:
+            xtmp (int): The x-coordinate around which the y-slice is taken.
+
         Returns:
-        --------
-        comb : np.ndarray
-            The combined result of the y-slice minus the B-spline model.
-        sset : bspline
-            The B-spline object fitted to the data.
-        res : int
-            The result of the B-spline fitting process.
-        yfit : np.ndarray
-            The fitted y-values from the B-spline model.
+            tuple: A 4-tuple ``(comb, sset, res, yfit)`` where:
+
+            * ``comb`` (np.ndarray) -- The combined result of the y-slice minus the B-spline model.
+            * ``sset`` (bspline) -- The B-spline object fitted to the data.
+            * ``res`` (int) -- The result of the B-spline fitting process.
+            * ``yfit`` (np.ndarray) -- The fitted y-values from the B-spline model.
         """
 
         
@@ -464,16 +462,19 @@ class TraceLlamas:
         return comb, sset, res, yfit
     
     def find_comb(self, rownum=None)-> np.ndarray:
-        """
-        Find and process the comb of peaks in the data.
-        This function extracts a slice of the data around the specified row number,
-        identifies valleys, fits a B-spline to the valleys, and then finds peaks
-        in the residuals after subtracting the fitted B-spline.
-        Parameters:
-        rownum (int, optional): The row number around which to extract the data slice.
-                                If None, the middle row is used.
+        """Find and process the comb of peaks in the data.
+
+        Extracts a slice of the data around the specified row number, identifies
+        valleys, fits a B-spline to the valleys, and then finds peaks in the
+        residuals after subtracting the fitted B-spline.
+
+        Args:
+            rownum (int, optional): The row number around which to extract the data
+                slice.  If None, the middle row is used.
+
         Returns:
-        numpy.ndarray: The comb of peaks in the data slice after subtracting the fitted B-spline.
+            numpy.ndarray: The comb of peaks in the data slice after subtracting
+            the fitted B-spline.
         """
 
         
@@ -510,37 +511,42 @@ class TraceLlamas:
     
          
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, use_bias: str = None) -> dict:
-        """
-        Processes data from a specific HDU (Header Data Unit) array.
-        Parameters:
-        -----------
-        hdu_data : np.ndarray
-            The data array from the HDU to be processed.
-        hdu_header : dict
-            The header information associated with the HDU data.
-        find_LUT : bool, optional
-            Flag to determine whether to find and use a Look-Up Table (LUT) for processing (default is False).
+        """Process data from a specific HDU (Header Data Unit) array.
+
+        Args:
+            hdu_data (np.ndarray): The data array from the HDU to be processed.
+            hdu_header (dict): The header information associated with the HDU data.
+            use_bias (str, optional): Path to a master bias FITS file for background
+                subtraction.
+
         Returns:
-        --------
-        dict
-            A dictionary containing the status of the processing. If successful, returns {"status": "success"}.
-            If an error occurs, returns {"status": "failed", "error": str(e), 'channel': self.channel, 'bench': self.bench, 'side': self.side}.
-        Description:
-        ------------
+            dict: A dictionary containing the status of the processing.  If
+            successful, returns ``{"status": "success"}``.  If an error occurs,
+            returns ``{"status": "failed", "error": ..., "channel": ...,
+            "bench": ..., "side": ...}``.
+
         This method processes the HDU data by performing the following steps:
-        1. Initializes the bspline_ssets list.
-        2. Extracts and processes header information to determine the channel, bench, and side.
+
+        1. Initialises the bspline_ssets list.
+        2. Extracts and processes header information to determine the channel,
+           bench, and side.
         3. Extracts the dimensions of the data (NAXIS1 and NAXIS2).
         4. Finds the initial comb for the data to be fitted.
-        5. Updates peaks and peak heights, ensuring they are not too close to the edge.
-        6. Optionally, opens and uses a trace Look-Up Table (LUT) to account for dead fibers.
-        7. Determines the number of fibers and the maximum x-axis value for tracing.
-        8. Fits combs from the midpoint forward and then backward, updating peak positions.
-        9. Defines the coordinates of the trace along the x-axis and fits a spline along the x-axis for each fiber.
-        10. Interpolates the traces to give x, y positions for each fiber along the naxis.
-        Exceptions:
-        -----------
-        If an error occurs during processing, the method catches the exception, logs the error, and returns a dictionary with the status "failed" and the error message.
+        5. Updates peaks and peak heights, ensuring they are not too close to the
+           edge.
+        6. Optionally opens and uses a trace Look-Up Table (LUT) to account for
+           dead fibres.
+        7. Determines the number of fibres and the maximum x-axis value for tracing.
+        8. Fits combs from the midpoint forward and then backward, updating peak
+           positions.
+        9. Defines the coordinates of the trace along the x-axis and fits a spline
+           along the x-axis for each fibre.
+        10. Interpolates the traces to give x, y positions for each fibre along the
+            naxis.
+
+        If an error occurs during processing, the method catches the exception, logs
+        the error, and returns a dictionary with status ``"failed"`` and the error
+        message.
         """
         
         try:

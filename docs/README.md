@@ -1,127 +1,89 @@
 # LLAMAS Pyjamas Documentation
 
-This directory contains the Sphinx documentation for the LLAMAS Pyjamas project.
+Sphinx source for the LLAMAS Pyjamas documentation. The API reference is generated
+automatically from the package's Google-style docstrings.
 
-## Building the Documentation
+This directory contains **only source files**. Build artefacts (`_build/`) are
+git-ignored and must never be committed.
 
-### Prerequisites
-
-First, install the documentation requirements:
-
-```bash
-pip install -r docs/requirements.txt
-```
-
-### Building HTML Documentation
-
-To build the HTML documentation locally:
+## Building locally
 
 ```bash
+pip install -r docs/requirements.txt   # one-time
 cd docs
 make html
 ```
 
-The generated HTML documentation will be available in `docs/_build/html/index.html`.
+The site is written to `docs/_build/html/`. Open `docs/_build/html/index.html`.
 
-### Building Other Formats
+Use `make clean` to remove the build, and `make help` to list other formats.
 
-Sphinx supports multiple output formats:
+> **Note on dependencies:** Heavy/environment-specific pipeline packages (`ray`,
+> `pypeit`, `cloudpickle`, `PyQt6`, `lacosmic`, `pyds9`) are *mocked* during the build via
+> `autodoc_mock_imports` in `conf.py`, so you do **not** need them installed to build the
+> docs — only the lightweight deps in `requirements.txt`.
 
-```bash
-# PDF documentation (requires LaTeX)
-make latexpdf
+## Regenerating the API reference
 
-# EPUB documentation
-make epub
-
-# Single HTML file
-make singlehtml
-
-# Plain text
-make text
-```
-
-### Cleaning Build Files
-
-To clean all generated documentation files:
+The per-module pages under `docs/api/` are generated with `sphinx-apidoc`. Regenerate them
+after adding or removing modules:
 
 ```bash
-make clean
+cd <repo-root>
+sphinx-apidoc --force --separate --module-first -o docs/api llamas_pyjamas \
+  llamas_pyjamas/GUI llamas_pyjamas/Postprocessing llamas_pyjamas/Scripts \
+  llamas_pyjamas/Flux llamas_pyjamas/Test llamas_pyjamas/Tutorials \
+  llamas_pyjamas/output llamas_pyjamas/LUT llamas_pyjamas/mastercalib \
+  llamas_pyjamas/reduced 'llamas_pyjamas/**/*backup*.py' \
+  llamas_pyjamas/analyze_spectrum_X90_Y58.py llamas_pyjamas/check_arc_simple.py \
+  llamas_pyjamas/check_detector_order.py llamas_pyjamas/check_reference_arc.py \
+  llamas_pyjamas/example_pixel_to_fiber.py llamas_pyjamas/extract_cube_spectrum_correct.py \
+  llamas_pyjamas/flux_calibration.py llamas_pyjamas/plot_galaxy_spectrum.py \
+  llamas_pyjamas/sky_subtract_spectra.py llamas_pyjamas/test_flat_processing.py \
+  llamas_pyjamas/test_normalized_flat_fix.py llamas_pyjamas/verify_cube_position.py
 ```
 
-## Documentation Structure
+The excluded paths are non-importable or display-dependent (`GUI`), or standalone
+analysis/maintenance scripts that are not part of the public API.
 
-- `conf.py` - Sphinx configuration file
-- `index.rst` - Main documentation page
-- `llamas_pyjamas.*.rst` - Auto-generated module documentation
-- `_static/` - Static files (CSS, images, etc.)
-- `_templates/` - Custom Sphinx templates
-- `_build/` - Generated documentation output
+## Publishing to GitHub Pages
 
-## Writing Documentation
+Deployment is automated by `.github/workflows/docs.yml`: on every push to `main`, the
+workflow builds the docs and publishes them to GitHub Pages. To enable it once:
 
-### Docstring Style
+1. Push the branch containing the workflow to GitHub.
+2. In the repository, go to **Settings → Pages**.
+3. Set **Source** to **GitHub Actions**.
 
-This project uses Google-style docstrings. Example:
+The site will be served at `https://mit-kavli-institute.github.io/llamas-pyjamas/`.
+
+To publish manually instead (without the workflow):
+
+```bash
+cd docs && make html
+pip install ghp-import
+ghp-import -n -p -f docs/_build/html   # pushes to the gh-pages branch
+```
+
+## Writing docstrings
+
+The project uses **Google-style** docstrings (parsed by `sphinx.ext.napoleon`):
 
 ```python
-def example_function(param1, param2="default"):
-    """Brief description of the function.
-
-    Longer description with more details about what the function does.
+def example(param1, param2="default"):
+    """Brief description.
 
     Args:
         param1 (str): Description of param1.
-        param2 (str, optional): Description of param2. Defaults to "default".
+        param2 (str, optional): Description. Defaults to "default".
 
     Returns:
-        bool: Description of return value.
+        bool: Description of the return value.
 
     Raises:
-        ValueError: Description of when this exception is raised.
-
-    Example:
-        >>> result = example_function("hello")
-        >>> print(result)
-        True
+        ValueError: When something is invalid.
     """
     return True
 ```
 
-### Adding New Pages
-
-1. Create a new `.rst` file in the `docs/` directory
-2. Add the file to the appropriate `toctree` in `index.rst`
-3. Rebuild the documentation
-
-### Cross-References
-
-Use Sphinx cross-references to link to other parts of the documentation:
-
-```rst
-:doc:`llamas_pyjamas.Extract`
-:func:`llamas_pyjamas.Trace.traceLlamas.TraceLlamas.traceSingleCamera`
-:class:`llamas_pyjamas.Extract.extractLlamas.ExtractLlamas`
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **ModuleNotFoundError during build**: Make sure all dependencies are installed
-2. **Import errors**: Check that the package is properly installed in development mode
-3. **Missing docstrings**: Ensure all public functions and classes have docstrings
-
-### Dependencies
-
-If you encounter import errors during documentation build, you may need to install additional packages or add them to the `autodoc_mock_imports` list in `conf.py`.
-
-## Contributing
-
-When adding new modules or functions:
-
-1. Write comprehensive Google-style docstrings
-2. Add the module to the appropriate `.rst` file
-3. Update the main `index.rst` if needed
-4. Test the documentation build locally
-5. Include examples where appropriate
+After adding a new module, regenerate the API reference (above) and rebuild.
