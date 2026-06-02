@@ -5,7 +5,7 @@ name: Documentation
 
 on:
   push:
-    branches: [main]
+    branches: [documentation]
   workflow_dispatch:
 
 # Allow only one concurrent deployment.

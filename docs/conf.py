@@ -94,7 +94,7 @@ html_title = 'LLAMAS Pyjamas'
 
 html_theme_options = {
     'source_repository': 'https://github.com/mit-kavli-institute/llamas-pyjamas/',
-    'source_branch': 'main',
+    'source_branch': 'documentation',
     'source_directory': 'docs/',
     'navigation_with_keys': True,
 }

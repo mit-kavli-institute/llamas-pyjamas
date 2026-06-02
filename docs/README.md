@@ -48,12 +48,15 @@ analysis/maintenance scripts that are not part of the public API.
 
 ## Publishing to GitHub Pages
 
-Deployment is automated by `.github/workflows/docs.yml`: on every push to `main`, the
-workflow builds the docs and publishes them to GitHub Pages. To enable it once:
+Deployment is automated by `.github/workflows/docs.yml`: on every push to the
+`documentation` branch, the workflow builds the docs and publishes them to GitHub Pages.
+To enable it once:
 
-1. Push the branch containing the workflow to GitHub.
-2. In the repository, go to **Settings → Pages**.
-3. Set **Source** to **GitHub Actions**.
+1. Push the `documentation` branch (with the workflow) to GitHub.
+2. **Settings → Pages → Build and deployment → Source** = **GitHub Actions**.
+3. **Settings → Environments → `github-pages` → Deployment branches** — allow the
+   `documentation` branch (the default `github-pages` environment otherwise restricts
+   deployments to the default branch and the `deploy` job will fail).
 
 The site will be served at `https://mit-kavli-institute.github.io/llamas-pyjamas/`.
 
