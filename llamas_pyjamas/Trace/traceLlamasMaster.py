@@ -21,6 +21,7 @@ Example:
 """
 import os
 import sys
+import tempfile
 from   astropy.io import fits
 import scipy
 import numpy as np
@@ -43,7 +44,6 @@ import multiprocessing
 import argparse
 import cloudpickle
 from scipy.signal import find_peaks
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
@@ -51,20 +51,17 @@ import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
+from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError
 
-# Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-# Add timestamp to log filename
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-#logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 
 LOG = []
 
 
-def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.path.join(CALIB_DIR, 'combined_bias.fits')) -> fits.ImageHDU:
+def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
+                   dir=os.path.join(BIAS_DIR, 'slow_master_bias.fits'),
+                   required_readmode=None) -> fits.ImageHDU:
     """
     Retrieves the appropriate bias HDU from a combined bias file.
     
@@ -92,17 +89,86 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None, dir=os.pat
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    bias_hdus = process_fits_by_color(dir)
-    
+    with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf:
+        _tmp_path = _tf.name
+    bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
+
+    if bias_hdus is None:
+        # Try BIAS_DIR fallback before giving up
+        if required_readmode:
+            calib_path = os.path.join(BIAS_DIR, f'{required_readmode.lower()}_master_bias.fits')
+        else:
+            calib_path = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+        with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf2:
+            _tmp_path2 = _tf2.name
+        bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
+        if bias_hdus is None:
+            raise BiasNotFoundError(dir)
+        logger.warning(
+            f"Bias file '{dir}' unreadable; using BIAS_DIR fallback '{calib_path}'"
+        )
+
+    # Read-mode mismatch check
+    if required_readmode is not None:
+        bias_mode = bias_hdus[0].header.get('READ-MDE', None)
+        if bias_mode is not None and bias_mode.strip().upper() != required_readmode.upper():
+            raise BiasReadModeError(required_readmode, bias_mode, dir)
+
+    # First try to match by header keywords (robust to non-standard extension order)
+    target_color = color.lower()
+    target_bench = str(bench)
+    target_side = side.upper()
+    for hdu in bias_hdus[1:]:
+        hdr = hdu.header
+        if 'COLOR' in hdr and 'BENCH' in hdr and 'SIDE' in hdr:
+            if (str(hdr['BENCH']) == target_bench and
+                str(hdr['SIDE']).upper() == target_side and
+                str(hdr['COLOR']).lower() == target_color):
+                logger.info(
+                    f"Bias HDU matched by header: {target_bench}{target_side} {target_color}"
+                )
+                return hdu
+        elif 'CAM_NAME' in hdr:
+            camname = hdr['CAM_NAME']
+            cam_color = camname.split('_')[1].lower()
+            cam_bench = camname.split('_')[0][0]
+            cam_side = camname.split('_')[0][1].upper()
+            if cam_color == target_color and cam_bench == target_bench and cam_side == target_side:
+                logger.info(
+                    f"Bias HDU matched by CAM_NAME: {target_bench}{target_side} {target_color}"
+                )
+                return hdu
+
+    # Fall back to standard index lookup if header match fails
     try:
-        bias_idx = idx_lookup.get((color.lower(), str(bench), side.upper()))
+        bias_idx = idx_lookup.get((target_color, target_bench, target_side))
         print(f"Bias index: {bias_idx} for {bench}/{side}/{color}")
-    except:
+    except Exception:
         raise ValueError(f"Invalid bench/side/color combination: {bench}/{side}/{color}")
-        
-    
+
+    if bias_idx is None or bias_idx >= len(bias_hdus):
+        raise ValueError(
+            f"Bias index lookup failed for {bench}/{side}/{color} in file {dir}"
+        )
+
+    logger.warning(
+        f"Bias HDU matched by index only (header match failed): {target_bench}{target_side} {target_color}"
+    )
     bias_hdu = bias_hdus[bias_idx]
-    
+
+    # Verify the index-matched HDU actually corresponds to the requested camera
+    hdr = bias_hdu.header
+    matched_color = hdr.get('COLOR', '').lower() if 'COLOR' in hdr else None
+    matched_bench = str(hdr.get('BENCH', '')) if 'BENCH' in hdr else None
+    matched_side = hdr.get('SIDE', '').upper() if 'SIDE' in hdr else None
+
+    if matched_color != target_color or matched_bench != target_bench or matched_side != target_side:
+        raise ValueError(
+            f"Bias index lookup returned wrong camera for {target_bench}{target_side} {target_color}: "
+            f"got {matched_bench}{matched_side} {matched_color} at index {bias_idx}. "
+            f"The bias file may have missing extensions — validate it first."
+        )
+
     return bias_hdu
 
 
@@ -147,21 +213,19 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
 
 
 
-def get_fiber_position(channel:str, benchside: str, fiber: str) -> int:
-    def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
-        """
-        Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.
-        Args:
-            channel (str): The channel name (red, green or blue).
-            benchside (str): The benchside identifier (e.g., '1A').
-            fiber (str): The fiber identifier (e.g., 'fiber_number').
-        Returns:
-            int: The position of the specified fiber.
-        Raises:
-            FileNotFoundError: If the LUT file is not found.
-            KeyError: If the specified channel, benchside, or fiber is not found in the LUT.
-        """
-
+def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
+    """
+    Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.
+    Args:
+        channel (str): The channel name (red, green or blue).
+        benchside (str): The benchside identifier (e.g., '1A').
+        fiber (str): The fiber identifier (e.g., 'fiber_number').
+    Returns:
+        int: The position of the specified fiber.
+    Raises:
+        FileNotFoundError: If the LUT file is not found.
+        KeyError: If the specified channel, benchside, or fiber is not found in the LUT.
+    """
     json_file = os.path.join(LUT_DIR, 'traceLUT.json')
     with open(json_file, 'r') as f:
         lut = json.load(f)
@@ -510,10 +574,10 @@ class TraceLlamas:
                 if os.path.isfile(use_bias):
                     bias_file = use_bias
                 else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             else:
-                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             print(f'Bias file: {bias_file}')
             #### fix the directory here!
             bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
@@ -838,19 +902,25 @@ class TraceRay(TraceLlamas):
         return
     
     
-    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None) -> dict:
+    def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None, is_master_calib: bool = True) -> dict:
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)
 
-               
+        if result["status"] != "success":
+            return result
+
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
         
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
         print(f'color: {color}')
-        
-        filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+
+        # Generate filename based on whether this is master calibration or user traces
+        if is_master_calib:
+            filename = f'LLAMAS_master_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
+        else:
+            filename = f'LLAMAS_{self.channel.lower()}_{self.bench}_{self.side}_traces.pkl'
         
         if outpath:
             os.makedirs(outpath, exist_ok=True)
@@ -864,39 +934,99 @@ class TraceRay(TraceLlamas):
             
         
         elapsed_time = time.time() - start_time
-        return 
-        if result["status"] != "success":
-                return result
 
-def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR, use_bias: str = None) -> None:
+def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR,
+                    slow_bias: str = None, fast_bias: str = None,
+                    is_master_calib: bool = True, skip_extension_indices: List[int] = None) -> None:
+    """
+    Run fiber tracing on a FITS file using Ray multiprocessing.
 
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    # Initialize Ray with logging config
+    Args:
+        fitsfile: Path to FITS file to process
+        channel: Optional channel filter ('red', 'green', 'blue')
+        outpath: Output directory for trace files
+        slow_bias: Optional path to SLOW-mode master bias FITS file
+        fast_bias: Optional path to FAST-mode master bias FITS file
+        is_master_calib: Whether this is master calibration (affects output naming)
+        skip_extension_indices: Optional list of extension indices to skip (for placeholder extensions)
+
+    Returns:
+        None
+    """
+
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+
+    import pkg_resources as _pkgr, shutil as _shutil, glob as _glob2
+    _package_path = _pkgr.resource_filename('llamas_pyjamas', '')
+    _package_root = os.path.dirname(_package_path)
+    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+        _shutil.rmtree(_stale, ignore_errors=True)
+    _runtime_env = {
+        "working_dir": _package_root,
+        "env_vars": {"PYTHONPATH": f"{_package_root}:{os.environ.get('PYTHONPATH', '')}"},
+        "excludes": [
+            "**/*.fits", "**/*.pkl", "**/.git/**",
+            "**/*.zip/**", "**/*.tar.gz/**", "**/mastercalib*/**", "**/*.zip",
+            "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+            "**/testing/**",
+        ],
+    }
+
     ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES, runtime_env=_runtime_env)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
-    
+
     futures = []
-    results = []    
-    
-    hdul = process_fits_by_color(fitsfile)
+    results = []
+
+    hdul, _ = process_fits_by_color(fitsfile)
+
+    # Filter HDUs based on channel and exclude placeholders
     if channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == channel.lower()]
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)  # Track extension index
+            if hdu.data is not None
+            and hdu.header['COLOR'].lower() == channel.lower()
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
     elif channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()]
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)
+            if hdu.data is not None
+            and hdu.header['CAM_NAME'].split('_')[1].lower() == channel.lower()
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
     else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
-        
+        hdus = [
+            (hdu.data.astype(float), dict(hdu.header))
+            for idx, hdu in enumerate(hdul[1:], start=1)
+            if hdu.data is not None
+            and (skip_extension_indices is None or idx not in skip_extension_indices)
+        ]
+
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
+
+    if skip_extension_indices:
+        print(f"Skipping {len(skip_extension_indices)} placeholder extension(s): {skip_extension_indices}")
         
     #hdu_processor = TraceRay.remote(fitsfile)
         
+    # Select bias per-file based on primary header READ-MDE
+    read_mode = hdul[0].header.get('READ-MDE', 'SLOW').strip().upper()
+    if read_mode == 'FAST' and fast_bias is not None:
+        use_bias = fast_bias
+    elif slow_bias is not None:
+        use_bias = slow_bias
+    else:
+        use_bias = None  # TraceRay / _grab_bias_hdu will use its own defaults
+
     for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias)
+        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=outpath, use_bias=use_bias, is_master_calib=is_master_calib)
         futures.append(future)
     
     # Monitor processing
@@ -926,7 +1056,7 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
     return
     
     
-if __name__ == "__main__":  
+if __name__ == "__main__":
     os.environ["RAY_RUNTIME_ENV_TEMPORARY_REFERENCE_EXPIRATION_S"] = "1200"
     parser = argparse.ArgumentParser(description='Process LLAMAS FITS files using Ray multiprocessing.')
     parser.add_argument('filename', type=str, help='Path to input FITS file')
@@ -934,62 +1064,25 @@ if __name__ == "__main__":
     parser.add_argument('--channel', type=str, choices=['red', 'green', 'blue'], help='Specify the color channel to use')
     parser.add_argument('--outpath', type=str, help='Path to save output files')
     parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
+    parser.add_argument('--skip-placeholders', action='store_true', help='Skip placeholder extensions')
     args = parser.parse_args()
-      
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
-    print(f"\nStarting with {NUMBER_OF_CORES} cores available")
-    print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
-    
-    futures = []
-    results = []    
-    
-    fitsfile = args.filename
-    
-    hdul = process_fits_by_color(fitsfile)
-    if args.channel is not None and 'COLOR' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
-    elif args.channel is not None and 'CAM_NAME' in hdul[1].header:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['CAM_NAME'].split('_')[1].lower() == args.channel.lower()]
-    else:
-        hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None]
-        
-        
-    hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
-    print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")
-        
-    #hdu_processor = TraceRay.remote(fitsfile)
-        
-    for index, ((hdu_data, hdu_header), processor) in enumerate(zip(hdus, hdu_processors)):
-        future = processor.process_hdu_data.remote(hdu_data, hdu_header, outpath=args.outpath, use_bias=args.bias)
-        futures.append(future)
-    
-    # Monitor processing
-    total_jobs = len(futures)
-    completed = 0
-        
-    # Monitor processing
-    print("\nProcessing Status:")
-    while futures:
-        
-        # Print current CPU usage every 5 seconds
-        if completed % 5 == 0:
-            print(f"CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-            print(f"Progress: {completed}/{total_jobs} jobs complete")
-        
-        
-        done_id, futures = ray.wait(futures)
-        result = ray.get(done_id[0])
-        results.append(result)
-        completed += 1
-        
-    print(f"\nAll {total_jobs} jobs complete")
-    print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
+
+    # Use the refactored run_ray_tracing function
+    skip_indices = None
+    if args.skip_placeholders:
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices
+        skip_indices = get_placeholder_extension_indices(args.filename)
+        if skip_indices:
+            print(f"Found {len(skip_indices)} placeholder extensions to skip")
+
+    run_ray_tracing(
+        args.filename,
+        channel=args.channel,
+        outpath=args.outpath if args.outpath else CALIB_DIR,
+        use_bias=args.bias,
+        is_master_calib=args.mastercalib,
+        skip_extension_indices=skip_indices
+    )
     
     
     

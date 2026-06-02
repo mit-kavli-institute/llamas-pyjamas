@@ -42,14 +42,10 @@ from pathlib import Path
 
 ####################################################################################
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
-ray.init(ignore_reinit_error=True)
-
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
@@ -151,7 +147,15 @@ class ExtractLlamas:
                 logger.warning(f"Error accessing dead fibers in LUT: {e}")
 
 
-            for ifiber in range(trace.nfibers):    
+            for ifiber in range(trace.nfibers):
+                extracted = np.zeros(self.trace.naxis1)
+                # print fiber, and list of dead fibers, print also bench and color
+                logger.info(self.dead_fibers)
+                logger.info(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
+                if ifiber in self.dead_fibers:
+                    logger.info(f"Skipping dead fiber # {ifiber}")
+                    self.counts[ifiber,:] = extracted
+                    continue
 
                 if (optimal == True):
                     # Optimally weighted extraction (a la Horne et al ~1986)
@@ -219,17 +223,19 @@ class ExtractLlamas:
                 
                 for i in range(total_fibers):
                     if i in dead_set:
+                        new_counts[i] = np.zeros(trace.naxis1)
                         # Leave zeros for dead fiber positions
                         logger.info(f"Inserting dead fiber at index {i}")
                         continue
                     else:
                         # Copy data from original array if position exists
-                        if current_idx < len(self.counts):
-                            new_counts[i] = self.counts[current_idx]
-                            current_idx += 1
+                        #if current_idx < len(self.counts):
+                        new_counts[i] = self.counts[current_idx]
+                        current_idx += 1
                 
                 # Replace the counts array with the new one
                 self.counts = new_counts
+                self.fiberid = np.arange(total_fibers)
                 logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
 
                     
@@ -378,6 +384,92 @@ def load_extractions(infile: str)-> Tuple[list, list]:
     logger.info(f"Loaded {len(batch_data['extractions'])} extractions")
     return batch_data['extractions'], batch_data['metadata']
 
+def sort_extractions(input_pickle, output_pickle=None):
+    """
+    Sort extraction objects in canonical order matching idx_lookup from constants.py.
+
+    The ordering follows: bench (1-4) -> side (A, B) -> channel (red, green, blue)
+    This ensures consistent ordering across all extraction files for downstream processing.
+
+    Args:
+        input_pickle (str): Path to input pickle file with extractions
+        output_pickle (str, optional): Path to output pickle file. If None, overwrites input file.
+
+    Returns:
+        str: Path to the sorted output pickle file
+
+    Example:
+        >>> sort_extractions('combined_flat_extractions.pkl', 'sorted_flat_extractions.pkl')
+    """
+    from llamas_pyjamas.constants import idx_lookup
+
+    # Load the extraction file
+    with open(input_pickle, 'rb') as fp:
+        batch_data = cloudpickle.load(fp)
+
+    extractions = batch_data['extractions']
+    metadata = batch_data['metadata']
+    primary_header = batch_data.get('primary_header', None)
+
+    logger.info(f"Loaded {len(extractions)} extractions from {input_pickle}")
+
+    # Create list of (sort_index, extraction, metadata) tuples
+    ext_with_idx = []
+
+    for ext, meta in zip(extractions, metadata):
+        channel = meta['channel']
+        bench = str(meta['bench'])
+        side = meta['side']
+
+        # Get sort index from lookup
+        sort_key = (channel, bench, side)
+        if sort_key not in idx_lookup:
+            logger.warning(f"Extension {channel} {bench}{side} not in standard ordering - skipping")
+            continue
+
+        idx = idx_lookup[sort_key]
+        ext_with_idx.append((idx, ext, meta))
+
+    # Sort by index
+    ext_with_idx.sort(key=lambda x: x[0])
+
+    logger.info(f"Sorted {len(ext_with_idx)} extractions in canonical order")
+
+    # Verify we have expected number of extensions
+    if len(ext_with_idx) != 24:
+        logger.warning(f"Expected 24 extensions, found {len(ext_with_idx)}")
+        missing_indices = set(range(1, 25)) - set([x[0] for x in ext_with_idx])
+        if missing_indices:
+            logger.warning(f"Missing extension indices: {sorted(missing_indices)}")
+
+    # Extract sorted extractions and metadata
+    sorted_extractions = [x[1] for x in ext_with_idx]
+    sorted_metadata = [x[2] for x in ext_with_idx]
+
+    # Create sorted batch data
+    sorted_batch_data = {
+        'primary_header': primary_header,
+        'extractions': sorted_extractions,
+        'metadata': sorted_metadata
+    }
+
+    # Determine output path
+    if output_pickle is None:
+        output_pickle = input_pickle
+
+    # Save sorted data
+    with open(output_pickle, 'wb') as fp:
+        cloudpickle.dump(sorted_batch_data, fp)
+
+    logger.info(f"Saved sorted extractions to {output_pickle}")
+
+    # Print summary of ordering
+    print("\nSorted extraction order:")
+    for i, (idx, ext, meta) in enumerate(ext_with_idx):
+        print(f"  Extension {i}: idx={idx:2d} | {meta['channel']:5s} {meta['bench']}{meta['side']} | {meta['nfibers']} fibers")
+
+    return output_pickle
+
 @ray.remote
 class ExtractLlamasRay(ExtractLlamas):
     """Ray remote class for parallel processing of LLAMAS extractions.
@@ -455,7 +547,7 @@ def parse_args()-> list:
 
 if __name__ == '__main__':
     # Example of how to run the extraction
-
+    # ray.init(ignore_reinit_error=True)
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     

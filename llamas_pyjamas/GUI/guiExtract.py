@@ -15,7 +15,6 @@ import traceback
 import pkg_resources
 from pathlib import Path
 
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
@@ -27,10 +26,13 @@ from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, Wh
 import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
+from llamas_pyjamas.Bias.biasChecking import build_interfibre_mask
+from llamas_pyjamas.Masking.cosmicLlamas import clean_cosmic_rays, save_cosmic_ray_masks
 
 # Set up logging
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
+logger = logging.getLogger(__name__)
 
 
 
@@ -38,14 +40,14 @@ logger = setup_logger(__name__, log_filename=f'extractLlamas_{timestamp}.log')
 
 def ExtractLlamasCube(infits, tracefits, optimal=True):
 
-    assert infits.endswith('.fits'), 'File must be a .fits file'  
+    assert infits.endswith('.fits'), 'File must be a .fits file'
     # hdu = fits.open(infits)
-    hdu = process_fits_by_color(infits)
+    hdu, _ = process_fits_by_color(infits)
 
     # Find the trace files
     basefile = os.path.basename(tracefits).split('.fits')[0]
     trace_files = glob.glob(os.path.join(OUTPUT_DIR, f'{basefile}*traces.pkl'))
-    extraction_file = os.path.basename(infits).split('mef.fits')[0] + 'extract.pkl'
+    extraction_file = os.path.splitext(os.path.basename(infits))[0] + '_extract.pkl'
 
     if len(trace_files) == 0:
         logger.error("No trace files found for the indicated file root!")
@@ -84,14 +86,50 @@ def ExtractLlamasCube(infits, tracefits, optimal=True):
     return None
 
 
+def get_trace_file(channel, bench, side, trace_dir):
+    """
+    Find trace file for specific camera configuration.
+
+    Args:
+        channel: Color channel (red/green/blue)
+        bench: Bench number
+        side: Side letter (A/B)
+        trace_dir: Directory containing trace files
+
+    Returns:
+        str: Path to trace file
+
+    Raises:
+        FileNotFoundError: If trace file not found
+    """
+    # Standard trace file naming: LLAMAS_master_{channel}_{bench}_{side}_traces.pkl
+    trace_filename = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
+    trace_path = os.path.join(trace_dir, trace_filename)
+
+    if os.path.exists(trace_path):
+        return trace_path
+
+    # Try alternate naming without "master"
+    alt_filename = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
+    alt_path = os.path.join(trace_dir, alt_filename)
+
+    if os.path.exists(alt_path):
+        return alt_path
+
+    raise FileNotFoundError(
+        f"Trace file not found for {channel}{bench}{side} in {trace_dir}\n"
+        f"  Tried: {trace_filename}, {alt_filename}"
+    )
+
+
 def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     """Match HDU extensions to their corresponding trace files"""
     matches = []
-    
+
     # Skip primary HDU (index 0)
     #### need to be super careful with this starting index
     for idx in range(start_idx, len(hdu_list)):
-        
+
         header = hdu_list[idx].header
 
         # Get color and benchside from header
@@ -107,31 +145,51 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
         benchside = f"{bench}{side}"
         pattern = f"{color}_{bench}_{side}_traces"
-        
+
         # Find matching trace file
         matching_trace = next(
-            (tf for tf in trace_files 
+            (tf for tf in trace_files
              if pattern in os.path.basename(tf)),
             None
         )
-        #print(f'HDU {idx}: {color} {benchside} -> {matching_trace}')
+        print(f'HDU {idx}: Looking for pattern "{pattern}" -> {os.path.basename(matching_trace) if matching_trace else "NOT FOUND"}')
         if matching_trace:
             matches.append((idx, matching_trace))
         else:
-            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}")
-            
+            logger.warning(f"No matching trace found for HDU {idx}: {color} {benchside}, pattern: {pattern}")
+            print(f"  Available trace files: {[os.path.basename(tf) for tf in trace_files]}")
+
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote
+@ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
 
-def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None):
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None, remove_cosmic_rays=True):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
-    Returns the extraction object or None if there is an error.
+
+    The tracer is loaded first so its fiberimg can be used for an inter-fibre
+    bias quality check and, when needed, an inter-fibre fallback bias estimate.
+
+    Bias selection logic:
+    1. Try to load master bias extension from use_bias file.
+    2. If loaded, verify bench/side/color match.
+    3. If verified, run inter-fibre quality check: if the master bias inter-fibre
+       median deviates from the raw frame's inter-fibre median by more than
+       _BIAS_INTERFIBRE_THRESHOLD DN, discard the master bias.
+    4. If no valid master bias remains, call generate_fallback_bias_hdu(hdu_data, tracer)
+       which cross-validates inter-fibre vs test-region (rows 30-50) estimates and
+       selects the better one.
+
+    Returns a dict containing:
+        'extraction': ExtractLlamas object (or None if error)
+        'detector_background': median background after bias subtraction
+        'hdu_index': the HDU index for this extraction
     """
+    _BIAS_INTERFIBRE_LOG_THRESHOLD = 10.0  # DN — divergence above which a diagnostic warning is logged
+
     try:
-        # Compute the bias from the current extension data.
+        # Parse camera identifiers
         if 'COLOR' in header:
             color = header['COLOR'].lower()
             bench = header['BENCH']
@@ -142,35 +200,142 @@ def process_trace(hdu_data, header, trace_file, method='optimal', use_bias=None)
             bench = camname.split('_')[0][0]
             side = camname.split('_')[0][1]
 
-        if use_bias is None:    
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-        elif use_bias is str:
-            if os.path.isfile(use_bias):
-                bias_file = use_bias
-        else:
-            bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
-
-
-        print(f'Bias file: {bias_file}')
-        #### fix the directory here!
-        bias = _grab_bias_hdu(bench=bench, side=side, color=color, dir=bias_file)
-        
-        bias_data = bias.data #np.median(bias.data[20:50])
-            
-        # Load the trace object from the pickle file using cloudpickle for better compatibility
+        # Load the trace object first — needed for inter-fibre bias quality check
         with open(trace_file, mode='rb') as f:
             tracer = cloudpickle.load(f)
-        # Create an ExtractLlamas object; note the subtraction of the bias.
+
+        # Guard against double-subtraction
+        if header.get('BIASSUB', False):
+            logger.warning(
+                f"BIASSUB already set for {bench}{side} {color} — skipping bias subtraction"
+            )
+            bias_subtracted_data = hdu_data.astype(float)
+        else:
+            # use_bias is the resolved bias file path from GUI_extract (may be None)
+            frame_mode = header.get('READ-MDE', None)
+            bias = None
+
+            if use_bias is not None:
+                bias_file = os.fspath(use_bias)
+                print(f'Bias file: {bias_file}')
+                try:
+                    bias = _grab_bias_hdu(bench=bench, side=side, color=color,
+                                          dir=bias_file, required_readmode=frame_mode)
+                    logger.info(f"Loaded master bias for {bench}{side} {color}")
+                except (BiasNotFoundError, BiasReadModeError) as e:
+                    logger.warning(f"Master bias failed for {bench}{side} {color}: {e}")
+                    bias = None
+            else:
+                logger.info(f"No bias file path received for {bench}{side} {color}; using inter-fibre fallback")
+
+            if bias is not None:
+                # --- Bench/side/color verification before subtraction ---
+                bias_bench = str(bias.header.get('BENCH', '')).strip()
+                bias_side  = str(bias.header.get('SIDE',  '')).strip().upper()
+                bias_color = str(bias.header.get('COLOR', '')).strip().lower()
+                # CAM_NAME fallback if individual keywords are absent
+                if not (bias_bench and bias_side and bias_color) and 'CAM_NAME' in bias.header:
+                    cam = bias.header['CAM_NAME']
+                    parts = cam.split('_')
+                    bias_color = parts[1].lower() if len(parts) >= 2 else ''
+                    bias_bench = parts[0][0] if parts else ''
+                    bias_side  = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
+
+                if (bias_bench and bias_side and bias_color and
+                        (bias_bench != str(bench) or bias_side != str(side).upper() or
+                         bias_color != str(color).lower())):
+                    logger.error(
+                        f"Bias BSC mismatch: expected {bench}{side} {color}, "
+                        f"got {bias_bench}{bias_side} {bias_color} — using inter-fibre fallback"
+                    )
+                    bias = None
+
+            if bias is not None:
+                # --- Inter-fibre diagnostic (informational only) ---
+                # Log the divergence between the raw frame's inter-fibre median and the
+                # master bias's inter-fibre median.  For science frames, this divergence
+                # is dominated by sky background in the gaps and can legitimately be
+                # hundreds of DN — it does NOT indicate a bad bias file.  The master
+                # bias is never discarded here; hard failures (missing file, read-mode
+                # mismatch, wrong detector) are handled earlier.
+                try:
+                    gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
+                    n_gap = int(gap_mask.sum())
+                    if n_gap >= 100:
+                        frame_if_level = float(np.nanmedian(hdu_data.astype(float)[gap_mask]))
+                        bias_if_level  = float(np.nanmedian(bias.data[gap_mask]))
+                        divergence = abs(frame_if_level - bias_if_level)
+                        if divergence > _BIAS_INTERFIBRE_LOG_THRESHOLD:
+                            logger.warning(
+                                f"Master bias inter-fibre divergence for {bench}{side} {color}: "
+                                f"|frame_if={frame_if_level:.2f} - bias_if={bias_if_level:.2f}| = "
+                                f"{divergence:.2f} DN "
+                                f"(expected for sky-illuminated frames; master bias retained)"
+                            )
+                        else:
+                            logger.info(
+                                f"Master bias inter-fibre check OK for {bench}{side} {color}: "
+                                f"divergence={divergence:.2f} DN"
+                            )
+                    else:
+                        logger.warning(
+                            f"Inter-fibre diagnostic skipped for {bench}{side} {color}: "
+                            f"only {n_gap} gap pixels (< 100)"
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        f"Inter-fibre bias diagnostic failed for {bench}{side} {color} "
+                        f"({exc}); continuing with master bias"
+                    )
+
+            if bias is None:
+                logger.warning(
+                    f"No valid master bias for {bench}{side} {color} — "
+                    f"using inter-fibre/test-region fallback."
+                )
+                bias = generate_fallback_bias_hdu(hdu_data, tracer=tracer)
+                logger.info(f"Fallback bias source: {bias.header['BIASSRC']}")
+
+            bias_data = bias.data
+
+            # Compute bias-subtracted data
+            bias_subtracted_data = hdu_data.astype(float) - bias_data
+
+            # Record bias subtraction in the header
+            header['BIASSUB'] = (True, 'True = bias was subtracted')
+            header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
+            header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
+
+        # Cosmic ray removal (after bias subtraction, before extraction)
+        cr_mask = None
+        if remove_cosmic_rays:
+            bias_subtracted_data, cr_mask = clean_cosmic_rays(
+                bias_subtracted_data,
+                color=color, bench=bench, side=side
+            )
+            header['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
+            header['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+
+        # Compute detector background AFTER bias subtraction
+        detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
+        print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
+
+        # Create an ExtractLlamas object with bias-subtracted data
         if (method == 'optimal'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=True)
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=True)
         elif (method == 'boxcar'):
-            extraction = ExtractLlamas(tracer, hdu_data.astype(float)-bias_data, header, optimal=False)
-        return extraction
+            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=False)
+
+        return {
+            'extraction': extraction,
+            'detector_background': detector_background,
+            'hdu_index': hdu_index,
+            'cr_mask': cr_mask
+        }
     except Exception as e:
         logger.error(f"Error extracting trace from {trace_file}")
         logger.error(traceback.format_exc())
-        return None
+        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index, 'cr_mask': None}
 
 
 def make_writable(extraction_obj):
@@ -218,22 +383,69 @@ def make_writable(extraction_obj):
     logger.warning(f"Could not make object of type {type(extraction_obj)} writable")
     return extraction_obj
 
+def is_placeholder_camera(data):
+    """
+    Check if HDU data represents a non-functional camera (filled with 1.0).
+    
+    Args:
+        data: numpy array of HDU data
+        
+    Returns:
+        bool: True if this is a placeholder camera
+    """
+    if data is None:
+        return True
+    
+    # Check if all values are 1.0 (or very close due to floating point)
+    return np.allclose(data, 1.0, rtol=1e-5)
 
+def compute_detector_background(data, rows=(30, 50)):
+    """
+    Compute median background from specified detector rows.
+    
+    Args:
+        data: numpy array of detector data
+        rows: tuple of (start_row, end_row) for background region
+        
+    Returns:
+        float: median background value
+    """
+    upper_det = data[rows[0]:rows[1], :]
+    upper_background_value = np.median(upper_det)
+    return upper_background_value
 
 ##Main function currently used by the Quicklook for full extraction
 
 
-def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None, use_bias: str = None, method='optimal', trace_dir=None) -> None:
+def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
+                slow_bias: str = None, fast_bias: str = None,
+                method='optimal', trace_dir=None, mastercalib_trace_dir=None,
+                remove_cosmic_rays=True, mask_output_dir=None) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
+
+    Supports hybrid trace selection: uses user traces for real camera data and
+    mastercalib traces for placeholder extensions (missing cameras).
+
+    The correct bias file is selected per-file based on the READ-MDE primary header keyword.
+    If slow_bias and/or fast_bias are provided they take priority over the package defaults.
+    If neither is provided the function falls back to package-default paths in BIAS_DIR.
+    If no bias files exist at all, process_trace() applies a test-region (rows 30-50) fallback.
+
     Parameters:
     file (str): Path to the FITS file to be processed. Must have a .fits extension.
     flatfiles (str, optional): Path to the flat files for generating new traces. Defaults to None.
-    biasfiles (str, optional): Path to the bias files for calibration. Defaults to None.
-    
+    output_dir (str, optional): Output directory for extraction files. Defaults to None.
+    slow_bias (str, optional): Path to the SLOW-mode master bias FITS file. Defaults to None.
+    fast_bias (str, optional): Path to the FAST-mode master bias FITS file. Defaults to None.
+    method (str, optional): Extraction method ('optimal' or 'boxcar'). Defaults to 'optimal'.
+    trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
+    mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
+                                           Defaults to CALIB_DIR if None.
+
     Returns:
-    None
+    Tuple[str, int]: (extraction_file_path, number_of_placeholder_extensions)
     """
     start_time = time.perf_counter()  # Start timer
     
@@ -248,24 +460,33 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             raise ValueError("No master calibration files found in CALIB_DIR")
         
         #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package
+        # Get absolute path to llamas_pyjamas package directory
         package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
         package_root = os.path.dirname(package_path)
 
-        # Configure Ray runtime environment
+        # Clear stale Ray py_modules cache so updated source files are always re-bundled
+        import shutil as _shutil, glob as _glob2
+        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+            _shutil.rmtree(_stale, ignore_errors=True)
+
+        # Configure Ray runtime environment.
+        # py_modules ships the repo root so workers can `import llamas_pyjamas`
+        # and resolve all subpackages including Bias/.
+        # (working_dir is not used because the repo root exceeds Ray's 512 MB limit.)
         runtime_env = {
             "py_modules": [package_root],
             "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
                 str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
                 "**/*.zip/**",
                 "**/*.tar.gz/**",
                 "**/mastercalib*/**",
                 "**/*.zip",
-                
+                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+                "**/testing/**",
             ]
         }
 
@@ -274,74 +495,179 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         ray.shutdown()
         ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
 
+        # Import placeholder detection utilities
+        from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+
+        # Validate and create GUI version if needed (preserves original file)
+        file = validate_for_gui(file)
+
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         primary_hdr = hdu[0].header
 
-        extraction_file = os.path.basename(file).split('mef.fits')[0] + 'extract.pkl'
+        # Determine bias file based on READ-MDE header keyword
+        read_mode = primary_hdr.get('READ-MDE', None)
+        if read_mode is not None:
+            read_mode = read_mode.strip().upper()
+            logger.info(f"Detected READ-MDE: {read_mode}")
+
+        extraction_file = os.path.splitext(os.path.basename(file))[0] + '_extract.pkl'
 
         #Defining the base filename
-        #basefile = os.path.basename(file).split('.fits')[0]
         basefile = os.path.basename(file).split('.fits')[0]
         masterfile = 'LLAMAS_master'
-        if use_bias is not None:
-            if os.path.isfile(use_bias):
-                masterbiasfile = use_bias
+
+        if slow_bias is not None or fast_bias is not None:
+            # Caller supplied explicit paths — use READ-MDE to pick the right one per file
+            if read_mode == 'FAST' and fast_bias is not None:
+                masterbiasfile = fast_bias
+                logger.info(f"READ-MDE=FAST: using caller-supplied fast bias: {masterbiasfile}")
+            elif slow_bias is not None:
+                masterbiasfile = slow_bias
+                logger.info(f"READ-MDE={read_mode}: using caller-supplied slow bias: {masterbiasfile}")
             else:
-                raise ValueError(f"Bias file {use_bias} does not exist.")
+                # FAST data but no fast_bias supplied by caller
+                logger.warning(
+                    f"READ-MDE=FAST but no fast_bias supplied; "
+                    f"process_trace() will use test-region fallback if no bias can be loaded"
+                )
+                masterbiasfile = None  # process_trace() handles the fallback
         else:
-            masterbiasfile = os.path.join(BIAS_DIR, 'combined_bias.fits')
+            # No caller paths supplied — check package-default locations in BIAS_DIR
+            slow_default = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            fast_default = os.path.join(BIAS_DIR, 'fast_master_bias.fits')
+            if read_mode == 'FAST' and os.path.isfile(fast_default):
+                masterbiasfile = fast_default
+                logger.info(f"READ-MDE=FAST: auto-selected fast bias from BIAS_DIR: {masterbiasfile}")
+            elif os.path.isfile(slow_default):
+                masterbiasfile = slow_default
+                logger.info(f"READ-MDE={read_mode}: auto-selected slow bias from BIAS_DIR: {masterbiasfile}")
+            else:
+                # Neither package default exists — process_trace() will use test-region fallback
+                masterbiasfile = None
+                logger.warning(
+                    "No master bias files found in BIAS_DIR; "
+                    "process_trace() will use test-region fallback bias per extension"
+                )
+
+        # Validate bias file structure (add placeholders for missing cameras)
+        if masterbiasfile is not None:
+            masterbiasfile = validate_for_gui(masterbiasfile)
 
         #Debug statements
         print(f'basefile = {basefile}')
         print(f'masterfile = {masterfile}')
         print(f'Bias file is {masterbiasfile}')
 
+        # Default mastercalib location
+        if mastercalib_trace_dir is None:
+            mastercalib_trace_dir = CALIB_DIR
+
+        # Set default user trace directory
         if not trace_dir:
-            trace_files = glob.glob(os.path.join(CALIB_DIR, f'{masterfile}*traces.pkl'))
+            trace_dir = CALIB_DIR
             print(f'No trace_dir specified, using CALIB_DIR: {CALIB_DIR}')
         else:
-            trace_files = glob.glob(os.path.join(trace_dir, f'{masterfile}*traces.pkl'))
             print(f'Using specified trace_dir: {trace_dir}')
-        print(f'Found {len(trace_files)} trace files: {[os.path.basename(f) for f in trace_files]}')
-        
-        #Running the extract routine
-        #This code should isolate to only the traces for the given fitsfile
-        
+
+        # Identify placeholder extensions
+        placeholder_indices = get_placeholder_extension_indices(file)
+
+        if placeholder_indices:
+            print(f"\n{'='*60}")
+            print(f"HYBRID TRACE EXTRACTION")
+            print(f"{'='*60}")
+            print(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
+            print(f"  Real extensions: Will use traces from {trace_dir}")
+            print(f"  Placeholder extensions: Will use mastercalib traces from {mastercalib_trace_dir}")
+            print(f"{'='*60}\n")
+
+        #Running the extract routine with hybrid trace selection
         extraction_list = []
-        
-        hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
+
+        # Build HDU-trace pairs with per-extension trace directory selection
+        hdu_trace_pairs = []
+        for idx in range(1, len(hdu)):
+            header = hdu[idx].header
+
+            # Get camera configuration
+            if 'COLOR' in header:
+                channel = header['COLOR'].lower()
+                bench = header['BENCH']
+                side = header['SIDE']
+            else:
+                camname = header['CAM_NAME']
+                channel = camname.split('_')[1].lower()
+                bench = camname.split('_')[0][0]
+                side = camname.split('_')[0][1]
+
+            # Select trace directory based on placeholder status
+            if idx in placeholder_indices:
+                active_trace_dir = mastercalib_trace_dir
+                trace_source = "mastercalib"
+            else:
+                active_trace_dir = trace_dir
+                trace_source = "user"
+
+            # Find trace file
+            try:
+                trace_file = get_trace_file(channel, bench, side, active_trace_dir)
+                hdu_trace_pairs.append((idx, trace_file))
+                print(f"  Extension {idx:2d} ({channel:5s}{bench}{side}): Using {trace_source:12s} trace")
+            except FileNotFoundError as e:
+                logger.error(f"  Extension {idx:2d} ({channel:5s}{bench}{side}): Trace file not found - {e}")
+                # Don't add to pairs - will skip this extension
         #print(hdu_trace_pairs)
 
-        ### Testing ray usage
+        ### Process each HDU-trace pair in parallel using Ray
 
-        # Process each HDU-trace pair in parallel using Ray.
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
-            
-            hdu_data = hdu[hdu_index].data
-            
-            # Get the data and header from the current extension.
-            
+            hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
-            #future = process_trace.remote(hdu_data, hdr, trace_file, use_bias=use_bias)
-            if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='optimal', use_bias=use_bias)
-            elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, method='boxcar', use_bias=use_bias)
-            futures.append(future)
-        
-        # Wait for all remote tasks to complete.
-        raw_extraction_list = ray.get(futures)
-        #extraction_list = [ex for ex in extraction_list if ex is not None]
 
-        # Post-process to make objects writable
-        extraction_list = []
-        for ex in raw_extraction_list:
-            if ex is not None:
-                writable_ex = make_writable(ex)
-                extraction_list.append(writable_ex)
+            if (method == 'optimal'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+            elif (method == 'boxcar'):
+                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+            futures.append(future)
+
+        # Wait for all remote tasks to complete
+        results = ray.get(futures)
+
+        # First, make all extraction objects writable (Ray returns read-only objects)
+        writable_results = []
+        for result in results:
+            if result is not None and result.get('extraction') is not None:
+                writable_ex = make_writable(result['extraction'])
+                writable_results.append({
+                    'extraction': writable_ex,
+                    'detector_background': result['detector_background'],
+                    'hdu_index': result['hdu_index'],
+                    'cr_mask': result.get('cr_mask')
+                })
+
+        # Set placeholder cameras to zero (no real data)
+        for result in writable_results:
+            hdu_idx = result['hdu_index']
+            hdu_data = hdu[hdu_idx].data
+            if is_placeholder_camera(hdu_data):
+                result['extraction'].counts[:] = 0.0
+                logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
+
+        # Save cosmic ray masks if CR removal was enabled
+        if remove_cosmic_rays:
+            cr_masks = {}
+            for result in writable_results:
+                if result.get('cr_mask') is not None:
+                    cr_masks[result['hdu_index']] = result['cr_mask']
+            if cr_masks:
+                mask_dir = mask_output_dir if mask_output_dir else (output_dir or OUTPUT_DIR)
+                save_cosmic_ray_masks(cr_masks, primary_hdr, file, mask_dir)
+
+        # Build extraction list from writable results
+        extraction_list = [result['extraction'] for result in writable_results]
 
 
         print(f'Extraction list = {extraction_list}')
@@ -363,13 +689,30 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             obj, metadata = load_extractions(os.path.join(OUTPUT_DIR, extraction_file))
         print(f'obj = {obj}')
         outfile = basefile+'_whitelight.fits'
+        
+        if output_dir and os.path.exists(output_dir):
+            outfile = os.path.join(output_dir, outfile)
+        else:
+            outfile = os.path.join(OUTPUT_DIR, outfile)
+                
         white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
         print(f'white_light_file = {white_light_file}')
-    
+
+        # Summary statistics
+        if placeholder_indices:
+            real_count = len(hdu_trace_pairs) - len(placeholder_indices)
+            print(f"\n{'='*60}")
+            print(f"EXTRACTION SUMMARY")
+            print(f"{'='*60}")
+            print(f"Total extracted: {len(extraction_list)} spectra")
+            print(f"  Real camera data: {real_count} spectra (user traces)")
+            print(f"  Placeholder data: {len(placeholder_indices)} spectra (mastercalib traces)")
+            print(f"{'='*60}\n")
+
     except Exception as e:
         traceback.print_exc()
         return
-    
+
     end_time = time.perf_counter()  # End timer
     elapsed = end_time - start_time
     # Log or print out the elapsed time
@@ -384,7 +727,7 @@ def make_ifuimage(extraction_file, flat=False):
     print(f'white_light_file = {white_light_file}')
 
 
-def box_extract(file, flat=False):
+def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None):
     try:
     
         assert file.endswith('.fits'), 'File must be a .fits file'
@@ -395,9 +738,14 @@ def box_extract(file, flat=False):
             raise ValueError("No master calibration files found in CALIB_DIR")
         
         #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package
+        # Get absolute path to llamas_pyjamas package directory
         package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
         package_root = os.path.dirname(package_path)
+
+        # Clear stale Ray py_modules cache so updated source files are always re-bundled
+        import shutil as _shutil, glob as _glob2
+        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
+            _shutil.rmtree(_stale, ignore_errors=True)
 
         # Configure Ray runtime environment
         runtime_env = {
@@ -405,12 +753,14 @@ def box_extract(file, flat=False):
             "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
             "excludes": [
                 str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files anywhere
+                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
                 "**/*.pkl",                  # Exclude all pickle files anywhere
                 "**/.git/**",               # Exclude git directory
                 "**/*.zip/**",
                 "**/*.tar.gz/**",
                 "**/mastercalib*/**",
+                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
+                "**/testing/**",
             ]
         }
 
@@ -419,7 +769,7 @@ def box_extract(file, flat=False):
         ray.init(runtime_env=runtime_env)
 
         #opening the fitsfile
-        hdu = process_fits_by_color(file)
+        hdu, _ = process_fits_by_color(file)
 
         #Defining the base filename
         basefile = os.path.basename(file).split('.fits')[0]
@@ -440,35 +790,55 @@ def box_extract(file, flat=False):
 
         #Running the extract routine
         #This code should isolate to only the traces for the given fitsfile
-        
+
         print(f'trace_files = {trace_files}')
         extraction_list = []
+        original_file = file  # preserve before loop variable shadows it
         
         hdu_trace_pairs = match_hdu_to_traces(hdu, trace_files)
         #print(hdu_trace_pairs)
-        
+
+        cr_masks = {}
         #for file in trace_files:
         for hdu_index, file in hdu_trace_pairs:
             hdr = hdu[hdu_index].header
-            
+
             data = hdu[hdu_index].data.astype(float)
-            
+
             bias = np.nanmedian(data)
-            
+            bias_subtracted = data - bias
+
+            if remove_cosmic_rays:
+                color = hdr.get('COLOR', '').lower()
+                bench = hdr.get('BENCH', '')
+                side = hdr.get('SIDE', '')
+                bias_subtracted, cr_mask = clean_cosmic_rays(
+                    bias_subtracted, color=color, bench=bench, side=side
+                )
+                cr_masks[hdu_index] = cr_mask
+                hdr['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
+                hdr['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+
             #print(f'hdu_index {hdu_index}, file {file}, {hdr['CAM_NAME']}')
-            
+
             try:
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
-      
-                extraction = ExtractLlamas(tracer, data-bias, hdu[hdu_index].header, optimal=False)
+
+                extraction = ExtractLlamas(tracer, bias_subtracted, hdu[hdu_index].header, optimal=False)
                 extraction_list.append(extraction)
                 
             except Exception as e:
                 print(f"Error extracting trace from {file}")
                 print(traceback.format_exc())
         
-        print(f'Extraction list = {extraction_list}')        
+        # Save cosmic ray masks
+        if remove_cosmic_rays and cr_masks:
+            primary_hdr = hdu[0].header
+            mask_dir = mask_output_dir if mask_output_dir else OUTPUT_DIR
+            save_cosmic_ray_masks(cr_masks, primary_hdr, original_file, mask_dir)
+
+        print(f'Extraction list = {extraction_list}')
         filename = save_extractions(extraction_list)
         print(f'extraction saved filename = {filename}')
 

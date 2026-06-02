@@ -10,4 +10,3 @@ from .crr_weights import (
 )
 from .crr_parallel import parallel_cube_construction, setup_ray_cluster
 from .rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
-from llamas_pyjamas.Utils.utils import setup_logger

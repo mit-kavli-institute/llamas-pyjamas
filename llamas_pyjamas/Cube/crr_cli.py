@@ -35,7 +35,6 @@ from llamas_pyjamas.Cube.crr_cube_constructor import (
 )
 from llamas_pyjamas.Cube.crr_parallel import parallel_cube_construction
 from llamas_pyjamas.Cube.crr_weights import compute_shepard_weights
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -88,7 +87,7 @@ def load_rss_data(rss_file: str) -> RSSData:
     Returns:
         RSS data structure
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info(f"Loading RSS data from {rss_file}")
     
     with fits.open(rss_file) as hdul:
@@ -266,7 +265,7 @@ Examples:
         filename=args.log_file
     )
     
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info("Starting CRR cube construction")
     
     try:

@@ -10,9 +10,59 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
 **Users of this pipeline are requested to cite Hughes et al. (in prep)**.
 
+<details>
+<summary>Citation</summary>
+```bibtex
+@unpublished{Hughes2025,
+  author       = {Hughes, Sarah and others},
+  title        = {{The LLAMAS data reduction pipeline}},
+  note         = {in preparation},
+  year         = {2025}}
+```
+</details>
+
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
+<details>
+  <summary>Commissioning files</summary>
+  A different set of master traces and wavelength solutions are required to reduce the 2024 data due to changes made to the LLAMAS camera positions. They should be in the same locations of the repository described at the end of the README.
+  
+  The master traces required to run your framework are here: https://mit-kavli.box.com/s/sawx4silf56uh00fziilygx7uppaaqz0
+  
+  The wavelength solution required is here: https://mit-kavli.box.com/s/5d1eaz073ilrnwviaw9b2ufusgzqfqub
+  
+</details>
+
+
+
+**If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
+
+<details>
+<summary>Missing camera command line steps</summary>
+
+Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
+
+## Create a corrected copy
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits
+```
+
+## With verbose logging to see what's happening
+```bash
+python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits -v
+```
+
+## Direct module execution
+```bash
+# From the validate.py directory
+python validate.py original_science.fits -o science_fixed.fits -v
+```
+
+</details>
+
+
+
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
@@ -35,7 +85,7 @@ Run the command `pip install -e .` to begin the installation process. **Some add
 
 To run the current pipeline, two steps are required. First, **please download the mastercalib files from this location and have them in a folder named 'mastercalib' located within the llamas_pyjamas subfolder**: https://mit-kavli.box.com/s/bath5hhtjqsn3m89l7579u1ev4rk2xjo
 
-You will also need to download the combined_bias.fits file and keep a copy within both llamas_pyjamas and the Bias subfolder to run the Quicklook GUI.
+**You will also need to download the slow_master_bias.fits and fast_master_bias.fits files** and keep a copy **within the Bias subfolder** to run the pipeline. They can be downloaded here: https://mit-kavli.box.com/s/sn4b27et5i3xvys1nazy6alv4ijwep1a 
 
 Secondly, **download the wavelength solution file and place it in the LUT subfolder**, which can be downloaded from here: https://mit-kavli.box.com/s/v4kwlsx02nevnv5nw3p1i58lsxxoowe6
 
@@ -44,10 +94,10 @@ The final structure of your repo should look like this to run both the reduction
 ```
 llamas-pyjamas/
 └── llamas_pyjamas/
-    │   └── combined_bias.fits
     ├── Arc/
     ├── Bias/
-    │   └── combined_bias.fits
+    │   └── slow_master_bias.fits
+    │   └── fast_master_bias.fits
     ├── Cube/
     ├── Docs/
     ├── Extract/
@@ -59,7 +109,8 @@ llamas-pyjamas/
     ├── LUT/
     │   └── LLAMAS_reference_arc.pkl
     ├── mastercalib/
-    │   └── combined_bias.fits
+    │   └── slow_master_bias.fits
+    │   └── fast_master_bias.fits
     │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
@@ -82,6 +133,17 @@ To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Py
 
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
+### QuickLook GUI
+The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
+
+To run the QL GUI, execute the following commands from the terminal:
+
+```
+cd llamas-pyjamas/llamas_pyjamas/GUI/
+conda activate myenv
+ds9 &
+python obslog.py
+```
 
 ### QuickLook Demo files
 To test run the quick look pipeline on data, we have provided a standard star raw image, flat field images, and a bias image to create an extracted WhiteLight image. https://mit-kavli.box.com/s/k7s3bmwu98q3iljm4djpzidxj7qg26cl

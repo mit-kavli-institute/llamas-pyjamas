@@ -43,7 +43,6 @@ import multiprocessing
 import argparse
 import cloudpickle
 from scipy.signal import find_peaks
-from llamas_pyjamas.Utils.utils import setup_logger
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
@@ -52,13 +51,7 @@ import rpdb
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
-# Enable DEBUG for your specific logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-# Add timestamp to log filename
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-#logger = setup_logger(__name__, f'traceLlamasMulti_{timestamp}.log')
 
 LOG = []
 
@@ -407,10 +400,10 @@ class TraceLlamas:
                 if os.path.isfile(use_bias):
                     bias_file = use_bias
                 else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'combined_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
             else:
-                bias_file = os.path.join(BIAS_DIR, 'combined_bias.fits')
+                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
                 
             print(f'Bias file: {bias_file}')
             #### fix the directory here!
@@ -891,8 +884,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
     results = []    
     
     # with fits.open(fitsfile) as hdul:
-    hdul = process_fits_by_color(fitsfile)
-    
+    hdul, _ = process_fits_by_color(fitsfile)
+    if hdul is None:
+        raise ValueError(f"Failed to process FITS file: {fitsfile}")
+
     if channel is not None and 'COLOR' in hdul[1].header:
         hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data.astype(float) is not None and hdu.header['COLOR'].lower() == channel.lower()]
     elif channel is not None and 'CAM_NAME' in hdul[1].header:
@@ -961,8 +956,10 @@ if __name__ == "__main__":
     fitsfile = args.filename
 
     # with fits.open(fitsfile) as hdul:
-    hdul = process_fits_by_color(fitsfile)
-    
+    hdul, _ = process_fits_by_color(fitsfile)
+    if hdul is None:
+        raise ValueError(f"Failed to process FITS file: {fitsfile}")
+
     if args.channel is not None and 'COLOR' in hdul[1].header:
         hdus = [(hdu.data.astype(float), dict(hdu.header)) for hdu in hdul if hdu.data is not None and hdu.header['COLOR'].lower() == args.channel.lower()]
     elif args.channel is not None and 'CAM_NAME' in hdul[1].header:

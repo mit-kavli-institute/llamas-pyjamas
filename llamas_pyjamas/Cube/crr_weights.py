@@ -31,7 +31,6 @@ from scipy.sparse import csr_matrix, diags
 from scipy.spatial.distance import cdist
 import warnings
 
-from llamas_pyjamas.Utils.utils import setup_logger
 
 
 def build_variance_matrix(mask: np.ndarray, ivar: np.ndarray) -> np.ndarray:
@@ -84,7 +83,7 @@ def regularized_svd_inverse(A: np.ndarray,
     Returns:
         Tuple of (regularized_inverse, svd_info_dict)
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     
     # Perform SVD decomposition: A = U S V^T
     U, S, Vt = svd(A, full_matrices=False)
@@ -140,7 +139,7 @@ def flux_conservation_matrix(Q: np.ndarray,
     Returns:
         Flux conservation matrix R shape (n_pixels, n_fibers)
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     
     # Calculate row sums for normalization
     row_sums = np.sum(Q, axis=1)
@@ -198,7 +197,7 @@ def compute_crr_weights(A_matrix: np.ndarray,
     Returns:
         Tuple of (weight_matrix, covariance_matrix, reconstruction_info)
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     logger.info("Computing CRR reconstruction weights")
     
     n_pixels, n_fibers = A_matrix.shape
@@ -281,7 +280,7 @@ def compute_shepard_weights(fiber_positions: np.ndarray,
     Returns:
         Shepard weight matrix shape (n_pixels, n_fibers)
     """
-    logger = setup_logger(__name__)
+    logger = logging.getLogger(__name__)
     
     n_x, n_y = len(output_grid_x), len(output_grid_y)
     n_pixels = n_x * n_y

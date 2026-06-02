@@ -5,6 +5,8 @@ BLUE_IDXS = [3, 6, 9, 12, 15, 18, 21, 24]
 
 N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
 
+N_det = 24
+
 idx_lookup = {
     ("red", "1", "A"): 1,
     ("green", "1", "A"): 2,
@@ -59,3 +61,31 @@ gain_noise_lookup ={
     ("green", "4", "B"): {'noise': 2.4, 'gain': 1.25},
     ("blue", "4", "B"): {'noise': 2.4, 'gain': 1.25}
 }
+
+#old version-- kkeping for now to check more conservative values
+# LACOSMIC_DEFAULTS = {
+#     'contrast': 5.0,
+#     'cr_threshold': 4.5,
+#     'neighbor_threshold': 0.3,
+#     'effective_gain': 1.25,
+#     'readnoise': 6.9,
+# }
+
+LACOSMIC_DEFAULTS = {
+    'contrast': 5.0,
+    'cr_threshold': 6.5,
+    'neighbor_threshold': 0.7,
+    'effective_gain': 1.25,
+    'readnoise': 6.9,
+    'maxiter': 2
+}
+
+# Per-color overrides (merged on top of LACOSMIC_DEFAULTS)
+LACOSMIC_COLOR_OVERRIDES = {
+    'red': {
+        'cr_threshold': 10.0,
+        'contrast': 9.0,
+        'skip': True,  # disable CR cleaning for red until tuning is finalised
+    },
+}
+
