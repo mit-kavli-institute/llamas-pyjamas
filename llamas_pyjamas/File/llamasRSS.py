@@ -1,3 +1,10 @@
+"""Row-Stacked Spectra (RSS) generation for the LLAMAS pipeline.
+
+Provides the :class:`RSSgeneration` class, which converts pickled extraction
+products into multi-extension RSS FITS files (flux, error, mask, wavelength,
+FWHM, and fibermap extensions) suitable for downstream cube construction.
+"""
+
 import cloudpickle as pickle
 import os
 from astropy.io import fits
@@ -10,6 +17,18 @@ from datetime import datetime
 
 
 class RSSgeneration:
+    """Generate Row-Stacked Spectra (RSS) FITS files from extraction products.
+
+    Reads pickled extraction objects, groups them by channel, and writes
+    multi-extension RSS FITS files containing the per-fiber flux, error, mask,
+    wavelength, FWHM, and fibermap data.
+
+    Attributes:
+        logger (logging.Logger): Logger used for progress and diagnostic output.
+        new_rss_filenames (list): Paths of RSS FITS files written by
+            :meth:`generate_rss`.
+    """
+
     def __init__(self, logger=None):
         """
         Initialize the RSSgeneration class.

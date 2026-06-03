@@ -246,6 +246,24 @@ def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
 
 
 class TraceLlamas:
+    """Trace and profile-fit fiber positions from LLAMAS FITS detector frames.
+
+    Detects fiber peaks across the detector, accounts for known dead fibers via
+    a lookup table (LUT), fits B-spline traces to the fiber centroids, and
+    builds the fiber/profile images used downstream for spectral extraction.
+    Instances are picklable; attributes listed in ``_EXCLUDED_FROM_PICKLE`` are
+    dropped during serialization.
+
+    Attributes:
+        fitsfile (str): The path to the FITS file being traced.
+        mph (Optional[int]): Minimum peak height for peak detection.
+        xmin (int): Minimum x-coordinate for trace fitting (200).
+        fitspace (int): Column spacing used when fitting the trace grid (10).
+        min_pkheight (int): Minimum peak height threshold for detection (500).
+        window (int): Window size for the running median calculation (12).
+        LUT (dict): Trace lookup table loaded from ``traceLUT.json``.
+        dead_fibres (dict): Per-benchside dead-fiber information from the LUT.
+    """
 
     _EXCLUDED_FROM_PICKLE = ['hdr', 'dead_fibres', 'LUT', 'mph', 'first_peaks', 'first_pkht', 'xmax', 'xmin', 'benchside', 'peak_properties']
 
@@ -286,7 +304,20 @@ class TraceLlamas:
                  mph: Optional[int] = None,
                  master_trace: Optional[str] = None
                  ):
-        
+        """Initialize a TraceLlamas instance and load the trace lookup table.
+
+        Sets default tracing parameters and loads ``traceLUT.json`` from the
+        LUT directory, storing it on ``self.LUT`` and extracting the dead-fiber
+        map into ``self.dead_fibres``.
+
+        Args:
+            fitsfile (str): Path to the FITS file to be traced.
+            mph (Optional[int]): Minimum peak height for peak detection.
+                Defaults to None.
+            master_trace (Optional[str]): Path to a master trace file.
+                Defaults to None.
+        """
+
         self.fitsfile = fitsfile
         self.mph = mph
         self.xmin     = 200
@@ -855,8 +886,25 @@ class TraceLlamas:
         return (fiberimg, profimg, bpmask)
     
     def saveTraces(self, outfile='LLAMASTrace.pkl', newpath=None)-> None:
-        
-        
+        """Serialize the trace object to a pickle or HDF5 file.
+
+        If ``outfile`` ends in ``.pkl`` the full TraceLlamas instance is
+        cloudpickled. If it ends in ``.h5`` the trace data arrays and selected
+        attributes are written to an HDF5 file. When ``newpath`` is given the
+        file is written there (creating the directory); otherwise it is written
+        to the package ``CALIB_DIR``.
+
+        Args:
+            outfile (str): Output filename; the extension (``.pkl`` or ``.h5``)
+                selects the output format. Defaults to ``'LLAMASTrace.pkl'``.
+            newpath (str, optional): Target directory for the output file. If
+                None, the package calibration directory is used.
+
+        Returns:
+            None
+        """
+
+
         if newpath:
             print(f'Making directory newpath: {newpath}')   
             path = os.path.dirname(newpath)
@@ -902,6 +950,14 @@ class TraceRay(TraceLlamas):
 
     
     def __init__(self, fitsfile: str) -> None:
+        """Initialize a TraceRay actor by delegating to TraceLlamas.
+
+        Calls the parent ``TraceLlamas.__init__`` and then stores only the
+        basename of the FITS file on ``self.fitsfile``.
+
+        Args:
+            fitsfile (str): Path to the FITS file to be traced.
+        """
         super().__init__(fitsfile)
         self.fitsfile = os.path.basename(fitsfile)
         print(f'fitsfile: {self.fitsfile}')
@@ -909,6 +965,28 @@ class TraceRay(TraceLlamas):
     
     
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None, is_master_calib: bool = True) -> dict:
+        """Process a single HDU, fit fiber profiles, and save the traces.
+
+        Runs the parent ``process_hdu_data`` to trace fibers (returning early if
+        that fails), performs the profile fit to build the fiber, profile, and
+        bad-pixel-mask images, then saves the resulting traces to a pickle whose
+        name encodes the channel, bench, and side. The filename is prefixed with
+        ``LLAMAS_master_`` for master calibration and ``LLAMAS_`` otherwise.
+
+        Args:
+            hdu_data (np.ndarray): The 2D image data for the HDU to process.
+            hdu_header (dict): The FITS header for the HDU.
+            outpath (str, optional): Directory to write the trace file to. If
+                None, the default calibration directory is used.
+            use_bias (str, optional): Path to a master bias to subtract before
+                tracing.
+            is_master_calib (bool): Whether this is master calibration, which
+                controls the output filename prefix. Defaults to True.
+
+        Returns:
+            dict: The result dictionary from the parent ``process_hdu_data``;
+            returned early (unchanged) if its ``status`` is not ``"success"``.
+        """
         start_time = time.time()
         
         result = super().process_hdu_data(hdu_data, hdu_header, use_bias=use_bias)

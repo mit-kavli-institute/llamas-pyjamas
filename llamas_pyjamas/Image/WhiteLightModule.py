@@ -338,6 +338,19 @@ def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np
 
         
 def WhiteLightHex(extraction_array, ds9plot=True):
+    """Placeholder for hexagonal-grid white-light image construction.
+
+    Intended to build a white-light image sampled onto the hexagonal IFU fiber
+    grid. Currently a stub that performs no work.
+
+    Args:
+        extraction_array: Collection of fiber extraction objects to combine.
+        ds9plot (bool, optional): Whether to display the result in DS9.
+            Defaults to True.
+
+    Returns:
+        None
+    """
     pass
 
     ## placeholder for eventual hexagonal grid inclusion
@@ -499,7 +512,19 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
     return(x_final, y_final)
 
 def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
+    """Look up the spatial (x, y) position of a fiber from the fiber-map table.
 
+    Queries the module-level ``fibermap_lut`` table for the row matching the
+    given bench and fiber number and returns its stored position.
+
+    Args:
+        bench (str): Bench-side identifier (e.g. '1A', '2B').
+        fiber (int): Fiber number within the bench-side.
+
+    Returns:
+        tuple: ``(xpos, ypos)`` position of the fiber, or ``(-1, -1)`` if no
+            matching entry is found.
+    """
     #if (np.logical_and(bench == '2B',fiber >= 49)):
     #    fiber += 1
     
@@ -724,25 +749,18 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     """
     Generate a white light image by directly summing unmasked fiber values without extraction.
     
-    Parameters:
-    -----------
-    trace_list : list
-        A list of TraceLlamas objects containing the fiber trace information.
-    data_list : list
-        A list of data arrays corresponding to each trace object.
-    metadata : list, optional
-        Optional metadata for each trace/data pair.
-    ds9plot : bool, optional
-        If True, display the resulting white light image using DS9. Default is False.
-    
+    Args:
+        trace_list (list): A list of TraceLlamas objects containing the fiber trace information.
+        data_list (list): A list of data arrays corresponding to each trace object.
+        metadata (list, optional): Optional metadata for each trace/data pair.
+        ds9plot (bool, optional): If True, display the resulting white light image using DS9. Default is False.
+
     Returns:
-    --------
-    tuple
-        A tuple containing:
-        - whitelight (numpy.ndarray): The interpolated white light image.
-        - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
-        - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
-        - flux (numpy.ndarray): The flux values for each fiber.
+        tuple: A tuple containing:
+            - whitelight (numpy.ndarray): The interpolated white light image.
+            - xdata (numpy.ndarray): The x-coordinates of the fiber positions.
+            - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
+            - flux (numpy.ndarray): The flux values for each fiber.
     """
 
     xdata = np.array([])
@@ -1088,37 +1106,22 @@ def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None,
     Create a hexagonal grid white light image without interpolation between fibers.
     Each fiber is represented as a discrete hexagon with its measured value.
     
-    Parameters
-    ----------
-    extraction_list : list
-        List of ExtractLlamas objects
-    metadata : list, optional
-        Metadata for each extraction object, by default None
-    ds9plot : bool, optional
-        If True, display the image with DS9, by default False
-    median : bool, optional
-        If True, use median instead of mean for combining extractions, by default False
-    mask : ndarray, optional
-        Mask to apply to the data, by default None
-    zscale : bool, optional
-        If True, use zscale for display, by default True
-    scale_min : float, optional
-        Minimum value for display scaling, by default None
-    scale_max : float, optional
-        Maximum value for display scaling, by default None
-    colorbar : bool, optional
-        If True, display colorbar, by default True
-    colormap : str, optional
-        Colormap to use, by default 'viridis'
-    fig : matplotlib.figure.Figure, optional
-        Figure to plot on, by default None
-    ax : matplotlib.axes.Axes, optional
-        Axes to plot on, by default None
-        
-    Returns
-    -------
-    ndarray
-        2D hexagonal grid image
+    Args:
+        extraction_list (list): List of ExtractLlamas objects
+        metadata (list, optional): Metadata for each extraction object, by default None
+        ds9plot (bool, optional): If True, display the image with DS9, by default False
+        median (bool, optional): If True, use median instead of mean for combining extractions, by default False
+        mask (ndarray, optional): Mask to apply to the data, by default None
+        zscale (bool, optional): If True, use zscale for display, by default True
+        scale_min (float, optional): Minimum value for display scaling, by default None
+        scale_max (float, optional): Maximum value for display scaling, by default None
+        colorbar (bool, optional): If True, display colorbar, by default True
+        colormap (str, optional): Colormap to use, by default 'viridis'
+        fig (matplotlib.figure.Figure, optional): Figure to plot on, by default None
+        ax (matplotlib.axes.Axes, optional): Axes to plot on, by default None
+
+    Returns:
+        ndarray: 2D hexagonal grid image
     """
 
 

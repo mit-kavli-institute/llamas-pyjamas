@@ -56,6 +56,12 @@ autodoc_mock_imports = [
     'pyds9',
     'PyQt6',
     'lacosmic',
+    'sklearn',
+    'rpdb',
+    # pkg_resources was removed from setuptools >= 80; the package only uses it
+    # inside functions (resource_filename), never at import time, so mocking it
+    # is safe and avoids pinning a legacy setuptools in the docs build.
+    'pkg_resources',
 ]
 
 # -- Napoleon (Google-style docstrings) --------------------------------------

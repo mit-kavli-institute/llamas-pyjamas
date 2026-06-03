@@ -94,20 +94,14 @@ def build_interfibre_mask(tracer,
     The result is cached in ``_MASK_CACHE`` keyed on ``(id(tracer), image_type)``
     to avoid recomputing for repeated calls with the same tracer.
 
-    Parameters
-    ----------
-    tracer : TraceLlamas or None
-        A loaded TraceLlamas object with a ``fiberimg`` attribute.
-        If None or lacking ``fiberimg``, falls back to a rows 30-50 mask.
-    image_shape : (int, int)
-        (n_rows, n_cols) of the detector image, used for the fallback mask.
-    image_type : str
-        One of 'science', 'dome_flat', 'lamp_flat', 'trace_flat'.
+    Args:
+        tracer (TraceLlamas or None): A loaded TraceLlamas object with a ``fiberimg`` attribute.
+            If None or lacking ``fiberimg``, falls back to a rows 30-50 mask.
+        image_shape ((int, int)): (n_rows, n_cols) of the detector image, used for the fallback mask.
+        image_type (str): One of 'science', 'dome_flat', 'lamp_flat', 'trace_flat'.
 
-    Returns
-    -------
-    numpy.ndarray
-        Boolean array of shape ``image_shape`` where True = inter-fibre gap.
+    Returns:
+        numpy.ndarray: Boolean array of shape ``image_shape`` where True = inter-fibre gap.
     """
     # Fallback: no tracer or no fiberimg
     if tracer is None or not hasattr(tracer, 'fiberimg') or tracer.fiberimg is None:
@@ -161,24 +155,16 @@ def _check_single_detector(frame_ext_data: np.ndarray,
     """
     Compute bias residual statistics for a single detector extension.
 
-    Parameters
-    ----------
-    frame_ext_data : numpy.ndarray
-        Raw 2-D science or flat frame data for this detector.
-    bias_ext_data : numpy.ndarray
-        Bias frame data for this detector (same shape).
-    tracer : TraceLlamas or None
-        Loaded trace object for this detector (provides fiberimg).
-    image_type : str
-        Frame type string (e.g. 'science', 'dome_flat').
-    bench, side, color : str
-        Camera identifiers for this detector.
-    thresholds : BiasCheckThresholds, optional
-        Pass/fail thresholds. Uses defaults if None.
+    Args:
+        frame_ext_data (numpy.ndarray): Raw 2-D science or flat frame data for this detector.
+        bias_ext_data (numpy.ndarray): Bias frame data for this detector (same shape).
+        tracer (TraceLlamas or None): Loaded trace object for this detector (provides fiberimg).
+        image_type (str): Frame type string (e.g. 'science', 'dome_flat').
+        bench, side, color (str): Camera identifiers for this detector.
+        thresholds (BiasCheckThresholds, optional): Pass/fail thresholds. Uses defaults if None.
 
-    Returns
-    -------
-    DetectorBiasStats
+    Returns:
+        DetectorBiasStats
     """
     if thresholds is None:
         thresholds = BiasCheckThresholds()

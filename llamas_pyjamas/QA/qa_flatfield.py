@@ -1,3 +1,10 @@
+"""Flat-field quality-assurance diagnostics for the LLAMAS pipeline.
+
+This module provides QA metrics for evaluating flat-fielded data, such as
+assessing the residual uniformity of flat-fielded Row-Stacked Spectra (RSS)
+to verify that the flat-field correction has produced a sufficiently uniform
+response across fibres and wavelengths.
+"""
 import numpy as np
 from scipy import ndimage, stats
 from sklearn.decomposition import PCA

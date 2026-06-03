@@ -39,11 +39,9 @@ MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # fibre absent from FiberMap_LUT; grad
 def _load_smooth_models(smooth_models_file):
     """Load the smooth models FITS into a dict keyed by extension name.
 
-    Returns
-    -------
-    models : dict
-        ``{ext_name: {'fiber_ids': array, 'smooth': 2D, 'wave': 2D,
-        'channel': str, 'bench': str, 'side': str}}``
+    Returns:
+        models (dict): ``{ext_name: {'fiber_ids': array, 'smooth': 2D, 'wave': 2D,
+            'channel': str, 'bench': str, 'side': str}}``
     """
     models = {}
     with fits.open(smooth_models_file) as hdul:
@@ -69,19 +67,14 @@ def _compute_benchside_reference(smooth_arr, wave_arr):
     per-wavelength median, then returns both the common grid and the
     reference spectrum.
 
-    Parameters
-    ----------
-    smooth_arr : ndarray, shape (n_fibres, n_pix)
-        Smooth model per fibre.
-    wave_arr : ndarray, shape (n_fibres, n_pix)
-        Wavelength grid per fibre.
+    Args:
+        smooth_arr (ndarray, shape (n_fibres, n_pix)): Smooth model per fibre.
+        wave_arr (ndarray, shape (n_fibres, n_pix)): Wavelength grid per fibre.
 
-    Returns
-    -------
-    common_wave : ndarray, shape (n_common,)
-        Common wavelength grid.
-    reference : ndarray, shape (n_common,)
-        Median reference spectrum on the common grid.
+    Returns:
+        common_wave (ndarray, shape (n_common,)): Common wavelength grid.
+        reference (ndarray, shape (n_common,)): Median reference spectrum on the
+            common grid.
     """
     # Determine common grid from the union of all fibre wavelength ranges
     valid_waves = wave_arr[np.isfinite(wave_arr) & (wave_arr > 0)]
@@ -128,18 +121,13 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None)
     For each benchside, writes a BinTableHDU with FIBER_ID, CORRECTION,
     and WAVE columns, followed by an ImageHDU with the reference spectrum.
 
-    Parameters
-    ----------
-    corrections : dict
-        ``{ext_name: {'fiber_ids': array, 'correction': 2D, 'wave': 2D,
-        'channel': str, 'bench': str, 'side': str, 'n_ref': int,
-        'common_wave': 1D, 'reference': 1D}}``
-    output_path : str
-        Output FITS path.
-    method : str
-        'twilight' or 'lamp_only'.
-    header_extra : dict, optional
-        Extra keywords for the primary header.
+    Args:
+        corrections (dict): ``{ext_name: {'fiber_ids': array, 'correction': 2D,
+            'wave': 2D, 'channel': str, 'bench': str, 'side': str, 'n_ref': int,
+            'common_wave': 1D, 'reference': 1D}}``
+        output_path (str): Output FITS path.
+        method (str): 'twilight' or 'lamp_only'.
+        header_extra (dict, optional): Extra keywords for the primary header.
     """
     primary = fits.PrimaryHDU()
     primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
@@ -211,17 +199,12 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
     For each benchside, computes the per-benchside median reference
     ``S̄_bs(λ)`` and forms ``C_i(λ) = smooth_i(λ) / S̄_bs(λ)``.
 
-    Parameters
-    ----------
-    smooth_models_file : str
-        Path to ``flat_smooth_models.fits``.
-    output_dir : str
-        Directory for the output corrections file.
+    Args:
+        smooth_models_file (str): Path to ``flat_smooth_models.fits``.
+        output_dir (str): Directory for the output corrections file.
 
-    Returns
-    -------
-    corrections_file : str
-        Path to ``fibre_flat_corrections.fits``.
+    Returns:
+        corrections_file (str): Path to ``fibre_flat_corrections.fits``.
     """
     logger.warning(
         "No twilight flat provided. Falling back to lamp-only fibre-to-fibre "
@@ -322,28 +305,18 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
 
     Reuses existing pipeline infrastructure for each step.
 
-    Parameters
-    ----------
-    twilight_file : str
-        Path to raw twilight flat FITS (MEF).
-    p2p_map_file : str
-        Path to pixel-to-pixel flat map (``pixel_maps.fits``).
-    trace_dir : str
-        Directory containing trace pickle files.
-    arc_soln : object or None
-        Arc solution dict, or None to use reference arc.
-    slow_bias : str or None
-        Path to SLOW-mode master bias FITS file.
-    output_dir : str
-        Output directory for intermediates.
-    fast_bias : str or None
-        Path to FAST-mode master bias FITS file.
+    Args:
+        twilight_file (str): Path to raw twilight flat FITS (MEF).
+        p2p_map_file (str): Path to pixel-to-pixel flat map (``pixel_maps.fits``).
+        trace_dir (str): Directory containing trace pickle files.
+        arc_soln (object or None): Arc solution dict, or None to use reference arc.
+        slow_bias (str or None): Path to SLOW-mode master bias FITS file.
+        output_dir (str): Output directory for intermediates.
+        fast_bias (str or None): Path to FAST-mode master bias FITS file.
 
-    Returns
-    -------
-    extraction_dict : dict
-        Calibrated extraction dict with keys ``'extractions'``,
-        ``'metadata'``, ``'primary_header'``.
+    Returns:
+        extraction_dict (dict): Calibrated extraction dict with keys
+            ``'extractions'``, ``'metadata'``, ``'primary_header'``.
     """
     from llamas_pyjamas.reduce import (apply_flat_field_correction,
                                        run_extraction, correct_wavelengths)
@@ -394,34 +367,27 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     low-order polynomial surface, and divides by the model so that only
     true fibre-to-fibre throughput variations remain.
 
-    Parameters
-    ----------
-    integrals_dict : dict
-        ``{(benchside_str, fiber_id): raw_integral}`` — all fibres across
-        all benchsides for one colour channel.
-    channel : str
-        Channel name (for logging).
-    poly_order : int, dict, or None, optional
-        Polynomial order for the 2D surface fit.
+    Args:
+        integrals_dict (dict): ``{(benchside_str, fiber_id): raw_integral}`` —
+            all fibres across all benchsides for one colour channel.
+        channel (str): Channel name (for logging).
+        poly_order (int, dict, or None, optional): Polynomial order for the 2D
+            surface fit.
 
-        * ``None``  → use channel-specific defaults (blue=4, green=3, red=2).
-        * ``int``   → use that order for every channel.
-        * ``dict``  → ``{'blue': N, 'green': M, 'red': P}``; falls back to 2
-          if the channel is absent.
+            * ``None``  → use channel-specific defaults (blue=4, green=3, red=2).
+            * ``int``   → use that order for every channel.
+            * ``dict``  → ``{'blue': N, 'green': M, 'red': P}``; falls back to 2
+              if the channel is absent.
 
-        If >2 benchsides are missing twilight data, the order is automatically
-        reduced to 1 (a simple tilt) to avoid oscillation in the spatial gaps.
+            If >2 benchsides are missing twilight data, the order is automatically
+            reduced to 1 (a simple tilt) to avoid oscillation in the spatial gaps.
 
-    Returns
-    -------
-    corrected : dict
-        Same structure as *integrals_dict* with gradient removed.
-    diagnostics : dict or None
-        Diagnostic data for saving/plotting, or None if gradient
-        removal was skipped.
-    unmapped_keys : set
-        Set of ``(benchside_str, fiber_id)`` keys that were absent from
-        FiberMap_LUT and had the benchside-median correction applied.
+    Returns:
+        corrected (dict): Same structure as *integrals_dict* with gradient removed.
+        diagnostics (dict or None): Diagnostic data for saving/plotting, or None
+            if gradient removal was skipped.
+        unmapped_keys (set): Set of ``(benchside_str, fiber_id)`` keys that were
+            absent from FiberMap_LUT and had the benchside-median correction applied.
     """
     # ── Resolve polynomial order ──
     if poly_order is None:
@@ -664,12 +630,10 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
 def _save_gradient_model(gradient_diagnostics, output_dir):
     """Save the twilight gradient model to a multi-extension FITS file.
 
-    Parameters
-    ----------
-    gradient_diagnostics : dict
-        ``{channel: diagnostics_dict}`` from ``_remove_twilight_gradient()``.
-    output_dir : str
-        Directory for the output file.
+    Args:
+        gradient_diagnostics (dict): ``{channel: diagnostics_dict}`` from
+            ``_remove_twilight_gradient()``.
+        output_dir (str): Directory for the output file.
     """
     output_path = os.path.join(output_dir, 'twilight_gradient_model.fits')
 
@@ -752,18 +716,13 @@ def _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
     3. Corrected integrals
     4. T_i per fibre
 
-    Parameters
-    ----------
-    gradient_diagnostics : dict
-        ``{channel: diagnostics_dict}`` from ``_remove_twilight_gradient()``.
-    t_i_all : dict
-        ``{ext_name: {fid: t_i_value}}`` from Pass 2.
-    models : dict
-        Smooth models dict (for fiber_ids and bench/side metadata).
-    channel_groups : dict
-        ``{channel: [ext_name, ...]}``
-    output_dir : str
-        Directory for the output plot.
+    Args:
+        gradient_diagnostics (dict): ``{channel: diagnostics_dict}`` from
+            ``_remove_twilight_gradient()``.
+        t_i_all (dict): ``{ext_name: {fid: t_i_value}}`` from Pass 2.
+        models (dict): Smooth models dict (for fiber_ids and bench/side metadata).
+        channel_groups (dict): ``{channel: [ext_name, ...]}``
+        output_dir (str): Directory for the output plot.
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -920,18 +879,14 @@ def _compute_lamp_benchside_offsets(models):
     The lamp already encodes the inter-bench throughput ratio in the relative
     levels of each benchside's median reference spectrum ``S̄_bs``.
 
-    Parameters
-    ----------
-    models : dict
-        ``{ext_name: data}`` as returned by ``_load_smooth_models``.
+    Args:
+        models (dict): ``{ext_name: data}`` as returned by ``_load_smooth_models``.
 
-    Returns
-    -------
-    dict
-        ``{ext_name: offset_scalar}`` where *offset_scalar* is the scalar
-        ratio ``median(S̄_bs) / median(channel_S̄)`` — values above 1.0 mean
-        brighter-than-average bench, below 1.0 means dimmer.  Benchsides
-        that cannot be computed default to 1.0.
+    Returns:
+        dict: ``{ext_name: offset_scalar}`` where *offset_scalar* is the scalar
+            ratio ``median(S̄_bs) / median(channel_S̄)`` — values above 1.0 mean
+            brighter-than-average bench, below 1.0 means dimmer.  Benchsides
+            that cannot be computed default to 1.0.
     """
     # Group by channel
     channel_groups = {}
@@ -1009,22 +964,17 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
        normalised to mean 1.0.
     3. Combine: ``C_i(λ) = T_i × W_i(λ)``.
 
-    Parameters
-    ----------
-    twilight_extractions : dict
-        Calibrated twilight extractions (from ``reduce_twilight_flat``).
-    smooth_models_file : str
-        Path to ``flat_smooth_models.fits``.
-    output_dir : str
-        Directory for the output corrections file.
-    integration_range : dict, optional
-        Per-channel wavelength ranges for T_i integration:
-        ``{'red': (w_min, w_max), ...}``.  Defaults to central 80%.
+    Args:
+        twilight_extractions (dict): Calibrated twilight extractions (from
+            ``reduce_twilight_flat``).
+        smooth_models_file (str): Path to ``flat_smooth_models.fits``.
+        output_dir (str): Directory for the output corrections file.
+        integration_range (dict, optional): Per-channel wavelength ranges for
+            T_i integration: ``{'red': (w_min, w_max), ...}``.  Defaults to
+            central 80%.
 
-    Returns
-    -------
-    corrections_file : str
-        Path to ``fibre_flat_corrections.fits``.
+    Returns:
+        corrections_file (str): Path to ``fibre_flat_corrections.fits``.
     """
     logger.info("Computing fibre flat: Twilight + Lamp method")
 
@@ -1367,19 +1317,14 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
     Divides FLUX and ERROR by the correction factor ``C_i(λ)`` for each
     fibre, producing a new RSS file with ``_FF.fits`` suffix.
 
-    Parameters
-    ----------
-    rss_file : str
-        Path to input science RSS FITS file.
-    corrections_file : str
-        Path to ``fibre_flat_corrections.fits``.
-    output_file : str, optional
-        Output path.  Defaults to replacing ``.fits`` with ``_FF.fits``.
+    Args:
+        rss_file (str): Path to input science RSS FITS file.
+        corrections_file (str): Path to ``fibre_flat_corrections.fits``.
+        output_file (str, optional): Output path.  Defaults to replacing
+            ``.fits`` with ``_FF.fits``.
 
-    Returns
-    -------
-    output_file : str
-        Path to the corrected RSS file.
+    Returns:
+        output_file (str): Path to the corrected RSS file.
     """
     if output_file is None:
         base, ext = os.path.splitext(rss_file)
@@ -1567,10 +1512,8 @@ def _cross_bench_diagnostic(channel_refs):
     Logs RMS deviation between each benchside's reference and the
     channel-wide median.  Warns if any benchside deviates by > 5%.
 
-    Parameters
-    ----------
-    channel_refs : dict
-        ``{channel: [(ext_name, common_wave, reference), ...]}``
+    Args:
+        channel_refs (dict): ``{channel: [(ext_name, common_wave, reference), ...]}``
     """
     for channel, ref_list in channel_refs.items():
         if len(ref_list) < 2:

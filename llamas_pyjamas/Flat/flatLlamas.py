@@ -1,3 +1,10 @@
+"""Flat-field processing for the LLAMAS pipeline.
+
+Provides routines for combining flat extractions, applying flat-field
+corrections to science frames, and computing per-pixel thresholds via the
+:class:`Thresholding` class operating on combined flat extraction products.
+"""
+
 import os
 from collections import Counter
 import logging
@@ -206,35 +213,31 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
     pixel-to-pixel sensitivity variations.  The 1D correction is projected
     back onto the 2D detector footprint via the trace fiberimg.
 
-    Parameters
-    ----------
-    extraction_obj : ExtractLlamas
-        Extraction object for this extension.  Must have ``.trace`` with
-        ``.fiberimg``, ``.nfibers``, ``.naxis1``, ``.naxis2``, and
-        ``.counts`` and ``.xshift`` arrays (populated by arc transfer).
-    channel : str, optional
-        Color channel ('red', 'green', 'blue').  Used to select default
-        ``signal_threshold`` when not explicitly provided.
-    filter_size : int
-        Median filter kernel size (pixels) for lamp-envelope smoothing.
-    signal_threshold : float, optional
-        Minimum smooth-model ADU to apply correction.  Pixels below this
-        are set to 1.0 (no correction).  If ``None``, uses
-        ``CHANNEL_SIGNAL_THRESHOLDS`` based on *channel*.
-    clip_range : tuple of float
-        (min, max) clipping range for the output sensitivity map.
-    return_smooth_models : bool
-        If True, also return the smooth lamp-envelope models per fibre
-        (keyed by array index) for use in fibre-to-fibre flat fielding.
+    Args:
+        extraction_obj (ExtractLlamas): Extraction object for this extension.
+            Must have ``.trace`` with ``.fiberimg``, ``.nfibers``, ``.naxis1``,
+            ``.naxis2``, and ``.counts`` and ``.xshift`` arrays (populated by
+            arc transfer).
+        channel (str, optional): Color channel ('red', 'green', 'blue').  Used to
+            select default ``signal_threshold`` when not explicitly provided.
+        filter_size (int): Median filter kernel size (pixels) for lamp-envelope
+            smoothing.
+        signal_threshold (float, optional): Minimum smooth-model ADU to apply
+            correction.  Pixels below this are set to 1.0 (no correction).  If
+            ``None``, uses ``CHANNEL_SIGNAL_THRESHOLDS`` based on *channel*.
+        clip_range (tuple of float): (min, max) clipping range for the output
+            sensitivity map.
+        return_smooth_models (bool): If True, also return the smooth lamp-envelope
+            models per fibre (keyed by array index) for use in fibre-to-fibre
+            flat fielding.
 
-    Returns
-    -------
-    sensitivity_map : ndarray, shape (naxis2, naxis1)
-        2D pixel sensitivity map clipped to *clip_range*.
-    smooth_models : dict, optional
-        Only returned when ``return_smooth_models=True``.  Dictionary
-        ``{fib_idx: smooth_1d_array}`` containing the smooth lamp-envelope
-        model for each fibre.
+    Returns:
+        sensitivity_map (ndarray, shape (naxis2, naxis1)): 2D pixel sensitivity
+            map clipped to *clip_range*.
+        smooth_models (dict, optional): Only returned when
+            ``return_smooth_models=True``.  Dictionary
+            ``{fib_idx: smooth_1d_array}`` containing the smooth lamp-envelope
+            model for each fibre.
     """
     trace_obj = extraction_obj.trace
     naxis1, naxis2 = trace_obj.naxis1, trace_obj.naxis2
@@ -339,21 +342,14 @@ def _parse_extension_name(ext_name):
 def _find_matching_trace(trace_files, channel, bench, side):
     """Find the trace file matching a given channel/bench/side combination.
 
-    Parameters
-    ----------
-    trace_files : list of str
-        Paths to available trace pickle files.
-    channel : str
-        Color channel (e.g. 'red', 'green', 'blue').
-    bench : str
-        Bench number (e.g. '1', '2', '3', '4').
-    side : str
-        Side identifier (e.g. 'A', 'B').
+    Args:
+        trace_files (list of str): Paths to available trace pickle files.
+        channel (str): Color channel (e.g. 'red', 'green', 'blue').
+        bench (str): Bench number (e.g. '1', '2', '3', '4').
+        side (str): Side identifier (e.g. 'A', 'B').
 
-    Returns
-    -------
-    str or None
-        Path to matching trace file, or None if not found.
+    Returns:
+        str or None: Path to matching trace file, or None if not found.
     """
     target = f"{channel}{bench}{side}".lower()
     for trace_file in trace_files:
@@ -685,17 +681,12 @@ def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
     Creates one BinTableHDU per benchside with columns FIBER_ID, SMOOTH,
     and WAVE.  Dead fibres are excluded.
 
-    Parameters
-    ----------
-    all_smooth_data : dict
-        ``{ext_name: {'fiber_ids': array, 'smooth': 2D array,
-        'wave': 2D array, 'channel': str, 'bench': str, 'side': str}}``
-    output_path : str
-        Output FITS file path.
-    filter_size : int
-        Median filter kernel size used (recorded in header).
-    gaussian_sigma : float
-        Gaussian sigma used (recorded in header).
+    Args:
+        all_smooth_data (dict): ``{ext_name: {'fiber_ids': array, 'smooth': 2D
+            array, 'wave': 2D array, 'channel': str, 'bench': str, 'side': str}}``
+        output_path (str): Output FITS file path.
+        filter_size (int): Median filter kernel size used (recorded in header).
+        gaussian_sigma (float): Gaussian sigma used (recorded in header).
     """
     primary = fits.PrimaryHDU()
     primary.header['FILTSZ'] = (filter_size, 'Median filter kernel size')
@@ -749,34 +740,26 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     4. For each extension, generate sensitivity map via ``generate_pixel_flat_extension``
     5. Write 24-extension FITS via ``sort_and_write_pixel_maps``
 
-    Parameters
-    ----------
-    red_flat_file, green_flat_file, blue_flat_file : str
-        Paths to color-channel flat field FITS files.
-    arc_calib_file : str, optional
-        Path to arc calibration pickle.  Defaults to
-        ``LUT/LLAMAS_reference_arc.pkl``.
-    use_bias : str, optional
-        Path to bias file for bias subtraction during extraction.
-    output_dir : str
-        Output directory for extraction intermediates and final pixel maps.
-    trace_dir : str
-        Directory containing trace pickle files.
-    verbose : bool
-        Enable verbose logging.
-    filter_size : int
-        Median filter kernel size for lamp-envelope smoothing.
-    signal_thresholds : dict, optional
-        Per-channel thresholds ``{'red': N, 'green': N, 'blue': N}``.
-        Defaults to ``CHANNEL_SIGNAL_THRESHOLDS``.
-    clip_range : tuple of float
-        (min, max) clipping for the sensitivity map.
+    Args:
+        red_flat_file, green_flat_file, blue_flat_file (str): Paths to
+            color-channel flat field FITS files.
+        arc_calib_file (str, optional): Path to arc calibration pickle.  Defaults
+            to ``LUT/LLAMAS_reference_arc.pkl``.
+        use_bias (str, optional): Path to bias file for bias subtraction during
+            extraction.
+        output_dir (str): Output directory for extraction intermediates and final
+            pixel maps.
+        trace_dir (str): Directory containing trace pickle files.
+        verbose (bool): Enable verbose logging.
+        filter_size (int): Median filter kernel size for lamp-envelope smoothing.
+        signal_thresholds (dict, optional): Per-channel thresholds
+            ``{'red': N, 'green': N, 'blue': N}``. Defaults to
+            ``CHANNEL_SIGNAL_THRESHOLDS``.
+        clip_range (tuple of float): (min, max) clipping for the sensitivity map.
 
-    Returns
-    -------
-    dict
-        ``{'combined_flat_file', 'calibrated_flat_file', 'pixel_map_file',
-        'processing_status'}``
+    Returns:
+        dict: A results dict with keys ``combined_flat_file``,
+            ``calibrated_flat_file``, ``pixel_map_file`` and ``processing_status``.
     """
     logger.info("Starting SIMPLE pixel flat processing workflow")
 
@@ -956,27 +939,19 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
     The pixel map extensions are identified by EXTNAME header keyword.
     These must match in order.
     
-    Parameters
-    ----------
-    science_file : str
-        Path to the science FITS file to be corrected
-    pixel_map_file : str
-        Path to the pixel map FITS file (flat field correction map)
-    output_dir : str, optional
-        Directory to save the corrected file. If None, saves in same directory
-        as science_file.
-    
-    Returns
-    -------
-    str
-        Path to the output flat-fielded FITS file
-        
-    Raises
-    ------
-    ValueError
-        If the files have mismatched extensions or ordering
-    FileNotFoundError
-        If input files don't exist
+    Args:
+        science_file (str): Path to the science FITS file to be corrected
+        pixel_map_file (str): Path to the pixel map FITS file (flat field
+            correction map)
+        output_dir (str, optional): Directory to save the corrected file. If
+            None, saves in same directory as science_file.
+
+    Returns:
+        str: Path to the output flat-fielded FITS file
+
+    Raises:
+        ValueError: If the files have mismatched extensions or ordering
+        FileNotFoundError: If input files don't exist
     """
     from astropy.io import fits
     import os
@@ -1101,21 +1076,29 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
 
     
 class Thresholding():
+    """Compute per-pixel flat-field thresholds from combined flat extractions.
+
+    Operates on a combined flat extractions pickle (24 ExtractLlamas objects)
+    to fit and derive pixel threshold values used in flat-field processing.
+
+    Attributes:
+        combined_flat_file (str): Path to the combined flat extractions pickle.
+        use_bias (str): Optional path to a bias file used during processing.
+        output_dir (str): Directory where output files are written.
+        trace_dir (str): Directory containing trace files for fiber mapping.
+    """
 
     def __init__(self, combined_flat_file, use_bias=None, output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR) -> None:
         """Initialize Thresholding class with combined flat extractions file.
 
-        Parameters
-        ----------
-        combined_flat_file : str
-            Path to combined_flat_extractions.pkl or combined_flat_extractions_calibrated.pkl
-            containing 24 ExtractLlamas objects (3 colors × 4 benches × 2 sides) with metadata.
-        use_bias : str, optional
-            Path to bias file if needed for processing.
-        output_dir : str, optional
-            Directory for output files.
-        trace_dir : str, optional
-            Directory containing trace files for fiber mapping.
+        Args:
+            combined_flat_file (str): Path to combined_flat_extractions.pkl or
+                combined_flat_extractions_calibrated.pkl containing 24
+                ExtractLlamas objects (3 colors × 4 benches × 2 sides) with metadata.
+            use_bias (str, optional): Path to bias file if needed for processing.
+            output_dir (str, optional): Directory for output files.
+            trace_dir (str, optional): Directory containing trace files for fiber
+                mapping.
         """
         self.combined_flat_file = combined_flat_file
         self.use_bias = use_bias

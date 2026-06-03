@@ -65,13 +65,11 @@ def plot_bias_level_heatmap(report: BiasCheckReport) -> plt.Figure:
     """
     24-detector heatmap of the inter-fibre bias median level.
 
-    Parameters
-    ----------
-    report : BiasCheckReport
+    Args:
+        report (BiasCheckReport):
 
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
     grid, row_labels, col_labels = _build_grid(report, 'interfibre_bias_median')
 
@@ -106,13 +104,11 @@ def plot_interfibre_residuals(report: BiasCheckReport) -> plt.Figure:
     """
     Bar chart of residual_median ± residual_std for each detector.
 
-    Parameters
-    ----------
-    report : BiasCheckReport
+    Args:
+        report (BiasCheckReport):
 
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
     stats_list = report.detector_stats
     if not stats_list:
@@ -151,13 +147,11 @@ def plot_bias_vs_interfibre(report: BiasCheckReport) -> plt.Figure:
     """
     Scatter plot: inter-fibre bias median vs inter-fibre science median.
 
-    Parameters
-    ----------
-    report : BiasCheckReport
+    Args:
+        report (BiasCheckReport):
 
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
     stats_list = report.detector_stats
     bias_meds  = [s.interfibre_bias_median     for s in stats_list]
@@ -202,20 +196,14 @@ def plot_spatial_residual_images(frame: np.ndarray,
     1×3 panel showing Raw frame | Bias frame | Residual, with the
     inter-fibre mask boundary overlaid as a contour on each panel.
 
-    Parameters
-    ----------
-    frame : numpy.ndarray
-        Raw 2-D science or flat frame.
-    bias : numpy.ndarray
-        Bias frame (same shape).
-    mask : numpy.ndarray
-        Boolean inter-fibre gap mask (True = gap pixel).
-    title : str
-        Optional suptitle for the figure.
+    Args:
+        frame (numpy.ndarray): Raw 2-D science or flat frame.
+        bias (numpy.ndarray): Bias frame (same shape).
+        mask (numpy.ndarray): Boolean inter-fibre gap mask (True = gap pixel).
+        title (str): Optional suptitle for the figure.
 
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
     residual = frame.astype(float) - bias.astype(float)
     panels   = [frame, bias, residual]
@@ -248,14 +236,12 @@ def plot_bias_check_dashboard(report: BiasCheckReport,
     """
     2×2 multi-panel figure combining the four plot types.
 
-    Parameters
-    ----------
-    report : BiasCheckReport
-    title : str
+    Args:
+        report (BiasCheckReport):
+        title (str):
 
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
     fig = plt.figure(figsize=(16, 12))
     gs  = fig.add_gridspec(2, 2, hspace=0.4, wspace=0.35)

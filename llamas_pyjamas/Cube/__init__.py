@@ -1,3 +1,10 @@
+"""Cube subpackage: IFU data cube construction for the LLAMAS pipeline.
+
+Provides the standard cube constructor and the covariance-regularized
+reconstruction (CRR) engine, including its kernels, weighting schemes,
+parallel construction helpers, and RSS-to-CRR adapters.
+"""
+
 from .cubeConstruct import CubeConstructor
 from .crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig, RSSData, CRRDataCube
 from .crr_kernels import (

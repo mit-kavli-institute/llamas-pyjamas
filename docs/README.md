@@ -40,11 +40,18 @@ sphinx-apidoc --force --separate --module-first -o docs/api llamas_pyjamas \
   llamas_pyjamas/example_pixel_to_fiber.py llamas_pyjamas/extract_cube_spectrum_correct.py \
   llamas_pyjamas/flux_calibration.py llamas_pyjamas/plot_galaxy_spectrum.py \
   llamas_pyjamas/sky_subtract_spectra.py llamas_pyjamas/test_flat_processing.py \
-  llamas_pyjamas/test_normalized_flat_fix.py llamas_pyjamas/verify_cube_position.py
+  llamas_pyjamas/test_normalized_flat_fix.py llamas_pyjamas/verify_cube_position.py \
+  llamas_pyjamas/Arc/arcReidentify.py llamas_pyjamas/Arc/nistArc.py \
+  llamas_pyjamas/Flat/flatPypeit.py llamas_pyjamas/Utils/readmode.py
 ```
 
 The excluded paths are non-importable or display-dependent (`GUI`), or standalone
-analysis/maintenance scripts that are not part of the public API.
+analysis/maintenance scripts that are not part of the public API. `Arc/arcReidentify.py`
+and `Arc/nistArc.py` are standalone scripts that execute code at import time and reference
+a removed `ArcLlamas` class, so they cannot be imported by autodoc; they are excluded here
+so a `--force` regeneration does not re-create broken (empty) pages for them.
+`Flat/flatPypeit.py` and `Utils/readmode.py` are excluded because their source is not yet
+committed; their pages are dropped to avoid empty entries on the published site.
 
 ## Publishing to GitHub Pages
 

@@ -139,7 +139,20 @@ class TraceLlamas:
                  mph: Optional[int] = None,
                  master_trace: Optional[str] = None
                  ):
-        
+        """Initialize a TraceLlamas instance and load the trace lookup table.
+
+        Sets default tracing parameters and loads ``traceLUT.json`` from the
+        LUT directory, storing it on ``self.LUT`` and extracting the dead-fiber
+        map into ``self.dead_fibres``.
+
+        Args:
+            fitsfile (str): Path to the FITS file to be traced.
+            mph (Optional[int]): Minimum peak height for peak detection.
+                Defaults to None.
+            master_trace (Optional[str]): Path to a master trace file.
+                Defaults to None.
+        """
+
         self.fitsfile = fitsfile
         self.mph = mph
         self.xmin     = 200
@@ -827,6 +840,14 @@ class TraceRay(TraceLlamas):
 
     
     def __init__(self, fitsfile: str) -> None:
+        """Initialize a TraceRay actor by delegating to TraceLlamas.
+
+        Calls the parent ``TraceLlamas.__init__`` and then stores only the
+        basename of the FITS file on ``self.fitsfile``.
+
+        Args:
+            fitsfile (str): Path to the FITS file to be traced.
+        """
         super().__init__(fitsfile)
         self.fitsfile = os.path.basename(fitsfile)
         print(f'fitsfile: {self.fitsfile}')

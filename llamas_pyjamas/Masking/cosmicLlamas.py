@@ -1,3 +1,10 @@
+"""Cosmic-ray and bad-pixel masking for LLAMAS detector images.
+
+Provides routines to detect and clean cosmic rays from 2D detector frames using
+the L.A.Cosmic algorithm, applying per-colour parameter overrides and
+detector-specific gain/read-noise values, and to persist the resulting cosmic
+ray masks.
+"""
 import os
 import logging
 
@@ -13,23 +20,15 @@ logger = logging.getLogger("llamas_pyjamas")
 def clean_cosmic_rays(data, color=None, bench=None, side=None):
     """Clean cosmic rays from a 2D detector image using L.A.Cosmic.
 
-    Parameters
-    ----------
-    data : numpy.ndarray
-        2D bias-subtracted detector image.
-    color : str, optional
-        Detector colour channel ('red', 'green', 'blue').
-    bench : str, optional
-        Bench identifier ('1', '2', '3', '4').
-    side : str, optional
-        Side identifier ('A', 'B').
+    Args:
+        data (numpy.ndarray): 2D bias-subtracted detector image.
+        color (str, optional): Detector colour channel ('red', 'green', 'blue').
+        bench (str, optional): Bench identifier ('1', '2', '3', '4').
+        side (str, optional): Side identifier ('A', 'B').
 
-    Returns
-    -------
-    cleaned : numpy.ndarray
-        Cleaned 2D image with cosmic rays replaced.
-    mask : numpy.ndarray
-        Boolean mask where True indicates a cosmic ray pixel.
+    Returns:
+        cleaned (numpy.ndarray): Cleaned 2D image with cosmic rays replaced.
+        mask (numpy.ndarray): Boolean mask where True indicates a cosmic ray pixel.
     """
     params = dict(LACOSMIC_DEFAULTS)
 
@@ -66,21 +65,14 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
 def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_dir):
     """Save cosmic ray masks as a multi-extension FITS file.
 
-    Parameters
-    ----------
-    masks_dict : dict
-        Mapping of ``{hdu_index: 2D boolean mask array}``.
-    primary_header : astropy.io.fits.Header
-        Primary header from the original science file.
-    original_filename : str
-        Path to the original science FITS file (used for naming).
-    output_dir : str
-        Base output directory. Masks are written to ``{output_dir}/masks/``.
+    Args:
+        masks_dict (dict): Mapping of ``{hdu_index: 2D boolean mask array}``.
+        primary_header (astropy.io.fits.Header): Primary header from the original science file.
+        original_filename (str): Path to the original science FITS file (used for naming).
+        output_dir (str): Base output directory. Masks are written to ``{output_dir}/masks/``.
 
-    Returns
-    -------
-    str
-        Path to the saved mask FITS file.
+    Returns:
+        str: Path to the saved mask FITS file.
     """
     masks_dir = os.path.join(output_dir, "masks")
     os.makedirs(masks_dir, exist_ok=True)

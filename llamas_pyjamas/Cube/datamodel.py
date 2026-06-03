@@ -1,3 +1,10 @@
+"""Data model for LLAMAS IFU data cubes.
+
+Defines the :class:`dataCube` container that holds the flux, error, bad-pixel
+mask, and wavelength arrays produced during cube construction, along with the
+``datamodel`` describing each array's expected type and units.
+"""
+
 import numpy as np
 
 
@@ -33,7 +40,18 @@ class dataCube():
                                     'The units are Angstroms.')}
     
     def __init__(self):
-        
+        """Initialise an empty data cube container.
+
+        Sets up the placeholder attributes for inverse variance, WCS, and the
+        primary header; the flux/error/mask/wavelength arrays are populated
+        separately during cube construction.
+
+        Attributes:
+            _ivar: Inverse variance array (None until populated).
+            _wcs: World Coordinate System for the cube (None until populated).
+            head0: Primary header of the spec2d frame used to build the cube
+                (None until populated).
+        """
         self._ivar = None
         self._wcs = None
         self.head0 = None  # This contains the primary header of the spec2d used to make the datacube

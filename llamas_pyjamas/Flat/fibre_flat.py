@@ -76,15 +76,12 @@ def _load_fibermap_lut(lut_path=None):
     Returns a dict keyed by bench-side string (e.g. ``'1A'``) mapping to a
     list of ``(fiber_id, xpos)`` tuples.
 
-    Parameters
-    ----------
-    lut_path : str, optional
-        Override path to the .dat file.  Defaults to ``_FIBERMAP_LUT_PATH``.
+    Args:
+        lut_path (str, optional): Override path to the .dat file.  Defaults to
+            ``_FIBERMAP_LUT_PATH``.
 
-    Returns
-    -------
-    dict
-        ``{benchside: [(fiber_id, xpos), ...]}``
+    Returns:
+        dict: ``{benchside: [(fiber_id, xpos), ...]}``
     """
     path = lut_path or _FIBERMAP_LUT_PATH
     lut = {}
@@ -116,26 +113,18 @@ def get_reference_row(fibermap_table, bench='4', side='A', fibre_id=150):
     Searches the FIBERMAP binary table for the row matching
     *benchside* (bench+side concatenated) and *fibre_id*.
 
-    Parameters
-    ----------
-    fibermap_table : astropy BinTableHDU data
-        The FIBERMAP extension data from an RSS FITS file.
-    bench : str
-        Bench identifier (default '4').
-    side : str
-        Side identifier (default 'A').
-    fibre_id : int
-        Fibre index within the bench/side (default 150).
+    Args:
+        fibermap_table (astropy BinTableHDU data): The FIBERMAP extension data
+            from an RSS FITS file.
+        bench (str): Bench identifier (default '4').
+        side (str): Side identifier (default 'A').
+        fibre_id (int): Fibre index within the bench/side (default 150).
 
-    Returns
-    -------
-    int
-        Zero-based row index into the RSS flux array.
+    Returns:
+        int: Zero-based row index into the RSS flux array.
 
-    Raises
-    ------
-    ValueError
-        If the reference fibre is not found in the FIBERMAP.
+    Raises:
+        ValueError: If the reference fibre is not found in the FIBERMAP.
     """
     benchside = f"{bench}{side}"
     benchside_col = np.array(fibermap_table['BENCHSIDE'], dtype=str)
@@ -154,18 +143,15 @@ def get_reference_row(fibermap_table, bench='4', side='A', fibre_id=150):
 def _resolve_reference_row(fibermap_table, reference_fibre):
     """Resolve the reference row from a user-supplied override or pipeline default.
 
-    Parameters
-    ----------
-    fibermap_table : astropy BinTableHDU data
-    reference_fibre : None, int, or (bench, side, fibre_id) tuple
-        - None  → use pipeline default (bench 4A, fibre 150)
-        - int   → treat as a direct RSS row index
-        - tuple → (bench, side, fibre_id) passed to get_reference_row()
+    Args:
+        fibermap_table (astropy BinTableHDU data):
+        reference_fibre (None, int, or (bench, side, fibre_id) tuple):
+            - None  → use pipeline default (bench 4A, fibre 150)
+            - int   → treat as a direct RSS row index
+            - tuple → (bench, side, fibre_id) passed to get_reference_row()
 
-    Returns
-    -------
-    int
-        RSS row index of the reference fibre.
+    Returns:
+        int: RSS row index of the reference fibre.
     """
     if reference_fibre is None:
         return get_reference_row(fibermap_table, REFERENCE_BENCH, REFERENCE_SIDE, REFERENCE_FIBRE)
@@ -185,24 +171,18 @@ def clean_output_filename(science_filepath, suffix, output_dir=None):
     Strips any existing ``_RSS`` or ``_RSSFF`` suffix from the input basename
     before appending the requested *suffix*.
 
-    Parameters
-    ----------
-    science_filepath : str
-        Path to the input science RSS FITS file.
-    suffix : str
-        Output suffix, e.g. ``'_RSS'`` or ``'_RSSFF'``.
-    output_dir : str, optional
-        Output directory.  Defaults to the directory of *science_filepath*.
+    Args:
+        science_filepath (str): Path to the input science RSS FITS file.
+        suffix (str): Output suffix, e.g. ``'_RSS'`` or ``'_RSSFF'``.
+        output_dir (str, optional): Output directory.  Defaults to the directory
+            of *science_filepath*.
 
-    Returns
-    -------
-    str
-        Full output path.
+    Returns:
+        str: Full output path.
 
-    Examples
-    --------
-    >>> clean_output_filename('obs_RSS_red.fits', '_RSSFF')
-    'obs_RSSFF_red.fits'
+    Examples:
+        >>> clean_output_filename('obs_RSS_red.fits', '_RSSFF')
+        'obs_RSSFF_red.fits'
     """
     if output_dir is None:
         output_dir = os.path.dirname(os.path.abspath(science_filepath))
@@ -491,36 +471,27 @@ def apply_fibre_flat(sci_flux, sci_err, sci_mask, correction,
                      dead_fibre_mask=None):
     """Apply fibre-to-fibre flat-field correction to science spectra.
 
-    Parameters
-    ----------
-    sci_flux : 2D ndarray, shape (n_fibres, n_wave)
-        Science flux array.
-    sci_err : 2D ndarray, shape (n_fibres, n_wave)
-        Sigma values (NOT IVAR).
-    sci_mask : 2D int16 array, shape (n_fibres, n_wave)
-        Pixel mask (0 = good).
-    correction : 2D ndarray, shape (n_fibres, n_wave)
-        Multiplicative correction from :func:`compute_fibre_flat`.
-        Contains no NaN or inf (dead-fibre rows are 1.0 there).
-    dead_fibre_mask : 1D bool array, shape (n_fibres,), optional
-        True for dead fibres (rows that should be NaN'd out).
+    Args:
+        sci_flux (2D ndarray, shape (n_fibres, n_wave)): Science flux array.
+        sci_err (2D ndarray, shape (n_fibres, n_wave)): Sigma values (NOT IVAR).
+        sci_mask (2D int16 array, shape (n_fibres, n_wave)): Pixel mask (0 = good).
+        correction (2D ndarray, shape (n_fibres, n_wave)): Multiplicative
+            correction from :func:`compute_fibre_flat`.
+            Contains no NaN or inf (dead-fibre rows are 1.0 there).
+        dead_fibre_mask (1D bool array, shape (n_fibres,), optional): True for
+            dead fibres (rows that should be NaN'd out).
 
-    Returns
-    -------
-    corr_flux : 2D float32 ndarray
-        Corrected flux array.
-    corr_err : 2D float32 ndarray
-        Corrected error array.
-    corr_mask : 2D int16 array
-        Updated mask array.
+    Returns:
+        corr_flux (2D float32 ndarray): Corrected flux array.
+        corr_err (2D float32 ndarray): Corrected error array.
+        corr_mask (2D int16 array): Updated mask array.
 
-    Notes
-    -----
-    Mask bit conventions:
+    Notes:
+        Mask bit conventions:
 
-    * Bit 8 (value 8) — dead fibre: entire row flagged.
-    * Bit 4 (value 4) — alive-fibre pixels where correction was clamped to 1.0
-      (i.e., the ratio was undefined — un-flat-fielded pixels).
+        * Bit 8 (value 8) — dead fibre: entire row flagged.
+        * Bit 4 (value 4) — alive-fibre pixels where correction was clamped to 1.0
+          (i.e., the ratio was undefined — un-flat-fielded pixels).
     """
     corr_flux = sci_flux  * correction
     corr_err  = sci_err   * np.abs(correction)    # σ_out = σ_in × |correction|
@@ -555,15 +526,14 @@ def _write_rss_fits(template_hdul, out_path, flux=None, error=None, mask=None,
     Copies all extensions; optionally replaces FLUX/ERROR/MASK data and
     adds extra header keywords to the primary HDU.
 
-    Parameters
-    ----------
-    template_hdul : astropy HDUList (open, read-only is fine)
-    out_path : str
-    flux, error, mask : ndarray or None
-        If provided, replace the corresponding extension data.
-    extra_header_kw : dict, optional
-        Header keyword/value/comment triples to add to extension 0.
-        Format: {keyword: (value, comment)} or {keyword: value}.
+    Args:
+        template_hdul (astropy HDUList (open, read-only is fine)):
+        out_path (str):
+        flux, error, mask (ndarray or None): If provided, replace the
+            corresponding extension data.
+        extra_header_kw (dict, optional): Header keyword/value/comment triples to
+            add to extension 0.
+            Format: {keyword: (value, comment)} or {keyword: value}.
     """
     new_hdul = fits.HDUList()
     for ext in template_hdul:
@@ -591,13 +561,12 @@ def _write_rss_fits(template_hdul, out_path, flux=None, error=None, mask=None,
 def plot_fibre_flat_qa(correction, dead_mask, wavelength, output_path, channel=''):
     """Generate a 4-panel QA plot of the fibre-flat correction.
 
-    Parameters
-    ----------
-    correction : 2D ndarray (n_fibres, n_wave)
-    dead_mask  : 1D bool array (n_fibres,)
-    wavelength : 1D ndarray (n_wave,) — representative wavelength array
-    output_path : str  — save path (.png)
-    channel : str      — channel name for plot titles
+    Args:
+        correction (2D ndarray (n_fibres, n_wave)):
+        dead_mask (1D bool array (n_fibres,)):
+        wavelength (1D ndarray (n_wave,)): representative wavelength array
+        output_path (str): save path (.png)
+        channel (str): channel name for plot titles
     """
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(f'Fibre-to-Fibre Flat Correction QA  ({channel})', fontsize=13)
@@ -664,13 +633,12 @@ def plot_fibre_flat_qa(correction, dead_mask, wavelength, output_path, channel='
 def plot_before_after_qa(science_flux, corrected_flux, wavelength, output_path, channel=''):
     """Generate a 2-panel before/after comparison QA plot.
 
-    Parameters
-    ----------
-    science_flux : 2D ndarray (n_fibres, n_wave)
-    corrected_flux : 2D ndarray (n_fibres, n_wave)
-    wavelength : 1D ndarray
-    output_path : str
-    channel : str
+    Args:
+        science_flux (2D ndarray (n_fibres, n_wave)):
+        corrected_flux (2D ndarray (n_fibres, n_wave)):
+        wavelength (1D ndarray):
+        output_path (str):
+        channel (str):
     """
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle(f'Fibre-to-Fibre Flat: Before vs After  ({channel})', fontsize=12)
@@ -715,18 +683,16 @@ def _align_correction_to_science(correction, dead_mask,
     FIBER_ID values, but may be stored in different row orders (e.g., if the
     flat and science were extracted from separate runs).
 
-    Parameters
-    ----------
-    correction : 2D ndarray (n_flat_fibres, n_wave)
-    dead_mask : 1D bool array (n_flat_fibres,)
-    flat_fibermap : astropy BinTableHDU data
-    sci_fibermap : astropy BinTableHDU data
-    logger : logging.Logger
+    Args:
+        correction (2D ndarray (n_flat_fibres, n_wave)):
+        dead_mask (1D bool array (n_flat_fibres,)):
+        flat_fibermap (astropy BinTableHDU data):
+        sci_fibermap (astropy BinTableHDU data):
+        logger (logging.Logger):
 
-    Returns
-    -------
-    aligned_correction : 2D ndarray (n_sci_fibres, n_wave)
-    aligned_dead_mask : 1D bool array (n_sci_fibres,)
+    Returns:
+        aligned_correction (2D ndarray (n_sci_fibres, n_wave)):
+        aligned_dead_mask (1D bool array (n_sci_fibres,)):
     """
     flat_fiber_ids = np.array(flat_fibermap['FIBER_ID'], dtype=int)
     sci_fiber_ids  = np.array(sci_fibermap['FIBER_ID'],  dtype=int)
@@ -798,37 +764,32 @@ def run_fibre_flat(science_rss_path, flat_rss_path,
     applies it to one or more science RSS files.  Writes both a straight copy
     (``*_RSS.fits``) and a corrected version (``*_RSSFF.fits``).
 
-    Parameters
-    ----------
-    science_rss_path : str or list of str
-        Path(s) to science RSS FITS file(s).
-    flat_rss_path : str
-        Path to the flat-field RSS FITS file (same channel as science).
-    output_dir : str, optional
-        Output directory.  Defaults to same directory as each science file.
-    savgol_window : int
-        Savitzky-Golay smoothing window in pixels.  Default ``FF_SAVGOL_WINDOW``.
-    savgol_polyorder : int
-        Savitzky-Golay polynomial order.  Default ``FF_SAVGOL_POLYORDER``.
-    smooth_kernel : int or None
-        Deprecated alias for ``savgol_window``.  Accepted for backward
-        compatibility with ``reduce.py``.
-    clip_sigma : float
-        MAD sigma-clipping threshold for outlier rejection.  Default 3.0.
-    min_throughput : float
-        Dead-fibre threshold (fraction of global maximum median).  Default 0.1.
-    n_central_fibres : int
-        Number of fibres per bench-side closest to detector centre used for
-        the synthetic reference.  Default ``FF_N_CENTRAL_FIBRES``.
-    reference_fibre : ignored
-        Deprecated parameter kept for backward compatibility.  Has no effect.
-    generate_qa : bool
-        Generate QA PNG plots.  Default True.
+    Args:
+        science_rss_path (str or list of str): Path(s) to science RSS FITS file(s).
+        flat_rss_path (str): Path to the flat-field RSS FITS file (same channel
+            as science).
+        output_dir (str, optional): Output directory.  Defaults to same directory
+            as each science file.
+        savgol_window (int): Savitzky-Golay smoothing window in pixels.  Default
+            ``FF_SAVGOL_WINDOW``.
+        savgol_polyorder (int): Savitzky-Golay polynomial order.  Default
+            ``FF_SAVGOL_POLYORDER``.
+        smooth_kernel (int or None): Deprecated alias for ``savgol_window``.
+            Accepted for backward compatibility with ``reduce.py``.
+        clip_sigma (float): MAD sigma-clipping threshold for outlier rejection.
+            Default 3.0.
+        min_throughput (float): Dead-fibre threshold (fraction of global maximum
+            median).  Default 0.1.
+        n_central_fibres (int): Number of fibres per bench-side closest to
+            detector centre used for the synthetic reference.  Default
+            ``FF_N_CENTRAL_FIBRES``.
+        reference_fibre (ignored): Deprecated parameter kept for backward
+            compatibility.  Has no effect.
+        generate_qa (bool): Generate QA PNG plots.  Default True.
 
-    Returns
-    -------
-    list of (str, str)
-        List of ``(rss_path, rssff_path)`` tuples, one per science file.
+    Returns:
+        list of (str, str): List of ``(rss_path, rssff_path)`` tuples, one per
+            science file.
     """
     # Honour legacy smooth_kernel kwarg from reduce.py
     if smooth_kernel is not None:
@@ -979,29 +940,22 @@ class FibreFlatField:
 
     Mirrors the style of :class:`~llamas_pyjamas.Flat.flatPypeit.PypeItFlatField`.
 
-    Parameters
-    ----------
-    flat_rss_path : str
-        Path to the flat-field RSS FITS file.
-    savgol_window : int
-        Savitzky-Golay filter window length (pixels, must be odd).  Default 51.
-    savgol_polyorder : int
-        Savitzky-Golay polynomial order.  Default 3.
-    n_central_fibres : int
-        Number of fibres closest to each detector centre used to build the
-        synthetic reference spectrum.  Default 50.
-    clip_sigma : float
-        Sigma-clipping threshold.  Default 3.0.
-    min_throughput : float
-        Dead-fibre threshold.  Default 0.1.
-    generate_qa : bool
-        Write QA plots on :meth:`apply`.  Default True.
-    reference_fibre : ignored
-        Deprecated — accepted for backward compatibility but not used.
-    smooth_kernel : ignored
-        Deprecated alias for ``savgol_window`` — accepted for backward
-        compatibility but not used (the value is ignored when the OO
-        interface is used directly; use ``savgol_window`` instead).
+    Args:
+        flat_rss_path (str): Path to the flat-field RSS FITS file.
+        savgol_window (int): Savitzky-Golay filter window length (pixels, must be
+            odd).  Default 51.
+        savgol_polyorder (int): Savitzky-Golay polynomial order.  Default 3.
+        n_central_fibres (int): Number of fibres closest to each detector centre
+            used to build the synthetic reference spectrum.  Default 50.
+        clip_sigma (float): Sigma-clipping threshold.  Default 3.0.
+        min_throughput (float): Dead-fibre threshold.  Default 0.1.
+        generate_qa (bool): Write QA plots on :meth:`apply`.  Default True.
+        reference_fibre (ignored): Deprecated — accepted for backward
+            compatibility but not used.
+        smooth_kernel (ignored): Deprecated alias for ``savgol_window`` —
+            accepted for backward compatibility but not used (the value is
+            ignored when the OO interface is used directly; use ``savgol_window``
+            instead).
     """
 
     def __init__(self, flat_rss_path,
@@ -1011,6 +965,33 @@ class FibreFlatField:
                  clip_sigma=3.0, min_throughput=0.1, generate_qa=True,
                  # deprecated kwargs kept for backward compatibility
                  reference_fibre=None, smooth_kernel=None):
+        """Initialise the fibre-flat corrector and configure logging.
+
+        Stores the flat RSS path and Savitzky-Golay / clipping parameters (see
+        the class docstring for argument details), initialises the correction
+        and dead-mask attributes to None, and sets up a timestamped logger.
+
+        Args:
+            flat_rss_path (str): Path to the flat-field RSS FITS file.
+            savgol_window (int): Savitzky-Golay filter window length in pixels
+                (must be odd).
+            savgol_polyorder (int): Savitzky-Golay polynomial order.
+            n_central_fibres (int): Number of central fibres used to build the
+                synthetic reference spectrum.
+            clip_sigma (float): Sigma-clipping threshold. Default 3.0.
+            min_throughput (float): Dead-fibre throughput threshold. Default 0.1.
+            generate_qa (bool): Whether to write QA plots on apply. Default True.
+            reference_fibre: Deprecated, accepted for backward compatibility
+                but not used.
+            smooth_kernel: Deprecated alias for ``savgol_window``; if provided,
+                its integer value overrides ``savgol_window``.
+
+        Attributes:
+            correction: Computed per-fibre correction array (None until
+                :meth:`compute` is called).
+            dead_mask: Boolean mask of dead fibres (None until computed).
+            logger (logging.Logger): Timestamped logger for this instance.
+        """
         self.flat_rss_path    = flat_rss_path
         self.savgol_window    = int(smooth_kernel) if smooth_kernel is not None else savgol_window
         self.savgol_polyorder = savgol_polyorder
@@ -1050,15 +1031,12 @@ class FibreFlatField:
 
         Calls :meth:`compute` automatically if not yet done.
 
-        Parameters
-        ----------
-        science_rss_path : str
-        output_dir : str, optional
+        Args:
+            science_rss_path (str):
+            output_dir (str, optional):
 
-        Returns
-        -------
-        tuple of (str, str)
-            ``(rss_path, rssff_path)``
+        Returns:
+            tuple of (str, str): ``(rss_path, rssff_path)``
         """
         if self.correction is None:
             self.compute()

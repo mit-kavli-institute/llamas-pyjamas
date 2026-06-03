@@ -16,3 +16,6 @@ numpy
 scipy
 astropy
 matplotlib
+h5py
+psutil
+pyyaml

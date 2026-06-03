@@ -1,3 +1,10 @@
+"""Base arc-lamp wavelength-calibration utilities for the LLAMAS pipeline.
+
+Provides routines for re-identifying arc lines via cross-correlation against a
+reference ThAr line list and deriving wavelength solutions for extracted arc
+spectra, built on PypeIt cross-correlation, peak-detection, and B-spline
+fitting primitives.
+"""
 from   astropy.io import fits
 import scipy
 import numpy as np

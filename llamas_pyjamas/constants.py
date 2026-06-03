@@ -1,12 +1,26 @@
+"""Detector-layout and calibration constants for the LLAMAS spectrograph.
+
+LLAMAS has 24 detectors arranged as 4 benches x 2 sides (A/B) x 3 colour
+channels (red/green/blue). These constants describe the mapping between
+(colour, bench, side) and the 1-indexed detector/HDU index, the number of
+fibers per bench-side, and per-detector gain, read-noise, and cosmic-ray
+cleaning parameters used throughout the pipeline.
+"""
+#: 1-indexed detector/HDU indices for the eight red detectors.
 RED_IDXS = [1, 4, 7, 10, 13, 16, 19, 22]
+#: 1-indexed detector/HDU indices for the eight green detectors.
 GREEN_IDXS = [2, 5, 8, 11, 14, 17, 20, 23]
+#: 1-indexed detector/HDU indices for the eight blue detectors.
 BLUE_IDXS = [3, 6, 9, 12, 15, 18, 21, 24]
 
 
+#: Number of fibers per bench-side, keyed by bench-side identifier (e.g. '1A').
 N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
 
+#: Total number of LLAMAS detectors (4 benches x 2 sides x 3 colours).
 N_det = 24
 
+#: Maps (colour, bench, side) to its 1-indexed detector/HDU number.
 idx_lookup = {
     ("red", "1", "A"): 1,
     ("green", "1", "A"): 2,
@@ -35,6 +49,8 @@ idx_lookup = {
    
 }
 
+#: Maps (colour, bench, side) to per-detector ``{'noise', 'gain'}`` values
+#: (read noise in electrons, gain in e-/ADU).
 gain_noise_lookup ={
     ("red", "1", "A"): {'noise': 2.4, 'gain': 1.25},
     ("green", "1", "A"): {'noise': 2.4, 'gain': 1.25},
@@ -71,6 +87,7 @@ gain_noise_lookup ={
 #     'readnoise': 6.9,
 # }
 
+#: Default L.A.Cosmic cosmic-ray cleaning parameters applied to all detectors.
 LACOSMIC_DEFAULTS = {
     'contrast': 5.0,
     'cr_threshold': 6.5,
@@ -81,6 +98,8 @@ LACOSMIC_DEFAULTS = {
 }
 
 # Per-color overrides (merged on top of LACOSMIC_DEFAULTS)
+#: Per-colour overrides merged on top of :data:`LACOSMIC_DEFAULTS`
+#: (e.g. ``'skip': True`` disables CR cleaning for that colour).
 LACOSMIC_COLOR_OVERRIDES = {
     'red': {
         'cr_threshold': 10.0,

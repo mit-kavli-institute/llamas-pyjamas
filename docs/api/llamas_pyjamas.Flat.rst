@@ -16,5 +16,4 @@ Submodules
    llamas_pyjamas.Flat.fibre_flat
    llamas_pyjamas.Flat.flatLlamas
    llamas_pyjamas.Flat.flatProcessing
-   llamas_pyjamas.Flat.flatPypeit
    llamas_pyjamas.Flat.scattered2dLlamas

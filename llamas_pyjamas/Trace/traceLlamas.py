@@ -1,3 +1,11 @@
+"""Base fiber-tracing module for LLAMAS spectrograph data.
+
+Defines the foundational ``TraceLlamas`` class used to trace fiber positions
+across the detector and fit fiber profiles in LLAMAS observations. It detects
+fiber peaks, fits B-spline traces to the fiber centroids, and produces the
+fiber and profile images consumed by the spectral extraction stage. This is the
+base implementation that the master and multiprocessing trace variants build on.
+"""
 from   astropy.io import fits # type: ignore
 import numpy as np # type: ignore
 #import pyds9 # type: ignore

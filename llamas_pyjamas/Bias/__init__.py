@@ -31,12 +31,17 @@ class BiasNotFoundError(FileNotFoundError):
     Raised when a master-bias FITS file is absent, unreadable, or returns
     (None, None) from process_fits_by_color.
 
-    Attributes
-    ----------
-    path : str
-        The file path that could not be opened.
+    Attributes:
+        path (str): The file path that could not be opened.
     """
     def __init__(self, path: str, message: str = None):
+        """Initialise the error with the offending path and an optional message.
+
+        Args:
+            path (str): The bias FITS file path that could not be opened or read.
+            message (str, optional): Custom error message. If None, a default
+                message describing the missing/invalid bias file is generated.
+        """
         self.path = path
         if message is None:
             message = (
@@ -51,13 +56,20 @@ class BiasReadModeError(ValueError):
     Raised when the read-mode encoded in the bias FITS primary header does
     not match the requested read-mode for the current science frame.
 
-    Attributes
-    ----------
-    requested_mode : str
-    bias_mode      : str
-    bias_path      : str
+    Attributes:
+        requested_mode (str):
+        bias_mode (str):
+        bias_path (str):
     """
     def __init__(self, requested_mode: str, bias_mode: str, bias_path: str):
+        """Initialise the error describing the read-mode mismatch.
+
+        Args:
+            requested_mode (str): Read-mode required by the current science frame.
+            bias_mode (str): Read-mode encoded in the bias FITS primary header
+                (READ-MDE keyword).
+            bias_path (str): Path to the bias FITS file with the mismatched mode.
+        """
         self.requested_mode = requested_mode
         self.bias_mode = bias_mode
         self.bias_path = bias_path
@@ -103,20 +115,15 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
     * ``BIASIFF``  -- inter-fibre estimate (DN), or NaN if unavailable.
     * ``BIASTST``  -- test-region estimate (DN), or NaN if unavailable.
 
-    Parameters
-    ----------
-    frame_data : numpy.ndarray
-        The 2-D raw science/flat frame. Must be convertible to float.
-    tracer : TraceLlamas or None, optional
-        A loaded TraceLlamas object with a ``fiberimg`` attribute.
-        When provided, enables the inter-fibre gap estimate.
+    Args:
+        frame_data (numpy.ndarray): The 2-D raw science/flat frame. Must be convertible to float.
+        tracer (TraceLlamas or None, optional): A loaded TraceLlamas object with a ``fiberimg`` attribute.
+            When provided, enables the inter-fibre gap estimate.
 
-    Returns
-    -------
-    astropy.io.fits.ImageHDU
-        ImageHDU whose ``.data`` is a 2-D float32 array of constant value
-        equal to the estimated bias level, with shape matching
-        ``frame_data.shape``.
+    Returns:
+        astropy.io.fits.ImageHDU: ImageHDU whose ``.data`` is a 2-D float32 array of constant value
+            equal to the estimated bias level, with shape matching
+            ``frame_data.shape``.
     """
     _CROSS_CHECK_THRESHOLD = 5.0  # DN — max tolerated gap between the two estimates
 

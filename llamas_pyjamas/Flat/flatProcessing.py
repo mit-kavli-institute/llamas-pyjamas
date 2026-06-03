@@ -1,3 +1,10 @@
+"""Flat-field reduction orchestration for the LLAMAS pipeline.
+
+Coordinates the end-to-end flat-field reduction workflow: processing raw flat
+frames by color, tracing fibers, producing flat extractions, and assembling the
+combined flat products used by downstream calibration steps.
+"""
+
 import os
 import glob
 import pdb
@@ -31,23 +38,17 @@ logger = logging.getLogger('flatProcessing')
 def load_bias_subtracted_flat_2d(flat_fits_file, channel, bench, side, bias_file=None):
     """Load and bias-subtract the raw 2D flat image for one detector extension.
 
-    Parameters
-    ----------
-    flat_fits_file : str
-        Path to the raw flat field FITS file for the appropriate color channel.
-    channel : str
-        Color channel ('red', 'green', 'blue').
-    bench : str
-        Bench identifier ('1', '2', '3', '4').
-    side : str
-        Side identifier ('A', 'B').
-    bias_file : str, optional
-        Path to bias file. If None, uses default slow_master_bias.fits.
+    Args:
+        flat_fits_file (str): Path to the raw flat field FITS file for the
+            appropriate color channel.
+        channel (str): Color channel ('red', 'green', 'blue').
+        bench (str): Bench identifier ('1', '2', '3', '4').
+        side (str): Side identifier ('A', 'B').
+        bias_file (str, optional): Path to bias file. If None, uses default
+            slow_master_bias.fits.
 
-    Returns
-    -------
-    np.ndarray
-        Bias-subtracted 2D flat image for the specified extension.
+    Returns:
+        np.ndarray: Bias-subtracted 2D flat image for the specified extension.
     """
     from llamas_pyjamas.config import BIAS_DIR
 

@@ -63,6 +63,21 @@ _linefile = os.path.join(LUT_DIR, '')
 
 
 def validate_input_files(file_list):
+    """Validate and repair the FITS extensions of a list of input files.
+
+    For every path in ``file_list`` this asserts that the file exists and then
+    runs ``validate_and_fix_extensions`` on it (writing a backup but not a
+    separate output file) to ensure the FITS extension structure is correct.
+
+    Args:
+        file_list (list): Paths to the input FITS files to validate.
+
+    Returns:
+        bool: True if all files exist and pass validation.
+
+    Raises:
+        AssertionError: If any file in ``file_list`` does not exist.
+    """
 
     for file in file_list:
         assert os.path.exists(file), f"Input file does not exist: {file}"
@@ -75,17 +90,12 @@ def get_input_files_from_config(config, file_keys=None):
       """
       Extract all input file paths from a configuration dictionary.
       
-      Parameters
-      ----------
-      config : dict
-          Configuration dictionary with file paths
-      file_keys : list, optional
-          List of config keys that contain file paths. If None, uses default keys.
-          
-      Returns
-      -------
-      list
-          List of all file paths found in the config
+      Args:
+          config (dict): Configuration dictionary with file paths
+          file_keys (list, optional): List of config keys that contain file paths. If None, uses default keys.
+
+      Returns:
+          list: List of all file paths found in the config
       """
       if file_keys is None:
           file_keys = ['science_files', 'slow_bias_file', 'fast_bias_file',
@@ -115,17 +125,12 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     and file/directory path existence before any processing begins.  On failure,
     prints a clear itemised summary and calls sys.exit(1).
 
-    Parameters
-    ----------
-    config : dict
-        Parsed configuration dictionary from the config .txt file.
-    config_path : str
-        Path to the config file (used in error messages for context).
+    Args:
+        config (dict): Parsed configuration dictionary from the config .txt file.
+        config_path (str): Path to the config file (used in error messages for context).
 
-    Returns
-    -------
-    bool
-        True if all checks pass (warnings are allowed).
+    Returns:
+        bool: True if all checks pass (warnings are allowed).
     """
     import sys
 
@@ -395,6 +400,23 @@ def generate_traces(red_flat, green_flat, blue_flat, output_dir,
 #currently designed to use skyflats
 #only used for generating new wl solutions
 def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None):
+    """Extract spectra from flat-field frames (typically sky flats).
+
+    Creates ``output_dir`` if it does not exist and runs the GUI extraction
+    routine on the flat frame(s) with cosmic-ray removal disabled. This is
+    primarily used when generating new wavelength solutions.
+
+    Args:
+        flat_file_dir (str): Path to the flat-field FITS file (or directory)
+            to extract.
+        output_dir (str): Directory where the extraction products are written;
+            created if missing.
+        slow_bias (str, optional): Path to the SLOW-mode master bias FITS file.
+        fast_bias (str, optional): Path to the FAST-mode master bias FITS file.
+
+    Returns:
+        None
+    """
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -463,6 +485,24 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
 
 #this isn't quite right -> nneeds checking
 def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
+    """Extract an arc frame and derive its X-shift wavelength calibration data.
+
+    Runs the GUI extraction on the arc frame (cosmic-ray removal disabled),
+    loads the resulting extraction pickle, applies ``arc.shiftArcX`` to
+    determine the per-fiber X shifts, and returns the loaded arc extraction
+    dictionary.
+
+    Args:
+        arc_file (str): Path to the arc-lamp FITS file (expected to end in
+            ``_mef.fits``).
+        output_dir (str): Directory where the extraction pickle is written.
+        slow_bias (str, optional): Path to the SLOW-mode master bias FITS file.
+        fast_bias (str, optional): Path to the FAST-mode master bias FITS file.
+
+    Returns:
+        dict: The loaded arc extraction dictionary containing ``extractions``
+        and ``metadata`` keys.
+    """
 
     ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
                    remove_cosmic_rays=False)
@@ -482,6 +522,19 @@ def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
 
 def relative_throughput(shift_picklename, flat_picklename):
+    """Compute the relative fiber-to-fiber throughput from a flat extraction.
+
+    Delegates to ``arc.fiberRelativeThroughput`` using the flat-field
+    extraction and the shifted arc extraction to derive the relative
+    throughput of each fiber.
+
+    Args:
+        shift_picklename (str): Path to the X-shifted arc extraction pickle.
+        flat_picklename (str): Path to the flat-field extraction pickle.
+
+    Returns:
+        None
+    """
 
     arc.fiberRelativeThroughput(flat_picklename, shift_picklename)
     ### need to add code in to return the name of the throughput file
@@ -489,6 +542,24 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 
 def correct_wavelengths(science_extraction_file, soln=None):
+    """Apply a reference arc wavelength solution to a science extraction.
+
+    Loads (and caches) the packaged ``LLAMAS_reference_arc.pkl`` reference arc
+    on the first call, loads the science extraction, and transfers the arc
+    wavelength solution onto the science spectra via ``arc.arcTransfer``.
+
+    Args:
+        science_extraction_file (str): Path to the science extraction pickle.
+        soln (optional): Placeholder for a custom arc solution; currently
+            unused (a TODO notes it will be wired in once the arc processing
+            pipeline is available).
+
+    Returns:
+        tuple: A 2-tuple ``(std_wvcal, primary_hdr)`` where ``std_wvcal`` is
+        the wavelength-calibrated science extraction returned by
+        ``arc.arcTransfer`` and ``primary_hdr`` is the science primary header
+        (or None if not present).
+    """
     # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
     global _cached_reference_arc
     if _cached_reference_arc is None:
@@ -522,31 +593,19 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
     extraction so that extracted spectra represent pure fibre throughput
     (detector per-pixel sensitivity removed).
 
-    Parameters
-    ----------
-    flat_files : list of str
-        Raw flat FITS files (dome or twilight).
-    flat_pixel_maps : list of str
-        Pixel flat maps generated from the dome flat.
-    output_dir : str
-        Directory for all intermediate and output files.
-    slow_bias : str or None
-        Path to SLOW-mode master bias FITS (passed to run_extraction).
-    fast_bias : str or None
-        Path to FAST-mode master bias FITS (passed to run_extraction).
-    trace_dir : str or None
-        Directory containing fibre trace files.
-    arc_dict_config : object or None
-        Arc solution config forwarded to correct_wavelengths.
-    timestamp : str
-        Timestamp string used in log-file names.
-    label : str
-        Short label used in log filenames (e.g. 'dome', 'twilight').
+    Args:
+        flat_files (list of str): Raw flat FITS files (dome or twilight).
+        flat_pixel_maps (list of str): Pixel flat maps generated from the dome flat.
+        output_dir (str): Directory for all intermediate and output files.
+        slow_bias (str or None): Path to SLOW-mode master bias FITS (passed to run_extraction).
+        fast_bias (str or None): Path to FAST-mode master bias FITS (passed to run_extraction).
+        trace_dir (str or None): Directory containing fibre trace files.
+        arc_dict_config (object or None): Arc solution config forwarded to correct_wavelengths.
+        timestamp (str): Timestamp string used in log-file names.
+        label (str): Short label used in log filenames (e.g. 'dome', 'twilight').
 
-    Returns
-    -------
-    list of str
-        RSS output file paths (may be empty on failure).
+    Returns:
+        list of str: RSS output file paths (may be empty on failure).
     """
     rss_outputs = []
     for flat_file in flat_files:
@@ -896,19 +955,13 @@ def _align_shapes(science_data, flat_data):
     (e.g. 2049x2048 vs 2048x2048).  This trims the larger array to match
     the smaller, keeping data from the origin corner.
 
-    Parameters
-    ----------
-    science_data : ndarray
-        2D science frame.
-    flat_data : ndarray
-        2D flat field / pixel map.
+    Args:
+        science_data (ndarray): 2D science frame.
+        flat_data (ndarray): 2D flat field / pixel map.
 
-    Returns
-    -------
-    science_out, flat_out : ndarray
-        Arrays with matching shapes.
-    trimmed : bool
-        True if any trimming was performed.
+    Returns:
+        science_out, flat_out (ndarray): Arrays with matching shapes.
+        trimmed (bool): True if any trimming was performed.
     """
     if science_data.shape == flat_data.shape:
         return science_data, flat_data, False

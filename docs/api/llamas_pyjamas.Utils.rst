@@ -12,5 +12,4 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   llamas_pyjamas.Utils.readmode
    llamas_pyjamas.Utils.utils

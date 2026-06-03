@@ -36,7 +36,21 @@ import glob
 import pickle
 
 def plot_ds9(image_array: fits, samp=False) -> None:
-    
+    """Display a 2D image array in SAOImage DS9.
+
+    Wraps the array in a FITS HDU and sends it to DS9 either through the SAMP
+    hub (when ``samp`` is True) or by piping the FITS bytes to a new ``ds9``
+    subprocess.
+
+    Args:
+        image_array (numpy.ndarray): 2D image data to display. Non-array inputs
+            are ignored.
+        samp (bool, optional): If True, deliver the image to a running DS9 via
+            the SAMP hub; otherwise launch DS9 as a subprocess. Defaults to False.
+
+    Returns:
+        None
+    """
     if isinstance(image_array, np.ndarray):
 
     
@@ -122,7 +136,19 @@ def plot_trace_qa(trace_obj: TraceLlamas, save_dir=None)-> None:
     return
 
 def plot_pkl_combs(channel: str)-> None:
+    """Plot comb profiles from pickled trace objects for a given channel.
 
+    Searches ``CALIB_DIR`` for pickle files matching the channel, loads each
+    one, and plots its stored ``comb`` array in a separate figure labelled by
+    bench-side and channel.
+
+    Args:
+        channel (str): Channel name used to match pickle filenames (e.g.
+            'green', 'red', 'blue').
+
+    Returns:
+        None
+    """
     files = glob.glob(os.path.join(CALIB_DIR, f'*{channel}_*.pkl'))
     N_combs = len(files)
     print(f"Found {N_combs} files for channel {channel}")
@@ -150,7 +176,21 @@ def plot_pkl_combs(channel: str)-> None:
 
 
 def plot_comb_template(fitsfile: str, channel)-> None:
-    
+    """Plot per-HDU comb profiles and detected peaks for a channel from a FITS file.
+
+    Builds a TraceLlamas object from the FITS file, selects the HDU extensions
+    belonging to the requested channel (by ``CAM_NAME`` or ``COLOR`` header),
+    processes each, and plots the comb with overlaid peak positions, peak
+    heights, and fiber index labels on a grid of subplots.
+
+    Args:
+        fitsfile (str): Path to the FITS file to trace.
+        channel (str): Channel name to select matching HDU extensions (e.g.
+            'green', 'red', 'blue').
+
+    Returns:
+        None
+    """
     trace = TraceLlamas(fitsfile)
     hdu = fits.open(fitsfile)
     
@@ -204,7 +244,20 @@ def plot_comb_template(fitsfile: str, channel)-> None:
 
 
 def plot_master_comb(channel: str)-> None:
-    
+    """Plot master comb profiles for all bench-sides of a channel from the trace LUT.
+
+    Loads ``traceLUT.json`` from ``LUT_DIR`` and, for each of the eight
+    bench-sides ('1A'..'4B'), plots the stored master comb together with the
+    master fiber peak positions, peak heights, and fiber index labels on a grid
+    of subplots.
+
+    Args:
+        channel (str): Channel name whose master combs are read from the LUT
+            (e.g. 'green', 'red', 'blue').
+
+    Returns:
+        None
+    """
     pkht_value = 10000
     
     with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'rb') as f:
@@ -262,6 +315,21 @@ def plot_master_comb(channel: str)-> None:
 
 
 def compare_combs(channel1: str, benchside1: str, channel2: str, benchside2: str)-> None:
+    """Compare master comb profiles for two channel/bench-side combinations.
+
+    Loads ``traceLUT.json`` from ``LUT_DIR`` and plots the two requested master
+    combs in a stacked two-panel figure, each with its master peak positions,
+    peak heights, and fiber index labels, to allow visual comparison.
+
+    Args:
+        channel1 (str): Channel name for the first (top) panel.
+        benchside1 (str): Bench-side identifier for the first panel (e.g. '1A').
+        channel2 (str): Channel name for the second (bottom) panel.
+        benchside2 (str): Bench-side identifier for the second panel (e.g. '2B').
+
+    Returns:
+        None
+    """
     with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'rb') as f:
         master_LUT = json.load(f)
     
@@ -660,6 +728,18 @@ def analyze_psf_width(hdu_data, trace, ifiber, n_samples=5, figsize=(12, 10)):
     
     # Define Gaussian function for fitting
     def gaussian(x, amp, cen, sigma, offset):
+        """Gaussian-plus-offset profile used to fit fiber cross-sections.
+
+        Args:
+            x (np.ndarray): Positions at which to evaluate the profile.
+            amp (float): Peak amplitude of the Gaussian above the offset.
+            cen (float): Center position of the Gaussian.
+            sigma (float): Standard deviation (width) of the Gaussian.
+            offset (float): Constant baseline added to the profile.
+
+        Returns:
+            np.ndarray: The evaluated Gaussian-plus-offset profile.
+        """
         return amp * np.exp(-(x - cen)**2 / (2 * sigma**2)) + offset
     
     # Sample positions across detector

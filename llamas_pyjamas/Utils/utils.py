@@ -73,17 +73,12 @@ def configure_pipeline_logging(log_dir, level=logging.INFO):
 
     Call this **once** at pipeline startup in ``reduce.py:main()``.
 
-    Parameters
-    ----------
-    log_dir : str
-        Directory for the log file.
-    level : int
-        File logging level (default: ``logging.INFO``).
+    Args:
+        log_dir (str): Directory for the log file.
+        level (int): File logging level (default: ``logging.INFO``).
 
-    Returns
-    -------
-    str
-        Path to the created log file.
+    Returns:
+        str: Path to the created log file.
     """
     os.makedirs(log_dir, exist_ok=True)
 
@@ -823,7 +818,20 @@ def flip_blue_combs()-> None:
     
     
 def check_image_properties(hdu: fits.HDUList, start_idx: int = 1) -> None:
+    """Print basic diagnostics for each image extension in a FITS HDU list.
 
+    For each extension from ``start_idx`` onward, reports the colour, bench, and
+    side from the header and whether the data contains any NaN or negative
+    values.
+
+    Args:
+        hdu (astropy.io.fits.HDUList): Open FITS HDU list to inspect.
+        start_idx (int, optional): Index of the first extension to check.
+            Defaults to 1 (skips the primary HDU).
+
+    Returns:
+        None
+    """
     for i in range(start_idx, len(hdu)):
         color = hdu[i].header['COLOR']
         bench = hdu[i].header['BENCh']
@@ -1729,26 +1737,21 @@ def is_wavelength_solution_useable(arc_dict):
     for use in wavelength transfer operations. This function samples a few
     fibers from each extension to verify the wavelength data is valid.
 
-    Parameters
-    ----------
-    arc_dict : dict
-        Dictionary containing 'extractions' (list of ExtractLlamas objects)
-        and 'metadata' for each extension. Typically loaded via
-        ExtractLlamas.loadExtraction().
+    Args:
+        arc_dict (dict): Dictionary containing 'extractions' (list of ExtractLlamas objects)
+            and 'metadata' for each extension. Typically loaded via
+            ExtractLlamas.loadExtraction().
 
-    Returns
-    -------
-    bool
-        True if wavelength solutions are useable, False otherwise.
+    Returns:
+        bool: True if wavelength solutions are useable, False otherwise.
 
-    Notes
-    -----
-    This function uses validate_wavelength_solution() from Arc/arcValidation.py
-    to check wavelength data quality including:
-    - Non-zero wavelength values
-    - No NaN/Inf values
-    - Monotonically increasing wavelengths
-    - Reasonable wavelength ranges for each channel
+    Notes:
+        This function uses validate_wavelength_solution() from Arc/arcValidation.py
+        to check wavelength data quality including:
+        - Non-zero wavelength values
+        - No NaN/Inf values
+        - Monotonically increasing wavelengths
+        - Reasonable wavelength ranges for each channel
     """
     from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
 
@@ -1866,21 +1869,14 @@ def plot_flat_correction_ratio(uncorrected_pkl, corrected_pkl, output_file=None,
     produces a smooth curve near 1.0; high-frequency residual structure
     indicates under- or over-correction.
 
-    Parameters
-    ----------
-    uncorrected_pkl : str
-        Path to batch extraction pickle **before** flat correction.
-    corrected_pkl : str
-        Path to batch extraction pickle **after** flat correction.
-    output_file : str, optional
-        Path to save the figure.  If ``None``, displays interactively.
-    n_fibers : int
-        Number of representative fibers per extension (evenly spaced).
+    Args:
+        uncorrected_pkl (str): Path to batch extraction pickle **before** flat correction.
+        corrected_pkl (str): Path to batch extraction pickle **after** flat correction.
+        output_file (str, optional): Path to save the figure.  If ``None``, displays interactively.
+        n_fibers (int): Number of representative fibers per extension (evenly spaced).
 
-    Returns
-    -------
-    dict
-        ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
+    Returns:
+        dict: ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
     """
     import matplotlib
     if output_file:
@@ -1962,20 +1958,14 @@ def plot_channel_flat_summary(extraction_pkl, output_file=None, filter_size=12):
     green | blue).  If one channel has systematically higher RMS, the
     signal threshold or filter size may need tuning.
 
-    Parameters
-    ----------
-    extraction_pkl : str
-        Path to a batch extraction pickle (e.g. the corrected flat
-        extraction or a corrected science extraction).
-    output_file : str, optional
-        Save path for the figure.
-    filter_size : int
-        Median filter size used to build the smooth model.
+    Args:
+        extraction_pkl (str): Path to a batch extraction pickle (e.g. the corrected flat
+            extraction or a corrected science extraction).
+        output_file (str, optional): Save path for the figure.
+        filter_size (int): Median filter size used to build the smooth model.
 
-    Returns
-    -------
-    dict
-        ``{'red': {'median_rms': float, 'fibers': int}, ...}``
+    Returns:
+        dict: ``{'red': {'median_rms': float, 'fibers': int}, ...}``
     """
     from scipy.ndimage import median_filter as _mf, gaussian_filter as _gf
     import matplotlib
@@ -2041,18 +2031,13 @@ def plot_fiber_consistency(extraction_pkl, output_file=None):
     systematic structure.  Lines are colored by channel so that
     red/green/blue can be compared directly.
 
-    Parameters
-    ----------
-    extraction_pkl : str
-        Path to a batch extraction pickle (e.g. corrected flat lamp
-        extraction).
-    output_file : str, optional
-        Save path for the figure.
+    Args:
+        extraction_pkl (str): Path to a batch extraction pickle (e.g. corrected flat lamp
+            extraction).
+        output_file (str, optional): Save path for the figure.
 
-    Returns
-    -------
-    dict
-        ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
+    Returns:
+        dict: ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
     """
     import matplotlib
     if output_file:
@@ -2121,17 +2106,12 @@ def plot_flat_residual_map(pixel_map_file, output_file=None):
     is not fully removing pixel QE variations; structure perpendicular to
     traces indicates trace-edge artifacts.
 
-    Parameters
-    ----------
-    pixel_map_file : str
-        Path to ``pixel_maps.fits`` (24-extension MEF).
-    output_file : str, optional
-        Save path for the figure.
+    Args:
+        pixel_map_file (str): Path to ``pixel_maps.fits`` (24-extension MEF).
+        output_file (str, optional): Save path for the figure.
 
-    Returns
-    -------
-    dict
-        ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
+    Returns:
+        dict: ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
     """
     import matplotlib
     if output_file:

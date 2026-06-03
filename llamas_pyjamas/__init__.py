@@ -1,3 +1,11 @@
+"""LLAMAS Pyjamas: data-reduction pipeline for the LLAMAS IFU spectrograph.
+
+Top-level package providing the full reduction workflow for the Magellan LLAMAS
+integral-field spectrograph, including bias subtraction, fiber tracing, flat
+fielding, spectral extraction, wavelength calibration, cube building, and
+white-light imaging. Subpackages are organised by reduction stage (e.g. Trace,
+Flat, Extract, Arc, Cube, Image, Masking, QA, Utils).
+"""
 # Fix for Ray + PypeIt signal handler conflict
 # This must be done before any imports that might trigger PypeIt imports
 import signal

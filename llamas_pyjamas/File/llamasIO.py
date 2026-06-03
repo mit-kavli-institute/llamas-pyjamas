@@ -45,6 +45,18 @@ class llamasOneCamera:
 
 
     def __init__(self):
+        """Initialise an empty single-camera container.
+
+        Sets all metadata fields to placeholder defaults; populate them by
+        calling :meth:`readhdu` with a FITS HDU.
+
+        Attributes:
+            header (str): Placeholder for the camera's FITS header (empty string).
+            data (int): Placeholder for the camera's image data (0).
+            bench (int): Placeholder bench number (-1).
+            side (str): Placeholder bench side (empty string).
+            channel (str): Placeholder colour channel (empty string).
+        """
         self.header =   ''
         self.data   =   0
         self.bench  =   -1
@@ -83,7 +95,21 @@ class llamasAllCameras:
 
 
     def __init__(self, fitsfile: str) -> None:
+        """Load all camera extensions from a multi-extension FITS file.
 
+        Opens the FITS file, stores the primary header, and builds a
+        :class:`llamasOneCamera` for every image extension by calling its
+        ``readhdu`` method.
+
+        Args:
+            fitsfile (str): Path to the multi-extension LLAMAS FITS file.
+
+        Attributes:
+            header: Primary HDU header of the FITS file.
+            Next (int): Number of image extensions (HDUs beyond the primary).
+            extensions (list): List of :class:`llamasOneCamera` objects, one
+                per extension.
+        """
         with fits.open(fitsfile) as hdulist:
             self.header     = hdulist[0].header
             self.Next       = len(hdulist) - 1

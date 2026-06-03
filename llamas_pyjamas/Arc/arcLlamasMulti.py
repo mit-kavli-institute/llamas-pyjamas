@@ -1,3 +1,9 @@
+"""Multi-detector arc wavelength-solution utilities for the LLAMAS pipeline.
+
+Extends the base arc-calibration routines to derive wavelength solutions across
+all LLAMAS detectors, using Ray for parallel multiprocessing. Builds on PypeIt
+cross-correlation, peak-detection, and B-spline fitting primitives.
+"""
 from   astropy.io import fits
 import scipy
 import numpy as np

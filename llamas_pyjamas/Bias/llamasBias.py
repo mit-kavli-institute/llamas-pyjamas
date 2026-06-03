@@ -30,15 +30,25 @@ from llamas_pyjamas.config import CALIB_DIR
 
 
 class BiasLlamas:
+    """Build a master bias frame from a set of LLAMAS bias exposures.
+
+    Accepts a directory of bias FITS files, a single file path, or a list of
+    file paths, and combines the matching detector extensions (grouped by COLOR
+    and BENCHSIDE) into a median-stacked master bias via :meth:`master_bias`.
+
+    Attributes:
+        files (list): Resolved list of bias FITS file paths to combine.
+        bias_path (str): Directory associated with the input files, used as the
+            output location for the combined master bias.
+    """
+
     def __init__(self, input_data) -> None:
         """
         Initializes the BiasLlamas object with either a directory path, a file path, or a list of file paths.
 
-        Parameters
-        ----------
-        input_data : str or list
-            If a string, it is treated as either a directory (from which all .fits files are grabbed)
-            or a full file path. If a list, it should contain file paths to .fits files.
+        Args:
+            input_data (str or list): If a string, it is treated as either a directory (from which all .fits files are grabbed)
+                or a full file path. If a list, it should contain file paths to .fits files.
         """
         from llamas_pyjamas.config import CALIB_DIR  # ensure CALIB_DIR is available
 
