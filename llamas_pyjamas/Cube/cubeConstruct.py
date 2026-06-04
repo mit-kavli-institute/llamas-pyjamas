@@ -1592,6 +1592,7 @@ class CubeConstructor:
         This method searches for RSS files with channel-specific suffixes like:
         - '_extract_RSS_blue.fits', '_extract_RSS_green.fits', '_extract_RSS_red.fits' (old format)
         - '_flat_corrected_RSS_blue.fits', '_flat_corrected_RSS_green.fits', '_flat_corrected_RSS_red.fits' (new format)
+        - '_extract_RSS_blue_FF.fits', etc. (fibre-flat corrected, preferred when available)
         
         Parameters:
             base_path (str): Base path/prefix to the RSS files or a single RSS file
@@ -1619,16 +1620,19 @@ class CubeConstructor:
                 if pattern in base_name:
                     # Extract the channel from the filename
                     parts = base_name.split(pattern)
-                    if len(parts) == 2 and parts[1] in ['blue', 'green', 'red']:
-                        detected_channel = parts[1]
-                        detected_base_name = parts[0]
-                        # Just return this file with its detected channel
-                        self.logger.info(f"Input is already a channel-specific file for channel: {detected_channel} (pattern: {pattern})")
-                        return {detected_channel: base_path}
-                    # Get the base name without channel suffix for further processing
-                    elif len(parts) == 2:
-                        detected_base_name = parts[0]
-                        break
+                    if len(parts) == 2:
+                        # Strip known post-channel suffixes (e.g. _FF for fibre-flat corrected)
+                        channel_part = parts[1].replace('_FF', '')
+                        if channel_part in ['blue', 'green', 'red']:
+                            detected_channel = channel_part
+                            detected_base_name = parts[0]
+                            # Just return this file with its detected channel
+                            self.logger.info(f"Input is already a channel-specific file for channel: {detected_channel} (pattern: {pattern})")
+                            return {detected_channel: base_path}
+                        # Get the base name without channel suffix for further processing
+                        else:
+                            detected_base_name = parts[0]
+                            break
             
             # Update base_name if we found a pattern
             if detected_base_name is not None:
@@ -1640,14 +1644,21 @@ class CubeConstructor:
         # Dictionary to store found channel files
         channel_files = {}
         
-        # Define common channel names and RSS patterns to try
+        # Define common channel names and RSS pattern/suffix combinations to try.
+        # Fibre-flat corrected (_FF) variants are tried first so they are preferred
+        # when both corrected and uncorrected files exist.
         channels = ['blue', 'green', 'red']
-        rss_patterns = ['_flat_corrected_RSS_', '_extract_RSS_']  # Try new format first
-        
-        # Check for existence of each channel file using both patterns
+        rss_suffixes = [
+            ('_flat_corrected_RSS_', '_FF'),   # pixel-flat + fibre-flat corrected
+            ('_extract_RSS_', '_FF'),           # extract + fibre-flat corrected
+            ('_flat_corrected_RSS_', ''),       # pixel-flat only
+            ('_extract_RSS_', ''),              # extract only (no flat correction)
+        ]
+
+        # Check for existence of each channel file using all pattern/suffix combos
         for channel in channels:
-            for pattern in rss_patterns:
-                channel_path = f"{base_path_no_ext}{pattern}{channel}.fits"
+            for pattern, ff_suffix in rss_suffixes:
+                channel_path = f"{base_path_no_ext}{pattern}{channel}{ff_suffix}.fits"
                 if os.path.isfile(channel_path):
                     self.logger.info(f"Found {channel} channel RSS file: {channel_path}")
                     channel_files[channel] = channel_path

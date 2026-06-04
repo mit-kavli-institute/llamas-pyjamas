@@ -363,7 +363,8 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
     logger.info("Twilight: extracting 1D spectra using lamp traces")
     extraction_file = run_extraction(
         corrected_file, twi_output_dir,
-        slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir)
+        slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir,
+        remove_cosmic_rays=False)
     logger.info(f"Twilight extraction: {extraction_file}")
 
     # Step 3: Wavelength calibration

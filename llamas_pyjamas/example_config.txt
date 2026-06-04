@@ -19,6 +19,17 @@
 #slow_bias_file = /path/to/your/slow_master_bias.fits
 #fast_bias_file = /path/to/your/fast_master_bias.fits
 
+#==============================================================================
+# COSMIC RAY REMOVAL
+#==============================================================================
+# Enable L.A.Cosmic cosmic ray removal before spectral extraction (default: True)
+# Set to False to skip cosmic ray removal (e.g. for calibration frames)
+remove_cosmic_rays = True
+
+# Optional: custom output directory for cosmic ray mask FITS files
+# If not set, masks are saved to {extraction_output_dir}/masks/
+#mask_output_dir = /path/to/custom/mask/output
+
 #calibration files to include
 red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_34_47.516_mef.fits
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits

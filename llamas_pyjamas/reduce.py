@@ -400,13 +400,15 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
+    ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
+                   remove_cosmic_rays=False)
 
     return
 
 
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
-                   trace_dir=None, mastercalib_trace_dir=None):
+                   trace_dir=None, mastercalib_trace_dir=None,
+                   remove_cosmic_rays=True, mask_output_dir=None):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -417,6 +419,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         fast_bias: Path to FAST-mode master bias FITS file
         trace_dir: User trace directory (for real extensions)
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
+        remove_cosmic_rays: Enable L.A.Cosmic cosmic ray removal before extraction
+        mask_output_dir: Output directory for cosmic ray mask FITS files
 
     Returns:
         str: Path to extraction file
@@ -438,7 +442,9 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 slow_bias=slow_bias,
                 fast_bias=fast_bias,
                 trace_dir=trace_dir,
-                mastercalib_trace_dir=mastercalib_trace_dir
+                mastercalib_trace_dir=mastercalib_trace_dir,
+                remove_cosmic_rays=remove_cosmic_rays,
+                mask_output_dir=mask_output_dir
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -448,7 +454,9 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             slow_bias=slow_bias,
             fast_bias=fast_bias,
             trace_dir=trace_dir,
-            mastercalib_trace_dir=mastercalib_trace_dir
+            mastercalib_trace_dir=mastercalib_trace_dir,
+            remove_cosmic_rays=remove_cosmic_rays,
+            mask_output_dir=mask_output_dir
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -461,7 +469,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
 #this isn't quite right -> nneeds checking
 def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
-    ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias)
+    ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
+                   remove_cosmic_rays=False)
 
     arc_picklename = os.path.join(output_dir, os.path.basename(arc_file).replace('_mef.fits', '_extract.pkl'))
 
@@ -562,7 +571,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
         # run_extraction returns only a basename (from GUI_extract); join with output_dir
         pkl_basename = run_extraction(corr_file, output_dir,
                                       slow_bias=slow_bias, fast_bias=fast_bias,
-                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR)
+                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
+                                      remove_cosmic_rays=False)
         if not pkl_basename:
             print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
             continue
@@ -1430,6 +1440,14 @@ def main(config_path):
         logger.warning(f"Fast bias file not found at '{_fast_bias_path}' — inter-fibre fallback will be used")
 
         
+    # Parse cosmic ray removal configuration
+    remove_cosmic_rays = config.get('remove_cosmic_rays', True)
+    mask_output_dir = config.get('mask_output_dir', None)
+    if remove_cosmic_rays:
+        logger.info("Cosmic ray removal enabled (L.A.Cosmic)")
+    else:
+        logger.info("Cosmic ray removal disabled")
+
     # Parse CRR cube configuration (defaults to True if not specified)
     use_crr_cube = config.get('CRR_cube', False)  # Default to True
     if isinstance(use_crr_cube, str):
@@ -1944,7 +1962,9 @@ def main(config_path):
                     slow_bias=slow_bias_file,
                     fast_bias=fast_bias_file,
                     trace_dir=final_trace_dir,              # User traces
-                    mastercalib_trace_dir=CALIB_DIR         # Mastercalib fallback
+                    mastercalib_trace_dir=CALIB_DIR,        # Mastercalib fallback
+                    remove_cosmic_rays=remove_cosmic_rays,
+                    mask_output_dir=mask_output_dir
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -1957,7 +1977,9 @@ def main(config_path):
                 slow_bias=slow_bias_file,
                 fast_bias=fast_bias_file,
                 trace_dir=final_trace_dir,                  # User traces
-                mastercalib_trace_dir=CALIB_DIR             # Mastercalib fallback
+                mastercalib_trace_dir=CALIB_DIR,            # Mastercalib fallback
+                remove_cosmic_rays=remove_cosmic_rays,
+                mask_output_dir=mask_output_dir
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
