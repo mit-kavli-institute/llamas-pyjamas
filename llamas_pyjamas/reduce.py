@@ -1101,7 +1101,8 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
                    use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
-                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
+                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled',
+                   name_suffix=''):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -1127,6 +1128,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         cube_min_weight (float): Minimum weight threshold (for simple method)
         cube_grid_method (str): Spatial grid method for simple constructor:
             'oversampled' (default), 'native_hex', or 'nearest_hex'
+        name_suffix (str): Tag appended to each output cube filename (e.g. '_skysub'),
+            so multiple cube sets (standard vs sky-subtracted) can coexist in the same
+            output directory without overwriting. Default '' (no suffix).
 
     Returns:
         list: Paths to constructed cube files
@@ -1220,9 +1224,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
 
                 # Save cube
                 if channel:
-                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                    cube_filename = f"{base_name}_cube_{channel}{name_suffix}.fits"
                 else:
-                    cube_filename = f"{base_name}_cube.fits"
+                    cube_filename = f"{base_name}_cube{name_suffix}.fits"
 
                 cube_path = os.path.join(output_dir, cube_filename)
                 constructor.save_cube(cube_path, overwrite=True)
@@ -1279,9 +1283,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 if parallel:
                     output_suffix += "_parallel"
                 
-                cube_filename = f"{base_name}{output_suffix}.fits"
+                cube_filename = f"{base_name}{output_suffix}{name_suffix}.fits"
                 cube_path = os.path.join(output_dir, cube_filename)
-                
+
                 crr_cube.save_to_fits(cube_path)
                 cube_files.append(cube_path)
                 
@@ -1342,7 +1346,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 # Save each channel cube
                 saved_paths = constructor.save_channel_cubes(
                     channel_cubes,
-                    output_prefix=os.path.join(output_dir, f"{base_name}"),
+                    output_prefix=os.path.join(output_dir, f"{base_name}{name_suffix}"),
                     header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
                     spatial_sampling=spatial_sampling
                 )
@@ -1470,6 +1474,15 @@ def main(config_path):
         ray_object_store_mb = int(ray_object_store_mb)
     os.environ['LLAMAS_RAY_OBJECT_STORE_MB'] = str(ray_object_store_mb)
     print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
+
+    # Optional per-task memory reservation for extraction (default 0 = none).
+    # A non-zero value throttles extraction concurrency on low-RAM machines; leave
+    # at 0 to schedule purely on ray_num_cpus and avoid the infeasible-memory deadlock.
+    ray_task_memory_mb = config.get('ray_task_memory_mb', 0)
+    if isinstance(ray_task_memory_mb, str):
+        ray_task_memory_mb = int(ray_task_memory_mb)
+    os.environ['LLAMAS_RAY_TASK_MEMORY_MB'] = str(ray_task_memory_mb)
+    print(f"Configuring Ray per-task memory reservation to {ray_task_memory_mb} MB")
 
 
     if not config.get('output_dir'):
@@ -1709,7 +1722,7 @@ def main(config_path):
                 arc_calib_file=config.get('arc_calib_file'),
                 verbose=config.get('verbose_flat_processing', False),
                 method=flat_field_method,
-                use_bias=bias_file,
+                use_bias=slow_bias_file,
                 filter_size=filter_size,
                 signal_thresholds=signal_thresholds,
                 clip_range=(clip_min, clip_max),
@@ -2194,30 +2207,46 @@ def main(config_path):
                       "skipping fibre-to-fibre flat correction")
                 logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
 
+        # ── Sky-subtraction framework (post fibre-flat, per-colour) ──
+        # Builds on the base SKY model already in the FF files and writes
+        # LLAMAS_{name}_RSS_{color}_FF_SKYSUB.fits. Disabled by default.
+        if config.get('sky_framework', False):
+            from llamas_pyjamas.Sky.skySubtract import subtract_sky_all_colors
+            from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
+            ff_for_sky = [
+                os.path.join(extraction_path, f)
+                for f in os.listdir(extraction_path)
+                if f.endswith('_FF.fits') and '_RSS' in f
+            ]
+            if ff_for_sky:
+                print("\n" + "=" * 60)
+                print("SKY-SUBTRACTION FRAMEWORK")
+                print("=" * 60)
+                sky_cfg = SkySubtractConfig.from_pipeline_config(config)
+                skysub_files = subtract_sky_all_colors(ff_for_sky, config=sky_cfg)
+                for sf in skysub_files:
+                    print(f"  SKYSUB RSS: {os.path.basename(sf)}")
+                logger.info(f"Sky framework produced: {skysub_files}")
+            else:
+                print("Sky framework enabled but no *_FF.fits files found — skipping")
+                logger.warning("sky_framework=True but no _FF.fits files present")
+
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
         logger.info("Stage: Constructing cubes from RSS files")
-        # Look for RSS files — prefer FF (fibre-flat corrected) when available
         all_rss = [os.path.join(extraction_path, f)
                    for f in os.listdir(extraction_path)
                    if f.endswith('.fits') and '_RSS' in f]
-        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
+        # Two independent cube sets, both built by default:
+        #   - standard set from the fibre-flat (_FF) RSS  -> ..._cube_{color}.fits
+        #   - sky-subtracted set from the framework (_FF_SKYSUB) RSS -> ..._cube_{color}_skysub.fits
+        # _FF_SKYSUB files end in '_FF_SKYSUB.fits' (not '_FF.fits'), so the two lists are disjoint.
+        skysub_rss = [f for f in all_rss if '_FF_SKYSUB' in os.path.basename(f)]
+        ff_rss = [f for f in all_rss if os.path.basename(f).endswith('_FF.fits')]
         non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
-        rss_files = ff_rss if ff_rss else non_ff_rss
-        
-        if rss_files:
-            print(f"Found {len(rss_files)} RSS files for cube construction:")
-            for rss_file in rss_files:
-                basename = os.path.basename(rss_file)
-                if '_FF' in basename:
-                    status = " (fibre-flat corrected)"
-                elif '_flat_corrected' in basename:
-                    status = " (pixel-flat corrected)"
-                else:
-                    status = ""
-                print(f"  - {basename}{status}")
-        else:
-            print(f"Found {len(rss_files)} RSS files for cube construction")
+        # Standard set uses the _FF RSS; falls back to plain RSS only if fibre-flat
+        # produced no _FF files at all.
+        standard_rss = ff_rss if ff_rss else non_ff_rss
 
         if 'cube_output_dir' not in config:
             cube_output_dir = os.path.join(output_dir, 'cubes')
@@ -2225,10 +2254,12 @@ def main(config_path):
             cube_output_dir = config.get('cube_output_dir')
         os.makedirs(cube_output_dir, exist_ok=True)
 
+        gen_standard = config.get('generate_standard_cubes', True)
+        gen_skysub = config.get('generate_skysub_cubes', True)
 
-        if rss_files and _gen_cubes:
-            cube_files = construct_cube(
-                rss_files,
+        def _build_cubes(rss_list, name_suffix):
+            return construct_cube(
+                rss_list,
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
@@ -2241,11 +2272,36 @@ def main(config_path):
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
                 cube_radius=float(config.get('cube_radius', 1.5)),
                 cube_min_weight=float(config.get('cube_min_weight', 0.01)),
-                cube_grid_method=config.get('cube_grid_method', 'oversampled')
+                cube_grid_method=config.get('cube_grid_method', 'oversampled'),
+                name_suffix=name_suffix,
             )
-            print(f"Cubes constructed: {cube_files}")
+
+        cube_files = []
+        if _gen_cubes:
+            if gen_standard and standard_rss:
+                print(f"Building standard cubes from {len(standard_rss)} RSS file(s)...")
+                logger.info(f"Building standard cube set from {len(standard_rss)} RSS files")
+                cube_files += _build_cubes(standard_rss, '')
+            elif gen_standard:
+                print("generate_standard_cubes=True but no standard RSS files found")
+                logger.warning("generate_standard_cubes=True but no standard RSS files found")
+
+            if gen_skysub and skysub_rss:
+                print(f"Building sky-subtracted (_skysub) cubes from {len(skysub_rss)} RSS file(s)...")
+                logger.info(f"Building sky-subtracted cube set from {len(skysub_rss)} RSS files")
+                cube_files += _build_cubes(skysub_rss, '_skysub')
+            elif gen_skysub:
+                print("generate_skysub_cubes=True but no *_FF_SKYSUB.fits found "
+                      "(did the sky framework run?)")
+                logger.warning("generate_skysub_cubes=True but no _FF_SKYSUB RSS files found "
+                               "(sky framework may not have run)")
+
+            if cube_files:
+                print(f"Cubes constructed: {cube_files}")
+            else:
+                print("No cubes constructed (no matching RSS files or both sets disabled)")
         else:
-            print("No RSS files found for cube construction")
+            print("Cube generation disabled (generate_cubes=False)")
                 
         
         

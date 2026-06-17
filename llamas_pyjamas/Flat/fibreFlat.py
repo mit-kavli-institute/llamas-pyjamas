@@ -1539,8 +1539,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         mask_hdu.header['HISTORY'] = 'Fibre flat quality flags ORed in'
         out_hdul.append(mask_hdu)
 
-        # Copy remaining extensions unchanged (WAVE, FWHM, FIBERMAP)
-        for ext_name_copy in ['WAVE', 'FWHM', 'FIBERMAP']:
+        # Copy remaining extensions unchanged (COUNTS/SKY, WAVE, FWHM, FIBERMAP).
+        # COUNTS and SKY are intentionally NOT fibre-flat corrected; the sky-subtraction
+        # framework consumes them from the FF file (SKY as the OH line-shape template,
+        # COUNTS for the white-light source mask). They must be carried through.
+        for ext_name_copy in ['COUNTS', 'SKY', 'WAVE', 'FWHM', 'FIBERMAP']:
             try:
                 out_hdul.append(hdul[ext_name_copy].copy())
             except KeyError:

@@ -6,7 +6,7 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 import llamas_pyjamas.Arc.arcLlamas as arc
 from llamas_pyjamas.QA import plot_ds9
-from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR
+from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 from pypeit.core.fitting import iterfit, robust_fit
 from pypeit.core.wavecal.wvutils import arc_lines_from_spec
 from astropy.io import fits
@@ -225,7 +225,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
     else:
         sky_dict = ExtractLlamas.loadExtraction(sky_extraction_file)
 
-    arc_dict = ExtractLlamas.loadExtraction(os.path.join(OUTPUT_DIR, 'LLAMAS_reference_arc.pkl'))
+    arc_dict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
     sky_wvcal = arc.arcTransfer(sky_dict, arc_dict)
     
     sky = sky_wvcal['extractions']
@@ -327,7 +327,12 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         # back by each fiber's throughput to match raw counts in obj.counts.
         print(f"  Applying sky model to {n_fibers} fibers")
         for i in range(n_fibers):
-            skymodel = sset.value(sky[extension[i]].xshift[fiber[i],:])[0]
+            # Clip each fiber's xshift to the spline's fitted range before evaluating.
+            # The bspline is fit only on the middle-third sky fibers' xshift span;
+            # evaluating it on edge/dead fibers whose xshift extends beyond that span
+            # causes catastrophic extrapolation (~1e11) that poisons FLUX and the cubes.
+            x_eval = np.clip(sky[extension[i]].xshift[fiber[i],:], xshift_min, xshift_max)
+            skymodel = sset.value(x_eval)[0]
             tp = science[extension[i]].relative_throughput[fiber[i]]
             if not np.isfinite(tp) or tp <= 0:
                 tp = 1.0
