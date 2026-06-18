@@ -71,6 +71,24 @@ ray_num_cpus = 8
 # refines. Leave True so the framework has a base model to build on.
 sky_subtract = True
 
+# Which fibres/regions build the sky model. This drives BOTH the base model
+# (skyModel_1d) and, for consistency, the advanced framework's PCA basis below.
+#   dimmest       (default) the sky_n_fibres faintest fibres per camera.
+#   middle-third  legacy: the central third of fibres ranked by brightness.
+#   skymap        fibres falling in a user sky region -> set sky_map_file.
+#   frame         build from dedicated blank-sky exposures -> set sky_frame_files.
+sky_selection_method = dimmest
+# Number of faint fibres for the 'dimmest' method (default 20).
+# sky_n_fibres = 20
+# For sky_selection_method = skymap: a 2-D FITS marking sky regions. Either a
+# mask (sky = nonzero pixels) or a flux image / non-sky-subtracted cube the
+# pipeline thresholds. A celestial WCS is used when present (recommended).
+# sky_map_file = /path/to/sky_map.fits
+# For sky_selection_method = frame: dedicated blank-sky MEF(s) from your run.
+# They are extracted through the normal path; all good fibres build the model.
+# (If several are listed, only the first is used for now.)
+# sky_frame_files = /path/to/sky1_mef.fits, /path/to/sky2_mef.fits
+
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it
 # reads the *_FF.fits files, applies source masking -> per-fibre OH scaling ->
 # PCA/ZAP residual cleaning, and writes *_FF_SKYSUB.fits (consumed by the

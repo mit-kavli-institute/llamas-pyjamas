@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
@@ -5,6 +6,7 @@ from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 import llamas_pyjamas.Arc.arcLlamas as arc
+import llamas_pyjamas.Sky.skySelect as skySelect
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 from pypeit.core.fitting import iterfit, robust_fit
@@ -13,6 +15,8 @@ from astropy.io import fits
 from astropy.table import Table
 import os
 import warnings
+
+logger = logging.getLogger(__name__)
 
 def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half_width=10,
                sigdetect=5.0, fwhm=4.0, match_tol=5.0, min_lines=4, poly_order=1):
@@ -193,7 +197,8 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
     return outputfile
 
 
-def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False):
+def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False,
+                selection_method='dimmest', n_sky_fibres=20, sky_map=None):
     """
     Create a 1D sky model from the sky extraction.
 
@@ -201,10 +206,18 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
     science_extraction (ExtractLlamas): Extracted science data.
     sky_extraction (ExtractLlamas): Extracted data from a blank sky reference field
 
-    Note that as a default, the code assumes that the user estimates the sky from 
+    Note that as a default, the code assumes that the user estimates the sky from
     the science field itself. If a separate sky field is provided, it will be used instead.
 
-    Either way, the user must generate a mask to exclude sources from the sky estimation.
+    The fibres that build the model are chosen per camera by ``selection_method``
+    (see :mod:`llamas_pyjamas.Sky.skySelect`):
+
+    * ``'dimmest'``      (default) the ``n_sky_fibres`` faintest fibres.
+    * ``'middle-third'`` legacy central-third-by-brightness behaviour.
+    * ``'skymap'``       fibres falling in the user sky region ``sky_map``
+                         (a :class:`~llamas_pyjamas.Sky.skySelect.SkyMap`).
+    * ``'frame'``        all good fibres — use when ``sky_extraction_file`` is a
+                         dedicated blank-sky exposure.
 
     Returns:
     sky_model (np.ndarray): 1D sky model.
@@ -273,22 +286,63 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                     tt = np.sum(sky[i].counts[thisfiber]/sky[i].relative_throughput[thisfiber])
                     counts = np.append(counts, tt)
 
-        # Sort in descending order of brightness
-        idx = np.argsort(-counts)
-        extension = extension[idx].astype(int)
-        fiber = fiber[idx].astype(int)
-        counts = counts[idx]
-
-        # Use the middle third of fibers by brightness as sky fibers (avoid brightest
-        # which may have object flux, and dimmest which are noisy)
+        # Cast index arrays for fibre lookups.
+        extension = extension.astype(int)
+        fiber = fiber.astype(int)
         n_fibers = len(counts)
-        sky_start = n_fibers // 3
-        sky_end   = 2 * n_fibers // 3
+
+        # Skip missing/placeholder cameras. When a camera is absent the pipeline
+        # inserts a placeholder extension whose extracted counts are all zero
+        # (set in guiExtract); that is the canonical "no real data" test used
+        # across the pipeline.
+        cam_exts = np.unique(extension)
+        is_placeholder = all(np.allclose(np.nan_to_num(sky[e].counts), 0.0)
+                             for e in cam_exts)
+        finite_any = np.isfinite(counts)
+        if is_placeholder or finite_any.sum() == 0:
+            reason = ("missing/placeholder extension" if is_placeholder
+                      else "no finite sky fibres")
+            print(f"  Skipping sky model for camera {channel} {bench}{side}: {reason}.")
+            logger.warning("skyModel_1d: skipping camera %s %s%s (%s)",
+                           channel, bench, side, reason)
+            continue
+
+        # Preferred sky candidates: finite AND positive (keeps 'dimmest' from
+        # picking dead/zero fibres).
+        usable = finite_any & (counts > 0)
+
+        # Choose the sky fibres for this camera via the configured method.
+        # 'skymap' maps each fibre's spatial position into the user sky map;
+        # every other method ranks/selects on the white-light brightness.
+        in_region = None
+        if selection_method == 'skymap' and sky_map is not None:
+            benchsides_cam = np.array([f"{bench}{side}"] * n_fibers)
+            in_region = skySelect.fibres_in_sky_region(benchsides_cam, fiber, sky_map)
+        sel_mask = skySelect.select_sky_fibres(
+            counts, usable, method=selection_method,
+            n_fibres=n_sky_fibres, in_sky_region=in_region)
+
+        # Min-fibre floor for 'dimmest': low-signal cameras (e.g. faint blue) may
+        # have very few positive fibres, leaving a fit built from 1-2 fibres.
+        # Broaden to the middle-third of finite fibres for a sturdier fit.
+        if (selection_method == 'dimmest'
+                and sel_mask.sum() < skySelect.MIN_SKY_FIT_FIBRES
+                and finite_any.sum() >= skySelect.MIN_SKY_FIBRES):
+            broadened = skySelect.select_sky_fibres(counts, finite_any, method='middle-third')
+            if broadened.sum() > sel_mask.sum():
+                print(f"  Low-signal camera {channel} {bench}{side}: broadening dimmest "
+                      f"({int(sel_mask.sum())}) -> middle-third ({int(broadened.sum())} fibres)")
+                logger.info("skyModel_1d: %s %s%s only %d positive sky fibres; broadening "
+                            "to middle-third (%d)", channel, bench, side,
+                            int(sel_mask.sum()), int(broadened.sum()))
+                sel_mask = broadened
+
+        sel_idx = np.where(sel_mask)[0]
 
         sky_fitx = np.array([])
         sky_fity = np.array([])
 
-        for i in range(sky_start, sky_end):
+        for i in sel_idx:
             tp = sky[extension[i]].relative_throughput[fiber[i]]
             if not np.isfinite(tp) or tp <= 0:
                 tp = 1.0
@@ -305,13 +359,23 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         sky_fitx = sky_fitx[gd]
         sky_fity = sky_fity[gd]
 
+        if sky_fitx.size == 0:
+            print(f"  WARNING: camera {channel} {bench}{side}: no good sky pixels; skipping.")
+            logger.warning("skyModel_1d: no good sky pixels for %s %s%s; skipping",
+                           channel, bench, side)
+            continue
+
         xshift_min, xshift_max = sky_fitx.min(), sky_fitx.max()
         print(f"  xshift range: {xshift_min:.2f} to {xshift_max:.2f}")
         if xshift_max - xshift_min < 1.0:
-            print(f"  ERROR: Degenerate xshift for camera {channel} bench {bench}{side} — arcTransfer likely skipped this extension due to a metadata mismatch. Exiting.")
-            import sys; sys.exit(1)
+            print(f"  WARNING: Degenerate xshift for camera {channel} bench {bench}{side} — "
+                  "arcTransfer likely skipped this extension due to a metadata mismatch; skipping.")
+            logger.warning("skyModel_1d: degenerate xshift for %s %s%s; skipping",
+                           channel, bench, side)
+            continue
 
-        print(f"  Fitting sky with {len(sky_fitx)} points from {sky_end - sky_start} fibers")
+        print(f"  Fitting sky with {len(sky_fitx)} points from {len(sel_idx)} fibers "
+              f"(method='{selection_method}')")
         sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6, kwargs_bspline={'bkspace':0.5})
 
         if show_plots:
@@ -344,7 +408,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
     # Plot some QA - show a few fibers from the middle of the last camera processed
     try:
         if show_plots:
-            qa_indices = range(sky_start, min(sky_start + 5, sky_end))
+            qa_indices = sel_idx[:5]
             for i in qa_indices:
                 plt.plot(sky[extension[i]].wave[fiber[i],:], sky[extension[i]].counts[fiber[i],:], '.', markersize=0.5, label='data', color='k')
                 plt.plot(sky[extension[i]].wave[fiber[i],:], science[extension[i]].sky[fiber[i],:], color='r')

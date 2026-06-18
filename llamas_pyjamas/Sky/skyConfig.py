@@ -75,6 +75,13 @@ class SkySubtractConfig:
 
     method: str = "pca"
 
+    # sky-fibre selection (shared concept with the base model skyModel_1d).
+    # 'dimmest'/'frame' -> faint-population (white-light percentile) basis;
+    # 'middle-third' -> central third by brightness; 'skymap' -> fibres in the
+    # user sky map.  See llamas_pyjamas.Sky.skySelect.
+    selection_method: str = "dimmest"
+    sky_map_file: Optional[str] = None
+
     # source masking
     mask_method: str = "whitelight"
     sky_fiber_percentile: float = 60.0
@@ -97,12 +104,16 @@ class SkySubtractConfig:
     qa_dir: Optional[str] = None
 
     def __post_init__(self):
+        from llamas_pyjamas.Sky.skySelect import VALID_METHODS
         if self.method not in ("scaled", "pca"):
             raise ValueError(f"Unknown sky method {self.method!r}; "
                              "expected 'scaled' or 'pca'")
         if self.mask_method not in ("whitelight", "none"):
             raise ValueError(f"Unknown mask_method {self.mask_method!r}; "
                              "expected 'whitelight' or 'none'")
+        if self.selection_method not in VALID_METHODS:
+            raise ValueError(f"Unknown selection_method {self.selection_method!r}; "
+                             f"expected one of {VALID_METHODS}")
 
     @property
     def run_pca(self) -> bool:
@@ -126,6 +137,9 @@ class SkySubtractConfig:
 
         return cls(
             method=str(get("sky_method", default=cls.method)).lower(),
+            selection_method=str(get("sky_selection_method",
+                                     default=cls.selection_method)).lower(),
+            sky_map_file=get("sky_map_file", default=cls.sky_map_file),
             mask_method=str(get("sky_mask_method", default=cls.mask_method)).lower(),
             sky_fiber_percentile=float(get("sky_fiber_percentile",
                                            default=cls.sky_fiber_percentile)),
@@ -148,6 +162,7 @@ class SkySubtractConfig:
         """Compact provenance keys for the SKYSUB FITS header."""
         return {
             "SKYMETH": (self.method, "Sky framework method"),
+            "SKYSEL": (self.selection_method, "Sky-fibre selection method"),
             "SKYPCANC": (self.pca_ncomp if self.run_pca else 0,
                          "PCA residual components removed"),
             "SKYMASKP": (self.sky_fiber_percentile,

@@ -466,6 +466,53 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
     return extraction_file_path
 
 
+def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_dir,
+                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None):
+    """Extract a dedicated blank-sky MEF and return a ``*_corrected_extractions.pkl``.
+
+    Mirrors the science extraction path (validate -> optional flat-correct ->
+    extract -> wavelength-correct -> save) so the result can be passed straight
+    to :func:`skyModel_1d` as ``sky_extraction_file`` for the ``'frame'`` method.
+    """
+    if not os.path.exists(sky_file):
+        raise FileNotFoundError(f"Sky frame {sky_file} does not exist.")
+    print("\n" + "=" * 60)
+    print(f"EXTRACTING DEDICATED SKY FRAME: {os.path.basename(sky_file)}")
+    print("=" * 60)
+
+    orig_sky_file = sky_file
+    with fits.open(orig_sky_file) as _sky_hdul:
+        sky_primary_hdr = _sky_hdul[0].header.copy()
+
+    sky_file = validate_and_fix_extensions(sky_file, output_file=None, backup=True)
+
+    # Optional flat-field correction, matching the science path so the sky and
+    # science counts share the same detector response.
+    if flat_pixel_maps:
+        corrected, _stats = apply_flat_field_correction(
+            sky_file, flat_pixel_maps, extraction_path,
+            validate_matching=config.get('validate_flat_matching', True),
+            require_all_matches=config.get('require_all_flat_matches', True))
+        if corrected:
+            sky_file = corrected
+
+    extracted = run_extraction(
+        sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
+        trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
+        remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir)
+    if not extracted:
+        raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
+
+    corr_extractions, _ = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    base_name = os.path.splitext(os.path.basename(extracted))[0]
+    sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
+    save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
+                     savefile=sky_savefile, save_dir=extraction_path,
+                     prefix='LLAMASExtract_sky_corrected')
+    print(f"Sky frame extraction complete: {os.path.basename(sky_savefile)}")
+    return sky_savefile
+
+
 #this isn't quite right -> nneeds checking
 def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
@@ -1998,6 +2045,50 @@ def main(config_path):
             if extracted_basename:
                 science_pkl_pairs.append((os.path.join(extraction_path, extracted_basename), original_science_files[0]))
 
+        # ── Sky-fibre selection setup (base model skyModel_1d) ──
+        # Resolve which fibres/regions build the sky model. 'frame' extracts a
+        # dedicated blank-sky MEF here (once, reused for every science file);
+        # 'skymap' preloads the user sky map; 'dimmest'/'middle-third' need no setup.
+        sky_selection_method = str(config.get('sky_selection_method', 'dimmest')).lower()
+        sky_n_fibres = int(config.get('sky_n_fibres', 20))
+        sky_map_obj = None
+        # Backward-compatible: an explicit sky_extraction_file still works.
+        sky_frame_extraction_file = config.get('sky_extraction_file', None)
+
+        if sky_selection_method == 'skymap':
+            sky_map_path = config.get('sky_map_file', None)
+            if sky_map_path:
+                from llamas_pyjamas.Sky import skySelect
+                print(f"Loading sky map for fibre selection: {sky_map_path}")
+                sky_map_obj = skySelect.load_sky_map(sky_map_path)
+            else:
+                print("WARNING: sky_selection_method='skymap' but no sky_map_file set; "
+                      "falling back to 'dimmest'")
+                sky_selection_method = 'dimmest'
+
+        if sky_selection_method == 'frame' and not sky_frame_extraction_file:
+            sky_frame_files = config.get('sky_frame_files', None)
+            if isinstance(sky_frame_files, str):
+                sky_frame_files = [s.strip() for s in sky_frame_files.split(',') if s.strip()]
+            if sky_frame_files:
+                if len(sky_frame_files) > 1:
+                    print(f"NOTE: {len(sky_frame_files)} sky frames supplied; using the "
+                          f"first ({os.path.basename(sky_frame_files[0])}). Multi-frame "
+                          "combination is not yet implemented.")
+                    logger.warning("sky_frame_files: using only the first of %d frames",
+                                   len(sky_frame_files))
+                use_flat = (config.get('apply_flat_field_correction', True)
+                            and config.get('apply_pixel_flat', True) and flat_pixel_maps)
+                sky_frame_extraction_file = _extract_sky_frame(
+                    sky_frame_files[0], extraction_path,
+                    slow_bias_file, fast_bias_file, final_trace_dir,
+                    remove_cosmic_rays, mask_output_dir, config,
+                    flat_pixel_maps=flat_pixel_maps if use_flat else None)
+            else:
+                print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
+                      "falling back to 'dimmest'")
+                sky_selection_method = 'dimmest'
+
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
             if not os.path.exists(correction_path):
@@ -2038,10 +2129,14 @@ def main(config_path):
             sky_subtract = config.get('sky_subtract', True)
             rss_input_file = savefile
             if sky_subtract:
-                sky_extraction_file = config.get('sky_extraction_file', None)
-                print(f"Running sky subtraction on {os.path.basename(savefile)}...")
-                sky1d_file = skyModel_1d(savefile, color=None, sky_extraction_file=sky_extraction_file,
-                                         show_plots=config.get('sky_qa_plots', False))
+                print(f"Running sky subtraction on {os.path.basename(savefile)} "
+                      f"(selection='{sky_selection_method}')...")
+                sky1d_file = skyModel_1d(savefile, color=None,
+                                         sky_extraction_file=sky_frame_extraction_file,
+                                         show_plots=config.get('sky_qa_plots', False),
+                                         selection_method=sky_selection_method,
+                                         n_sky_fibres=sky_n_fibres,
+                                         sky_map=sky_map_obj)
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 
