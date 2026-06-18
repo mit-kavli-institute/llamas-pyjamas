@@ -15,6 +15,7 @@ import traceback
 import pkg_resources
 from pathlib import Path
 
+import llamas_pyjamas
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
@@ -162,8 +163,13 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
-
+# NOTE: no hard `memory=` reservation here. A fixed per-task memory reservation
+# can deadlock extraction when Ray's auto-detected logical `memory` pool (≈ free
+# RAM − object store) drops below the reservation, in which case the task becomes
+# permanently unschedulable. Concurrency is governed by `num_cpus` instead. To opt
+# back into a reservation on low-RAM machines, set `ray_task_memory_mb` in the
+# config (applied via `.options(memory=...)` at dispatch).
+@ray.remote
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None, remove_cosmic_rays=True):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
@@ -492,8 +498,30 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         # Initialize Ray
         num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
+        object_store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB', 2048))
+        task_mem_mb = int(os.environ.get('LLAMAS_RAY_TASK_MEMORY_MB', 0))  # 0 ⇒ no per-task reservation
+        os.environ['RAY_ENABLE_MAC_LARGE_OBJECT_STORE'] = '1'
+        os.environ['RAY_local_fs_capacity_threshold'] = '0.99'
+
+        # Clamp the object store so it can't swallow Ray's logical `memory` pool
+        # (auto-detected ≈ free RAM − object store). RAY_ENABLE_MAC_LARGE_OBJECT_STORE
+        # removes Ray's own 2 GiB Mac guard, so this clamp provides that safety.
+        total_mb = psutil.virtual_memory().total // (1024 * 1024)
+        store_cap_mb = int(total_mb * 0.30)  # ≤30% of RAM for the object store
+        if object_store_mb > store_cap_mb:
+            logger.warning(f"Clamping Ray object store {object_store_mb}→{store_cap_mb} MB "
+                           f"(30% of {total_mb} MB RAM) to preserve scheduler memory pool")
+            object_store_mb = store_cap_mb
+
+        # Self-diagnosing startup log: which package is bound, and the full Ray budget.
+        logger.info(f"[extract] package={llamas_pyjamas.__file__}")
+        logger.info(f"[extract] ray.init num_cpus={num_cpus} object_store={object_store_mb}MB "
+                    f"task_mem={task_mem_mb}MB "
+                    f"free_RAM={psutil.virtual_memory().available // (1024 * 1024)}MB")
+
         ray.shutdown()
-        ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
+        ray.init(num_cpus=num_cpus, object_store_memory=object_store_mb * 1024 * 1024,
+                 runtime_env=runtime_env)
 
         # Import placeholder detection utilities
         from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
@@ -622,15 +650,20 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         ### Process each HDU-trace pair in parallel using Ray
 
+        # Optional per-task memory reservation (opt-in via `ray_task_memory_mb`).
+        # Default 0 ⇒ schedule on CPU only, so concurrency = num_cpus.
+        extract_fn = (process_trace.options(memory=task_mem_mb * 1024 * 1024)
+                      if task_mem_mb > 0 else process_trace)
+
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
             hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
 
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
             futures.append(future)
 
         # Wait for all remote tasks to complete

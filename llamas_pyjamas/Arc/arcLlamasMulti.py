@@ -538,50 +538,152 @@ def shiftArcXRay(arc_extraction_pickle):
     print(f"Saved shifted arc extraction to {sv}")
 
 def fiberRelativeThroughput_original(flat_extraction_pickle, arc_extraction_pickle):
-    """Calculate relative fiber throughput from flat field observations (original serial version).
+    """Calculate relative fiber throughput from flat field observations (serial version).
 
-    This function calculates the relative throughput of each fiber compared to 
-    a reference fiber using flat field observations.
+    For each fiber computes throughput as the median of the per-wavelength ratio
+    (fiber_counts / reference_counts) on a common xshift grid.  This is robust
+    against outlier pixels and does not depend on the total integrated flux.
+    Requires xshift to be populated in the flat pkl (i.e. pass the
+    *_calibrated.pkl produced by process_pixel_flat_simple, not the raw one).
+
+    Extensions missing from the flat are skipped and their archival
+    relative_throughput values are left unchanged (defaults to 1.0 if the arc
+    was freshly initialised).
 
     Args:
-        flat_extraction_pickle (str): Path to the flat field extraction pickle file.
-        arc_extraction_pickle (str): Path to the arc extraction pickle file.
+        flat_extraction_pickle (str): Path to the wavelength-calibrated flat
+            field extraction pickle (xshift must be populated).
+        arc_extraction_pickle  (str): Path to the arc extraction pickle.
 
     Returns:
-        None: The function modifies the arc extraction object and saves it with 
-            '_shifted_tp.pkl' suffix.
+        None: Saves modified arc as arc_extraction_pickle with '_shifted_tp.pkl'.
     """
 
     flatdict = extract.ExtractLlamas.loadExtraction(flat_extraction_pickle)
-    flatspec = flatdict['extractions']
-    metadata = flatdict['metadata']
+    flatspec  = flatdict['extractions']
+    flat_meta = flatdict['metadata']
 
-    arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_pickle)
-    arcspec = arcdict['extractions']
+    arcdict_loaded = extract.ExtractLlamas.loadExtraction(arc_extraction_pickle)
+    arcspec  = arcdict_loaded['extractions']
+    arc_meta = arcdict_loaded.get('metadata', [{}] * len(arcspec))
 
-    reference_fiber = 150
+    REFERENCE_FIBER  = 150
+    EDGE_PIXELS      = 100    # ignore this many pixels at each detector edge
+    N_COMMON         = 1024   # points on the common xshift grid
+    MIN_SIGNAL_FRAC  = 0.05   # ref pixels below this fraction of ref median are masked
 
-    for fits_ext in range(len(arcspec)):
+    # Check whether xshift is populated in the flat
+    xshift_available = any(
+        np.count_nonzero(flatspec[i].xshift) > 0
+        for i in range(len(flatspec))
+    )
+    if not xshift_available:
+        print("  WARNING: flat xshift is all zeros — pass the calibrated flat pkl. "
+              "Falling back to integrated-flux ratio.")
 
-        if (metadata[fits_ext]['channel'] == 'red'):
-            ref_ext = 18
-        elif (metadata[fits_ext]['channel'] == 'green'):
-            ref_ext = 19
-        elif (metadata[fits_ext]['channel'] == 'blue'):
-            ref_ext = 20
+    # Build (channel, bench, side) -> flat extension index lookup
+    flat_lookup = {}
+    for i, m in enumerate(flat_meta):
+        key = (m.get('channel', ''), str(m.get('bench', '')), m.get('side', ''))
+        flat_lookup[key] = i
 
-        refspec = flatspec[ref_ext].counts[reference_fiber]
-        gd = (arcspec[fits_ext].xshift[reference_fiber] > 150) & (arcspec[fits_ext].xshift[reference_fiber] < 2048-150)
-        reference_flux = np.nansum(refspec[gd])
+    # Identify the flat extension that serves as the per-channel reference.
+    # Try to match the arc's own reference extensions (18=red, 19=green, 20=blue)
+    # by camera identity; fall back to the first available flat ext of that channel.
+    ARC_REF_EXT = {'red': 18, 'green': 19, 'blue': 20}
+    channel_ref_flat_ext = {}
+    for channel, arc_ref_idx in ARC_REF_EXT.items():
+        ref_flat_ext = None
+        if arc_ref_idx < len(arc_meta):
+            am  = arc_meta[arc_ref_idx]
+            key = (am.get('channel', channel), str(am.get('bench', '')), am.get('side', ''))
+            ref_flat_ext = flat_lookup.get(key)
+        if ref_flat_ext is None:
+            for i, m in enumerate(flat_meta):
+                if m.get('channel') == channel:
+                    ref_flat_ext = i
+                    break
+        channel_ref_flat_ext[channel] = ref_flat_ext
 
-        for ifiber in range(0,metadata[fits_ext]['nfibers']):   
-            spec = flatspec[fits_ext].counts[ifiber]
-            gd = (arcspec[fits_ext].xshift[ifiber] > 150) & (arcspec[fits_ext].xshift[ifiber] < 2048-150)
-            flux = np.nansum(spec[gd])
-            arcspec[fits_ext].relative_throughput[ifiber] = flux/reference_flux
-            print(f'{metadata[fits_ext]['bench']}{metadata[fits_ext]['side']} {metadata[fits_ext]['channel']} Fiber #{ifiber}:  Throughput = {flux/reference_flux:5.3f}')
+    # Populate relative_throughput for each arc extension
+    for arc_ext in range(len(arcspec)):
+        am      = arc_meta[arc_ext]
+        channel = am.get('channel', '')
+        key     = (channel, str(am.get('bench', '')), am.get('side', ''))
+        bench   = am.get('bench', '?')
+        side    = am.get('side', '?')
 
-    sv = arc_extraction_pickle.replace('.pkl','_shifted_tp.pkl')
+        if key not in flat_lookup:
+            print(f"  {bench}{side} {channel}: no matching flat extension — "
+                  f"leaving archival relative_throughput unchanged")
+            continue
+
+        flat_ext     = flat_lookup[key]
+        ref_flat_ext = channel_ref_flat_ext.get(channel)
+        if ref_flat_ext is None:
+            print(f"  {bench}{side} {channel}: no reference flat extension — "
+                  f"leaving archival relative_throughput unchanged")
+            continue
+
+        arc_nfibers  = arcspec[arc_ext].relative_throughput.shape[0]
+        flat_nfibers = flat_meta[flat_ext].get('nfibers',
+                                               flatspec[flat_ext].counts.shape[0])
+        nfibers = min(arc_nfibers, flat_nfibers)
+
+        # Reference spectrum on a common xshift grid
+        if xshift_available:
+            ref_xs  = flatspec[ref_flat_ext].xshift[REFERENCE_FIBER, EDGE_PIXELS:-EDGE_PIXELS]
+            ref_cts = flatspec[ref_flat_ext].counts[REFERENCE_FIBER, EDGE_PIXELS:-EDGE_PIXELS]
+            sort_r  = np.argsort(ref_xs)
+            ref_xs  = ref_xs[sort_r]
+            ref_cts = ref_cts[sort_r]
+        else:
+            ref_cts = flatspec[ref_flat_ext].counts[REFERENCE_FIBER, EDGE_PIXELS:-EDGE_PIXELS]
+
+        for ifiber in range(nfibers):
+            fib_cts = flatspec[flat_ext].counts[ifiber, EDGE_PIXELS:-EDGE_PIXELS]
+
+            if xshift_available:
+                fib_xs = flatspec[flat_ext].xshift[ifiber, EDGE_PIXELS:-EDGE_PIXELS]
+                sort_f = np.argsort(fib_xs)
+                fib_xs  = fib_xs[sort_f]
+                fib_cts = fib_cts[sort_f]
+
+                # Common xshift grid spanning the overlap region
+                xs_lo = max(ref_xs[0],  fib_xs[0])
+                xs_hi = min(ref_xs[-1], fib_xs[-1])
+                if xs_hi <= xs_lo:
+                    # No wavelength overlap — skip
+                    print(f"  {bench}{side} {channel} Fiber #{ifiber}: "
+                          f"no xshift overlap — skipping")
+                    continue
+
+                x_common    = np.linspace(xs_lo, xs_hi, N_COMMON)
+                ref_on_grid = np.interp(x_common, ref_xs, ref_cts)
+                fib_on_grid = np.interp(x_common, fib_xs, fib_cts)
+
+                # Mask where reference has too little signal
+                ref_thresh  = MIN_SIGNAL_FRAC * np.nanmedian(ref_on_grid)
+                good        = (ref_on_grid > ref_thresh) & np.isfinite(fib_on_grid)
+                if np.sum(good) < 10:
+                    tp = 1.0
+                else:
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        ratio = np.where(good, fib_on_grid / ref_on_grid, np.nan)
+                    tp = float(np.nanmedian(ratio))
+            else:
+                # Fallback: integrated flux ratio
+                ref_sum = np.nansum(ref_cts)
+                fib_sum = np.nansum(fib_cts)
+                tp = fib_sum / ref_sum if ref_sum > 0 else 1.0
+
+            if not np.isfinite(tp) or tp <= 0:
+                tp = 1.0
+
+            arcspec[arc_ext].relative_throughput[ifiber] = tp
+            print(f"  {bench}{side} {channel} Fiber #{ifiber}: Throughput = {tp:5.3f}")
+
+    sv = arc_extraction_pickle.replace('.pkl', '_shifted_tp.pkl')
     extract.save_extractions(arcspec, savefile=sv)
 
 def fiberRelativeThroughputRay(flat_extraction_pickle, arc_extraction_pickle):

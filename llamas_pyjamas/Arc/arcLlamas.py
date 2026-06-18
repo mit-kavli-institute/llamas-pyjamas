@@ -10,7 +10,7 @@ import astropy.units as u
 import os
 from   llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 
-from pypeit.core.wavecal.wvutils import xcorr_shift_stretch
+from pypeit.core.wavecal.wvutils import xcorr_shift_stretch, arc_lines_from_spec
 from pypeit.core.wave import airtovac
 from pypeit.core.arc import detect_peaks
 from pypeit import bspline
@@ -138,6 +138,146 @@ def shiftArcX(arc_extraction_pickle):
     # Re-save with new information populated
     sv = arc_extraction_pickle.replace('.pkl','_shifted.pkl')
     extract.save_extractions(arcspec, savefile=sv)
+
+def refineArcX(arc_extraction_shifted_pickle, channels=None):
+    """Refine per-fiber xshift using sub-pixel arc line centroids.
+
+    Takes the quadratic xshift from shiftArcX as a first guess, detects arc line
+    centroids via arc_lines_from_spec, matches them to the ThAr catalog, and fits
+    an order-5 Legendre polynomial per fiber. Falls back to the quadratic solution
+    if fewer than MIN_LINES lines are matched for a given fiber.
+
+    Args:
+        arc_extraction_shifted_pickle (str): Path to a *_shifted.pkl file produced
+            by shiftArcX (or any file with xshift/wave populated).
+
+    Returns:
+        str: Path to the output pickle (*_refined.pkl) with updated xshift and wave.
+    """
+
+    MIN_LINES  = 6
+    POLY_ORDER = 3     # cubic residuals on top of quadratic; avoids Runge oscillation with ~20 pts
+    MATCH_TOL  = 10.0  # pixels — wide search; quadratic xshift can be off by several px at edges
+
+    arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_shifted_pickle)
+    arcspec = arcdict['extractions']
+    metadata = arcdict['metadata']
+
+    x = np.arange(2048, dtype=float)
+
+    for channel in (channels if channels is not None else ['red', 'green', 'blue']):
+
+        if channel == 'red':
+            ref_ext    = 18
+            line_table = Table.read(os.path.join(LUT_DIR, 'red_peaks.csv'))
+        elif channel == 'green':
+            ref_ext    = 19
+            line_table = Table.read(os.path.join(LUT_DIR, 'green_peaks.csv'))
+        elif channel == 'blue':
+            ref_ext    = 20
+            line_table = Table.read(os.path.join(LUT_DIR, 'blue_peaks.csv'))
+
+        line_table = line_table[line_table['Wavelength'] > 0]
+
+        # xshift values at the catalog line positions on the reference fiber
+        ref_xshift = arcspec[ref_ext].xshift[150, :]
+        ref_wave   = arcspec[ref_ext].wave[150, :]
+        ref_line_xshift = np.interp(line_table['Pixel'].astype(float), x, ref_xshift)
+
+        # Global wavelength calibration for this channel: xshift -> wavelength
+        # Derived from the reference fiber's existing (xshift, wave) arrays
+        sort_idx = np.argsort(ref_xshift)
+        wv_fit = robust_fit(ref_xshift[sort_idx], ref_wave[sort_idx],
+                            function='legendre', order=5, lower=3, upper=3, maxdev=5)
+
+        for fits_ext in range(len(arcspec)):
+            if metadata[fits_ext]['channel'] != channel:
+                continue
+
+            nfibers = metadata[fits_ext]['nfibers']
+            bench   = metadata[fits_ext]['bench']
+            side    = metadata[fits_ext]['side']
+            print(f"Refining arc solution for {bench}{side} {channel}  ({nfibers} fibers)")
+
+            n_refined  = 0
+            n_fallback = 0
+
+            for ifiber in range(nfibers):
+                spec        = interpolateNaNs(arcspec[fits_ext].counts[ifiber, :])
+                # Replace any remaining NaN/inf so pypeit routines don't warn or fail
+                spec        = np.nan_to_num(spec, nan=0.0, posinf=0.0, neginf=0.0)
+                quad_xshift = arcspec[fits_ext].xshift[ifiber, :]
+
+                # Detect sub-pixel arc line centroids.
+                # Suppress non-fatal continuum and sigma-clipping warnings that pypeit/astropy
+                # emit routinely on arc spectra.
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message="All pixels rejected")
+                        warnings.filterwarnings("ignore", message=".*invalid values.*")
+                        warnings.filterwarnings("ignore", category=UserWarning,
+                                                module="astropy.stats")
+                        all_tcent, all_ecent, _, _, _ = arc_lines_from_spec(
+                            spec, sigdetect=5.0, fwhm=4.0)
+                except Exception as e:
+                    if ifiber == 0:
+                        print(f"  DIAG fiber 0: arc_lines_from_spec raised {e}")
+                    n_fallback += 1
+                    continue
+
+                if len(all_tcent) == 0:
+                    if ifiber == 0:
+                        print(f"  DIAG fiber 0: arc_lines_from_spec returned 0 lines")
+                    n_fallback += 1
+                    continue
+
+                # Match detected centroids to catalog lines
+                # Predict detector pixel of each reference line by inverting quad_xshift
+                matched_pixels  = []
+                matched_xshifts = []
+                matched_weights = []
+
+                for xsh_ref in ref_line_xshift:
+                    # np.interp requires xp increasing; xshift is monotonically increasing
+                    pixel_pred = np.interp(xsh_ref, quad_xshift, x)
+                    dists      = np.abs(all_tcent - pixel_pred)
+                    nearest    = np.argmin(dists)
+                    if dists[nearest] < MATCH_TOL:
+                        matched_pixels.append(all_tcent[nearest])
+                        matched_xshifts.append(xsh_ref)
+                        ecent = max(all_ecent[nearest], 1e-4)   # guard against zero variance
+                        matched_weights.append(1.0 / ecent)
+
+                if ifiber == 0:
+                    print(f"  DIAG fiber 0: detected {len(all_tcent)} lines, "
+                          f"catalog has {len(ref_line_xshift)} entries, "
+                          f"matched {len(matched_pixels)} within {MATCH_TOL} px  "
+                          f"xshift range [{quad_xshift.min():.1f}, {quad_xshift.max():.1f}]")
+
+                if len(matched_pixels) >= MIN_LINES:
+                    mp  = np.array(matched_pixels)
+                    mxs = np.array(matched_xshifts)
+                    mw  = np.array(matched_weights)
+                    try:
+                        refined = robust_fit(mp, mxs, function='legendre', order=POLY_ORDER,
+                                             weights=mw, lower=5, upper=5)
+                        arcspec[fits_ext].xshift[ifiber, :] = refined.eval(x)
+                        arcspec[fits_ext].wave[ifiber, :]   = wv_fit.eval(refined.eval(x))
+                        n_refined += 1
+                    except Exception as e:
+                        if ifiber == 0:
+                            print(f"  DIAG fiber 0: robust_fit raised {e}")
+                        n_fallback += 1
+                else:
+                    n_fallback += 1
+
+            print(f"  {bench}{side} {channel}: refined {n_refined}, fallback {n_fallback}")
+
+    sv = arc_extraction_shifted_pickle.replace('.pkl', '_refined.pkl')
+    print(f"Saving refined arc solution to {sv}")
+    extract.save_extractions(arcspec, savefile=sv)
+    return sv
+
 
 def nan_median_filter(input_spectrum):
     """Filter function to compute median while ignoring NaN values.

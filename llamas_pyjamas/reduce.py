@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
 from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
                                            reduce_twilight_flat,
@@ -458,7 +459,58 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             mask_output_dir=mask_output_dir
         )
 
-    return  extraction_file_path
+    # GUI_extract returns just the basename; make it a full path
+    if extraction_file_path and not os.path.isabs(extraction_file_path):
+        extraction_file_path = os.path.join(output_dir, extraction_file_path)
+
+    return extraction_file_path
+
+
+def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_dir,
+                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None):
+    """Extract a dedicated blank-sky MEF and return a ``*_corrected_extractions.pkl``.
+
+    Mirrors the science extraction path (validate -> optional flat-correct ->
+    extract -> wavelength-correct -> save) so the result can be passed straight
+    to :func:`skyModel_1d` as ``sky_extraction_file`` for the ``'frame'`` method.
+    """
+    if not os.path.exists(sky_file):
+        raise FileNotFoundError(f"Sky frame {sky_file} does not exist.")
+    print("\n" + "=" * 60)
+    print(f"EXTRACTING DEDICATED SKY FRAME: {os.path.basename(sky_file)}")
+    print("=" * 60)
+
+    orig_sky_file = sky_file
+    with fits.open(orig_sky_file) as _sky_hdul:
+        sky_primary_hdr = _sky_hdul[0].header.copy()
+
+    sky_file = validate_and_fix_extensions(sky_file, output_file=None, backup=True)
+
+    # Optional flat-field correction, matching the science path so the sky and
+    # science counts share the same detector response.
+    if flat_pixel_maps:
+        corrected, _stats = apply_flat_field_correction(
+            sky_file, flat_pixel_maps, extraction_path,
+            validate_matching=config.get('validate_flat_matching', True),
+            require_all_matches=config.get('require_all_flat_matches', True))
+        if corrected:
+            sky_file = corrected
+
+    extracted = run_extraction(
+        sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
+        trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
+        remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir)
+    if not extracted:
+        raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
+
+    corr_extractions, _ = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    base_name = os.path.splitext(os.path.basename(extracted))[0]
+    sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
+    save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
+                     savefile=sky_savefile, save_dir=extraction_path,
+                     prefix='LLAMASExtract_sky_corrected')
+    print(f"Sky frame extraction complete: {os.path.basename(sky_savefile)}")
+    return sky_savefile
 
 
 #this isn't quite right -> nneeds checking
@@ -600,7 +652,7 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
                                   arc_calib_file=None, verbose=False, method='simple',
                                   filter_size=12, signal_thresholds=None,
-                                  clip_range=(0.90, 1.10)):
+                                  clip_range=(0.90, 1.10), use_bias=None):
     """Generate flat field pixel maps for science frame correction.
 
     Args:
@@ -634,6 +686,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
             results = process_pixel_flat_simple(
                 red_flat, green_flat, blue_flat,
                 arc_calib_file=arc_calib_file,
+                use_bias=use_bias,
                 output_dir=flat_output_dir,
                 trace_dir=trace_dir,
                 verbose=verbose,
@@ -645,6 +698,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
             results = process_flat_field_complete(
                 red_flat, green_flat, blue_flat,
                 arc_calib_file=arc_calib_file,
+                use_bias=use_bias,
                 output_dir=flat_output_dir,
                 trace_dir=trace_dir,
                 verbose=verbose,
@@ -1094,7 +1148,8 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
 def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0, spatial_sampling=0.75,
                    use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
-                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled'):
+                   cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled',
+                   name_suffix=''):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -1120,6 +1175,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         cube_min_weight (float): Minimum weight threshold (for simple method)
         cube_grid_method (str): Spatial grid method for simple constructor:
             'oversampled' (default), 'native_hex', or 'nearest_hex'
+        name_suffix (str): Tag appended to each output cube filename (e.g. '_skysub'),
+            so multiple cube sets (standard vs sky-subtracted) can coexist in the same
+            output directory without overwriting. Default '' (no suffix).
 
     Returns:
         list: Paths to constructed cube files
@@ -1213,9 +1271,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
 
                 # Save cube
                 if channel:
-                    cube_filename = f"{base_name}_cube_{channel}.fits"
+                    cube_filename = f"{base_name}_cube_{channel}{name_suffix}.fits"
                 else:
-                    cube_filename = f"{base_name}_cube.fits"
+                    cube_filename = f"{base_name}_cube{name_suffix}.fits"
 
                 cube_path = os.path.join(output_dir, cube_filename)
                 constructor.save_cube(cube_path, overwrite=True)
@@ -1272,9 +1330,9 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 if parallel:
                     output_suffix += "_parallel"
                 
-                cube_filename = f"{base_name}{output_suffix}.fits"
+                cube_filename = f"{base_name}{output_suffix}{name_suffix}.fits"
                 cube_path = os.path.join(output_dir, cube_filename)
-                
+
                 crr_cube.save_to_fits(cube_path)
                 cube_files.append(cube_path)
                 
@@ -1335,7 +1393,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 # Save each channel cube
                 saved_paths = constructor.save_channel_cubes(
                     channel_cubes,
-                    output_prefix=os.path.join(output_dir, f"{base_name}"),
+                    output_prefix=os.path.join(output_dir, f"{base_name}{name_suffix}"),
                     header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
                     spatial_sampling=spatial_sampling
                 )
@@ -1457,6 +1515,22 @@ def main(config_path):
     os.environ['LLAMAS_RAY_CPUS'] = str(ray_num_cpus)
     print(f"Configuring pipeline to use {ray_num_cpus} Ray cores")
 
+    # Configure Ray object store memory (default 8 GB)
+    ray_object_store_mb = config.get('ray_object_store_mb', 8192)
+    if isinstance(ray_object_store_mb, str):
+        ray_object_store_mb = int(ray_object_store_mb)
+    os.environ['LLAMAS_RAY_OBJECT_STORE_MB'] = str(ray_object_store_mb)
+    print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
+
+    # Optional per-task memory reservation for extraction (default 0 = none).
+    # A non-zero value throttles extraction concurrency on low-RAM machines; leave
+    # at 0 to schedule purely on ray_num_cpus and avoid the infeasible-memory deadlock.
+    ray_task_memory_mb = config.get('ray_task_memory_mb', 0)
+    if isinstance(ray_task_memory_mb, str):
+        ray_task_memory_mb = int(ray_task_memory_mb)
+    os.environ['LLAMAS_RAY_TASK_MEMORY_MB'] = str(ray_task_memory_mb)
+    print(f"Configuring Ray per-task memory reservation to {ray_task_memory_mb} MB")
+
 
     if not config.get('output_dir'):
         output_dir = os.path.join(BASE_DIR, 'reduced')
@@ -1482,6 +1556,15 @@ def main(config_path):
         arcdict = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
         if not os.path.exists(arcdict):
             raise FileNotFoundError(f"Reference arc file not found at {arcdict}")
+        if config.get('refine_arc', False):
+            from llamas_pyjamas.Arc.arcLlamas import refineArcX
+            refine_channels = config.get('refine_arc_channels', None)
+            if isinstance(refine_channels, str):
+                refine_channels = [c.strip() for c in refine_channels.split(',')]
+            ch_label = ','.join(refine_channels) if refine_channels else 'all'
+            print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
+            arcdict = refineArcX(arcdict, channels=refine_channels)
+            print(f"Using refined arc: {os.path.basename(arcdict)}")
         config['arcdict'] = arcdict
 
         
@@ -1686,6 +1769,7 @@ def main(config_path):
                 arc_calib_file=config.get('arc_calib_file'),
                 verbose=config.get('verbose_flat_processing', False),
                 method=flat_field_method,
+                use_bias=slow_bias_file,
                 filter_size=filter_size,
                 signal_thresholds=signal_thresholds,
                 clip_range=(clip_min, clip_max),
@@ -1695,7 +1779,41 @@ def main(config_path):
                 print(f"\nGenerated {len(flat_pixel_maps)} flat field pixel maps:")
             else:
                 print("WARNING: No flat field pixel maps generated. Proceeding without flat field correction.")
+
+            """
+            # NOTE: This is old code for computing per-fiber relative throughput from the flat field and updating arcdict.
+            # May be slated for removal 
+
+            # Compute per-fiber relative throughput from the flat extractions and
+            # update arcdict so arcTransfer carries the correct values into the science.
+            # Prefer the wavelength-calibrated flat pkl (xshift populated) so that
+            # the ratio-on-common-xshift method in fiberRelativeThroughput works.
+            _calib_flat_pkl = os.path.join(flat_field_dir, 'combined_flat_extractions_calibrated.pkl')
+            _raw_flat_pkl   = os.path.join(flat_field_dir, 'combined_flat_extractions.pkl')
+            flat_pkl = _calib_flat_pkl if os.path.exists(_calib_flat_pkl) else _raw_flat_pkl
+            if os.path.exists(flat_pkl) and flat_pixel_maps:
+                print("\nComputing per-fiber relative throughput from flat field...")
+                # Copy arcdict into flat_field_dir so the _shifted_tp output lands there
+                # rather than next to the LUT master calibration file.
+                import shutil as _shutil
+                arc_for_tp = os.path.join(flat_field_dir,
+                                          os.path.basename(arcdict))
+                _shutil.copy2(arcdict, arc_for_tp)
+                arc.fiberRelativeThroughput(flat_pkl, arc_for_tp)
+                tp_arcdict = arc_for_tp.replace('.pkl', '_shifted_tp.pkl')
+                if os.path.exists(tp_arcdict):
+                    arcdict = tp_arcdict
+                    config['arcdict'] = arcdict
+                    print(f"arcdict updated with throughputs: {os.path.basename(arcdict)}")
+                else:
+                    print("WARNING: throughput pkl not found after fiberRelativeThroughput — using original arcdict")
+            else:
+                print("WARNING: combined flat extraction not found, skipping throughput computation")
+
+
                 logger.warning("No flat field pixel maps generated. Proceeding without flat field correction.")
+
+            """
 
             # --- Generate flat RSS for fibre-to-fibre correction ---
             # The flat frames (dome or twilight) must have the pixel map applied
@@ -1789,7 +1907,9 @@ def main(config_path):
 
         science_files_to_process = validated_science_files
 
-        if config.get('apply_flat_field_correction', True) and flat_pixel_maps:
+        if (config.get('apply_flat_field_correction', True)
+                and config.get('apply_pixel_flat', True)
+                and flat_pixel_maps):
             print("\n" + "="*60)
             print("APPLYING FLAT FIELD CORRECTIONS")
             print("="*60)
@@ -1866,9 +1986,18 @@ def main(config_path):
         # Process science files (now potentially flat-corrected) for extraction
         if 'science_files' not in config:
             raise ValueError("No science files provided in the configuration.")
-    
+
+        # Control whether large 2D detector images are included in pickled extractions.
+        # Default is slim (strips ~7 GB of per-pixel arrays).  Set full_extraction_pickle=true
+        # in the config to keep everything for QA/troubleshooting.
+        ExtractLlamas._slim_pickle = not config.get('full_extraction_pickle', False)
+        print(f"Extraction pickle mode: {'FULL (large 2D arrays included)' if not ExtractLlamas._slim_pickle else 'SLIM (2D detector images stripped)'}")
+
         # Track whether files were flat-corrected
-        were_flat_corrected = config.get('apply_flat_field_correction', True) and flat_pixel_maps and len(flat_pixel_maps) > 0
+        were_flat_corrected = bool(
+            config.get('apply_flat_field_correction', True)
+            and config.get('apply_pixel_flat', True)
+            and flat_pixel_maps)
         
         # Build a list of (pkl_path, original_science_fits_path) pairs during extraction.
         # This avoids re-globbing (which could pick up flat/calibration pkls) and keeps
@@ -1916,6 +2045,50 @@ def main(config_path):
             if extracted_basename:
                 science_pkl_pairs.append((os.path.join(extraction_path, extracted_basename), original_science_files[0]))
 
+        # ── Sky-fibre selection setup (base model skyModel_1d) ──
+        # Resolve which fibres/regions build the sky model. 'frame' extracts a
+        # dedicated blank-sky MEF here (once, reused for every science file);
+        # 'skymap' preloads the user sky map; 'dimmest'/'middle-third' need no setup.
+        sky_selection_method = str(config.get('sky_selection_method', 'dimmest')).lower()
+        sky_n_fibres = int(config.get('sky_n_fibres', 20))
+        sky_map_obj = None
+        # Backward-compatible: an explicit sky_extraction_file still works.
+        sky_frame_extraction_file = config.get('sky_extraction_file', None)
+
+        if sky_selection_method == 'skymap':
+            sky_map_path = config.get('sky_map_file', None)
+            if sky_map_path:
+                from llamas_pyjamas.Sky import skySelect
+                print(f"Loading sky map for fibre selection: {sky_map_path}")
+                sky_map_obj = skySelect.load_sky_map(sky_map_path)
+            else:
+                print("WARNING: sky_selection_method='skymap' but no sky_map_file set; "
+                      "falling back to 'dimmest'")
+                sky_selection_method = 'dimmest'
+
+        if sky_selection_method == 'frame' and not sky_frame_extraction_file:
+            sky_frame_files = config.get('sky_frame_files', None)
+            if isinstance(sky_frame_files, str):
+                sky_frame_files = [s.strip() for s in sky_frame_files.split(',') if s.strip()]
+            if sky_frame_files:
+                if len(sky_frame_files) > 1:
+                    print(f"NOTE: {len(sky_frame_files)} sky frames supplied; using the "
+                          f"first ({os.path.basename(sky_frame_files[0])}). Multi-frame "
+                          "combination is not yet implemented.")
+                    logger.warning("sky_frame_files: using only the first of %d frames",
+                                   len(sky_frame_files))
+                use_flat = (config.get('apply_flat_field_correction', True)
+                            and config.get('apply_pixel_flat', True) and flat_pixel_maps)
+                sky_frame_extraction_file = _extract_sky_frame(
+                    sky_frame_files[0], extraction_path,
+                    slow_bias_file, fast_bias_file, final_trace_dir,
+                    remove_cosmic_rays, mask_output_dir, config,
+                    flat_pixel_maps=flat_pixel_maps if use_flat else None)
+            else:
+                print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
+                      "falling back to 'dimmest'")
+                sky_selection_method = 'dimmest'
+
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
             if not os.path.exists(correction_path):
@@ -1939,15 +2112,107 @@ def main(config_path):
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
             save_extractions(corr_extraction_list, primary_header=primary_hdr, savefile=savefile, save_dir=extraction_path, prefix='LLAMASExtract_batch_corrected')
 
+            # Optionally refine per-fiber xshift using sky line centroids
+            sky_x_refine = config.get('sky_line_refinement', False)
+            rss_input_file = savefile
+            if sky_x_refine:
+                from llamas_pyjamas.Sky.skyLlamas import refineSkyX
+                sky_x_channels = config.get('sky_line_channels', None)
+                if isinstance(sky_x_channels, str):
+                    sky_x_channels = [c.strip() for c in sky_x_channels.split(',')]
+                ch_label = ','.join(sky_x_channels) if sky_x_channels else 'all'
+                print(f"Refining xshift from sky lines (channels: {ch_label})...")
+                savefile = refineSkyX(savefile, channels=sky_x_channels)
+                print(f"Sky xshift refinement complete: {os.path.basename(savefile)}")
+
+            # Optionally run sky subtraction, populating the .sky attribute on each fiber
+            sky_subtract = config.get('sky_subtract', True)
+            rss_input_file = savefile
+            if sky_subtract:
+                print(f"Running sky subtraction on {os.path.basename(savefile)} "
+                      f"(selection='{sky_selection_method}')...")
+                sky1d_file = skyModel_1d(savefile, color=None,
+                                         sky_extraction_file=sky_frame_extraction_file,
+                                         show_plots=config.get('sky_qa_plots', False),
+                                         selection_method=sky_selection_method,
+                                         n_sky_fibres=sky_n_fibres,
+                                         sky_map=sky_map_obj)
+                rss_input_file = sky1d_file
+                print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
+
+                # Remove superseded intermediate pkls to save disk space.
+                # _corrected_extractions.pkl is now superseded by sky1d (via skyX if used)
+                corrected_pkl = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
+                for _old in ([savefile] if sky_x_refine and savefile != sky1d_file else []) + \
+                            ([corrected_pkl] if corrected_pkl != rss_input_file and os.path.exists(corrected_pkl) else []):
+                    try:
+                        os.remove(_old)
+                        print(f"Removed intermediate file: {os.path.basename(_old)}")
+                    except OSError:
+                        pass
+
+            # Optionally build a NOFLAT comparison extraction (from the original, pre-flat FITS)
+            noflat_rss_file = None
+            print(f"\nNOFLAT check: noflat_comparison={config.get('noflat_comparison', False)!r}, "
+                  f"were_flat_corrected={were_flat_corrected!r}")
+            if config.get('noflat_comparison', False):
+                if not were_flat_corrected:
+                    print("NOFLAT comparison requested but pixel flat was not applied "
+                          "(apply_pixel_flat=false or no flat maps available) — skipping NOFLAT extension")
+                else:
+                    orig_science = config.get('science_files')
+                    if isinstance(orig_science, list):
+                        print("NOFLAT comparison: list of science files not supported — skipping NOFLAT extension")
+                    elif orig_science and os.path.exists(orig_science):
+                        print("\nBuilding NOFLAT comparison extraction from original (pre-flat) FITS...")
+                        try:
+                            noflat_extracted = run_extraction(
+                                orig_science, extraction_path,
+                                use_bias=config.get('bias_file'),
+                                trace_dir=final_trace_dir,
+                                mastercalib_trace_dir=CALIB_DIR
+                            )
+                            noflat_corr_dict, noflat_hdr = correct_wavelengths(
+                                noflat_extracted, soln=config.get('arcdict'))
+                            noflat_objs = noflat_corr_dict['extractions']
+
+                            # Copy sky model from the main (flat-corrected) extraction
+                            main_dict = ExtractLlamas.loadExtraction(rss_input_file)
+                            main_objs = main_dict['extractions']
+                            for nf_obj, main_obj in zip(noflat_objs, main_objs):
+                                nf_obj.sky = getattr(main_obj, 'sky', np.zeros_like(nf_obj.counts))
+
+                            noflat_rss_file = os.path.join(extraction_path, f'{base_name}_noflat_extractions.pkl')
+                            save_extractions(noflat_objs, primary_header=noflat_hdr, savefile=noflat_rss_file)
+                            print(f"NOFLAT extraction saved: {os.path.basename(noflat_rss_file)}")
+
+                            # The raw _extract.pkl for the original FITS is now superseded
+                            try:
+                                os.remove(noflat_extracted)
+                            except OSError:
+                                pass
+                        except Exception as _nf_err:
+                            import traceback as _tb
+                            print(f"WARNING: NOFLAT extraction failed: {_nf_err}")
+                            _tb.print_exc()
+                            print("Proceeding without NOFLAT extension.")
+                            noflat_rss_file = None
+                    else:
+                        print(f"NOFLAT comparison: original science file not found "
+                              f"({orig_science!r}) — skipping NOFLAT extension")
+
             # Create a logger for RSS generation
             rss_logger = logging.getLogger(__name__ + '.rss')
             rss_logger.info(f"Starting RSS generation for {base_name}")
-            
+
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')
-            
-            #RSS generation
+
+            # RSS generation (subtract_sky mirrors sky_subtract; SKY extension always written)
             rss_gen = RSSgeneration(logger=rss_logger)
-            new_rss_outputs = rss_gen.generate_rss(savefile, rss_output_file)
+            print(f"Calling generate_rss: noflat_file={noflat_rss_file!r}")
+            new_rss_outputs = rss_gen.generate_rss(rss_input_file, rss_output_file,
+                                                    subtract_sky=sky_subtract,
+                                                    noflat_file=noflat_rss_file)
             rss_logger.info(f"RSS file generated: {new_rss_outputs}")
             print(f"RSS file generated: {new_rss_outputs}")
 
@@ -2037,30 +2302,46 @@ def main(config_path):
                       "skipping fibre-to-fibre flat correction")
                 logger.warning("Smooth models file not found — skipping fibre-to-fibre flat correction")
 
+        # ── Sky-subtraction framework (post fibre-flat, per-colour) ──
+        # Builds on the base SKY model already in the FF files and writes
+        # LLAMAS_{name}_RSS_{color}_FF_SKYSUB.fits. Disabled by default.
+        if config.get('sky_framework', False):
+            from llamas_pyjamas.Sky.skySubtract import subtract_sky_all_colors
+            from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
+            ff_for_sky = [
+                os.path.join(extraction_path, f)
+                for f in os.listdir(extraction_path)
+                if f.endswith('_FF.fits') and '_RSS' in f
+            ]
+            if ff_for_sky:
+                print("\n" + "=" * 60)
+                print("SKY-SUBTRACTION FRAMEWORK")
+                print("=" * 60)
+                sky_cfg = SkySubtractConfig.from_pipeline_config(config)
+                skysub_files = subtract_sky_all_colors(ff_for_sky, config=sky_cfg)
+                for sf in skysub_files:
+                    print(f"  SKYSUB RSS: {os.path.basename(sf)}")
+                logger.info(f"Sky framework produced: {skysub_files}")
+            else:
+                print("Sky framework enabled but no *_FF.fits files found — skipping")
+                logger.warning("sky_framework=True but no _FF.fits files present")
+
         # Cube construction from RSS files
         print("Constructing cubes from RSS files...")
         logger.info("Stage: Constructing cubes from RSS files")
-        # Look for RSS files — prefer FF (fibre-flat corrected) when available
         all_rss = [os.path.join(extraction_path, f)
                    for f in os.listdir(extraction_path)
                    if f.endswith('.fits') and '_RSS' in f]
-        ff_rss = [f for f in all_rss if '_FF' in os.path.basename(f)]
+        # Two independent cube sets, both built by default:
+        #   - standard set from the fibre-flat (_FF) RSS  -> ..._cube_{color}.fits
+        #   - sky-subtracted set from the framework (_FF_SKYSUB) RSS -> ..._cube_{color}_skysub.fits
+        # _FF_SKYSUB files end in '_FF_SKYSUB.fits' (not '_FF.fits'), so the two lists are disjoint.
+        skysub_rss = [f for f in all_rss if '_FF_SKYSUB' in os.path.basename(f)]
+        ff_rss = [f for f in all_rss if os.path.basename(f).endswith('_FF.fits')]
         non_ff_rss = [f for f in all_rss if '_FF' not in os.path.basename(f)]
-        rss_files = ff_rss if ff_rss else non_ff_rss
-        
-        if rss_files:
-            print(f"Found {len(rss_files)} RSS files for cube construction:")
-            for rss_file in rss_files:
-                basename = os.path.basename(rss_file)
-                if '_FF' in basename:
-                    status = " (fibre-flat corrected)"
-                elif '_flat_corrected' in basename:
-                    status = " (pixel-flat corrected)"
-                else:
-                    status = ""
-                print(f"  - {basename}{status}")
-        else:
-            print(f"Found {len(rss_files)} RSS files for cube construction")
+        # Standard set uses the _FF RSS; falls back to plain RSS only if fibre-flat
+        # produced no _FF files at all.
+        standard_rss = ff_rss if ff_rss else non_ff_rss
 
         if 'cube_output_dir' not in config:
             cube_output_dir = os.path.join(output_dir, 'cubes')
@@ -2068,10 +2349,12 @@ def main(config_path):
             cube_output_dir = config.get('cube_output_dir')
         os.makedirs(cube_output_dir, exist_ok=True)
 
+        gen_standard = config.get('generate_standard_cubes', True)
+        gen_skysub = config.get('generate_skysub_cubes', True)
 
-        if rss_files and _gen_cubes:
-            cube_files = construct_cube(
-                rss_files,
+        def _build_cubes(rss_list, name_suffix):
+            return construct_cube(
+                rss_list,
                 cube_output_dir,
                 wavelength_range=config.get('wavelength_range'),
                 dispersion=config.get('dispersion', 1.0),
@@ -2084,11 +2367,36 @@ def main(config_path):
                 cube_wave_sampling=float(config.get('cube_wave_sampling', 1.0)),
                 cube_radius=float(config.get('cube_radius', 1.5)),
                 cube_min_weight=float(config.get('cube_min_weight', 0.01)),
-                cube_grid_method=config.get('cube_grid_method', 'oversampled')
+                cube_grid_method=config.get('cube_grid_method', 'oversampled'),
+                name_suffix=name_suffix,
             )
-            print(f"Cubes constructed: {cube_files}")
+
+        cube_files = []
+        if _gen_cubes:
+            if gen_standard and standard_rss:
+                print(f"Building standard cubes from {len(standard_rss)} RSS file(s)...")
+                logger.info(f"Building standard cube set from {len(standard_rss)} RSS files")
+                cube_files += _build_cubes(standard_rss, '')
+            elif gen_standard:
+                print("generate_standard_cubes=True but no standard RSS files found")
+                logger.warning("generate_standard_cubes=True but no standard RSS files found")
+
+            if gen_skysub and skysub_rss:
+                print(f"Building sky-subtracted (_skysub) cubes from {len(skysub_rss)} RSS file(s)...")
+                logger.info(f"Building sky-subtracted cube set from {len(skysub_rss)} RSS files")
+                cube_files += _build_cubes(skysub_rss, '_skysub')
+            elif gen_skysub:
+                print("generate_skysub_cubes=True but no *_FF_SKYSUB.fits found "
+                      "(did the sky framework run?)")
+                logger.warning("generate_skysub_cubes=True but no _FF_SKYSUB RSS files found "
+                               "(sky framework may not have run)")
+
+            if cube_files:
+                print(f"Cubes constructed: {cube_files}")
+            else:
+                print("No cubes constructed (no matching RSS files or both sets disabled)")
         else:
-            print("No RSS files found for cube construction")
+            print("Cube generation disabled (generate_cubes=False)")
                 
         
         
