@@ -39,6 +39,13 @@ blue_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/
 #If missing, pipeline will default to using the lamp flat files i.e. red_flat_file, green_flat_file, blue_flat_file
 twilight_flat =  /Users/slh/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/ut20260106/LLAMAS_2026-01-06_23-49-00.7_CAL22_mef.fits
 
+# Optional per-colour twilight flats. These OVERRIDE the singular twilight_flat
+# above for their colour (useful when blue twilight is a separate exposure).
+# Any colour left unset falls back to the singular twilight_flat, then lamp-only.
+#red_twilight_flat = /path/to/red_twilight_mef.fits
+#green_twilight_flat = /path/to/green_twilight_mef.fits
+#blue_twilight_flat = /path/to/blue_twilight_mef.fits
+
 
 #science files to reduce
 science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/LLAMAS_2025-05-23T00_51_25.019_mef.fits

@@ -198,6 +198,7 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
 
 def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
                                   signal_threshold=None, clip_range=(0.90, 1.10),
+                                  saturation_threshold=None,
                                   return_smooth_models=False):
     """Fiber-by-fiber 1D pixel sensitivity map for a single extension.
 
@@ -283,8 +284,13 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         if return_smooth_models:
             smooth_models[fib_idx] = smooth_1d.copy()
 
-        # 1D sensitivity ratio where signal is reliable
-        valid = smooth_1d > signal_threshold
+        # 1D sensitivity ratio where signal is reliable.
+        # F2: also reject non-finite, negative/zero, and saturated raw counts so
+        # corrupted pixels keep sensitivity 1.0 (no correction) instead of
+        # producing spurious ratios that the clip floors to clip_range[0].
+        valid = (smooth_1d > signal_threshold) & np.isfinite(raw_1d) & (raw_1d > 0)
+        if saturation_threshold is not None:
+            valid &= (raw_1d < saturation_threshold)
         ratio_1d = np.ones_like(raw_1d, dtype=np.float32)
         ratio_1d[valid] = raw_1d[valid] / smooth_1d[valid]
 
@@ -746,7 +752,8 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
                               arc_calib_file=None, use_bias=None,
                               output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR,
                               verbose=False, filter_size=12,
-                              signal_thresholds=None, clip_range=(0.90, 1.10)):
+                              signal_thresholds=None, clip_range=(0.90, 1.10),
+                              saturation_threshold=None):
     """Generate pixel-to-pixel sensitivity maps using the simple median+Gaussian method.
 
     Workflow:
@@ -910,6 +917,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
             filter_size=filter_size,
             signal_threshold=threshold,
             clip_range=clip_range,
+            saturation_threshold=saturation_threshold,
             return_smooth_models=True,
         )
         pixel_maps[ext_name] = pixel_map

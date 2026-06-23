@@ -47,6 +47,13 @@ from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
 logger = logging.getLogger(__name__)
 
+# Detector noise defaults used for per-fibre variance (F4) when the FITS header
+# does not carry EGAIN/RDNOISE. The Poisson term dominates, so these only set
+# the read-noise floor; override via header keywords when available.
+DEFAULT_GAIN = 1.0        # e-/ADU
+DEFAULT_READNOISE = 2.5   # e-
+
+
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
 
@@ -249,6 +256,37 @@ class ExtractLlamas:
                 self.counts = new_counts
                 self.fiberid = np.arange(total_fibers)
                 logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
+
+            # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
+            # Populates `errors`, which llamasRSS writes to the ERROR extension
+            # and which fibreFlat/skySubtract propagate. Previously unset, so the
+            # ERROR extension was all zeros and no S/N was derivable from products.
+            # Detector gain (e-/ADU) and read noise (e-) are read from the header
+            # when available; the Poisson term dominates either way.
+            def _hdr_num(keys, default):
+                for k in keys:
+                    v = self.hdr.get(k)
+                    if v is not None:
+                        try:
+                            fv = float(v)
+                            if fv > 0:
+                                return fv
+                        except (TypeError, ValueError):
+                            pass
+                return default
+            gain = _hdr_num(('EGAIN', 'GAIN', 'GAIN1', 'CCDGAIN'), DEFAULT_GAIN)
+            readnoise = _hdr_num(('RDNOISE', 'RDNOISE1', 'READNOIS', 'RON'),
+                                 DEFAULT_READNOISE)
+            aperture_pix = float(getattr(self.trace, 'extraction_aperture', 9.0))
+            counts_e = np.clip(self.counts, 0.0, None) * gain
+            var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            self.counts_err = np.sqrt(var_adu).astype(np.float32)
+            # At extraction, flux == counts (no flux cal), so the error on the
+            # written FLUX/COUNTS is the same array.
+            self.errors = self.counts_err.copy()
+            logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
+                        f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
+                        f'pix); median error={np.median(self.counts_err):.3f}')
 
                     
                 

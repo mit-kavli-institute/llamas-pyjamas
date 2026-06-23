@@ -197,6 +197,44 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
     return outputfile
 
 
+# Per-fibre sky provenance flags (F3). Recorded on each extraction object as a
+# `sky_quality` int array and propagated to the RSS MASK by llamasRSS.
+SKY_OK = 0
+SKY_FALLBACK = 1      # sky model substituted from a channel-global fallback
+SKY_NONE = 2          # no sky model available (placeholder/missing camera)
+
+
+def _apply_sky_model(sset, xshift_min, xshift_max, sky_hi, sky_lo,
+                     extension, fiber, n_fibers, sky, science,
+                     channel, bench, side, quality_flag=SKY_OK):
+    """Evaluate a fitted sky bspline on every fibre of a camera, bounding the
+    output (F2) and tagging each fibre's sky provenance (F3).
+
+    Returns the number of fibres whose output needed clipping.
+    """
+    n_clipped = 0
+    for i in range(n_fibers):
+        x_eval = np.clip(sky[extension[i]].xshift[fiber[i], :],
+                         xshift_min, xshift_max)
+        skymodel = sset.value(x_eval)[0]
+        bad = (~np.isfinite(skymodel) | (skymodel < sky_lo)
+               | (skymodel > sky_hi))
+        if np.any(bad):
+            n_clipped += 1
+            skymodel = np.clip(np.nan_to_num(skymodel, nan=0.0, posinf=sky_hi,
+                                             neginf=sky_lo), sky_lo, sky_hi)
+        tp = science[extension[i]].relative_throughput[fiber[i]]
+        if not np.isfinite(tp) or tp <= 0:
+            tp = 1.0
+        sci = science[extension[i]]
+        sci.sky[fiber[i], :] = skymodel * tp
+        if quality_flag != SKY_OK:
+            if getattr(sci, 'sky_quality', None) is None:
+                sci.sky_quality = np.zeros(sci.sky.shape[0], dtype=np.int16)
+            sci.sky_quality[fiber[i]] = quality_flag
+    return n_clipped
+
+
 def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False,
                 selection_method='dimmest', n_sky_fibres=20, sky_map=None):
     """
@@ -267,6 +305,12 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             seen.add(key)
             cameras.append((key, i))  # store first extension index for this camera
 
+    # F3: accumulate per-channel sky points from successfully-fit cameras so a
+    # camera with "no finite sky fibres" can borrow a channel-global model in a
+    # second pass instead of being left with a silent zero sky.
+    channel_global_pts = {}   # channel -> [(x_array, y_array, sky_hi), ...]
+    deferred_cameras = []     # cameras needing the global fallback
+
     for (channel, bench, side), _ in cameras:
 
         extension = np.array([])
@@ -299,12 +343,29 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         is_placeholder = all(np.allclose(np.nan_to_num(sky[e].counts), 0.0)
                              for e in cam_exts)
         finite_any = np.isfinite(counts)
-        if is_placeholder or finite_any.sum() == 0:
-            reason = ("missing/placeholder extension" if is_placeholder
-                      else "no finite sky fibres")
-            print(f"  Skipping sky model for camera {channel} {bench}{side}: {reason}.")
-            logger.warning("skyModel_1d: skipping camera %s %s%s (%s)",
-                           channel, bench, side, reason)
+        if is_placeholder:
+            # Genuinely missing data — no sky can be modelled. Leave zero but tag
+            # the fibres so downstream products are not mistaken for subtracted.
+            print(f"  Skipping sky model for camera {channel} {bench}{side}: "
+                  f"missing/placeholder extension.")
+            logger.warning("skyModel_1d: skipping camera %s %s%s "
+                           "(missing/placeholder extension)", channel, bench, side)
+            for i in range(n_fibers):
+                sci = science[extension[i]]
+                if getattr(sci, 'sky_quality', None) is None:
+                    sci.sky_quality = np.zeros(sci.sky.shape[0], dtype=np.int16)
+                sci.sky_quality[fiber[i]] = SKY_NONE
+            continue
+        if finite_any.sum() == 0:
+            # Real data but no usable sky fibres on this benchside. Defer to a
+            # channel-global fallback (F3) instead of leaving a silent zero sky.
+            print(f"  Camera {channel} {bench}{side}: no finite sky fibres — "
+                  f"deferring to channel-global fallback.")
+            logger.warning("skyModel_1d: %s %s%s has no finite sky fibres; "
+                           "deferring to channel-global fallback", channel, bench, side)
+            deferred_cameras.append(dict(channel=channel, bench=bench, side=side,
+                                         extension=extension.copy(),
+                                         fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
         # Preferred sky candidates: finite AND positive (keeps 'dimmest' from
@@ -339,6 +400,22 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
 
         sel_idx = np.where(sel_mask)[0]
 
+        # F3: a per-camera fit from only 1-2 faint fibres produces a near-zero,
+        # unreliable sky (e.g. faint blue benchsides that selected a single
+        # ~zero-count fibre). Defer those to the channel-global fallback, which
+        # pools many fibres across the colour, rather than writing a zero sky.
+        MIN_CAMERA_SKY_FIBRES = 3
+        if len(sel_idx) < MIN_CAMERA_SKY_FIBRES:
+            print(f"  Camera {channel} {bench}{side}: only {len(sel_idx)} usable "
+                  f"sky fibre(s) — deferring to channel-global fallback.")
+            logger.warning("skyModel_1d: %s %s%s only %d usable sky fibre(s); "
+                           "deferring to channel-global fallback", channel, bench,
+                           side, len(sel_idx))
+            deferred_cameras.append(dict(channel=channel, bench=bench, side=side,
+                                         extension=extension.copy(),
+                                         fiber=fiber.copy(), n_fibers=n_fibers))
+            continue
+
         sky_fitx = np.array([])
         sky_fity = np.array([])
 
@@ -360,23 +437,44 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         sky_fity = sky_fity[gd]
 
         if sky_fitx.size == 0:
-            print(f"  WARNING: camera {channel} {bench}{side}: no good sky pixels; skipping.")
-            logger.warning("skyModel_1d: no good sky pixels for %s %s%s; skipping",
-                           channel, bench, side)
+            # F3: defer to channel-global fallback instead of a silent zero sky.
+            print(f"  Camera {channel} {bench}{side}: no good sky pixels — "
+                  f"deferring to channel-global fallback.")
+            logger.warning("skyModel_1d: %s %s%s no good sky pixels; deferring "
+                           "to channel-global fallback", channel, bench, side)
+            deferred_cameras.append(dict(channel=channel, bench=bench, side=side,
+                                         extension=extension.copy(),
+                                         fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
         xshift_min, xshift_max = sky_fitx.min(), sky_fitx.max()
         print(f"  xshift range: {xshift_min:.2f} to {xshift_max:.2f}")
         if xshift_max - xshift_min < 1.0:
+            # F3: degenerate xshift (e.g. arcTransfer metadata mismatch) — defer
+            # to the channel-global fallback rather than leaving a zero sky.
             print(f"  WARNING: Degenerate xshift for camera {channel} bench {bench}{side} — "
-                  "arcTransfer likely skipped this extension due to a metadata mismatch; skipping.")
-            logger.warning("skyModel_1d: degenerate xshift for %s %s%s; skipping",
-                           channel, bench, side)
+                  "deferring to channel-global fallback.")
+            logger.warning("skyModel_1d: degenerate xshift for %s %s%s; deferring "
+                           "to channel-global fallback", channel, bench, side)
+            deferred_cameras.append(dict(channel=channel, bench=bench, side=side,
+                                         extension=extension.copy(),
+                                         fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
         print(f"  Fitting sky with {len(sky_fitx)} points from {len(sel_idx)} fibers "
               f"(method='{selection_method}')")
         sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6, kwargs_bspline={'bkspace':0.5})
+
+        # F2: bound the sky model OUTPUT. Clipping the input xshift (below) is not
+        # sufficient — the bspline can still return catastrophic values (~1e8–1e11)
+        # that poison FLUX = COUNTS - SKY and the cubes. Sky photons are >= 0 and
+        # cannot greatly exceed the brightest sky pixel actually fit; bound to a
+        # generous multiple of that so true OH/[O I] lines are never clipped.
+        _sky_hi = float(np.nanpercentile(sky_fity, 99.9)) * 3.0
+        if not np.isfinite(_sky_hi) or _sky_hi <= 0:
+            _sky_hi = float(np.nanmax(sky_fity)) if sky_fity.size else 0.0
+        _sky_lo = 0.0
+        _n_clipped_fibers = 0
 
         if show_plots:
             plt.plot(sky_fitx, sky_fity, '.', markersize=0.1, label='data', color='k')
@@ -386,21 +484,55 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             plt.title(f'Sky fit: {channel} {bench}{side}')
             plt.show()
 
-        # Apply sky model to all fibers in this camera.
-        # The bspline was fit in throughput-corrected units (sky photons), so scale
-        # back by each fiber's throughput to match raw counts in obj.counts.
+        # Record this camera's sky points for the channel-global fallback (F3).
+        channel_global_pts.setdefault(channel, []).append(
+            (sky_fitx.copy(), sky_fity.copy(), _sky_hi))
+
+        # Apply sky model to all fibers in this camera (output bounded by F2).
         print(f"  Applying sky model to {n_fibers} fibers")
-        for i in range(n_fibers):
-            # Clip each fiber's xshift to the spline's fitted range before evaluating.
-            # The bspline is fit only on the middle-third sky fibers' xshift span;
-            # evaluating it on edge/dead fibers whose xshift extends beyond that span
-            # causes catastrophic extrapolation (~1e11) that poisons FLUX and the cubes.
-            x_eval = np.clip(sky[extension[i]].xshift[fiber[i],:], xshift_min, xshift_max)
-            skymodel = sset.value(x_eval)[0]
-            tp = science[extension[i]].relative_throughput[fiber[i]]
-            if not np.isfinite(tp) or tp <= 0:
-                tp = 1.0
-            science[extension[i]].sky[fiber[i],:] = skymodel * tp
+        _n_clipped_fibers = _apply_sky_model(
+            sset, xshift_min, xshift_max, _sky_hi, _sky_lo,
+            extension, fiber, n_fibers, sky, science, channel, bench, side)
+        if _n_clipped_fibers:
+            logger.warning("skyModel_1d: %s %s%s clipped catastrophic sky-model "
+                           "output in %d/%d fibres (cap=%.1f)", channel, bench,
+                           side, _n_clipped_fibers, n_fibers, _sky_hi)
+
+    # ── F3 pass 2: channel-global fallback for deferred cameras ──
+    for cam in deferred_cameras:
+        channel = cam['channel']; bench = cam['bench']; side = cam['side']
+        pts = channel_global_pts.get(channel)
+        if not pts:
+            logger.warning("skyModel_1d: %s %s%s no channel-global sky available "
+                           "(no other %s benchside modelled); leaving zero sky, "
+                           "flagged SKY_NONE", channel, bench, side, channel)
+            for i in range(cam['n_fibers']):
+                sci = science[cam['extension'][i]]
+                if getattr(sci, 'sky_quality', None) is None:
+                    sci.sky_quality = np.zeros(sci.sky.shape[0], dtype=np.int16)
+                sci.sky_quality[cam['fiber'][i]] = SKY_NONE
+            continue
+        gx = np.concatenate([p[0] for p in pts])
+        gy = np.concatenate([p[1] for p in pts])
+        g_hi = float(np.nanmax([p[2] for p in pts]))
+        order = np.argsort(gx)
+        gx, gy = gx[order], gy[order]
+        good = ~np.isnan(gy)
+        gx, gy = gx[good], gy[good]
+        if gx.size < 10 or (gx.max() - gx.min()) < 1.0:
+            logger.warning("skyModel_1d: %s %s%s channel-global sky degenerate; "
+                           "leaving zero sky, flagged SKY_NONE", channel, bench, side)
+            continue
+        gset, _ = iterfit(gx, gy, maxiter=6, kwargs_bspline={'bkspace': 0.5})
+        n_clip = _apply_sky_model(
+            gset, gx.min(), gx.max(), g_hi, 0.0,
+            cam['extension'], cam['fiber'], cam['n_fibers'], sky, science,
+            channel, bench, side, quality_flag=SKY_FALLBACK)
+        print(f"  Channel-global fallback sky applied to {channel} {bench}{side} "
+              f"({cam['n_fibers']} fibres)")
+        logger.warning("skyModel_1d: %s %s%s used channel-global fallback sky "
+                       "(%d fibres, %d output-clipped)", channel, bench, side,
+                       cam['n_fibers'], n_clip)
 
     #########################################
 

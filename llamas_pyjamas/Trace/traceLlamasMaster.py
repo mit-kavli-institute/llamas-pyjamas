@@ -496,13 +496,25 @@ class TraceLlamas:
         #x_model = np.arange(self.naxis2).astype(float)
         self.y_model = sset.value(self.x_model)[0]
         
-        self.min_pkheight = 10000    
+        self.min_pkheight = 10000
         if self.channel.lower() == 'blue':
             self.min_pkheight = 5000
-        
+
 
         self.comb = tslice - self.y_model
-        
+
+        # F7 ROOT CAUSE (documented; fix deferred as it needs broad re-validation):
+        # Fibre peaks are detected with a FIXED prominence=500/height=100 here,
+        # while the per-channel `self.min_pkheight` computed just above is never
+        # used. Red benchsides have lower comb prominence, so 2-11 faint fibres
+        # fall below prominence=500 and are dropped -> the detected fibre count
+        # (self.nfibers) is short of N_fib, which validate_and_fix_trace_fibres
+        # then rejects, triggering the mastercalib trace fallback (7 red cameras
+        # in the Sunburst run). Recommended fix: make prominence adaptive, e.g.
+        # `prominence = max(150, 0.25*np.nanmedian(self.peak_properties...))` or
+        # a robust fraction of the comb amplitude, then re-validate fibre counts
+        # across ALL 24 benchsides to ensure no spurious peaks are introduced in
+        # blue/green. Not applied here to avoid an unvalidated detection retune.
         self.peaks, self.peak_properties = find_peaks(self.comb,distance=5,height=100,threshold=None, prominence=500)
         self.pkht = self.peak_properties['peak_heights']
         

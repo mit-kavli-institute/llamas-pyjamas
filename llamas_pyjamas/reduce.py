@@ -91,7 +91,8 @@ def get_input_files_from_config(config, file_keys=None):
       if file_keys is None:
           file_keys = ['science_files', 'slow_bias_file', 'fast_bias_file',
                        'red_flat_file', 'green_flat_file', 'blue_flat_file',
-                       'twilight_flat']
+                       'twilight_flat', 'red_twilight_flat',
+                       'green_twilight_flat', 'blue_twilight_flat']
 
       input_files = []
 
@@ -195,7 +196,8 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # 4. File path existence checks
     # ------------------------------------------------------------------
     file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
-                 'twilight_flat']
+                 'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
+                 'blue_twilight_flat']
     if config.get('generate_new_wavelength_soln') is True:
         file_keys.append('arc_file')
 
@@ -563,6 +565,60 @@ def correct_wavelengths(science_extraction_file, soln=None):
     return std_wvcal, primary_hdr
 
 
+def _pointing_from_header(header):
+    """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header (F6).
+
+    Prefers the decimal ``RA``/``DEC`` keywords, falling back to the sexagesimal
+    HIERARCH ``TEL RA``/``TEL DEC`` pair, and reads the field rotation from
+    ``TEL PA`` (then ``TEL ROT``). Returns ``(0.0, 0.0, 0.0)`` if nothing usable
+    is present so cube construction degrades to the old placeholder behaviour.
+    """
+    if header is None:
+        return 0.0, 0.0, 0.0
+    ra = header.get('RA')
+    dec = header.get('DEC')
+    try:
+        ra, dec = float(ra), float(dec)
+        if not (np.isfinite(ra) and np.isfinite(dec)):
+            raise ValueError
+    except (TypeError, ValueError):
+        ra = dec = None
+    if ra is None or dec is None:
+        tra, tdec = header.get('TEL RA'), header.get('TEL DEC')
+        if tra and tdec:
+            try:
+                from astropy.coordinates import SkyCoord
+                import astropy.units as u
+                c = SkyCoord(str(tra), str(tdec), unit=(u.hourangle, u.deg))
+                ra, dec = float(c.ra.deg), float(c.dec.deg)
+            except Exception:
+                return 0.0, 0.0, 0.0
+        else:
+            return 0.0, 0.0, 0.0
+    pa = header.get('TEL PA', header.get('TEL ROT', 0.0))
+    try:
+        pa = float(pa)
+        if not np.isfinite(pa):
+            pa = 0.0
+    except (TypeError, ValueError):
+        pa = 0.0
+    return float(ra), float(dec), pa
+
+
+def resolve_twilight_files(config):
+    """Resolve the twilight flat to use for each colour (F1).
+
+    Supports both the per-colour keys ``{red,green,blue}_twilight_flat`` and the
+    singular ``twilight_flat`` key, with the per-colour key taking precedence and
+    the singular key as a shared fallback. Returns ``{color: path_or_None}`` for
+    ``red``/``green``/``blue``.  A single LLAMAS twilight MEF contains all
+    cameras, so multiple colours commonly resolve to the same file.
+    """
+    shared = config.get('twilight_flat')
+    return {color: (config.get(f'{color}_twilight_flat') or shared)
+            for color in ('red', 'green', 'blue')}
+
+
 def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
                           trace_dir, arc_dict_config,
                           timestamp, label='flat',
@@ -652,7 +708,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
 def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, output_dir,
                                   arc_calib_file=None, verbose=False, method='simple',
                                   filter_size=12, signal_thresholds=None,
-                                  clip_range=(0.90, 1.10), use_bias=None):
+                                  clip_range=(0.90, 1.10), use_bias=None,
+                                  saturation_threshold=None):
     """Generate flat field pixel maps for science frame correction.
 
     Args:
@@ -693,6 +750,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
                 filter_size=filter_size,
                 signal_thresholds=signal_thresholds,
                 clip_range=clip_range,
+                saturation_threshold=saturation_threshold,
             )
         elif method == 'bspline':
             results = process_flat_field_complete(
@@ -1266,8 +1324,19 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 # Construct cube
                 constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
 
-                # Create WCS (use default RA/Dec = 0 for now, could be enhanced later)
-                constructor.create_wcs(ra_center=0.0, dec_center=0.0)
+                # Create WCS from the real telescope pointing in the RSS header
+                # (F6) — previously hardcoded to (0,0), leaving cubes with no
+                # on-sky astrometry.
+                _ra_c, _dec_c, _pa = _pointing_from_header(
+                    getattr(constructor, 'primary_header', None))
+                constructor.create_wcs(ra_center=_ra_c, dec_center=_dec_c,
+                                       rotation_deg=_pa)
+                if _ra_c == 0.0 and _dec_c == 0.0:
+                    logger.warning("construct_cube: no telescope pointing in RSS "
+                                   "header; cube WCS left at placeholder (0,0)")
+                else:
+                    logger.info(f"construct_cube: cube WCS centred at RA={_ra_c:.5f}, "
+                                f"DEC={_dec_c:.5f}, PA={_pa:.3f} deg")
 
                 # Save cube
                 if channel:
@@ -1773,6 +1842,7 @@ def main(config_path):
                 filter_size=filter_size,
                 signal_thresholds=signal_thresholds,
                 clip_range=(clip_min, clip_max),
+                saturation_threshold=config.get('pixel_flat_saturation_threshold'),
             )
 
             if flat_pixel_maps:
@@ -1822,15 +1892,18 @@ def main(config_path):
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flat when specified
-            twilight_file = config.get('twilight_flat')
+            # Prefer twilight flat when specified (per-colour aware, F1).
+            twilight_by_color = resolve_twilight_files(config)
+            twilight_files = list(dict.fromkeys(
+                f for f in twilight_by_color.values() if f))  # distinct, ordered
+            twilight_file = twilight_files[0] if twilight_files else None
 
-            if twilight_file is not None and flat_pixel_maps:
+            if twilight_files and flat_pixel_maps:
                 print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
                 twi_dir = os.path.join(flat_field_dir, 'twilight')
                 os.makedirs(twi_dir, exist_ok=True)
                 twi_rss = _process_flat_for_rss(
-                    [twilight_file],
+                    twilight_files,
                     flat_pixel_maps, twi_dir,
                     trace_dir=final_trace_dir,
                     arc_dict_config=config.get('arcdict'),
@@ -2236,22 +2309,69 @@ def main(config_path):
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
                 print("=" * 60)
 
-                twilight_file = config.get('twilight_flat')
+                # F1: resolve twilight flats PER COLOUR. The previous code read
+                # only the singular ``twilight_flat`` key and silently ignored
+                # the per-colour keys ``{red,green,blue}_twilight_flat`` that the
+                # LLAMAS config templates use, forcing a lamp-only fallback.
+                twilight_by_color = resolve_twilight_files(config)
+                # Group colours by the distinct file that serves them (a single
+                # LLAMAS twilight MEF holds all cameras, so several colours often
+                # share one file).
+                files_to_colors = {}
+                for color in ('red', 'green', 'blue'):
+                    tfile = twilight_by_color.get(color)
+                    if tfile and os.path.exists(tfile):
+                        files_to_colors.setdefault(tfile, []).append(color)
                 corrections_file = None
 
-                if twilight_file and os.path.exists(twilight_file):
-                    # Branch A: Twilight + Lamp
-                    print(f"Using twilight flat: {os.path.basename(twilight_file)}")
+                if files_to_colors:
+                    # Branch A: Twilight + Lamp (per colour)
+                    summary = ", ".join(
+                        f"{'/'.join(cs)}={os.path.basename(f)}"
+                        for f, cs in files_to_colors.items())
+                    print(f"Using twilight flat(s): {summary}")
+                    logger.info(f"Twilight flats (per colour): {summary}")
                     try:
-                        twi_extractions = reduce_twilight_flat(
-                            twilight_file,
-                            flat_pixel_maps[0] if flat_pixel_maps else None,
-                            final_trace_dir,
-                            config.get('arcdict'),
-                            slow_bias_file,
-                            extraction_path,
-                            fast_bias=fast_bias_file,
-                        )
+                        merged_ext, merged_meta = [], []
+                        merged_primary = None
+                        used_colors = set()
+                        for tfile, colors in files_to_colors.items():
+                            twi = reduce_twilight_flat(
+                                tfile,
+                                flat_pixel_maps[0] if flat_pixel_maps else None,
+                                final_trace_dir,
+                                config.get('arcdict'),
+                                slow_bias_file,
+                                extraction_path,
+                                fast_bias=fast_bias_file,
+                            )
+                            merged_primary = twi.get('primary_header',
+                                                     merged_primary)
+                            # Keep only the channels this file is assigned to, so
+                            # a per-colour twilight flat contributes only its
+                            # colour(s) to the merged set.
+                            for ext, meta in zip(twi['extractions'],
+                                                 twi['metadata']):
+                                if meta['channel'] in colors:
+                                    merged_ext.append(ext)
+                                    merged_meta.append(meta)
+                                    used_colors.add(meta['channel'])
+                            del twi
+                            gc.collect()
+                        missing = {'red', 'green', 'blue'} - used_colors
+                        if missing:
+                            logger.warning(
+                                f"No twilight flat for colour(s) "
+                                f"{sorted(missing)}; those benchsides will use "
+                                f"the lamp-derived T_i fallback within the "
+                                f"twilight method.")
+                            print(f"  NOTE: colour(s) {sorted(missing)} have no "
+                                  f"twilight flat — lamp-only T_i for those.")
+                        twi_extractions = {
+                            'extractions': merged_ext,
+                            'metadata': merged_meta,
+                            'primary_header': merged_primary,
+                        }
                         corrections_file = compute_fibre_flat_twilight(
                             twi_extractions, smooth_models_file,
                             flat_field_dir,
@@ -2260,17 +2380,22 @@ def main(config_path):
                             poly_order=config.get(
                                 'fibre_flat_poly_order', None),
                         )
-                        del twi_extractions
+                        del twi_extractions, merged_ext, merged_meta
                         gc.collect()
-                        print("Fibre flat computed (twilight + lamp method)")
+                        print(f"Fibre flat computed (twilight + lamp method; "
+                              f"colours: {sorted(used_colors)})")
                     except Exception as e:
                         print(f"WARNING: Twilight reduction failed: {e}")
                         logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
                         print("Falling back to lamp-only fibre flat")
                         traceback.print_exc()
-                        # Clean up if twi_extractions was created before failure
+                        # Best-effort cleanup of any partial intermediates.
                         try:
                             del twi_extractions
+                        except NameError:
+                            pass
+                        try:
+                            del merged_ext, merged_meta
                         except NameError:
                             pass
                         gc.collect()
@@ -2278,9 +2403,16 @@ def main(config_path):
 
                 if corrections_file is None:
                     # Branch B: Lamp-only fallback
-                    if twilight_file:
+                    if files_to_colors:
                         print("Twilight flat not available or failed — "
                               "using lamp-only fallback")
+                    else:
+                        logger.warning(
+                            "No twilight flat provided (checked twilight_flat and "
+                            "{red,green,blue}_twilight_flat). Falling back to "
+                            "lamp-only fibre-to-fibre flat. Science cubes will "
+                            "contain artificial spatial illumination gradients "
+                            "from the lamp.")
                     corrections_file = compute_fibre_flat_lamp_only(
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")

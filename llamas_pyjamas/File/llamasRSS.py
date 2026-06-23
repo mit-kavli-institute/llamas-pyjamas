@@ -138,6 +138,10 @@ class RSSgeneration:
                 all_sky = []
                 fiber_ids = []
                 benchsides = []
+                # F3: tally per-fibre sky provenance (1=channel-global fallback,
+                # 2=no sky available) for SKY-extension header keywords.
+                n_sky_fallback_total = 0
+                n_sky_none_total = 0
                 fiber_types = []
                 fiber_ras = []
                 fiber_decs = []
@@ -338,6 +342,13 @@ class RSSgeneration:
                     all_dq.append(dq)
                     all_fwhm.append(fwhm)
                     all_sky.append(sky)
+
+                    # F3: accumulate sky provenance flags for this extension.
+                    _sq = getattr(obj, 'sky_quality', None)
+                    if _sq is not None:
+                        _sq = np.asarray(_sq)
+                        n_sky_fallback_total += int(np.sum(_sq == 1))
+                        n_sky_none_total += int(np.sum(_sq == 2))
                     
                     # Add metadata for fiber map
                     benchside_str = f"{meta.get('bench', '')}{meta.get('side', '')}"
@@ -505,6 +516,12 @@ class RSSgeneration:
                 sky_hdu.header['EXTNAME'] = 'SKY'
                 sky_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 sky_hdu.header['SKYSUB'] = subtract_sky
+                # F3: sky provenance — fibres whose sky came from a channel-global
+                # fallback (NSKYFALL) or that have no sky model at all (NSKYNONE).
+                sky_hdu.header['NSKYFALL'] = (n_sky_fallback_total,
+                                              'n fibres using channel-global fallback sky')
+                sky_hdu.header['NSKYNONE'] = (n_sky_none_total,
+                                              'n fibres with no sky model (excl. from science)')
                 sky_hdu.header['COMMENT'] = 'Sky model per fiber. FLUX = COUNTS - SKY if SKYSUB=True.'
                 hdul.append(sky_hdu)
                 self.logger.info(f"Added SKY extension with shape {sky_stack.shape} (subtract_sky={subtract_sky}, has_sky={has_sky})")
