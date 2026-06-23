@@ -14,3 +14,8 @@ llamas_pyjamas/LUT/traceLUT_*.json
 
 
 llamas_pyjamas/Bias/*.fits
+
+# Local data artifacts (reduction outputs, mastercalib symlink, reference files)
+llamas_pyjamas/reduced/
+llamas_pyjamas/mastercalib
+llamas_pyjamas/LUT/LLAMAS_reference_arc.pkl
