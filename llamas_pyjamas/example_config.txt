@@ -71,6 +71,54 @@ ray_num_cpus = 8
 # will make tasks unschedulable, so keep it small (e.g. 256).
 # ray_task_memory_mb = 0
 
+# --- Scratch / temp management (optional) -----------------------------------
+# Ray writes session logs, object-store spill, and its package uploads into a
+# temp dir. By default the pipeline redirects all of that into /tmp/llamas_ray/<pid>
+# and always removes it on exit (even on failure), so /tmp no longer fills up.
+#
+# ray_temp_dir: base dir for Ray's temp output. MUST be a SHORT path (<= ~32 chars
+#   on macOS / ~36 on Linux) because Ray binds AF_UNIX sockets under it; longer
+#   paths are auto-rejected back to /tmp/llamas_ray with a warning. Point this at a
+#   short path on a LARGE volume if your /tmp is small. Default: /tmp/llamas_ray.
+# ray_temp_dir = /tmp/llamas_ray
+#
+# scratch_dir: alternate base for the temp dir if ray_temp_dir is unset (same
+#   socket-length rule applies). Default: falls back to ray_temp_dir.
+# scratch_dir = /scratch/llrs
+#
+# cleanup_scratch: remove the run's Ray scratch dir on exit (default: true). Set
+#   false to keep it for debugging (Ray is still shut down cleanly).
+# cleanup_scratch = true
+#
+# prune_ray_sessions: at startup also sweep generic /tmp/ray/session_* left by
+#   crashed prior runs (default: false; may affect other Ray apps on the machine).
+# prune_ray_sessions = false
+#
+# --- Pre-flight disk-space gate (optional) ----------------------------------
+# Before any work, the pipeline checks free space on the temp and output volumes.
+# It ABORTS immediately if space is guaranteed insufficient, and WARNS if it is
+# tight. Tune or disable here.
+# min_free_gb: hard floor of free space required to start, per volume (default 5).
+# min_free_gb = 5
+# disk_estimate_factor: multiplier on total input size used to estimate the output
+#   footprint for the warning tier (default 5). Raise if your cubes are large.
+# disk_estimate_factor = 5
+# skip_disk_check: set true to bypass the pre-flight gate entirely (default false).
+# skip_disk_check = false
+#
+# input_timeout_s: per-run budget for probing that every input file responds before
+#   starting. If a file's filesystem is unresponsive (an offline cloud mount such as
+#   Box/iCloud/Dropbox, or a dead network share), the pipeline aborts with a clear
+#   message in this many seconds instead of hanging forever in stat (default 15).
+# input_timeout_s = 15
+#
+# log_retention: keep only the newest N llamas_pipeline_*.log files (default 10).
+# log_retention = 10
+#
+# To reclaim scratch left by OLDER runs (before this fix, or after a hard kill), run:
+#   python -m llamas_pyjamas.Utils.clean_ray_scratch           # preview (dry run)
+#   python -m llamas_pyjamas.Utils.clean_ray_scratch --yes     # actually delete
+
 #==============================================================================
 # SKY SUBTRACTION FRAMEWORK
 #==============================================================================

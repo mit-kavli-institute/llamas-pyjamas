@@ -34,12 +34,17 @@ import argparse
 import sys
 import os
 from astropy.io import fits
+from astropy.io.fits.verify import VerifyWarning
 from astropy.table import Table
 from astropy.wcs import WCS
 from scipy.spatial import cKDTree
 from scipy.interpolate import interp1d
 import warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning)
+# Raw Magellan/LLAMAS headers carry long, spaced keywords (e.g. 'TEL ROTATOR
+# SERVO STATUS'); astropy stores these as FITS-standard HIERARCH cards and emits
+# a VerifyWarning each time. The output is compliant, so silence the noise.
+warnings.filterwarnings('ignore', category=VerifyWarning)
 
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
 

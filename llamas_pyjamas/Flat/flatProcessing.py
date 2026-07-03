@@ -3,6 +3,7 @@ import glob
 import pdb
 import argparse
 import ray
+from llamas_pyjamas.Utils.rayManager import init_ray
 import psutil
 import pkg_resources
 from pathlib import Path
@@ -115,62 +116,12 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     """
     
     assert type(idxs) == list, 'idxs must be a list of integers'
-    package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
-    package_root = os.path.dirname(package_path)
-    import shutil as _shutil, glob as _glob2
-    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-        _shutil.rmtree(_stale, ignore_errors=True)
-    runtime_env = {
-            "working_dir": package_root,
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
-            "excludes": [
-                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
-                "**/*.pkl",                  # Exclude all pickle files anywhere (too large for Ray)
-                "**/.git/**",               # Exclude git directory
-                "**/*.zip",
-                "**/*.tar.gz",
-                "**/mastercalib/**",
-                "**/Test/**",               # Exclude test data directory
-                "**/Docs/**",               # Exclude documentation builds
-                "**/arc_testing/**",        # Exclude testing directories
-                "**/__pycache__/**",        # Exclude Python cache
-                "**/*.pyc",                 # Exclude compiled Python files
-                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-                "**/testing/**",
-            ]
-        }
 
-    # Initialize Ray
-    num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
-    # Limit object store memory to prevent OOM (2 GB default)
-    object_store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB', 2048))
-    object_store_memory = object_store_mb * 1024 * 1024
-    # On macOS Ray raises ValueError for an object store > 2 GiB unless this is set.
-    # GUI_extract (the science-extraction path) already sets it; mirror that here so
-    # the flat-field Ray init doesn't fail silently when LLAMAS_RAY_OBJECT_STORE_MB > 2048.
-    os.environ['RAY_ENABLE_MAC_LARGE_OBJECT_STORE'] = '1'
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py):
+    # canonical py_modules runtime_env, object store clamped to 30% RAM, temp/spill in
+    # the owned scratch dir. In the pipeline this attaches to reduce.py's session.
+    init_ray()
 
-    # Clamp the object store to ≤30% of RAM so it can't starve Ray's logical `memory`
-    # pool (auto-detected ≈ free RAM − object store). Mirrors GUI_extract.
-    total_mb = psutil.virtual_memory().total // (1024 * 1024)
-    store_cap_mb = int(total_mb * 0.30)
-    if object_store_mb > store_cap_mb:
-        logger.warning(f"Clamping Ray object store {object_store_mb}→{store_cap_mb} MB "
-                       f"(30% of {total_mb} MB RAM) to preserve scheduler memory pool")
-        object_store_mb = store_cap_mb
-        object_store_memory = object_store_mb * 1024 * 1024
-
-    logger.info(f"[flat] package={llamas_pyjamas.__file__}")
-    logger.info(f"[flat] ray.init num_cpus={num_cpus} object_store={object_store_mb}MB "
-                f"free_RAM={psutil.virtual_memory().available // (1024 * 1024)}MB")
-
-    ray.shutdown()
-    ray.init(
-        num_cpus=num_cpus,
-        runtime_env=runtime_env,
-        object_store_memory=object_store_memory
-    )
-    
     
     _extractions = []
     logger.debug(f'Processing {filename} with indices {idxs}')
@@ -306,7 +257,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
         futures.append(future)
     
     _extractions = ray.get(futures)
-    ray.shutdown()
+    # No ray.shutdown() here: the run shares one session managed by rayManager.
     # Post-process to make objects writable
     extraction_list = []
     for result in _extractions:

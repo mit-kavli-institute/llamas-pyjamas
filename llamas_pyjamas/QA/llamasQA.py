@@ -23,6 +23,7 @@ from io import BytesIO
 import traceback
 from astropy.samp import SAMPIntegratedClient
 import os
+import tempfile
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from llamas_pyjamas.Trace.traceLlamasMulti import TraceLlamas
@@ -45,13 +46,9 @@ def plot_ds9(image_array: fits, samp=False) -> None:
         
         if (samp == True):
                 
+            tmpfile = os.path.join(tempfile.gettempdir(), f"llamas_qa_{os.getpid()}.fits")
             try:
-                tmpfile = os.environ['PWD']+"/tmp.fits"
-                print(tmpfile)
                 hdul.writeto(tmpfile, overwrite=True)
-            except:
-                print("Error writing file")
-            try:
                 
                 ds9 = SAMPIntegratedClient()
                 ds9.connect()
@@ -66,13 +63,12 @@ def plot_ds9(image_array: fits, samp=False) -> None:
                 ds9.ecall_and_wait(client_id,"ds9.set","10",cmd="frame 1")
                 ds9.ecall_and_wait(client_id,"ds9.set","10",cmd=f"fits {tmpfile}")
                 ds9.ecall_and_wait(client_id,"ds9.set","10",cmd="zoom to fit")
-
-                os.remove(tmpfile)
-
+                ds9.disconnect()
             except:
                 print("ERROR: Problem connecting to the ds9 SAMP hub")
-
-            ds9.disconnect()
+            finally:
+                if os.path.exists(tmpfile):
+                    os.remove(tmpfile)
 
         else:
 

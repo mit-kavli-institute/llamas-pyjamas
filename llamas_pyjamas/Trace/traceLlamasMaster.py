@@ -39,6 +39,7 @@ from pypeit.bspline.bspline import bspline
 import pickle, h5py
 import logging
 import ray
+from llamas_pyjamas.Utils.rayManager import get_ray_temp_dir, init_ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
@@ -89,9 +90,16 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf:
-        _tmp_path = _tf.name
-    bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
+    # Write the intermediate bias FITS into the owned scratch dir and always remove it
+    # (the old NamedTemporaryFile(delete=True) pattern leaked a real .fits into /tmp).
+    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
+                                          dir=get_ray_temp_dir())
+    os.close(_tmp_fd)
+    try:
+        bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
+    finally:
+        if os.path.exists(_tmp_path):
+            os.remove(_tmp_path)
 
     if bias_hdus is None:
         # Try BIAS_DIR fallback before giving up
@@ -99,9 +107,14 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
             calib_path = os.path.join(BIAS_DIR, f'{required_readmode.lower()}_master_bias.fits')
         else:
             calib_path = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-        with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf2:
-            _tmp_path2 = _tf2.name
-        bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
+        _tmp_fd2, _tmp_path2 = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
+                                                dir=get_ray_temp_dir())
+        os.close(_tmp_fd2)
+        try:
+            bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
+        finally:
+            if os.path.exists(_tmp_path2):
+                os.remove(_tmp_path2)
         if bias_hdus is None:
             raise BiasNotFoundError(dir)
         logger.warning(
@@ -968,24 +981,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
 
     NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
 
-    import pkg_resources as _pkgr, shutil as _shutil, glob as _glob2
-    _package_path = _pkgr.resource_filename('llamas_pyjamas', '')
-    _package_root = os.path.dirname(_package_path)
-    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-        _shutil.rmtree(_stale, ignore_errors=True)
-    _runtime_env = {
-        "working_dir": _package_root,
-        "env_vars": {"PYTHONPATH": f"{_package_root}:{os.environ.get('PYTHONPATH', '')}"},
-        "excludes": [
-            "**/*.fits", "**/*.pkl", "**/.git/**",
-            "**/*.zip/**", "**/*.tar.gz/**", "**/mastercalib*/**", "**/*.zip",
-            "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-            "**/testing/**",
-        ],
-    }
-
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES, runtime_env=_runtime_env)
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py):
+    # canonical py_modules runtime_env, object store clamped, temp/spill in the owned
+    # scratch dir. In the pipeline this attaches to the session reduce.py started.
+    init_ray(num_cpus=NUMBER_OF_CORES)
 
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
@@ -1062,9 +1061,9 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
+
+    # No ray.shutdown() here: the run shares one session managed by rayManager
+    # (torn down once at pipeline end via cleanup_scratch / atexit).
     return
     
     

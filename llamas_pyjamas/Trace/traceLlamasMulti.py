@@ -38,6 +38,7 @@ from pypeit.bspline.bspline import bspline
 import pickle, h5py
 import logging
 import ray
+from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
@@ -871,12 +872,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
     """
 
 
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    # Initialize Ray with logging config
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
@@ -925,10 +924,8 @@ def run_ray_tracing(fitsfile: str, channel: str = None, bias: str = None) -> Non
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
-    
+
+    # No ray.shutdown() here: the run shares one session managed by rayManager.
     return
     
     
@@ -942,11 +939,9 @@ if __name__ == "__main__":
     parser.add_argument('--bias', type=str, default=None, help='Path to bias file for background subtraction')
     args = parser.parse_args()
       
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    # ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
@@ -1002,11 +997,9 @@ if __name__ == "__main__":
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
-    
-    
+
+    shutdown_ray()   # standalone CLI: release Ray (scratch cleaned by atexit)
+
     
 
     

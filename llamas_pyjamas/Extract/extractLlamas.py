@@ -34,6 +34,7 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import traceback
 from typing import Tuple
 import json
@@ -631,9 +632,9 @@ if __name__ == '__main__':
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
@@ -667,6 +668,5 @@ if __name__ == '__main__':
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
+
+    shutdown_ray()   # standalone CLI: release Ray (scratch cleaned by atexit)

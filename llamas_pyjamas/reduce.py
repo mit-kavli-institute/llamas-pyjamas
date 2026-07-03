@@ -38,6 +38,7 @@ from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
+from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -1536,9 +1537,26 @@ def main(config_path):
         log_dir = config['log_output_dir']
     else:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
-    log_file = configure_pipeline_logging(log_dir)
+    log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)))
     logger = logging.getLogger(__name__)
     logger.info(f"Pipeline started. Config: {config_path}")
+
+    # --- Ray / temp scratch management ---------------------------------------
+    # Redirect all of Ray's temp output (session logs, object-store spill, and the
+    # runtime_env package uploads) into one short, owned, per-run directory so it can
+    # be bounded and reliably cleaned up. Registers atexit + SIGTERM backstops so the
+    # scratch is removed even if the pipeline fails early, and reclaims any leftovers
+    # from crashed prior runs. See llamas_pyjamas/Utils/rayManager.py.
+    ray_temp_dir = resolve_run_temp_dir(config)
+    prune_stale(config)
+
+    # Fail fast if any input lives on an unresponsive filesystem (an offline
+    # cloud mount — Box/iCloud/Dropbox — or a dead network share). Otherwise the
+    # first os.stat in validate_pipeline_config below blocks indefinitely with no
+    # message. This only flags paths whose stat never returns; genuinely missing
+    # files are reported by the existence checks that follow.
+    check_inputs_reachable(get_input_files_from_config(config),
+                           timeout_s=float(config.get('input_timeout_s', 15)))
 
     # Pre-flight validation — exits cleanly if anything is wrong
     validate_pipeline_config(config, config_path)
@@ -1606,6 +1624,24 @@ def main(config_path):
     else:
         output_dir = config.get('output_dir')
     os.makedirs(output_dir, exist_ok=True)
+
+    # Pre-flight disk-space gate: warn when space is tight, abort *before any work*
+    # when it is guaranteed insufficient (so no partial output is left behind).
+    _preflight_inputs = []
+    for _k in ('science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
+               'arc_file', 'flat_file'):
+        _v = config.get(_k)
+        if isinstance(_v, list):
+            _preflight_inputs.extend(_v)
+        elif _v:
+            _preflight_inputs.append(_v)
+    preflight_disk_check(config, output_dir, ray_temp_dir, _preflight_inputs)
+
+    # Start THE one Ray session for this run with the canonical config (object store
+    # clamped to 30% RAM, py_modules bundle uploaded once, temp/spill in the owned
+    # scratch dir). Every stage below calls init_ray(reuse=True) and attaches to this
+    # session; it is torn down once at the end via the finally: cleanup_scratch().
+    init_ray(config)
 
     ### Checking for arc file or master wavelength solution
         
@@ -2536,6 +2572,11 @@ def main(config_path):
         traceback.print_exc()
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
+    finally:
+        # Prompt teardown: shut Ray down and remove the run scratch dir (honours
+        # cleanup_scratch=false). The atexit/SIGTERM backstops guarantee this also
+        # runs for failures before this try (validate/flat/arc) and on signals.
+        cleanup_scratch()
 
 
 

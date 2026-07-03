@@ -10,6 +10,7 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+from llamas_pyjamas.Utils.rayManager import init_ray
 import traceback
 
 import pkg_resources
@@ -426,7 +427,7 @@ def compute_detector_background(data, rows=(30, 50)):
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
                 method='optimal', trace_dir=None, mastercalib_trace_dir=None,
-                remove_cosmic_rays=True, mask_output_dir=None) -> None:
+                remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -465,63 +466,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         if not master_pkls:
             raise ValueError("No master calibration files found in CALIB_DIR")
         
-        #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package directory
-        package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
-        package_root = os.path.dirname(package_path)
+        # Per-task memory reservation for extraction (0 ⇒ schedule purely on CPUs).
+        task_mem_mb = int(os.environ.get('LLAMAS_RAY_TASK_MEMORY_MB', 0))
 
-        # Clear stale Ray py_modules cache so updated source files are always re-bundled
-        import shutil as _shutil, glob as _glob2
-        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-            _shutil.rmtree(_stale, ignore_errors=True)
-
-        # Configure Ray runtime environment.
-        # py_modules ships the repo root so workers can `import llamas_pyjamas`
-        # and resolve all subpackages including Bias/.
-        # (working_dir is not used because the repo root exceeds Ray's 512 MB limit.)
-        runtime_env = {
-            "py_modules": [package_root],
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
-            "excludes": [
-                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
-                "**/*.pkl",                  # Exclude all pickle files anywhere
-                "**/.git/**",               # Exclude git directory
-                "**/*.zip/**",
-                "**/*.tar.gz/**",
-                "**/mastercalib*/**",
-                "**/*.zip",
-                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-                "**/testing/**",
-            ]
-        }
-
-        # Initialize Ray
-        num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
-        object_store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB', 2048))
-        task_mem_mb = int(os.environ.get('LLAMAS_RAY_TASK_MEMORY_MB', 0))  # 0 ⇒ no per-task reservation
-        os.environ['RAY_ENABLE_MAC_LARGE_OBJECT_STORE'] = '1'
-        os.environ['RAY_local_fs_capacity_threshold'] = '0.99'
-
-        # Clamp the object store so it can't swallow Ray's logical `memory` pool
-        # (auto-detected ≈ free RAM − object store). RAY_ENABLE_MAC_LARGE_OBJECT_STORE
-        # removes Ray's own 2 GiB Mac guard, so this clamp provides that safety.
-        total_mb = psutil.virtual_memory().total // (1024 * 1024)
-        store_cap_mb = int(total_mb * 0.30)  # ≤30% of RAM for the object store
-        if object_store_mb > store_cap_mb:
-            logger.warning(f"Clamping Ray object store {object_store_mb}→{store_cap_mb} MB "
-                           f"(30% of {total_mb} MB RAM) to preserve scheduler memory pool")
-            object_store_mb = store_cap_mb
-
-        # Self-diagnosing startup log: which package is bound, and the full Ray budget.
-        logger.info(f"[extract] package={llamas_pyjamas.__file__}")
-        logger.info(f"[extract] ray.init num_cpus={num_cpus} object_store={object_store_mb}MB "
-                    f"task_mem={task_mem_mb}MB "
-                    f"free_RAM={psutil.virtual_memory().available // (1024 * 1024)}MB")
-
-        ray.shutdown()
-        ray.init(num_cpus=num_cpus, object_store_memory=object_store_mb * 1024 * 1024,
-                 runtime_env=runtime_env)
+        # Attach to (or start) the one consolidated Ray session — object store clamped
+        # to 30% RAM, temp/spill redirected into the owned scratch dir, package uploaded
+        # once per run. In the pipeline this attaches to the session reduce.py started;
+        # the GUI passes force_refresh=True so each click re-bundles source (per-click reset).
+        init_ray(force_refresh=force_refresh)
 
         # Import placeholder detection utilities
         from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
@@ -770,36 +722,8 @@ def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None)
         if not master_pkls:
             raise ValueError("No master calibration files found in CALIB_DIR")
         
-        #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package directory
-        package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
-        package_root = os.path.dirname(package_path)
-
-        # Clear stale Ray py_modules cache so updated source files are always re-bundled
-        import shutil as _shutil, glob as _glob2
-        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-            _shutil.rmtree(_stale, ignore_errors=True)
-
-        # Configure Ray runtime environment
-        runtime_env = {
-            "py_modules": [package_root],
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
-            "excludes": [
-                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
-                "**/*.pkl",                  # Exclude all pickle files anywhere
-                "**/.git/**",               # Exclude git directory
-                "**/*.zip/**",
-                "**/*.tar.gz/**",
-                "**/mastercalib*/**",
-                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-                "**/testing/**",
-            ]
-        }
-
-        # Initialize Ray
-        ray.shutdown()
-        ray.init(runtime_env=runtime_env)
+        # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
+        init_ray()
 
         #opening the fitsfile
         hdu, _ = process_fits_by_color(file)

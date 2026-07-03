@@ -62,7 +62,7 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-def configure_pipeline_logging(log_dir, level=logging.INFO):
+def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     """Configure centralized pipeline logging — one file per run.
 
     Sets up handlers on the ``llamas_pyjamas`` parent logger.
@@ -77,6 +77,9 @@ def configure_pipeline_logging(log_dir, level=logging.INFO):
         Directory for the log file.
     level : int
         File logging level (default: ``logging.INFO``).
+    retention : int
+        Keep only the newest ``retention`` ``llamas_pipeline_*.log`` files in
+        ``log_dir`` (older ones are removed). Set to 0 to disable pruning.
 
     Returns
     -------
@@ -87,6 +90,20 @@ def configure_pipeline_logging(log_dir, level=logging.INFO):
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = os.path.join(log_dir, f'llamas_pipeline_{timestamp}.log')
+
+    # Retention: prune old pipeline logs so the logs/ directory can't grow without
+    # bound across runs (the new file is created below and is always the newest).
+    if retention and retention > 0:
+        try:
+            existing = sorted(glob.glob(os.path.join(log_dir, 'llamas_pipeline_*.log')),
+                              key=os.path.getmtime, reverse=True)
+            for _old in existing[retention - 1:]:   # -1: the new file is not created yet
+                try:
+                    os.remove(_old)
+                except OSError:
+                    pass
+        except Exception:
+            pass
 
     parent_logger = logging.getLogger('llamas_pyjamas')
     parent_logger.setLevel(logging.DEBUG)
