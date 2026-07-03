@@ -19,6 +19,7 @@ import warnings
 
 # Ray multiprocessing imports
 import ray
+from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import multiprocessing
 import time
 import psutil
@@ -322,33 +323,17 @@ def _initialize_ray_if_needed():
         bool: True if Ray is available and initialized, False if fallback to serial
     """
     try:
-        if not ray.is_initialized():
-            NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
-            print(f"🚀 Initializing Ray with {NUMBER_OF_CORES} CPU cores for parallel processing...")
-            print(f"💾 Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
-            
-            ray.shutdown()  # Clear any existing Ray instances
-            ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-            
-            print(f"✅ Ray initialized successfully with {NUMBER_OF_CORES} cores")
-            return True
-        else:
-            print("🔄 Ray already initialized - using existing Ray cluster")
-            return True
-            
+        # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
+        init_ray()
+        return True
     except Exception as e:
         print(f"⚠️  Ray initialization failed: {str(e)}")
         print("🔀 Falling back to serial processing...")
         return False
 
 def _cleanup_ray():
-    """Cleanup Ray resources if we initialized them."""
-    try:
-        if ray.is_initialized():
-            ray.shutdown()
-            print("🧹 Ray shutdown complete")
-    except:
-        pass  # Ignore cleanup errors
+    """Cleanup Ray resources (delegates to the central manager)."""
+    shutdown_ray()
 
 def reidentifyArc(shifted_arc, reference_linelist=os.path.join(CALIB_DIR,'llamas_ThAr_ref_arclines.fits')):
     """Re-identify arc lines using cross-correlation with reference spectrum.
@@ -1519,10 +1504,9 @@ def run_wavelength_solution_ray(arc_filename: str, flat_filename: str,
     print(f"Using {NUMBER_OF_CORES} CPU cores for parallel processing")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
-    # Initialize Ray
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     try:
         start_time = time.time()
         
@@ -1579,10 +1563,8 @@ def run_wavelength_solution_ray(arc_filename: str, flat_filename: str,
     except Exception as e:
         print(f"Error in wavelength solution pipeline: {str(e)}")
         raise
-    finally:
-        # Always shutdown Ray
-        ray.shutdown()
-        print("Ray shutdown complete")
+    # No finally: ray.shutdown() — the run shares one session managed by rayManager
+    # (torn down once at pipeline end via cleanup_scratch / atexit).
 
 def run_wavelength_solution_workflow(arc_filename: str, flat_filename: str, 
                                    data_dir: str = DATA_DIR, output_dir: str = OUTPUT_DIR,
