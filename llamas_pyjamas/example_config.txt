@@ -4,6 +4,24 @@
 #if files cannot be found or processed correctly then the pipeline defaults to the master calibration files
 
 #==============================================================================
+# RESUME / RE-RUN CONTROL
+#==============================================================================
+# By default the pipeline RESUMES: on a re-run it reuses any intermediate
+# products already on disk and only does the work that is missing. Each stage
+# checks for its own outputs and skips when they are present:
+#   - flat pixel maps (flat/pixel_maps.fits + flat/flat_smooth_models.fits)
+#   - per-science extraction + RSS generation (*_RSS_*.fits)
+#   - fibre-to-fibre flat correction (*_FF.fits)
+#   - sky-subtraction framework (*_FF_SKYSUB.fits)
+#   - cube construction (*_cube_*.fits)
+# So if a run fails late (e.g. only cube construction), re-running picks up from
+# where it left off instead of repeating the whole reduction.
+#
+# Set clobber = true to force EVERY stage (including trace regeneration) to run
+# from scratch, ignoring any existing products. Default: false.
+# clobber = false
+
+#==============================================================================
 # BIAS CALIBRATION
 #==============================================================================
 # The pipeline requires two pre-combined master bias FITS files — one for each

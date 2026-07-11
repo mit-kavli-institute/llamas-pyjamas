@@ -21,6 +21,7 @@ Example:
 """
 
 import os
+import re
 import argparse
 import pickle
 import traceback
@@ -1208,7 +1209,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                    use_crr=True, crr_config=None, parallel=False, cube_method='traditional',
                    cube_pixel_size=0.3, cube_fiber_pitch=0.75, cube_wave_sampling=1.0,
                    cube_radius=1.5, cube_min_weight=0.01, cube_grid_method='oversampled',
-                   name_suffix=''):
+                   name_suffix='', resume=False):
     """
     Construct IFU data cubes from RSS files using simple, traditional, or CRR method.
 
@@ -1287,6 +1288,20 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
             print(f"Processing {channel} channel RSS file with base name: {base_name}")
         else:
             print(f"Processing RSS file (no specific channel detected): {base_name}")
+
+        # Resume: skip RSS files whose output cube already exists (set clobber=true
+        # to force a rebuild). The filename is deterministic from base_name/channel,
+        # so this is checked before any (expensive) construction.
+        if resume:
+            if channel:
+                _existing_cube = os.path.join(output_dir, f"{base_name}_cube_{channel}{name_suffix}.fits")
+            else:
+                _existing_cube = os.path.join(output_dir, f"{base_name}_cube{name_suffix}.fits")
+            if os.path.exists(_existing_cube):
+                print(f"  RESUME: cube already exists, skipping: {os.path.basename(_existing_cube)}")
+                logger.info(f"Resume: skipping existing cube {_existing_cube}")
+                cube_files.append(_existing_cube)
+                continue
 
         # Determine which method to use
         # CRR flag overrides cube_method for backward compatibility
@@ -1478,6 +1493,38 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     
     return cube_files
 
+
+def _science_stem(science_file):
+    """Return a stable identifier for a science exposure.
+
+    The stem is preserved as a substring through the whole per-file product
+    naming chain (``{stem}_mef_flat_corrected_extract_RSS_{color}[...]_FF.fits``),
+    so it can be used to detect on disk whether a given science file has already
+    been reduced. Strips the extension and a trailing ``_mef``.
+    """
+    base = os.path.splitext(os.path.basename(science_file))[0]
+    if base.endswith('_mef'):
+        base = base[:-len('_mef')]
+    return base
+
+
+def _has_rss_product(extraction_dir, stem):
+    """True if a base RSS product (pre fibre-flat) exists for ``stem``.
+
+    Matches ``*_RSS*.fits`` files that belong to this science stem but are not
+    themselves fibre-flat (``_FF``) products. Presence of the RSS means the
+    extraction -> wavelength-correction -> sky -> RSS-generation chain for this
+    file already completed.
+    """
+    if not os.path.isdir(extraction_dir):
+        return False
+    for f in os.listdir(extraction_dir):
+        if (stem in f and f.endswith('.fits')
+                and '_RSS' in f and '_FF' not in f):
+            return True
+    return False
+
+
 def main(config_path):
     """
     Main entry point for the data reduction pipeline.
@@ -1507,7 +1554,13 @@ def main(config_path):
                 key, value = line.split('=', 1)
                 key = key.strip()
                 value = value.strip()
-                
+
+                # Strip inline comments: a '#' preceded by whitespace begins a
+                # trailing comment (e.g. "0.3   # pixel size"). The required
+                # leading whitespace means a '#' that is part of a value or path
+                # is left intact.
+                value = re.split(r'\s+#', value, maxsplit=1)[0].strip()
+
                 # Handle quoted values
                 if value.startswith('"') and value.endswith('"') or value.startswith("'") and value.endswith("'"):
                     value = value[1:-1]  # Remove quotes
@@ -1531,6 +1584,20 @@ def main(config_path):
         
         
     print("Configuration:", config)
+
+    # Resume control: by default the pipeline reuses any intermediate products
+    # already on disk (flat pixel maps, per-science RSS/_FF products, cubes) and
+    # skips the stages that produced them, so a re-run only does the work that is
+    # actually missing. Set ``clobber = true`` in the config to force every stage
+    # to run from scratch (including trace regeneration; normally traces are also
+    # reused when ``use_existing_traces`` is true, which is the default).
+    clobber = bool(config.get('clobber', False))
+    resume = not clobber
+    if clobber:
+        print("clobber=True — all stages will run from scratch (no resume).")
+    else:
+        print("Resume enabled — existing intermediate products will be reused "
+              "(set clobber=true to force a full re-run).")
 
     # Configure pipeline logging — log file goes next to the config file
     if 'log_output_dir' in config:
@@ -1707,7 +1774,7 @@ def main(config_path):
         trace_source = None
 
         # Check if we should use existing traces or generate new ones
-        if config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
+        if resume and config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
             # Check if trace files exist in the specified directory
             import glob
             existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
@@ -1842,7 +1909,25 @@ def main(config_path):
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
         flat_field_method = config.get('flat_field_method', 'simple')
-        if config.get('apply_flat_field_correction', True):
+        # Resume: flat_pixel_maps is always a single-element list holding the path
+        # to pixel_maps.fits (see process_flat_field_calibration). If both that MEF
+        # and the flat_smooth_models.fits (needed by the fibre-flat stage) already
+        # exist, we can skip the expensive flat extraction entirely and just point
+        # flat_pixel_maps at the existing file.
+        _flat_field_dir = config.get('flat_field_output_dir',
+                                     os.path.join(extraction_path, 'flat'))
+        _flat_products_present = (
+            os.path.exists(os.path.join(_flat_field_dir, 'pixel_maps.fits'))
+            and os.path.exists(os.path.join(_flat_field_dir, 'flat_smooth_models.fits')))
+        if config.get('apply_flat_field_correction', True) and resume and _flat_products_present:
+            print("\n" + "="*60)
+            print("FLAT FIELD PROCESSING — RESUME (existing products found)")
+            print("="*60)
+            print(f"Using existing pixel_maps.fits + flat_smooth_models.fits in {_flat_field_dir}")
+            print("Skipping flat field generation (set clobber=true to force).")
+            logger.info("Resume: skipping flat field generation (products present)")
+            flat_pixel_maps = [os.path.join(_flat_field_dir, 'pixel_maps.fits')]
+        elif config.get('apply_flat_field_correction', True):
             print("\n" + "="*60)
             print(f"FLAT FIELD PROCESSING (method={flat_field_method})")
             print("="*60)
@@ -2036,7 +2121,18 @@ def main(config_path):
                     
                     if not os.path.exists(science_file):
                         raise FileNotFoundError(f"Science file {science_file} does not exist.")
-                    
+
+                    # Resume: reuse the existing flat-corrected file if present, keeping
+                    # this list aligned with original_science_files for the extraction zip.
+                    _existing_corr = os.path.join(
+                        flat_output_dir,
+                        os.path.splitext(os.path.basename(science_file))[0] + '_flat_corrected.fits')
+                    if resume and os.path.exists(_existing_corr):
+                        print(f"RESUME: reusing existing flat-corrected file "
+                              f"{os.path.basename(_existing_corr)}")
+                        flat_corrected_files.append(_existing_corr)
+                        continue
+
                     corrected_file, stats = apply_flat_field_correction(
                         science_file,
                         flat_pixel_maps,
@@ -2063,25 +2159,33 @@ def main(config_path):
                 science_file = config['science_files']
                 if not os.path.exists(science_file):
                     raise FileNotFoundError(f"Science file {science_file} does not exist.")
-                
-                print(f"\nFlat-correcting science file: {os.path.basename(science_file)}")
-                corrected_file, stats = apply_flat_field_correction(
-                    science_file,
-                    flat_pixel_maps,
+
+                _existing_corr = os.path.join(
                     flat_output_dir,
-                    validate_matching=config.get('validate_flat_matching', True),
-                    require_all_matches=config.get('require_all_flat_matches', False)
-                )
-                
-                if corrected_file:
-                    science_files_to_process = corrected_file
-                    overall_stats['total_corrected'] = stats['corrected']
-                    overall_stats['total_skipped'] = stats['skipped']
-                    overall_stats['total_errors'] = stats['errors']
+                    os.path.splitext(os.path.basename(science_file))[0] + '_flat_corrected.fits')
+                if resume and os.path.exists(_existing_corr):
+                    print(f"RESUME: reusing existing flat-corrected file "
+                          f"{os.path.basename(_existing_corr)}")
+                    science_files_to_process = _existing_corr
                 else:
-                    print(f"ERROR: Failed to flat-correct {science_file}, using original")
-                    logger.error(f"Failed to flat-correct {science_file}, using original")
-                    science_files_to_process = science_file
+                    print(f"\nFlat-correcting science file: {os.path.basename(science_file)}")
+                    corrected_file, stats = apply_flat_field_correction(
+                        science_file,
+                        flat_pixel_maps,
+                        flat_output_dir,
+                        validate_matching=config.get('validate_flat_matching', True),
+                        require_all_matches=config.get('require_all_flat_matches', False)
+                    )
+
+                    if corrected_file:
+                        science_files_to_process = corrected_file
+                        overall_stats['total_corrected'] = stats['corrected']
+                        overall_stats['total_skipped'] = stats['skipped']
+                        overall_stats['total_errors'] = stats['errors']
+                    else:
+                        print(f"ERROR: Failed to flat-correct {science_file}, using original")
+                        logger.error(f"Failed to flat-correct {science_file}, using original")
+                        science_files_to_process = science_file
             
             print("\n" + "="*60)
             print("FLAT FIELD CORRECTION SUMMARY")
@@ -2123,6 +2227,14 @@ def main(config_path):
             logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
             for i, (science_file, orig_file) in enumerate(zip(science_files_to_process, original_science_files)):
+                # Resume: if this exposure already has an RSS product on disk, its
+                # whole extraction -> wavelength -> sky -> RSS chain is done. Skip it
+                # (not appending to science_pkl_pairs skips its post-processing too).
+                if resume and _has_rss_product(extraction_path, _science_stem(orig_file)):
+                    print(f"RESUME: RSS product already exists for "
+                          f"{os.path.basename(orig_file)} — skipping extraction/RSS.")
+                    logger.info(f"Resume: skipping extraction for {orig_file} (RSS present)")
+                    continue
                 print(f"Extracting science file {i+1}/{len(science_files_to_process)}: {os.path.basename(science_file)}")
                 # Process each science file with hybrid trace support
                 extracted_basename = run_extraction(
@@ -2138,6 +2250,10 @@ def main(config_path):
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
                     science_pkl_pairs.append((os.path.join(extraction_path, extracted_basename), orig_file))
+        elif resume and _has_rss_product(extraction_path, _science_stem(original_science_files[0])):
+            print(f"RESUME: RSS product already exists for "
+                  f"{os.path.basename(original_science_files[0])} — skipping extraction/RSS.")
+            logger.info(f"Resume: skipping extraction for {original_science_files[0]} (RSS present)")
         else:
             print(f"Extracting science file: {os.path.basename(science_files_to_process)}")
             extracted_basename = run_extraction(
@@ -2340,7 +2456,25 @@ def main(config_path):
             smooth_models_file = os.path.join(flat_field_dir,
                                               'flat_smooth_models.fits')
 
-            if os.path.exists(smooth_models_file):
+            # RSS files that still need a fibre-flat product. On resume, drop any
+            # that already have their _FF.fits so the (expensive) twilight
+            # reduction below is skipped entirely when nothing is pending.
+            _rss_all = [
+                os.path.join(extraction_path, f)
+                for f in os.listdir(extraction_path)
+                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
+            ]
+            if resume:
+                _rss_pending = [r for r in _rss_all
+                                if not os.path.exists(r.replace('.fits', '_FF.fits'))]
+            else:
+                _rss_pending = _rss_all
+
+            if os.path.exists(smooth_models_file) and not _rss_pending:
+                print("RESUME: all _FF products present — skipping fibre-to-fibre "
+                      "flat correction (set clobber=true to force).")
+                logger.info("Resume: skipping fibre-flat (all _FF present)")
+            elif os.path.exists(smooth_models_file):
                 print("\n" + "=" * 60)
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
                 print("=" * 60)
@@ -2453,14 +2587,8 @@ def main(config_path):
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")
 
-                # Apply to all RSS files in the extraction directory
-                rss_to_correct = [
-                    os.path.join(extraction_path, f)
-                    for f in os.listdir(extraction_path)
-                    if f.endswith('.fits') and '_RSS' in f
-                    and '_FF' not in f
-                ]
-                for rss_file in rss_to_correct:
+                # Apply to the pending RSS files (resume-filtered above).
+                for rss_file in _rss_pending:
                     ff_output = rss_file.replace('.fits', '_FF.fits')
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
                                            ff_output)
@@ -2481,6 +2609,15 @@ def main(config_path):
                 for f in os.listdir(extraction_path)
                 if f.endswith('_FF.fits') and '_RSS' in f
             ]
+            # Resume: skip FF files that already have their _FF_SKYSUB.fits product.
+            if resume:
+                _sky_pending = [f for f in ff_for_sky
+                                if not os.path.exists(f.replace('_FF.fits', '_FF_SKYSUB.fits'))]
+                if ff_for_sky and not _sky_pending:
+                    print("RESUME: all _FF_SKYSUB products present — skipping sky framework "
+                          "(set clobber=true to force).")
+                    logger.info("Resume: skipping sky framework (all _FF_SKYSUB present)")
+                ff_for_sky = _sky_pending
             if ff_for_sky:
                 print("\n" + "=" * 60)
                 print("SKY-SUBTRACTION FRAMEWORK")
@@ -2537,6 +2674,7 @@ def main(config_path):
                 cube_min_weight=float(config.get('cube_min_weight', 0.01)),
                 cube_grid_method=config.get('cube_grid_method', 'oversampled'),
                 name_suffix=name_suffix,
+                resume=resume,
             )
 
         cube_files = []
