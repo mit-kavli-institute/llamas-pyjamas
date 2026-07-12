@@ -1717,6 +1717,14 @@ def main(config_path):
         output_dir = config.get('output_dir')
     os.makedirs(output_dir, exist_ok=True)
 
+    # Wavelength/xshift QA (QA/waveQA.py): per-run HTML report + CSV scorecard.
+    # Enabled by default; set wavelength_qa = false to disable. The directory is
+    # created lazily on first QA write.
+    wavelength_qa = bool(config.get('wavelength_qa', True))
+    config['qa_output_dir'] = (config.get('qa_output_dir')
+                               or os.path.join(output_dir, 'QA'))
+    print(f"Wavelength QA: enabled={wavelength_qa}, dir={config['qa_output_dir']}")
+
     # Pre-flight disk-space gate: warn when space is tight, abort *before any work*
     # when it is guaranteed insufficient (so no partial output is left behind).
     _preflight_inputs = []
@@ -1736,7 +1744,8 @@ def main(config_path):
     init_ray(config)
 
     ### Checking for arc file or master wavelength solution
-        
+
+    arc_qa_records = None
     if bool(config.get('generate_new_wavelength_soln')) == True:
         print("Generating new wavelength solution.")
         logger.info("Stage: Generating new wavelength solution")
@@ -1760,9 +1769,26 @@ def main(config_path):
                 refine_channels = [c.strip() for c in refine_channels.split(',')]
             ch_label = ','.join(refine_channels) if refine_channels else 'all'
             print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
-            arcdict = refineArcX(arcdict, channels=refine_channels)
+            arc_qa_records = [] if wavelength_qa else None
+            arcdict = refineArcX(arcdict, channels=refine_channels,
+                                 qa_collector=arc_qa_records)
             print(f"Using refined arc: {os.path.basename(arcdict)}")
         config['arcdict'] = arcdict
+
+        # Arc-level wavelength QA: xshift structure of the solution in use (and
+        # arc-line fit residuals when refine_arc ran). QA must never kill a run.
+        if wavelength_qa:
+            try:
+                from llamas_pyjamas.QA import waveQA
+                waveQA.xshift_structure_qa(arcdict,
+                                           qa_dir=config['qa_output_dir'],
+                                           label='arc', emit='png')
+                if arc_qa_records:
+                    waveQA.arc_residual_qa(arc_qa_records,
+                                           qa_dir=config['qa_output_dir'],
+                                           label='arc', emit='png')
+            except Exception as _qa_exc:
+                logger.warning(f"Wavelength QA (arc stage) failed: {_qa_exc}")
 
         
     
@@ -2402,6 +2428,23 @@ def main(config_path):
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 
+                # Per-science wavelength QA: final xshift (incl. refineSkyX if
+                # enabled) + populated .sky. Writes one HTML report + CSV per
+                # science frame into qa_output_dir. Never fatal. Note: lives
+                # inside the loop that resume skips, so QA regenerates only when
+                # extraction reruns; the standalone CLI
+                # (python -m llamas_pyjamas.QA.waveQA) covers existing products.
+                if wavelength_qa:
+                    try:
+                        from llamas_pyjamas.QA import waveQA
+                        waveQA.run_wavelength_qa(
+                            sky1d_file,
+                            qa_dir=config['qa_output_dir'],
+                            run_label=base_name.split('_flat_corrected')[0],
+                            arc_qa_records=arc_qa_records)
+                    except Exception as _qa_exc:
+                        logger.warning(f"Wavelength QA failed for {base_name}: {_qa_exc}")
+
                 # Remove superseded intermediate pkls to save disk space.
                 # _corrected_extractions.pkl is now superseded by sky1d (via skyX if used)
                 corrected_pkl = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
@@ -2412,6 +2455,18 @@ def main(config_path):
                         print(f"Removed intermediate file: {os.path.basename(_old)}")
                     except OSError:
                         pass
+            elif wavelength_qa:
+                # No sky subtraction: still QA the xshift structure of the
+                # wavelength-corrected extraction (sky panels will be skipped).
+                try:
+                    from llamas_pyjamas.QA import waveQA
+                    waveQA.run_wavelength_qa(
+                        savefile,
+                        qa_dir=config['qa_output_dir'],
+                        run_label=base_name.split('_flat_corrected')[0],
+                        arc_qa_records=arc_qa_records)
+                except Exception as _qa_exc:
+                    logger.warning(f"Wavelength QA failed for {base_name}: {_qa_exc}")
 
             # Optionally build a NOFLAT comparison extraction (from the original, pre-flat FITS)
             noflat_rss_file = None

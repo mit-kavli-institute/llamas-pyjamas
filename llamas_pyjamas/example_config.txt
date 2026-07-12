@@ -182,6 +182,25 @@ ray_num_cpus = 8
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch --yes     # actually delete
 
 #==============================================================================
+# WAVELENGTH / XSHIFT QA
+#==============================================================================
+# Per-run QA of the wavelength calibration: xshift curvature structure per
+# camera, arc-line fit residuals (when refine_arc runs), and post-sky-subtraction
+# residuals at OH sky lines. Writes ONE self-contained HTML report (all figures
+# embedded) plus a machine-readable CSV scorecard per science frame, so runs can
+# be diffed against a baseline when the calibration algorithms change.
+#
+# Enable/disable (default: true). QA failures never abort a reduction.
+wavelength_qa = true
+# Output directory for QA reports (default: {output_dir}/QA).
+# qa_output_dir = /path/to/QA
+#
+# QA can also be run standalone on existing products, without a pipeline run:
+#   python -m llamas_pyjamas.QA.waveQA <..._sky1d_extractions.pkl> \
+#       --qa-dir /path/to/QA --label baseline
+# (add --pngs to also write individual PNG files)
+
+#==============================================================================
 # SKY SUBTRACTION FRAMEWORK
 #==============================================================================
 # Base sky model (skyModel_1d): populates the SKY extension that the framework

@@ -139,7 +139,7 @@ def shiftArcX(arc_extraction_pickle):
     sv = arc_extraction_pickle.replace('.pkl','_shifted.pkl')
     extract.save_extractions(arcspec, savefile=sv)
 
-def refineArcX(arc_extraction_shifted_pickle, channels=None):
+def refineArcX(arc_extraction_shifted_pickle, channels=None, qa_collector=None):
     """Refine per-fiber xshift using sub-pixel arc line centroids.
 
     Takes the quadratic xshift from shiftArcX as a first guess, detects arc line
@@ -150,6 +150,10 @@ def refineArcX(arc_extraction_shifted_pickle, channels=None):
     Args:
         arc_extraction_shifted_pickle (str): Path to a *_shifted.pkl file produced
             by shiftArcX (or any file with xshift/wave populated).
+        qa_collector (list, optional): When provided, one record per fiber is
+            appended describing the refinement outcome (status, matched line
+            pixels, fit residuals in xshift/pixel units) for QA reporting.
+            Capture only — the fitting itself is unaffected.
 
     Returns:
         str: Path to the output pickle (*_refined.pkl) with updated xshift and wave.
@@ -202,6 +206,20 @@ def refineArcX(arc_extraction_shifted_pickle, channels=None):
             n_refined  = 0
             n_fallback = 0
 
+            def _qa_record(fiber, status, n_detected=0, n_matched=0,
+                           pixels=None, resid_pix=None):
+                # QA capture only — never touches the fit.
+                if qa_collector is not None:
+                    qa_collector.append({
+                        'channel': channel, 'bench': bench, 'side': side,
+                        'fiber': fiber, 'status': status,
+                        'n_detected': int(n_detected), 'n_matched': int(n_matched),
+                        'pixels': (np.asarray(pixels, dtype=float)
+                                   if pixels is not None else np.array([])),
+                        'resid_pix': (np.asarray(resid_pix, dtype=float)
+                                      if resid_pix is not None else np.array([])),
+                    })
+
             for ifiber in range(nfibers):
                 spec        = interpolateNaNs(arcspec[fits_ext].counts[ifiber, :])
                 # Replace any remaining NaN/inf so pypeit routines don't warn or fail
@@ -223,12 +241,14 @@ def refineArcX(arc_extraction_shifted_pickle, channels=None):
                     if ifiber == 0:
                         print(f"  DIAG fiber 0: arc_lines_from_spec raised {e}")
                     n_fallback += 1
+                    _qa_record(ifiber, 'fallback_detect')
                     continue
 
                 if len(all_tcent) == 0:
                     if ifiber == 0:
                         print(f"  DIAG fiber 0: arc_lines_from_spec returned 0 lines")
                     n_fallback += 1
+                    _qa_record(ifiber, 'fallback_no_lines')
                     continue
 
                 # Match detected centroids to catalog lines
@@ -264,12 +284,24 @@ def refineArcX(arc_extraction_shifted_pickle, channels=None):
                         arcspec[fits_ext].xshift[ifiber, :] = refined.eval(x)
                         arcspec[fits_ext].wave[ifiber, :]   = wv_fit.eval(refined.eval(x))
                         n_refined += 1
+                        if qa_collector is not None:
+                            _qa_record(ifiber, 'refined',
+                                       n_detected=len(all_tcent),
+                                       n_matched=len(matched_pixels),
+                                       pixels=mp,
+                                       resid_pix=mxs - refined.eval(mp))
                     except Exception as e:
                         if ifiber == 0:
                             print(f"  DIAG fiber 0: robust_fit raised {e}")
                         n_fallback += 1
+                        _qa_record(ifiber, 'fallback_fit',
+                                   n_detected=len(all_tcent),
+                                   n_matched=len(matched_pixels))
                 else:
                     n_fallback += 1
+                    _qa_record(ifiber, 'fallback_few_lines',
+                               n_detected=len(all_tcent),
+                               n_matched=len(matched_pixels))
 
             print(f"  {bench}{side} {channel}: refined {n_refined}, fallback {n_fallback}")
 
