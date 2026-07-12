@@ -412,7 +412,7 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
 
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                    trace_dir=None, mastercalib_trace_dir=None,
-                   remove_cosmic_rays=True, mask_output_dir=None):
+                   remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -425,6 +425,9 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
         remove_cosmic_rays: Enable L.A.Cosmic cosmic ray removal before extraction
         mask_output_dir: Output directory for cosmic ray mask FITS files
+        edge_bias: Optional dict controlling the per-frame edge-bias (DC offset)
+            correction (see build_edge_bias_config); forwarded to GUI_extract.
+            None => process_trace uses its built-in defaults (Tier 1 on).
 
     Returns:
         str: Path to extraction file
@@ -448,7 +451,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 trace_dir=trace_dir,
                 mastercalib_trace_dir=mastercalib_trace_dir,
                 remove_cosmic_rays=remove_cosmic_rays,
-                mask_output_dir=mask_output_dir
+                mask_output_dir=mask_output_dir,
+                edge_bias=edge_bias
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -460,7 +464,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             trace_dir=trace_dir,
             mastercalib_trace_dir=mastercalib_trace_dir,
             remove_cosmic_rays=remove_cosmic_rays,
-            mask_output_dir=mask_output_dir
+            mask_output_dir=mask_output_dir,
+            edge_bias=edge_bias
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -468,6 +473,24 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         extraction_file_path = os.path.join(output_dir, extraction_file_path)
 
     return extraction_file_path
+
+
+def build_edge_bias_config(config, extraction_path, flat_field_dir=None):
+    """Assemble the edge-bias (per-frame DC offset) settings from the pipeline config.
+
+    Returns a small, Ray-serialisable dict consumed by GUI_extract/process_trace.
+    The DC offset is measured from unilluminated pixels of each frame and
+    subtracted on top of the master bias to track the nightly temperature drift.
+    """
+    return {
+        'enabled':       bool(config.get('edge_bias_dc_correction', True)),
+        'min_distance':  float(config.get('edge_bias_min_distance', 20)),
+        'min_pixels':    int(config.get('edge_bias_min_pixels', 500)),
+        'use_flat_mask': bool(config.get('edge_bias_use_flat_mask', False)),
+        'flat_frac':     float(config.get('edge_bias_flat_frac', 0.1)),
+        'flat_mask_dir': flat_field_dir or os.path.join(extraction_path, 'flat'),
+        'qa_csv':        os.path.join(extraction_path, 'edge_bias_levels.csv'),
+    }
 
 
 def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_dir,
@@ -503,7 +526,8 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
     extracted = run_extraction(
         sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
         trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
-        remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir)
+        remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir,
+        edge_bias=build_edge_bias_config(config, extraction_path))
     if not extracted:
         raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
 
@@ -624,7 +648,7 @@ def resolve_twilight_files(config):
 def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
                           trace_dir, arc_dict_config,
                           timestamp, label='flat',
-                          slow_bias=None, fast_bias=None):
+                          slow_bias=None, fast_bias=None, edge_bias=None):
     """Apply pixel flat → extract → wavelength-calibrate → generate RSS for a flat frame.
 
     Used for both dome flats (fibre-flat RSS) and twilight flats.
@@ -677,7 +701,7 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
         pkl_basename = run_extraction(corr_file, output_dir,
                                       slow_bias=slow_bias, fast_bias=fast_bias,
                                       trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
-                                      remove_cosmic_rays=False)
+                                      remove_cosmic_rays=False, edge_bias=edge_bias)
         if not pkl_basename:
             print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
             continue
@@ -711,7 +735,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
                                   arc_calib_file=None, verbose=False, method='simple',
                                   filter_size=12, signal_thresholds=None,
                                   clip_range=(0.90, 1.10), use_bias=None,
-                                  saturation_threshold=None):
+                                  saturation_threshold=None, unillum_frac=0.1):
     """Generate flat field pixel maps for science frame correction.
 
     Args:
@@ -753,6 +777,7 @@ def process_flat_field_calibration(red_flat, green_flat, blue_flat, trace_dir, o
                 signal_thresholds=signal_thresholds,
                 clip_range=clip_range,
                 saturation_threshold=saturation_threshold,
+                unillum_frac=unillum_frac,
             )
         elif method == 'bspline':
             results = process_flat_field_complete(
@@ -1756,7 +1781,14 @@ def main(config_path):
         config['extraction_output_dir'] = extraction_path
     else:
         extraction_path = config['extraction_output_dir']
-    
+
+    # Per-frame edge-bias (DC offset) settings, threaded into every extraction so
+    # science and flats are corrected identically. See build_edge_bias_config.
+    edge_bias_cfg = build_edge_bias_config(config, extraction_path)
+    print(f"Edge-bias DC correction: enabled={edge_bias_cfg['enabled']}, "
+          f"min_distance={edge_bias_cfg['min_distance']}px, "
+          f"use_flat_mask={edge_bias_cfg['use_flat_mask']}")
+
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
     # No need to pre-create a separate pixel_maps directory
     try:
@@ -1964,6 +1996,7 @@ def main(config_path):
                 signal_thresholds=signal_thresholds,
                 clip_range=(clip_min, clip_max),
                 saturation_threshold=config.get('pixel_flat_saturation_threshold'),
+                unillum_frac=edge_bias_cfg['flat_frac'],
             )
 
             if flat_pixel_maps:
@@ -2030,6 +2063,7 @@ def main(config_path):
                     arc_dict_config=config.get('arcdict'),
                     timestamp=timestamp_ff, label='twilight',
                     slow_bias=slow_bias_file, fast_bias=fast_bias_file,
+                    edge_bias=edge_bias_cfg,
                 )
                 if twi_rss:
                     config['flat_rss_outputs'] = twi_rss
@@ -2060,6 +2094,7 @@ def main(config_path):
                         arc_dict_config=config.get('arcdict'),
                         timestamp=timestamp_ff, label='dome',
                         slow_bias=slow_bias_file, fast_bias=fast_bias_file,
+                        edge_bias=edge_bias_cfg,
                     )
                     if dome_rss:
                         config['flat_rss_outputs'] = dome_rss
@@ -2245,7 +2280,8 @@ def main(config_path):
                     trace_dir=final_trace_dir,              # User traces
                     mastercalib_trace_dir=CALIB_DIR,        # Mastercalib fallback
                     remove_cosmic_rays=remove_cosmic_rays,
-                    mask_output_dir=mask_output_dir
+                    mask_output_dir=mask_output_dir,
+                    edge_bias=edge_bias_cfg
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -2264,7 +2300,8 @@ def main(config_path):
                 trace_dir=final_trace_dir,                  # User traces
                 mastercalib_trace_dir=CALIB_DIR,            # Mastercalib fallback
                 remove_cosmic_rays=remove_cosmic_rays,
-                mask_output_dir=mask_output_dir
+                mask_output_dir=mask_output_dir,
+                edge_bias=edge_bias_cfg
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
@@ -2393,9 +2430,9 @@ def main(config_path):
                         try:
                             noflat_extracted = run_extraction(
                                 orig_science, extraction_path,
-                                use_bias=config.get('bias_file'),
                                 trace_dir=final_trace_dir,
-                                mastercalib_trace_dir=CALIB_DIR
+                                mastercalib_trace_dir=CALIB_DIR,
+                                edge_bias=edge_bias_cfg
                             )
                             noflat_corr_dict, noflat_hdr = correct_wavelengths(
                                 noflat_extracted, soln=config.get('arcdict'))
@@ -2514,6 +2551,7 @@ def main(config_path):
                                 slow_bias_file,
                                 extraction_path,
                                 fast_bias=fast_bias_file,
+                                edge_bias=edge_bias_cfg,
                             )
                             merged_primary = twi.get('primary_header',
                                                      merged_primary)

@@ -48,6 +48,50 @@ remove_cosmic_rays = True
 # If not set, masks are saved to {extraction_output_dir}/masks/
 #mask_output_dir = /path/to/custom/mask/output
 
+#==============================================================================
+# EDGE BIAS (DC OFFSET) CORRECTION
+#==============================================================================
+# LLAMAS CCDs have no overscan region, and the per-channel bias DC level drifts
+# through the night with temperature. The afternoon master bias removes the 2D
+# fixed-pattern structure, but not this drift. This step measures a per-frame,
+# per-extension DC offset from UNILLUMINATED pixels of each science/flat frame
+# and subtracts it ON TOP of the master bias, levelling the red/green/blue
+# channels. Applied to every frame that is extracted (science + flats).
+#
+# Tier 1 (default ON): the offset is measured over the top/bottom stripes that
+# lie outside the fibre stack (pixels farther than edge_bias_min_distance from
+# any fibre), using a robust sigma-clipped median. Placeholder (missing-camera)
+# extensions are detected and skipped automatically.
+#
+# Master switch (default true). Set false to disable entirely.
+edge_bias_dc_correction = true
+# Distance in pixels from the nearest fibre for a pixel to count as an
+# unilluminated top/bottom stripe pixel (default 20).
+edge_bias_min_distance = 20
+# Minimum stripe-mask pixels required; below this the correction is skipped for
+# that extension (guards placeholders / odd geometry). Default 500.
+edge_bias_min_pixels = 500
+#
+# Tier 2 (default OFF, experimental): additionally include the dark left/right
+# dichroic-crossover / low-sensitivity zones. These vary per camera and per
+# fibre (valid-x is a function of y), so they are taken from a flat-derived,
+# per-pixel mask (flat/unillum_mask.fits, written during flat processing):
+# on-fibre pixels whose flat throughput is below edge_bias_flat_frac of that
+# fibre's own peak. Only meaningfully affects green/blue (red flats fill the
+# full detector). Turn on to A/B-test against Tier 1.
+#   NOTE: the flat mask is generated during flat processing, so enabling this on
+#   an already-reduced dataset requires re-running the flat stage (clobber = true).
+edge_bias_use_flat_mask = false
+# Flat-throughput fraction (of each fibre's peak) below which a pixel is treated
+# as unilluminated when building the flat mask (default 0.1).
+edge_bias_flat_frac = 0.1
+#
+# QA: every run writes {extraction_output_dir}/edge_bias_levels.csv with, per
+# extension, the subtracted offset (edge_dc) and BOTH candidate levels
+# (stripes-only and stripes+flat) plus WTH-TEMP and timestamp — so the nightly
+# drift and the two mask choices can be compared. Per-extension header keywords:
+# EDGEDC, EDGENPIX, EDGEDMIN, EDGESRC.
+
 #calibration files to include
 red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_34_47.516_mef.fits
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
