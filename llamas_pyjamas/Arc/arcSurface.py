@@ -57,7 +57,7 @@ from llamas_pyjamas.config import LUT_DIR
 import llamas_pyjamas.Extract.extractLlamas as extract
 from llamas_pyjamas.Arc.arcLlamas import interpolateNaNs
 
-from pypeit.core.wavecal.wvutils import arc_lines_from_spec
+from pypeit.core.wavecal.wvutils import arc_lines_from_spec, xcorr_shift_stretch
 from pypeit.core.fitting import robust_fit
 
 # Reference extensions per channel (fiber 150 of bench 4A), as in arcLlamas.py
@@ -275,13 +275,25 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                  perturb_order=0, perturb_min_lines=8, perturb_shrink_lines=5.0,
                  use_unidentified_peaks=True, blend_min_sep=8.0,
                  match_tol_pass1=4.0, match_tol_pass2=4.0,
-                 sigdetect=5.0, fwhm=4.0):
+                 sigdetect=5.0, fwhm=4.0, line_source=None):
     """Hybrid per-camera 2D surface + per-fibre perturbation xshift refinement.
 
     Saves ``<input>_refined2d.pkl`` (same conventions as refineArcX) and
     returns its path. See module docstring for the algorithm and QA-record
     semantics. The default pipeline never calls this: it is opt-in via
     ``refine_arc_method = 2d``.
+
+    line_source (dict, optional): ``{channel: extraction pickle path or dict}``
+        of NIGHT-OF arc exposures (e.g. the afternoon ThAr set, extracted with
+        the night's traces). When given, line centroids are detected on THOSE
+        spectra — so the refined solution aligns to the instrument's state at
+        the observation epoch — while the reference pickle still provides the
+        line identifications and the xshift->wavelength mapping (defined in
+        xshift space, epoch-independent). Each camera is bootstrapped by
+        cross-correlating the night arc's reference-fibre spectrum against the
+        packaged arc's, so multi-pixel epoch offsets cannot defeat pass-1
+        matching. Without line_source, centroids come from the reference
+        pickle's own (old-epoch) spectra as before.
     """
     arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_shifted_pickle)
     arcspec = arcdict['extractions']
@@ -323,6 +335,19 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         min_samples = max(20 * (surface_order_x + 1) * (surface_order_fiber + 1),
                           200)
 
+        # Night-of line source for this channel (e.g. afternoon ThAr arcs)
+        src_dict = None
+        src_lookup = {}
+        if line_source and line_source.get(channel):
+            src = line_source[channel]
+            src_dict = (src if isinstance(src, dict)
+                        else extract.ExtractLlamas.loadExtraction(src))
+            src_lookup = {(str(m['bench']), m['side']): j
+                          for j, m in enumerate(src_dict['metadata'])
+                          if m['channel'] == channel}
+            print(f"  {channel}: detecting line centroids on the NIGHT arc "
+                  f"({len(src_lookup)} cameras available)")
+
         for fits_ext in range(len(arcspec)):
             if metadata[fits_ext]['channel'] != channel:
                 continue
@@ -347,11 +372,56 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
 
             fc = _fiber_coords(arcspec[fits_ext], nfibers, cam)
 
+            # Night-arc line source for this camera, with a per-camera epoch
+            # bootstrap: cross-correlate the night arc's reference-fibre
+            # spectrum against the packaged arc's so pass-1 matching survives
+            # multi-pixel offsets between the two epochs.
+            det_counts = counts
+            n_det_fibers = nfibers
+            boot_t = None  # old-frame pixel as a function of new-frame pixel
+            if src_dict is not None:
+                j = src_lookup.get((str(bench), side))
+                src_counts = (src_dict['extractions'][j].counts
+                              if j is not None else None)
+                if (src_counts is None
+                        or np.nanstd(np.nan_to_num(src_counts)) == 0):
+                    print(f"  {cam}: night arc unavailable/placeholder — "
+                          f"using reference-arc spectra for this camera")
+                else:
+                    det_counts = src_counts
+                    n_det_fibers = min(nfibers, src_counts.shape[0])
+                    rf = min(REF_FIBER, n_det_fibers - 1)
+                    old_spec = np.nan_to_num(interpolateNaNs(counts[rf, :]),
+                                             nan=0.0, posinf=0.0, neginf=0.0)
+                    new_spec = np.nan_to_num(interpolateNaNs(src_counts[rf, :]),
+                                             nan=0.0, posinf=0.0, neginf=0.0)
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter('ignore')
+                            success, shift, stretch, stretch2, _, _, _ = \
+                                xcorr_shift_stretch(old_spec, new_spec,
+                                                    stretch_func='quadratic')
+                    except Exception:
+                        success = 0
+                    if success == 1:
+                        boot_t = x * stretch + x ** 2 * stretch2 + shift
+                        if not _monotonic(boot_t):
+                            boot_t = None
+                        else:
+                            print(f"  {cam}: epoch bootstrap shift={shift:+.2f}px "
+                                  f"stretch={(stretch - 1) * 1e3:+.3f}e-3")
+                    if boot_t is None:
+                        print(f"  {cam}: bootstrap xcorr failed — assuming "
+                              f"zero epoch offset for pass 1")
+
             # Detection once per fibre (cached; reused by both passes)
             detections = []
             n_det_total = 0
             for i in range(nfibers):
-                tcent, ecent = _detect_lines(counts[i, :], sigdetect, fwhm)
+                if i < n_det_fibers:
+                    tcent, ecent = _detect_lines(det_counts[i, :], sigdetect, fwhm)
+                else:
+                    tcent, ecent = None, None
                 detections.append((tcent, ecent))
                 if tcent is not None:
                     n_det_total += len(tcent)
@@ -368,6 +438,9 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                 if not _monotonic(orig_xshift[i]):
                     continue
                 pred = np.interp(ref_line_xshift, orig_xshift[i], x)
+                if boot_t is not None:
+                    # map old-frame predictions into the night arc's frame
+                    pred = np.interp(pred, boot_t, x)
                 mp, mt, mw = _match_lines(tcent, ecent, pred, ref_line_xshift,
                                           match_tol_pass1)
                 if mp.size:
@@ -469,6 +542,10 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                   f"{n_surface_only}, no-match {n_nomatch}, reverted {n_revert}, "
                   f"identity-rescued {n_identity_rescued}  "
                   f"[{time.time() - t0:.1f}s]")
+
+        # Free the night-arc extraction before moving to the next channel
+        src_dict = None
+        src_lookup = {}
 
     sv = arc_extraction_shifted_pickle.replace('.pkl', '_refined2d.pkl')
     print(f"Saving 2D-refined arc solution to {sv}")

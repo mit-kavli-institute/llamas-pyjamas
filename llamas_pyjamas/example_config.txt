@@ -202,6 +202,14 @@ ray_num_cpus = 8
 #                        sky-subtraction residuals.
 # refine_arc_method = 2d
 #
+# Night-arc line source (2d method): when {red,green,blue}_arc_file point to
+# same-night arc exposures, the 2d method extracts them (into {output_dir}/arcs,
+# resume-aware) and measures line centroids on THOSE spectra, so the solution
+# aligns to the observation epoch instead of the packaged reference arc's
+# (per-camera epoch offsets up to ~3 px were measured on may26 data). The
+# packaged arc still provides line IDs and the xshift->wavelength map.
+# refine_arc_use_night_arcs = true
+#
 # 2d-method tuning (defaults shown; all optional):
 # arc_surface_order_x = 3          # Legendre order along dispersion (x)
 # arc_surface_order_fiber = 2      # Legendre order across fibres

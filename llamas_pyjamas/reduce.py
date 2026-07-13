@@ -1801,53 +1801,10 @@ def main(config_path):
         arcdict = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
         if not os.path.exists(arcdict):
             raise FileNotFoundError(f"Reference arc file not found at {arcdict}")
-        if config.get('refine_arc', False):
-            refine_channels = config.get('refine_arc_channels', None)
-            if isinstance(refine_channels, str):
-                refine_channels = [c.strip() for c in refine_channels.split(',')]
-            ch_label = ','.join(refine_channels) if refine_channels else 'all'
-            arc_qa_records = [] if wavelength_qa else None
-            # Method dispatch: 'perfiber' (default) = existing per-fibre cubic
-            # refineArcX; '2d' = hybrid per-camera surface + per-fibre
-            # perturbation (Arc/arcSurface.py). Numeric config values arrive as
-            # strings from the parser, hence the explicit coercions.
-            refine_method = str(config.get('refine_arc_method', 'perfiber')).strip().lower()
-            if refine_method == '2d':
-                from llamas_pyjamas.Arc.arcSurface import refineArcX2D
-                print(f"Refining arc xshift with 2D surface + per-fibre "
-                      f"perturbations (channels: {ch_label})...")
-                arcdict = refineArcX2D(
-                    arcdict, channels=refine_channels,
-                    qa_collector=arc_qa_records,
-                    surface_order_x=int(config.get('arc_surface_order_x', 3)),
-                    surface_order_fiber=int(config.get('arc_surface_order_fiber', 2)),
-                    perturb_order=int(config.get('arc_perturb_order', 0)),
-                    perturb_min_lines=int(config.get('arc_perturb_min_lines', 8)),
-                    perturb_shrink_lines=float(config.get('arc_perturb_shrink_lines', 5)),
-                    use_unidentified_peaks=bool(config.get('arc_use_unidentified_peaks', True)),
-                    blend_min_sep=float(config.get('arc_catalog_min_sep', 8)))
-            else:
-                from llamas_pyjamas.Arc.arcLlamas import refineArcX
-                print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
-                arcdict = refineArcX(arcdict, channels=refine_channels,
-                                     qa_collector=arc_qa_records)
-            print(f"Using refined arc: {os.path.basename(arcdict)}")
         config['arcdict'] = arcdict
-
-        # Arc-level wavelength QA: xshift structure of the solution in use (and
-        # arc-line fit residuals when refine_arc ran). QA must never kill a run.
-        if wavelength_qa:
-            try:
-                from llamas_pyjamas.QA import waveQA
-                waveQA.xshift_structure_qa(arcdict,
-                                           qa_dir=config['qa_output_dir'],
-                                           label='arc', emit='png')
-                if arc_qa_records:
-                    waveQA.arc_residual_qa(arc_qa_records,
-                                           qa_dir=config['qa_output_dir'],
-                                           label='arc', emit='png')
-            except Exception as _qa_exc:
-                logger.warning(f"Wavelength QA (arc stage) failed: {_qa_exc}")
+        # NOTE: refine_arc dispatch now happens AFTER trace selection (below),
+        # because the 2d method can extract the night's own arc exposures
+        # ({red,green,blue}_arc_file) as its line source, which needs traces.
 
         
     
@@ -2022,7 +1979,99 @@ def main(config_path):
         print(f"Trace source: {trace_source}")
         print(f"All pipeline steps will use traces from: {final_trace_dir}")
         print("="*60)
-        
+
+        # ── Arc xshift refinement (moved after trace selection so the 2d
+        # method can extract the night's own arc exposures) ──
+        if config.get('refine_arc', False) and not config.get('generate_new_wavelength_soln'):
+            refine_channels = config.get('refine_arc_channels', None)
+            if isinstance(refine_channels, str):
+                refine_channels = [c.strip() for c in refine_channels.split(',')]
+            ch_label = ','.join(refine_channels) if refine_channels else 'all'
+            arc_qa_records = [] if wavelength_qa else None
+            refine_method = str(config.get('refine_arc_method', 'perfiber')).strip().lower()
+            if refine_method == '2d':
+                from llamas_pyjamas.Arc.arcSurface import refineArcX2D
+
+                # Night-of arc line source: extract the same-afternoon arc
+                # exposures ({red,green,blue}_arc_file) through the night's
+                # traces so the refined solution aligns to the observation
+                # epoch rather than the packaged reference arc's. Extraction
+                # is resume-aware (existing *_extract.pkl in arcs/ reused).
+                line_source = None
+                if bool(config.get('refine_arc_use_night_arcs', True)):
+                    night_arcs = {}
+                    for _ch in ('red', 'green', 'blue'):
+                        _f = config.get(f'{_ch}_arc_file')
+                        if _f and os.path.exists(_f):
+                            night_arcs[_ch] = _f
+                    if night_arcs:
+                        arc_extract_dir = os.path.join(output_dir, 'arcs')
+                        os.makedirs(arc_extract_dir, exist_ok=True)
+                        line_source = {}
+                        for _ch, _f in night_arcs.items():
+                            _base = os.path.splitext(os.path.basename(_f))[0] + '_extract.pkl'
+                            _pkl = os.path.join(arc_extract_dir, _base)
+                            if resume and os.path.exists(_pkl):
+                                print(f"RESUME: reusing extracted night arc for {_ch}: {_base}")
+                            else:
+                                print(f"Extracting night arc for {_ch}: {os.path.basename(_f)}")
+                                run_extraction(_f, arc_extract_dir,
+                                               slow_bias=slow_bias_file,
+                                               fast_bias=fast_bias_file,
+                                               trace_dir=final_trace_dir,
+                                               mastercalib_trace_dir=CALIB_DIR,
+                                               remove_cosmic_rays=False,
+                                               edge_bias=edge_bias_cfg)
+                            if os.path.exists(_pkl):
+                                line_source[_ch] = _pkl
+                            else:
+                                print(f"WARNING: night-arc extraction missing for {_ch} "
+                                      f"({_pkl}) — that channel refines against the "
+                                      f"reference arc spectra")
+                        if not line_source:
+                            line_source = None
+                    else:
+                        print("refine_arc_use_night_arcs=true but no "
+                              "{red,green,blue}_arc_file found — refining against "
+                              "the reference arc spectra")
+
+                print(f"Refining arc xshift with 2D surface + per-fibre "
+                      f"perturbations (channels: {ch_label}, "
+                      f"line source: {'night arcs' if line_source else 'reference arc'})...")
+                arcdict = refineArcX2D(
+                    arcdict, channels=refine_channels,
+                    qa_collector=arc_qa_records,
+                    surface_order_x=int(config.get('arc_surface_order_x', 3)),
+                    surface_order_fiber=int(config.get('arc_surface_order_fiber', 2)),
+                    perturb_order=int(config.get('arc_perturb_order', 0)),
+                    perturb_min_lines=int(config.get('arc_perturb_min_lines', 8)),
+                    perturb_shrink_lines=float(config.get('arc_perturb_shrink_lines', 5)),
+                    use_unidentified_peaks=bool(config.get('arc_use_unidentified_peaks', True)),
+                    blend_min_sep=float(config.get('arc_catalog_min_sep', 8)),
+                    line_source=line_source)
+            else:
+                from llamas_pyjamas.Arc.arcLlamas import refineArcX
+                print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
+                arcdict = refineArcX(arcdict, channels=refine_channels,
+                                     qa_collector=arc_qa_records)
+            print(f"Using refined arc: {os.path.basename(arcdict)}")
+            config['arcdict'] = arcdict
+
+        # Arc-level wavelength QA: xshift structure of the solution in use (and
+        # arc-line fit residuals when refine_arc ran). QA must never kill a run.
+        if wavelength_qa:
+            try:
+                from llamas_pyjamas.QA import waveQA
+                waveQA.xshift_structure_qa(config['arcdict'],
+                                           qa_dir=config['qa_output_dir'],
+                                           label='arc', emit='png')
+                if arc_qa_records:
+                    waveQA.arc_residual_qa(arc_qa_records,
+                                           qa_dir=config['qa_output_dir'],
+                                           label='arc', emit='png')
+            except Exception as _qa_exc:
+                logger.warning(f"Wavelength QA (arc stage) failed: {_qa_exc}")
+
         # Generate flat field pixel maps if flat correction is enabled
         flat_pixel_maps = []
         flat_field_method = config.get('flat_field_method', 'simple')
