@@ -322,7 +322,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
-                         slow_bias, output_dir, fast_bias=None):
+                         slow_bias, output_dir, fast_bias=None, edge_bias=None):
     """Reduce a twilight flat: bias/P2P correct, extract, wavelength calibrate.
 
     Reuses existing pipeline infrastructure for each step.
@@ -370,7 +370,7 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
     extraction_file = run_extraction(
         corrected_file, twi_output_dir,
         slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir,
-        remove_cosmic_rays=False)
+        remove_cosmic_rays=False, edge_bias=edge_bias)
     logger.info(f"Twilight extraction: {extraction_file}")
 
     # Step 3: Wavelength calibration

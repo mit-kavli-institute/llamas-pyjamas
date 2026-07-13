@@ -18,6 +18,7 @@ repeated calls with the same tracer object.
 import logging
 import numpy as np
 import scipy.ndimage
+from astropy.stats import sigma_clipped_stats
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
@@ -143,6 +144,118 @@ def build_interfibre_mask(tracer,
         f"{gap_mask.sum()} gap pixels ({100*gap_mask.mean():.1f}%)"
     )
     return gap_mask
+
+
+# ---------------------------------------------------------------------------
+# Edge-bias (per-frame DC offset) support
+# ---------------------------------------------------------------------------
+
+def build_topbottom_stripe_mask(tracer,
+                                image_shape: Tuple[int, int],
+                                min_distance: float = 20.0) -> np.ndarray:
+    """
+    Build a boolean mask of unilluminated pixels that lie far from any fibre.
+
+    LLAMAS traces span the full dispersion (X) range, so the pixels that are
+    farther than ``min_distance`` from every fibre are the top/bottom stripes
+    *outside* the fibre stack (above the top trace / below the bottom trace).
+    Unlike inter-fibre gaps these carry no sky, so the level measured over this
+    mask is a clean per-extension bias reference even on science frames.
+
+    Uses the ``fiberimg`` attribute of a loaded ``TraceLlamas`` object (fibre
+    pixels are >= 0; non-fibre pixels are -1). A Euclidean distance transform
+    gives, at each non-fibre pixel, the distance to the nearest fibre pixel.
+
+    The result is cached in ``_MASK_CACHE`` keyed on
+    ``(id(tracer), 'stripe', min_distance)``.
+
+    Parameters
+    ----------
+    tracer : TraceLlamas or None
+        Loaded trace object with a ``fiberimg`` attribute. If unavailable, an
+        all-False mask is returned (caller then skips the correction).
+    image_shape : (int, int)
+        (n_rows, n_cols) of the detector image.
+    min_distance : float
+        Minimum distance (pixels) from any fibre for a pixel to count as an
+        unilluminated stripe pixel.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array of shape ``image_shape`` where True = stripe pixel.
+    """
+    if tracer is None or not hasattr(tracer, 'fiberimg') or tracer.fiberimg is None:
+        logger.warning(
+            "build_topbottom_stripe_mask: tracer unavailable or lacks fiberimg; "
+            "returning empty mask"
+        )
+        return np.zeros(image_shape, dtype=bool)
+
+    cache_key = (id(tracer), 'stripe', float(min_distance))
+    if cache_key in _MASK_CACHE:
+        logger.debug(f"build_topbottom_stripe_mask: cache hit for {cache_key}")
+        return _MASK_CACHE[cache_key]
+
+    fibre_px = tracer.fiberimg >= 0
+    # distance_transform_edt returns, for each True pixel, the distance to the
+    # nearest False pixel. Passing ~fibre_px makes fibre pixels the False set, so
+    # each non-fibre pixel gets its distance to the nearest fibre.
+    dist = scipy.ndimage.distance_transform_edt(~fibre_px)
+    mask = dist > float(min_distance)
+
+    _MASK_CACHE[cache_key] = mask
+    logger.debug(
+        f"build_topbottom_stripe_mask: {int(mask.sum())} px > {min_distance}px "
+        f"from fibres ({100*mask.mean():.1f}%)"
+    )
+    return mask
+
+
+def measure_edge_dc_offset(data: np.ndarray,
+                           mask: np.ndarray,
+                           min_pixels: int = 500) -> Tuple[float, int, str]:
+    """
+    Measure a robust per-extension DC offset from unilluminated pixels.
+
+    Computes a sigma-clipped (σ=3) median of ``data`` over ``mask``. This is the
+    residual bias level to subtract from the whole frame (measured *after* master
+    bias subtraction, so it captures the nightly DC drift the static master bias
+    misses).
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        2-D frame (already master-bias-subtracted).
+    mask : numpy.ndarray
+        Boolean mask of unilluminated pixels (same shape as ``data``).
+    min_pixels : int
+        Minimum number of mask pixels required. Below this — or when the masked
+        data is constant (a placeholder extension) — no correction is made.
+
+    Returns
+    -------
+    (offset, n_pixels, source) : (float, int, str)
+        ``offset`` is the DC level (DN) to subtract, or 0.0 when skipped.
+        ``source`` is ``'ok'`` or ``'skipped'``.
+    """
+    data = np.asarray(data, dtype=np.float64)
+    n = int(np.count_nonzero(mask))
+    if n < int(min_pixels):
+        logger.warning(
+            f"measure_edge_dc_offset: only {n} mask pixels (< {min_pixels}); "
+            f"skipping edge-bias correction"
+        )
+        return 0.0, n, 'skipped'
+
+    vals = data[mask]
+    # Constant masked data => placeholder extension; nothing meaningful to subtract.
+    if np.nanmin(vals) == np.nanmax(vals):
+        logger.info("measure_edge_dc_offset: constant masked data (placeholder?); skipping")
+        return 0.0, n, 'skipped'
+
+    _, median, _ = sigma_clipped_stats(vals, sigma=3, maxiters=5)
+    return float(median), n, 'ok'
 
 
 # ---------------------------------------------------------------------------
