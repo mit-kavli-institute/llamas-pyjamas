@@ -523,6 +523,282 @@ def sky_line_residual_qa(sky1d_input, qa_dir=None, label='', emit='png'):
 
 
 # ---------------------------------------------------------------------------
+# Product 3b: sky-line xshift ERROR QA (measured from the science frame itself)
+# ---------------------------------------------------------------------------
+
+def _sky_template_peaks(obj, nfibers, ref_fiber=150, fiber_half_width=10,
+                        sigdetect=5.0, fwhm=4.0):
+    """Detect sky-line peaks in a per-camera template (refineSkyX's method).
+
+    Builds a high-S/N template from ref_fiber +/- fiber_half_width in xshift
+    space and returns the peak positions in xshift coordinates (or None).
+    Mirrors Sky/skyLlamas.refineSkyX:90-127 — keep in sync deliberately.
+    """
+    rf = min(max(ref_fiber, 0), nfibers - 1)
+    t_lo, t_hi = max(0, rf - fiber_half_width), min(nfibers, rf + fiber_half_width + 1)
+    txs = np.concatenate([obj.xshift[tf, :] for tf in range(t_lo, t_hi)])
+    tct = np.concatenate([np.nan_to_num(obj.counts[tf, :], nan=0.0, posinf=0.0,
+                                        neginf=0.0) for tf in range(t_lo, t_hi)])
+    order = np.argsort(txs)
+    txs, tct = txs[order], tct[order]
+    n_grid = 2048
+    grid = np.linspace(txs[0], txs[-1], n_grid)
+    binned = np.interp(grid, txs, tct)
+    try:
+        import warnings as _w
+        from pypeit.core.wavecal.wvutils import arc_lines_from_spec
+        with _w.catch_warnings():
+            _w.simplefilter("ignore")
+            tcent, _, _, _, _ = arc_lines_from_spec(binned, sigdetect=sigdetect,
+                                                    fwhm=fwhm)
+    except Exception:
+        return None
+    if len(tcent) == 0:
+        return None
+    return np.interp(tcent, np.arange(n_grid, dtype=float), grid)
+
+
+def sky_xshift_error_qa(sky1d_input, qa_dir=None, label='', emit='png',
+                        ref_fiber=150, fiber_half_width=10,
+                        sigdetect=5.0, fwhm=4.0, match_tol=5.0):
+    """Measure the ACTUAL xshift error on a science frame from its own sky lines.
+
+    The arc-based QA measures how well the model fits the (reference-epoch) arc
+    exposure. This measures what matters on sky: for each fibre, sky-line
+    centroids are detected on the science spectrum, mapped through that fibre's
+    xshift, and compared to a per-camera sky template — if xshift were perfect,
+    every fibre's sky lines would land exactly on the template positions.
+    Residuals therefore capture BOTH model error and any epoch drift (flexure)
+    between the reference arc and the science exposure. This is refineSkyX's
+    internal measurement, surfaced as QA (computed there and discarded).
+
+    Returns {cam_key: {metrics..., 'figure'/'figure_b64'}}.
+    """
+    import warnings as _w
+    from pypeit.core.wavecal.wvutils import arc_lines_from_spec
+
+    scidict, src_path = _load(sky1d_input)
+    extractions = scidict['extractions']
+    metadata = scidict.get('metadata', [{} for _ in extractions])
+    qa_dir = _resolve_qa_dir(qa_dir, src_path if src_path != '<in-memory>' else '.')
+
+    results = {}
+    for obj, meta in zip(extractions, metadata):
+        cam = _camera_key(meta)
+        counts = getattr(obj, 'counts', None)
+        xshift = getattr(obj, 'xshift', None)
+        if (counts is None or xshift is None or counts.shape[0] == 0
+                or np.count_nonzero(np.nan_to_num(counts)) == 0
+                or np.count_nonzero(xshift) == 0):
+            results[cam] = {'note': 'no_data'}
+            continue
+
+        # Guard the known counts-vs-xshift row mismatch (e.g. 300 vs 298)
+        nfib = min(counts.shape[0], xshift.shape[0])
+        nx = counts.shape[1]
+        x = np.arange(nx, dtype=float)
+        left, center, right = _thirds(nx)
+
+        tmpl_peaks = _sky_template_peaks(obj, nfib, ref_fiber, fiber_half_width,
+                                         sigdetect, fwhm)
+        if tmpl_peaks is None:
+            results[cam] = {'note': 'no_template_lines'}
+            continue
+
+        all_px, all_fib, all_err = [], [], []
+        fib_offset = np.full(nfib, np.nan)
+        n_nolines = 0
+        for i in range(nfib):
+            spec = np.nan_to_num(counts[i, :], nan=0.0, posinf=0.0, neginf=0.0)
+            try:
+                with _w.catch_warnings():
+                    _w.simplefilter("ignore")
+                    tcent, ecent, _, _, _ = arc_lines_from_spec(
+                        spec, sigdetect=sigdetect, fwhm=fwhm)
+            except Exception:
+                n_nolines += 1
+                continue
+            if len(tcent) == 0:
+                n_nolines += 1
+                continue
+            fib_xs = np.interp(tcent, x, xshift[i, :])
+            errs, pxs = [], []
+            for pk in tmpl_peaks:
+                d = np.abs(fib_xs - pk)
+                nearest = int(np.argmin(d))
+                if d[nearest] < match_tol:
+                    errs.append(fib_xs[nearest] - pk)   # + = fibre lines land redward of template
+                    pxs.append(tcent[nearest])
+            if not errs:
+                n_nolines += 1
+                continue
+            errs = np.array(errs); pxs = np.array(pxs)
+            all_err.append(errs); all_px.append(pxs)
+            all_fib.append(np.full(errs.size, i))
+            fib_offset[i] = np.median(errs)
+
+        if not all_err:
+            results[cam] = {'note': 'no_sky_lines_matched'}
+            continue
+        all_err = np.concatenate(all_err)
+        all_px = np.concatenate(all_px)
+        all_fib = np.concatenate(all_fib)
+
+        in_center = (all_px >= center.start) & (all_px < center.stop)
+        finite_off = fib_offset[np.isfinite(fib_offset)]
+        stats = {
+            'skyx_err_rms_pix': _rms(all_err),
+            'skyx_err_rms_center_pix': _rms(all_err[in_center]),
+            'skyx_err_rms_edge_pix': _rms(all_err[~in_center]),
+            'skyx_median_abs_err_pix': float(np.median(np.abs(all_err))),
+            'skyx_frac_fibres_off_gt0p5': float(np.mean(np.abs(finite_off) > 0.5)),
+            'skyx_frac_fibres_off_gt1': float(np.mean(np.abs(finite_off) > 1.0)),
+            'skyx_camera_median_offset_pix': float(np.median(finite_off)),
+            'n_fibres_no_sky_lines': n_nolines,
+            'n_matched_lines': int(all_err.size),
+        }
+
+        try:
+            import matplotlib
+            matplotlib.use('Agg', force=False)
+            import matplotlib.pyplot as plt
+
+            fig, axes = plt.subplots(3, 1, figsize=(11, 10))
+
+            ax = axes[0]
+            cmap = plt.get_cmap('viridis')
+            ax.scatter(all_px, all_err, s=3, c=all_fib / max(nfib - 1, 1),
+                       cmap=cmap, alpha=0.5)
+            for yv, st in ((0, '-'), (0.5, ':'), (-0.5, ':'), (1, '--'), (-1, '--')):
+                ax.axhline(yv, color='k', ls=st, lw=0.7, alpha=0.6)
+            for edge_x in (nx * EDGE_FRAC, nx * (1 - EDGE_FRAC)):
+                ax.axvline(edge_x, color='k', ls=':', lw=0.8, alpha=0.5)
+            ax.set_xlim(0, nx)
+            ax.set_ylim(-3, 3)
+            ax.set_xlabel('detector pixel of sky line')
+            ax.set_ylabel('xshift error (px)')
+            ax.set_title(
+                f"{label + ' ' if label else ''}sky-line xshift ERROR (measured on frame) — {cam}\n"
+                f"rms={stats['skyx_err_rms_pix']:.2f}px (ctr {stats['skyx_err_rms_center_pix']:.2f} / "
+                f"edge {stats['skyx_err_rms_edge_pix']:.2f})  med|err|={stats['skyx_median_abs_err_pix']:.2f}  "
+                f"fibres off >0.5px: {100*stats['skyx_frac_fibres_off_gt0p5']:.0f}%  "
+                f">1px: {100*stats['skyx_frac_fibres_off_gt1']:.0f}%")
+
+            ax = axes[1]
+            ax.plot(np.arange(nfib), fib_offset, '.', markersize=3, color='tab:blue')
+            for yv, st in ((0, '-'), (0.5, ':'), (-0.5, ':')):
+                ax.axhline(yv, color='k', ls=st, lw=0.7, alpha=0.6)
+            ax.set_xlabel('fibre index')
+            ax.set_ylabel('median offset (px)')
+            ax.set_ylim(-3, 3)
+
+            ax = axes[2]
+            ax.hist(all_err[np.abs(all_err) < 4], bins=100, color='tab:blue', alpha=0.8)
+            for yv in (0.5, -0.5, 1, -1):
+                ax.axvline(yv, color='k', ls=':' if abs(yv) < 1 else '--', lw=0.7)
+            ax.set_xlabel('xshift error (px)')
+            ax.set_ylabel('N lines')
+
+            fig.tight_layout()
+            stats.update(_emit_figure(
+                fig, qa_dir, f"{_fig_prefix(label)}skyXerrQA_{cam}.png", emit))
+        except Exception as e:
+            logger.warning(f"waveQA: skyXerr figure failed for {cam} ({e})")
+
+        results[cam] = stats
+        logger.info(
+            f"waveQA skyXerr {cam}: rms={stats['skyx_err_rms_pix']:.2f}px "
+            f"med|err|={stats['skyx_median_abs_err_pix']:.2f}px "
+            f"fibres>0.5px={100*stats['skyx_frac_fibres_off_gt0p5']:.0f}%")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# ds9 region files: model-predicted line positions on the raw detector
+# ---------------------------------------------------------------------------
+
+def make_line_region_files(extraction_input, out_dir, cameras=None, lines='sky',
+                           fiber_step=1, ref_fiber=150, fiber_half_width=10,
+                           sigdetect=5.0, fwhm=4.0):
+    """Write ds9 region files of model-predicted line positions per camera.
+
+    For each fibre, predicts the raw-detector (x, y) of each line — sky-template
+    lines (``lines='sky'``, from the frame itself) or catalog arc lines
+    (``lines='arc'``) — by inverting that fibre's xshift and reading the trace
+    y-position. Load the .reg over the matching camera extension of the raw
+    MEF (or flat-corrected) image: offsets between crosses and observed lines
+    ARE the xshift error, fibre by fibre.
+
+    One file per camera: ``{out_dir}/lines_{cam}.reg`` (image coordinates).
+    Returns list of paths written.
+    """
+    scidict, _ = _load(extraction_input)
+    extractions = scidict['extractions']
+    metadata = scidict.get('metadata', [{} for _ in extractions])
+    os.makedirs(out_dir, exist_ok=True)
+
+    written = []
+    for obj, meta in zip(extractions, metadata):
+        cam = _camera_key(meta)
+        if cameras is not None and cam not in cameras:
+            continue
+        counts = getattr(obj, 'counts', None)
+        xshift = getattr(obj, 'xshift', None)
+        trace = getattr(obj, 'trace', None)
+        traces = getattr(trace, 'traces', None) if trace is not None else None
+        if (counts is None or xshift is None or traces is None
+                or np.count_nonzero(xshift) == 0
+                or np.count_nonzero(np.nan_to_num(counts)) == 0):
+            continue
+
+        nfib, nx = xshift.shape
+        x = np.arange(nx, dtype=float)
+
+        if lines == 'sky':
+            targets = _sky_template_peaks(obj, nfib, ref_fiber, fiber_half_width,
+                                          sigdetect, fwhm)
+            if targets is None:
+                continue
+        else:
+            channel = meta.get('channel', 'red')
+            catalog_pixels = _load_peak_catalog_for_regions(channel)
+            ref_xs = xshift[min(ref_fiber, nfib - 1), :]
+            targets = np.interp(catalog_pixels, x, ref_xs)
+
+        path = os.path.join(out_dir, f"lines_{cam}.reg")
+        n_pts = 0
+        with open(path, 'w') as fh:
+            fh.write("# Region file format: DS9\n")
+            fh.write(f"# Model-predicted {lines} line positions — camera {cam}\n")
+            fh.write("global color=green point=cross width=1\nimage\n")
+            for i in range(0, nfib, max(1, fiber_step)):
+                xs_i = xshift[i, :]
+                if not np.all(np.diff(xs_i) > 0):
+                    continue
+                px_pred = np.interp(targets, xs_i, x, left=np.nan, right=np.nan)
+                for xp in px_pred:
+                    if not np.isfinite(xp):
+                        continue
+                    col = int(round(xp))
+                    if 0 <= col < traces.shape[1] and i < traces.shape[0]:
+                        yp = traces[i, col]
+                        if np.isfinite(yp):
+                            # ds9 image coords are 1-indexed
+                            fh.write(f"point({xp + 1:.2f},{yp + 1:.2f})\n")
+                            n_pts += 1
+        print(f"  {cam}: {n_pts} predicted positions -> {path}")
+        written.append(path)
+    return written
+
+
+def _load_peak_catalog_for_regions(channel):
+    """Catalog peak pixels for region files (avoids importing Arc at module load)."""
+    from llamas_pyjamas.Arc.arcSurface import _load_peak_catalog
+    return _load_peak_catalog(channel, use_unidentified=True)
+
+
+# ---------------------------------------------------------------------------
 # Product 4: summary CSV
 # ---------------------------------------------------------------------------
 
@@ -771,6 +1047,14 @@ def main():
                         help='Run label prefix for figures/CSV (default: from filename)')
     parser.add_argument('--pngs', action='store_true',
                         help='Also write individual PNG files (default: HTML report only)')
+    parser.add_argument('--sky-error', action='store_true',
+                        help='Run the sky-line xshift-error QA (measures xshift error '
+                             'from the frame\'s own sky lines) instead of the full report')
+    parser.add_argument('--regions', default=None, metavar='DIR',
+                        help='Write ds9 region files of model-predicted line positions '
+                             'per camera into DIR (loads over the raw MEF extensions)')
+    parser.add_argument('--regions-lines', default='sky', choices=['sky', 'arc'],
+                        help="Line source for --regions (default: sky)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -779,8 +1063,13 @@ def main():
         if label and len(args.pickles) > 1:
             label = f"{label}_{os.path.basename(pkl).split('_')[1]}"
         print(f"\n=== Wavelength QA: {os.path.basename(pkl)} ===")
-        run_wavelength_qa(pkl, qa_dir=args.qa_dir, run_label=label,
-                          keep_pngs=args.pngs)
+        if args.regions:
+            make_line_region_files(pkl, args.regions, lines=args.regions_lines)
+        if args.sky_error:
+            sky_xshift_error_qa(pkl, qa_dir=args.qa_dir, label=label or 'skyXerr')
+        if not (args.regions or args.sky_error):
+            run_wavelength_qa(pkl, qa_dir=args.qa_dir, run_label=label,
+                              keep_pngs=args.pngs)
 
 
 if __name__ == '__main__':
