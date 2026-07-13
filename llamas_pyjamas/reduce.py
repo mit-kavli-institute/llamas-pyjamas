@@ -51,6 +51,7 @@ import numpy as np
 import shutil
 
 _cached_reference_arc = None
+_cached_reference_arc_path = None
 
 logger = logging.getLogger(__name__)
 
@@ -569,13 +570,51 @@ def relative_throughput(shift_picklename, flat_picklename):
 
 
 def correct_wavelengths(science_extraction_file, soln=None):
-    # TODO: when arc processing pipeline is wired up, use soln to generate/load a custom arc solution
-    global _cached_reference_arc
-    if _cached_reference_arc is None:
-        logger.info("Loading reference arc (first call, will be cached)")
-        _cached_reference_arc = ExtractLlamas.loadExtraction(
-            os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
-    arcdict = _cached_reference_arc
+    """Transfer the wavelength solution onto a science extraction.
+
+    ``soln`` is the arc solution to use: a pickle path (e.g. the refined
+    product from refineArcX/refineArcX2D), an already-loaded arcdict, or None
+    for the packaged reference arc. Loads are cached keyed on the source path
+    so successive science files reuse one load.
+
+    NOTE: this function previously ignored ``soln`` entirely (a leftover TODO)
+    and always used the packaged reference arc — silently discarding any
+    refined solution, so refine_arc had no effect on science reductions.
+    """
+    global _cached_reference_arc, _cached_reference_arc_path
+
+    # stdout (not just logger): when run via `python -m llamas_pyjamas.reduce`
+    # this module is `__main__`, whose logger does not propagate into the
+    # llamas_pyjamas log file — prints are the reliable record of which arc
+    # solution was actually used.
+    print(f"correct_wavelengths: soln = "
+          f"{'<in-memory dict>' if isinstance(soln, dict) else repr(soln)}")
+
+    if isinstance(soln, dict):
+        arcdict = soln
+    else:
+        if isinstance(soln, str) and soln:
+            if not os.path.exists(soln):
+                print(f"correct_wavelengths: WARNING soln path not found "
+                      f"({soln}); using packaged reference arc")
+                logger.warning(f"correct_wavelengths: soln path not found "
+                               f"({soln}); using packaged reference arc")
+                arc_path = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+            else:
+                arc_path = soln
+        else:
+            arc_path = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+
+        if _cached_reference_arc is None or _cached_reference_arc_path != arc_path:
+            print(f"correct_wavelengths: loading arc solution {arc_path}")
+            logger.info(f"Loading arc solution {os.path.basename(arc_path)} "
+                        f"(cached for subsequent calls)")
+            _cached_reference_arc = ExtractLlamas.loadExtraction(arc_path)
+            _cached_reference_arc_path = arc_path
+        else:
+            print(f"correct_wavelengths: using cached arc solution "
+                  f"{os.path.basename(arc_path)}")
+        arcdict = _cached_reference_arc
 
     _science = ExtractLlamas.loadExtraction(science_extraction_file)
     extractions = _science['extractions']
@@ -1763,15 +1802,35 @@ def main(config_path):
         if not os.path.exists(arcdict):
             raise FileNotFoundError(f"Reference arc file not found at {arcdict}")
         if config.get('refine_arc', False):
-            from llamas_pyjamas.Arc.arcLlamas import refineArcX
             refine_channels = config.get('refine_arc_channels', None)
             if isinstance(refine_channels, str):
                 refine_channels = [c.strip() for c in refine_channels.split(',')]
             ch_label = ','.join(refine_channels) if refine_channels else 'all'
-            print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
             arc_qa_records = [] if wavelength_qa else None
-            arcdict = refineArcX(arcdict, channels=refine_channels,
-                                 qa_collector=arc_qa_records)
+            # Method dispatch: 'perfiber' (default) = existing per-fibre cubic
+            # refineArcX; '2d' = hybrid per-camera surface + per-fibre
+            # perturbation (Arc/arcSurface.py). Numeric config values arrive as
+            # strings from the parser, hence the explicit coercions.
+            refine_method = str(config.get('refine_arc_method', 'perfiber')).strip().lower()
+            if refine_method == '2d':
+                from llamas_pyjamas.Arc.arcSurface import refineArcX2D
+                print(f"Refining arc xshift with 2D surface + per-fibre "
+                      f"perturbations (channels: {ch_label})...")
+                arcdict = refineArcX2D(
+                    arcdict, channels=refine_channels,
+                    qa_collector=arc_qa_records,
+                    surface_order_x=int(config.get('arc_surface_order_x', 3)),
+                    surface_order_fiber=int(config.get('arc_surface_order_fiber', 2)),
+                    perturb_order=int(config.get('arc_perturb_order', 0)),
+                    perturb_min_lines=int(config.get('arc_perturb_min_lines', 8)),
+                    perturb_shrink_lines=float(config.get('arc_perturb_shrink_lines', 5)),
+                    use_unidentified_peaks=bool(config.get('arc_use_unidentified_peaks', True)),
+                    blend_min_sep=float(config.get('arc_catalog_min_sep', 8)))
+            else:
+                from llamas_pyjamas.Arc.arcLlamas import refineArcX
+                print(f"Refining arc xshift with sub-pixel centroiding (channels: {ch_label})...")
+                arcdict = refineArcX(arcdict, channels=refine_channels,
+                                     qa_collector=arc_qa_records)
             print(f"Using refined arc: {os.path.basename(arcdict)}")
         config['arcdict'] = arcdict
 
@@ -2424,7 +2483,8 @@ def main(config_path):
                                          show_plots=config.get('sky_qa_plots', False),
                                          selection_method=sky_selection_method,
                                          n_sky_fibres=sky_n_fibres,
-                                         sky_map=sky_map_obj)
+                                         sky_map=sky_map_obj,
+                                         arc_soln=config.get('arcdict'))
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 

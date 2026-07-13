@@ -236,7 +236,8 @@ def _apply_sky_model(sset, xshift_min, xshift_max, sky_hi, sky_lo,
 
 
 def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False,
-                selection_method='dimmest', n_sky_fibres=20, sky_map=None):
+                selection_method='dimmest', n_sky_fibres=20, sky_map=None,
+                arc_soln=None):
     """
     Create a 1D sky model from the sky extraction.
 
@@ -272,13 +273,29 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
 
     print("Loading sky extraction and arc from ", sky_extraction_file)
     if (sky_extraction_file == science_extraction_file):
+        # The science extraction reaching this function is ALWAYS already
+        # wavelength-calibrated (correct_wavelengths ran upstream). The former
+        # unconditional arcTransfer against the packaged LLAMAS_reference_arc
+        # here silently OVERWROTE any refined solution (refine_arc) with the
+        # baseline quadratic on every run — do not re-transfer.
         sky_dict = science_dict
+        sky_wvcal = sky_dict
     else:
+        # Dedicated blank-sky frame: calibrate it with the SAME solution the
+        # science frames used (arc_soln: path or loaded dict), falling back to
+        # the packaged reference arc only when none is supplied.
         sky_dict = ExtractLlamas.loadExtraction(sky_extraction_file)
+        if isinstance(arc_soln, dict):
+            arc_dict = arc_soln
+        else:
+            if isinstance(arc_soln, str) and os.path.exists(arc_soln):
+                arc_path = arc_soln
+            else:
+                arc_path = os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl')
+            print(f"skyModel_1d: calibrating sky frame with {os.path.basename(arc_path)}")
+            arc_dict = ExtractLlamas.loadExtraction(arc_path)
+        sky_wvcal = arc.arcTransfer(sky_dict, arc_dict)
 
-    arc_dict = ExtractLlamas.loadExtraction(os.path.join(LUT_DIR, 'LLAMAS_reference_arc.pkl'))
-    sky_wvcal = arc.arcTransfer(sky_dict, arc_dict)
-    
     sky = sky_wvcal['extractions']
     sky_metadata = sky_wvcal['metadata']
 
