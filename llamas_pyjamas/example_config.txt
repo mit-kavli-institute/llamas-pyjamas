@@ -182,6 +182,38 @@ ray_num_cpus = 8
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch --yes     # actually delete
 
 #==============================================================================
+# ARC XSHIFT REFINEMENT
+#==============================================================================
+# Refine the per-fibre xshift (wavelength-alignment map) beyond the default
+# cross-correlation quadratic. Off by default.
+# refine_arc = false
+# Channels to refine (default all): e.g. red,green
+# refine_arc_channels = red,green,blue
+#
+# Method (when refine_arc = true):
+#   perfiber (default) - existing refineArcX: independent per-fibre cubic on
+#                        ~15-26 identified catalog lines. Data-starved; known
+#                        to degrade edge consistency.
+#   2d                 - hybrid model (Arc/arcSurface.py): robust 2D Legendre
+#                        surface xshift(x, fibre) per camera fit to the FULL
+#                        peak catalog pooled over all fibres, plus a small
+#                        shrinkage-regularized per-fibre perturbation. Designed
+#                        to fix the edge curvature mis-tracking that drives
+#                        sky-subtraction residuals.
+# refine_arc_method = 2d
+#
+# 2d-method tuning (defaults shown; all optional):
+# arc_surface_order_x = 3          # Legendre order along dispersion (x)
+# arc_surface_order_fiber = 2      # Legendre order across fibres
+# arc_perturb_order = 0            # 0 = per-fibre offset, 1 = offset + tilt
+# arc_perturb_min_lines = 8        # fewer matched lines => surface only
+# arc_perturb_shrink_lines = 5     # shrinkage prior (equivalent lines)
+# arc_use_unidentified_peaks = true  # use full catalog for the surface
+# arc_catalog_min_sep = 8          # px; unidentified peaks with a closer
+#                                  # catalog neighbour are dropped as blends
+#                                  # (identified lines always kept)
+
+#==============================================================================
 # WAVELENGTH / XSHIFT QA
 #==============================================================================
 # Per-run QA of the wavelength calibration: xshift curvature structure per
