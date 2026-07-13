@@ -1,0 +1,2785 @@
+# LLAMAS calibration QA config -- GENERATED from robust baseline analysis (2026-04-07/05-02/06-30). See QA_TESTS_SUMMARY.md; regenerate via baselines/scripts.
+config_version: '1.0'
+instrument:
+  name: LLAMAS
+  description: Data-driven QA rules for LLAMAS MEF frames
+metadata_keys:
+  exposure_type: PRODCATG
+  readout_mode: READ-MDE
+extensions:
+- name: 1.A.Red
+  hdu_index: 1
+  color: Red
+  bench: 1
+  side: A
+- name: 1.A.Green
+  hdu_index: 2
+  color: Green
+  bench: 1
+  side: A
+- name: 1.A.Blue
+  hdu_index: 3
+  color: Blue
+  bench: 1
+  side: A
+- name: 1.B.Red
+  hdu_index: 4
+  color: Red
+  bench: 1
+  side: B
+- name: 1.B.Green
+  hdu_index: 5
+  color: Green
+  bench: 1
+  side: B
+- name: 1.B.Blue
+  hdu_index: 6
+  color: Blue
+  bench: 1
+  side: B
+- name: 2.A.Red
+  hdu_index: 7
+  color: Red
+  bench: 2
+  side: A
+- name: 2.A.Green
+  hdu_index: 8
+  color: Green
+  bench: 2
+  side: A
+- name: 2.A.Blue
+  hdu_index: 9
+  color: Blue
+  bench: 2
+  side: A
+- name: 2.B.Red
+  hdu_index: 10
+  color: Red
+  bench: 2
+  side: B
+- name: 2.B.Green
+  hdu_index: 11
+  color: Green
+  bench: 2
+  side: B
+- name: 2.B.Blue
+  hdu_index: 12
+  color: Blue
+  bench: 2
+  side: B
+- name: 3.A.Red
+  hdu_index: 13
+  color: Red
+  bench: 3
+  side: A
+- name: 3.A.Green
+  hdu_index: 14
+  color: Green
+  bench: 3
+  side: A
+- name: 3.A.Blue
+  hdu_index: 15
+  color: Blue
+  bench: 3
+  side: A
+- name: 3.B.Red
+  hdu_index: 16
+  color: Red
+  bench: 3
+  side: B
+- name: 3.B.Green
+  hdu_index: 17
+  color: Green
+  bench: 3
+  side: B
+- name: 3.B.Blue
+  hdu_index: 18
+  color: Blue
+  bench: 3
+  side: B
+- name: 4.A.Red
+  hdu_index: 19
+  color: Red
+  bench: 4
+  side: A
+- name: 4.A.Green
+  hdu_index: 20
+  color: Green
+  bench: 4
+  side: A
+- name: 4.A.Blue
+  hdu_index: 21
+  color: Blue
+  bench: 4
+  side: A
+- name: 4.B.Red
+  hdu_index: 22
+  color: Red
+  bench: 4
+  side: B
+- name: 4.B.Green
+  hdu_index: 23
+  color: Green
+  bench: 4
+  side: B
+- name: 4.B.Blue
+  hdu_index: 24
+  color: Blue
+  bench: 4
+  side: B
+regions:
+  full_frame:
+    type: full
+  bottom_stripe:
+    type: rectangle
+    x_start: 100
+    x_end: 1948
+    y_start: 2
+    y_end: 28
+  top_stripe:
+    type: rectangle
+    x_start: 100
+    x_end: 1948
+    y_start: 2020
+    y_end: 2046
+metrics:
+  median:
+    type: median
+  rms:
+    type: std
+  saturated_fraction:
+    type: fraction_above
+    threshold: 63000
+  row_banding:
+    type: row_structure
+  column_banding:
+    type: column_structure
+verdict_policy:
+  fail_if_any_fail: true
+  warn_if_any_warn: true
+lookup_tables:
+  edge_bg_BIAS:
+    1.A.Red:
+      FAST:
+        min: 1737.21
+        max: 1772.79
+      SLOW:
+        min: 1648.0
+        max: 1678.0
+    1.A.Green:
+      FAST:
+        min: 859.21
+        max: 894.79
+      SLOW:
+        min: 677.5
+        max: 707.5
+    1.A.Blue:
+      FAST:
+        min: 1208.21
+        max: 1243.79
+      SLOW:
+        min: 661.0
+        max: 691.0
+    1.B.Red:
+      FAST:
+        min: 1498.73
+        max: 1623.27
+      SLOW:
+        min: 1661.5
+        max: 1691.5
+    1.B.Green:
+      FAST:
+        min: 1027.0
+        max: 1057.0
+      SLOW:
+        min: 645.0
+        max: 675.0
+    1.B.Blue:
+      FAST:
+        min: 1208.21
+        max: 1243.79
+      SLOW:
+        min: 688.0
+        max: 718.0
+    2.A.Red:
+      FAST:
+        min: 775.63
+        max: 882.37
+      SLOW:
+        min: 1570.5
+        max: 1600.5
+    2.A.Green:
+      FAST:
+        min: 840.21
+        max: 875.79
+      SLOW:
+        min: 621.0
+        max: 651.0
+    2.A.Blue:
+      FAST:
+        min: 780.31
+        max: 833.69
+      SLOW:
+        min: 534.0
+        max: 564.0
+    2.B.Red:
+      FAST:
+        min: 1624.42
+        max: 1695.58
+      SLOW:
+        min: 1547.0
+        max: 1577.0
+    2.B.Green:
+      FAST:
+        min: 745.0
+        max: 775.0
+      SLOW:
+        min: 616.5
+        max: 646.5
+    2.B.Blue:
+      FAST:
+        min: 1415.0
+        max: 1445.0
+      SLOW:
+        min: 487.0
+        max: 517.0
+    3.A.Red:
+      FAST:
+        min: 1704.52
+        max: 1793.48
+      SLOW:
+        min: 1665.5
+        max: 1695.5
+    3.A.Green:
+      FAST:
+        min: 772.0
+        max: 802.0
+      SLOW:
+        min: 678.0
+        max: 708.0
+    3.A.Blue:
+      FAST:
+        min: 1431.0
+        max: 1461.0
+      SLOW:
+        min: 478.5
+        max: 508.5
+    3.B.Red:
+      FAST:
+        min: 1461.31
+        max: 1514.69
+      SLOW:
+        min: 1595.0
+        max: 1625.0
+    3.B.Green:
+      FAST:
+        min: 855.0
+        max: 885.0
+      SLOW:
+        min: 660.0
+        max: 690.0
+    3.B.Blue:
+      FAST:
+        min: 1054.0
+        max: 1084.0
+      SLOW:
+        min: 819.0
+        max: 849.0
+    4.A.Red:
+      FAST:
+        min: 1498.42
+        max: 1569.58
+      SLOW:
+        min: 1519.5
+        max: 1549.5
+    4.A.Green:
+      FAST:
+        min: 846.21
+        max: 881.79
+      SLOW:
+        min: 284.5
+        max: 314.5
+    4.A.Blue:
+      FAST:
+        min: 1208.21
+        max: 1243.79
+      SLOW:
+        min: 661.0
+        max: 691.0
+    4.B.Red:
+      FAST:
+        min: 1831.04
+        max: 2008.96
+      SLOW:
+        min: 1701.5
+        max: 1731.5
+    4.B.Green:
+      FAST:
+        min: 766.31
+        max: 819.69
+      SLOW:
+        min: 652.0
+        max: 682.0
+    4.B.Blue:
+      FAST:
+        min: 842.31
+        max: 895.69
+      SLOW:
+        min: 661.0
+        max: 691.0
+  struct_BIAS:
+    1.A.Red:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 5.0581
+        col_max: 4.8398
+    1.A.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    1.A.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    1.B.Red:
+      FAST:
+        row_max: 9.1261
+        col_max: 13.0326
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    1.B.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    1.B.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.A.Red:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.A.Green:
+      FAST:
+        row_max: 2.0857
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.A.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.B.Red:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.B.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.4441
+        col_max: 2.0
+    2.B.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 5.6585
+        col_max: 9.8241
+    3.A.Red:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    3.A.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.7592
+        col_max: 2.0
+    3.A.Blue:
+      FAST:
+        row_max: 2104.5976
+        col_max: 4.6128
+      SLOW:
+        row_max: 2136.1932
+        col_max: 4.4857
+    3.B.Red:
+      FAST:
+        row_max: 2.4121
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    3.B.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    3.B.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    4.A.Red:
+      FAST:
+        row_max: 259.8086
+        col_max: 710.7803
+      SLOW:
+        row_max: 5.9322
+        col_max: 7.0374
+    4.A.Green:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 5.0042
+        col_max: 9.1548
+    4.A.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    4.B.Red:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    4.B.Green:
+      FAST:
+        row_max: 2.3678
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    4.B.Blue:
+      FAST:
+        row_max: 2.0
+        col_max: 2.0
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+  sat_BIAS:
+    1.A.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Blue:
+      FAST:
+        frac_max: 0.0007
+      SLOW:
+        frac_max: 0.0007
+    3.B.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Red:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+  level_BIAS:
+    1.A.Red:
+      FAST:
+        med_min: 1737.21
+        med_max: 1772.79
+        rms_max: 15.2919
+      SLOW:
+        med_min: 1648.0
+        med_max: 1678.0
+        rms_max: 124.2214
+    1.A.Green:
+      FAST:
+        med_min: 861.21
+        med_max: 896.79
+        rms_max: 15.218
+      SLOW:
+        med_min: 680.0
+        med_max: 710.0
+        rms_max: 17.3049
+    1.A.Blue:
+      FAST:
+        med_min: 1208.21
+        med_max: 1243.79
+        rms_max: 16.4773
+      SLOW:
+        med_min: 661.5
+        med_max: 691.5
+        rms_max: 42.9395
+    1.B.Red:
+      FAST:
+        med_min: 1499.73
+        med_max: 1624.27
+        rms_max: 223.9735
+      SLOW:
+        med_min: 1661.5
+        med_max: 1691.5
+        rms_max: 39.8894
+    1.B.Green:
+      FAST:
+        med_min: 1028.0
+        med_max: 1058.0
+        rms_max: 34.3071
+      SLOW:
+        med_min: 645.0
+        med_max: 675.0
+        rms_max: 15.0641
+    1.B.Blue:
+      FAST:
+        med_min: 1208.21
+        med_max: 1243.79
+        rms_max: 13.4946
+      SLOW:
+        med_min: 688.0
+        med_max: 718.0
+        rms_max: 19.3124
+    2.A.Red:
+      FAST:
+        med_min: 776.63
+        med_max: 883.37
+        rms_max: 18.1329
+      SLOW:
+        med_min: 1570.5
+        med_max: 1600.5
+        rms_max: 29.0103
+    2.A.Green:
+      FAST:
+        med_min: 841.21
+        med_max: 876.79
+        rms_max: 13.8118
+      SLOW:
+        med_min: 621.0
+        med_max: 651.0
+        rms_max: 12.3501
+    2.A.Blue:
+      FAST:
+        med_min: 772.42
+        med_max: 843.58
+        rms_max: 17.4654
+      SLOW:
+        med_min: 534.0
+        med_max: 564.0
+        rms_max: 13.7856
+    2.B.Red:
+      FAST:
+        med_min: 1624.42
+        med_max: 1695.58
+        rms_max: 14.2553
+      SLOW:
+        med_min: 1547.0
+        med_max: 1577.0
+        rms_max: 24.4977
+    2.B.Green:
+      FAST:
+        med_min: 745.0
+        med_max: 775.0
+        rms_max: 11.8669
+      SLOW:
+        med_min: 615.5
+        med_max: 645.5
+        rms_max: 16.4557
+    2.B.Blue:
+      FAST:
+        med_min: 1415.0
+        med_max: 1445.0
+        rms_max: 13.2086
+      SLOW:
+        med_min: 486.0
+        med_max: 516.0
+        rms_max: 172.9832
+    3.A.Red:
+      FAST:
+        med_min: 1704.52
+        med_max: 1793.48
+        rms_max: 13.7093
+      SLOW:
+        med_min: 1665.0
+        med_max: 1695.0
+        rms_max: 25.2393
+    3.A.Green:
+      FAST:
+        med_min: 772.0
+        med_max: 802.0
+        rms_max: 13.9227
+      SLOW:
+        med_min: 676.5
+        med_max: 706.5
+        rms_max: 74.4148
+    3.A.Blue:
+      FAST:
+        med_min: 1431.0
+        med_max: 1461.0
+        rms_max: 2113.9157
+      SLOW:
+        med_min: 477.0
+        med_max: 507.0
+        rms_max: 2145.347
+    3.B.Red:
+      FAST:
+        med_min: 1463.31
+        med_max: 1516.69
+        rms_max: 23.021
+      SLOW:
+        med_min: 1595.0
+        med_max: 1625.0
+        rms_max: 21.9424
+    3.B.Green:
+      FAST:
+        med_min: 855.0
+        med_max: 885.0
+        rms_max: 13.7526
+      SLOW:
+        med_min: 659.0
+        med_max: 689.0
+        rms_max: 21.4792
+    3.B.Blue:
+      FAST:
+        med_min: 1054.0
+        med_max: 1084.0
+        rms_max: 13.7768
+      SLOW:
+        med_min: 819.0
+        med_max: 849.0
+        rms_max: 42.9395
+    4.A.Red:
+      FAST:
+        med_min: 1456.73
+        med_max: 1581.27
+        rms_max: 3807.3952
+      SLOW:
+        med_min: 1519.5
+        med_max: 1549.5
+        rms_max: 153.9857
+    4.A.Green:
+      FAST:
+        med_min: 848.21
+        med_max: 883.79
+        rms_max: 13.7227
+      SLOW:
+        med_min: 282.5
+        med_max: 312.5
+        rms_max: 163.7408
+    4.A.Blue:
+      FAST:
+        med_min: 1208.21
+        med_max: 1243.79
+        rms_max: 16.4773
+      SLOW:
+        med_min: 661.5
+        med_max: 691.5
+        rms_max: 42.9395
+    4.B.Red:
+      FAST:
+        med_min: 1823.15
+        med_max: 2018.85
+        rms_max: 16.0116
+      SLOW:
+        med_min: 1701.5
+        med_max: 1731.5
+        rms_max: 21.2783
+    4.B.Green:
+      FAST:
+        med_min: 768.31
+        med_max: 821.69
+        rms_max: 15.6416
+      SLOW:
+        med_min: 652.0
+        med_max: 682.0
+        rms_max: 13.3983
+    4.B.Blue:
+      FAST:
+        med_min: 834.42
+        med_max: 905.58
+        rms_max: 16.4773
+      SLOW:
+        med_min: 661.5
+        med_max: 691.5
+        rms_max: 17.1084
+  edge_bg_DARK:
+    1.A.Red:
+      SLOW:
+        min: 1679.0
+        max: 1709.0
+    1.A.Green:
+      SLOW:
+        min: 675.5
+        max: 705.5
+    1.A.Blue:
+      SLOW:
+        min: 662.0
+        max: 692.0
+    1.B.Red:
+      SLOW:
+        min: 1661.5
+        max: 1691.5
+    1.B.Green:
+      SLOW:
+        min: 649.0
+        max: 679.0
+    1.B.Blue:
+      SLOW:
+        min: 693.5
+        max: 723.5
+    2.A.Red:
+      SLOW:
+        min: 1571.5
+        max: 1601.5
+    2.A.Green:
+      SLOW:
+        min: 627.0
+        max: 657.0
+    2.A.Blue:
+      SLOW:
+        min: 536.0
+        max: 566.0
+    2.B.Red:
+      SLOW:
+        min: 1547.5
+        max: 1577.5
+    2.B.Green:
+      SLOW:
+        min: 619.0
+        max: 649.0
+    2.B.Blue:
+      SLOW:
+        min: 489.0
+        max: 519.0
+    3.A.Red:
+      SLOW:
+        min: 1667.0
+        max: 1697.0
+    3.A.Green:
+      SLOW:
+        min: 680.0
+        max: 710.0
+    3.A.Blue:
+      SLOW:
+        min: 483.0
+        max: 513.0
+    3.B.Red:
+      SLOW:
+        min: 1595.0
+        max: 1625.0
+    3.B.Green:
+      SLOW:
+        min: 662.5
+        max: 692.5
+    3.B.Blue:
+      SLOW:
+        min: 819.0
+        max: 849.0
+    4.A.Red:
+      SLOW:
+        min: 1521.0
+        max: 1551.0
+    4.A.Green:
+      SLOW:
+        min: 287.0
+        max: 317.0
+    4.A.Blue:
+      SLOW:
+        min: 662.0
+        max: 692.0
+    4.B.Red:
+      SLOW:
+        min: 1706.0
+        max: 1736.0
+    4.B.Green:
+      SLOW:
+        min: 654.0
+        max: 684.0
+    4.B.Blue:
+      SLOW:
+        min: 662.0
+        max: 692.0
+  struct_DARK:
+    1.A.Red:
+      SLOW:
+        row_max: 5.2407
+        col_max: 2.0
+    1.A.Green:
+      SLOW:
+        row_max: 4.9768
+        col_max: 5.2908
+    1.A.Blue:
+      SLOW:
+        row_max: 3.3545
+        col_max: 2.0696
+    1.B.Red:
+      SLOW:
+        row_max: 2.531
+        col_max: 2.1659
+    1.B.Green:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    1.B.Blue:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.A.Red:
+      SLOW:
+        row_max: 2.9252
+        col_max: 2.6538
+    2.A.Green:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.A.Blue:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.B.Red:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    2.B.Green:
+      SLOW:
+        row_max: 2.3044
+        col_max: 2.0
+    2.B.Blue:
+      SLOW:
+        row_max: 3.3545
+        col_max: 2.0696
+    3.A.Red:
+      SLOW:
+        row_max: 3.0355
+        col_max: 3.461
+    3.A.Green:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    3.A.Blue:
+      SLOW:
+        row_max: 2136.536
+        col_max: 4.6216
+    3.B.Red:
+      SLOW:
+        row_max: 3.4066
+        col_max: 2.7737
+    3.B.Green:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    3.B.Blue:
+      SLOW:
+        row_max: 2.0
+        col_max: 2.0
+    4.A.Red:
+      SLOW:
+        row_max: 2.6749
+        col_max: 2.0594
+    4.A.Green:
+      SLOW:
+        row_max: 4.858
+        col_max: 6.2049
+    4.A.Blue:
+      SLOW:
+        row_max: 3.3545
+        col_max: 2.0696
+    4.B.Red:
+      SLOW:
+        row_max: 2.1799
+        col_max: 2.0255
+    4.B.Green:
+      SLOW:
+        row_max: 10.1686
+        col_max: 15.3771
+    4.B.Blue:
+      SLOW:
+        row_max: 5.9323
+        col_max: 12.6791
+  sat_DARK:
+    1.A.Red:
+      SLOW:
+        frac_max: 0.0005
+    1.A.Green:
+      SLOW:
+        frac_max: 0.0005
+    1.A.Blue:
+      SLOW:
+        frac_max: 0.0005
+    1.B.Red:
+      SLOW:
+        frac_max: 0.0005
+    1.B.Green:
+      SLOW:
+        frac_max: 0.0005
+    1.B.Blue:
+      SLOW:
+        frac_max: 0.0005
+    2.A.Red:
+      SLOW:
+        frac_max: 0.0005
+    2.A.Green:
+      SLOW:
+        frac_max: 0.0005
+    2.A.Blue:
+      SLOW:
+        frac_max: 0.0005
+    2.B.Red:
+      SLOW:
+        frac_max: 0.0005
+    2.B.Green:
+      SLOW:
+        frac_max: 0.0005
+    2.B.Blue:
+      SLOW:
+        frac_max: 0.0005
+    3.A.Red:
+      SLOW:
+        frac_max: 0.0005
+    3.A.Green:
+      SLOW:
+        frac_max: 0.0005
+    3.A.Blue:
+      SLOW:
+        frac_max: 0.0007
+    3.B.Red:
+      SLOW:
+        frac_max: 0.0005
+    3.B.Green:
+      SLOW:
+        frac_max: 0.0005
+    3.B.Blue:
+      SLOW:
+        frac_max: 0.0005
+    4.A.Red:
+      SLOW:
+        frac_max: 0.0005
+    4.A.Green:
+      SLOW:
+        frac_max: 0.0005
+    4.A.Blue:
+      SLOW:
+        frac_max: 0.0005
+    4.B.Red:
+      SLOW:
+        frac_max: 0.0005
+    4.B.Green:
+      SLOW:
+        frac_max: 0.0005
+    4.B.Blue:
+      SLOW:
+        frac_max: 0.0005
+  level_DARK:
+    1.A.Red:
+      SLOW:
+        med_min: 1686.0
+        med_max: 1716.0
+        rms_max: 58.0021
+    1.A.Green:
+      SLOW:
+        med_min: 680.0
+        med_max: 710.0
+        rms_max: 126.2304
+    1.A.Blue:
+      SLOW:
+        med_min: 662.0
+        med_max: 692.0
+        rms_max: 84.6337
+    1.B.Red:
+      SLOW:
+        med_min: 1662.5
+        med_max: 1692.5
+        rms_max: 76.2544
+    1.B.Green:
+      SLOW:
+        med_min: 649.0
+        med_max: 679.0
+        rms_max: 39.8017
+    1.B.Blue:
+      SLOW:
+        med_min: 693.0
+        med_max: 723.0
+        rms_max: 53.8221
+    2.A.Red:
+      SLOW:
+        med_min: 1571.5
+        med_max: 1601.5
+        rms_max: 89.7895
+    2.A.Green:
+      SLOW:
+        med_min: 628.0
+        med_max: 658.0
+        rms_max: 33.9316
+    2.A.Blue:
+      SLOW:
+        med_min: 536.0
+        med_max: 566.0
+        rms_max: 30.9962
+    2.B.Red:
+      SLOW:
+        med_min: 1547.5
+        med_max: 1577.5
+        rms_max: 61.892
+    2.B.Green:
+      SLOW:
+        med_min: 618.0
+        med_max: 648.0
+        rms_max: 33.7919
+    2.B.Blue:
+      SLOW:
+        med_min: 487.0
+        med_max: 517.0
+        rms_max: 84.6337
+    3.A.Red:
+      SLOW:
+        med_min: 1667.5
+        med_max: 1697.5
+        rms_max: 104.3292
+    3.A.Green:
+      SLOW:
+        med_min: 678.0
+        med_max: 708.0
+        rms_max: 32.6805
+    3.A.Blue:
+      SLOW:
+        med_min: 481.0
+        med_max: 511.0
+        rms_max: 2146.1436
+    3.B.Red:
+      SLOW:
+        med_min: 1596.0
+        med_max: 1626.0
+        rms_max: 83.0786
+    3.B.Green:
+      SLOW:
+        med_min: 661.5
+        med_max: 691.5
+        rms_max: 48.8259
+    3.B.Blue:
+      SLOW:
+        med_min: 820.0
+        med_max: 850.0
+        rms_max: 55.1575
+    4.A.Red:
+      SLOW:
+        med_min: 1521.0
+        med_max: 1551.0
+        rms_max: 79.3109
+    4.A.Green:
+      SLOW:
+        med_min: 285.5
+        med_max: 315.5
+        rms_max: 142.9958
+    4.A.Blue:
+      SLOW:
+        med_min: 662.0
+        med_max: 692.0
+        rms_max: 84.6337
+    4.B.Red:
+      SLOW:
+        med_min: 1706.0
+        med_max: 1736.0
+        rms_max: 70.9923
+    4.B.Green:
+      SLOW:
+        med_min: 655.0
+        med_max: 685.0
+        rms_max: 251.6427
+    4.B.Blue:
+      SLOW:
+        med_min: 662.0
+        med_max: 692.0
+        rms_max: 193.7902
+  edge_bg_LDLS_FLAT:
+    1.A.Red:
+      FAST:
+        min: -214.3
+        max: 4251.3
+    1.A.Green:
+      FAST:
+        min: -330.47
+        max: 2400.47
+    1.A.Blue:
+      FAST:
+        min: 518.4
+        max: 2328.05
+    1.B.Red:
+      FAST:
+        min: -1778.63
+        max: 5782.63
+    1.B.Green:
+      FAST:
+        min: -679.19
+        max: 3208.19
+    1.B.Blue:
+      FAST:
+        min: 518.4
+        max: 2119.6
+    2.A.Red:
+      FAST:
+        min: -2127.69
+        max: 4570.69
+    2.A.Green:
+      FAST:
+        min: -789.13
+        max: 2938.13
+    2.A.Blue:
+      FAST:
+        min: -22.99
+        max: 1853.99
+    2.B.Red:
+      FAST:
+        min: -1425.52
+        max: 5557.52
+    2.B.Green:
+      FAST:
+        min: -759.9
+        max: 2664.9
+    2.B.Blue:
+      FAST:
+        min: 717.95
+        max: 2328.05
+    3.A.Red:
+      FAST:
+        min: -1386.84
+        max: 5711.84
+    3.A.Green:
+      FAST:
+        min: -853.73
+        max: 2855.73
+    3.A.Blue:
+      FAST:
+        min: 658.44
+        max: 2437.56
+    3.B.Red:
+      FAST:
+        min: -2760.07
+        max: 6856.07
+    3.B.Green:
+      FAST:
+        min: -1181.3
+        max: 3453.3
+    3.B.Blue:
+      FAST:
+        min: -33.38
+        max: 2457.38
+    4.A.Red:
+      FAST:
+        min: -1628.48
+        max: 5532.48
+    4.A.Green:
+      FAST:
+        min: -854.69
+        max: 3032.69
+    4.A.Blue:
+      FAST:
+        min: 518.4
+        max: 2328.05
+    4.B.Red:
+      FAST:
+        min: -1150.18
+        max: 5806.18
+    4.B.Green:
+      FAST:
+        min: -1224.22
+        max: 3339.22
+    4.B.Blue:
+      FAST:
+        min: -28.1
+        max: 2000.1
+  struct_LDLS_FLAT:
+    1.A.Red:
+      FAST:
+        row_max: 35168.7344
+        col_max: 28633.3209
+    1.A.Green:
+      FAST:
+        row_max: 59632.0006
+        col_max: 56229.2715
+    1.A.Blue:
+      FAST:
+        row_max: 36535.5413
+        col_max: 58208.6448
+    1.B.Red:
+      FAST:
+        row_max: 17957.9305
+        col_max: 26028.1654
+    1.B.Green:
+      FAST:
+        row_max: 65715.2141
+        col_max: 77493.2283
+    1.B.Blue:
+      FAST:
+        row_max: 27712.9361
+        col_max: 51944.6254
+    2.A.Red:
+      FAST:
+        row_max: 45219.4539
+        col_max: 24741.4087
+    2.A.Green:
+      FAST:
+        row_max: 62346.1954
+        col_max: 63429.0152
+    2.A.Blue:
+      FAST:
+        row_max: 36535.5413
+        col_max: 58208.6448
+    2.B.Red:
+      FAST:
+        row_max: 63601.9802
+        col_max: 41944.9924
+    2.B.Green:
+      FAST:
+        row_max: 49316.7965
+        col_max: 53250.9914
+    2.B.Blue:
+      FAST:
+        row_max: 34197.5564
+        col_max: 52394.0271
+    3.A.Red:
+      FAST:
+        row_max: 19709.8307
+        col_max: 30601.7837
+    3.A.Green:
+      FAST:
+        row_max: 52900.9935
+        col_max: 55732.7507
+    3.A.Blue:
+      FAST:
+        row_max: 26486.6184
+        col_max: 57624.9995
+    3.B.Red:
+      FAST:
+        row_max: 20808.7153
+        col_max: 34723.8812
+    3.B.Green:
+      FAST:
+        row_max: 48835.1379
+        col_max: 54817.2995
+    3.B.Blue:
+      FAST:
+        row_max: 42406.1942
+        col_max: 70290.4241
+    4.A.Red:
+      FAST:
+        row_max: 61299.0809
+        col_max: 24102.9353
+    4.A.Green:
+      FAST:
+        row_max: 50626.6591
+        col_max: 64276.1691
+    4.A.Blue:
+      FAST:
+        row_max: 36535.5413
+        col_max: 58208.6448
+    4.B.Red:
+      FAST:
+        row_max: 19408.7214
+        col_max: 22036.4668
+    4.B.Green:
+      FAST:
+        row_max: 42675.2991
+        col_max: 41645.3453
+    4.B.Blue:
+      FAST:
+        row_max: 41098.8782
+        col_max: 71478.3484
+  sat_LDLS_FLAT:
+    1.A.Red:
+      FAST:
+        frac_max: 2.6192
+    1.A.Green:
+      FAST:
+        frac_max: 1.1279
+    1.A.Blue:
+      FAST:
+        frac_max: 0.5408
+    1.B.Red:
+      FAST:
+        frac_max: 3.8727
+    1.B.Green:
+      FAST:
+        frac_max: 1.3418
+    1.B.Blue:
+      FAST:
+        frac_max: 0.3731
+    2.A.Red:
+      FAST:
+        frac_max: 4.1106
+    2.A.Green:
+      FAST:
+        frac_max: 1.1268
+    2.A.Blue:
+      FAST:
+        frac_max: 0.5408
+    2.B.Red:
+      FAST:
+        frac_max: 4.5994
+    2.B.Green:
+      FAST:
+        frac_max: 1.1438
+    2.B.Blue:
+      FAST:
+        frac_max: 0.4569
+    3.A.Red:
+      FAST:
+        frac_max: 3.7325
+    3.A.Green:
+      FAST:
+        frac_max: 1.1985
+    3.A.Blue:
+      FAST:
+        frac_max: 0.4887
+    3.B.Red:
+      FAST:
+        frac_max: 5.1305
+    3.B.Green:
+      FAST:
+        frac_max: 1.1741
+    3.B.Blue:
+      FAST:
+        frac_max: 0.5959
+    4.A.Red:
+      FAST:
+        frac_max: 4.7104
+    4.A.Green:
+      FAST:
+        frac_max: 1.2644
+    4.A.Blue:
+      FAST:
+        frac_max: 0.5408
+    4.B.Red:
+      FAST:
+        frac_max: 4.76
+    4.B.Green:
+      FAST:
+        frac_max: 1.4265
+    4.B.Blue:
+      FAST:
+        frac_max: 0.6194
+  edge_bg_SKY_FLAT:
+    1.A.Red:
+      FAST:
+        min: 1610.11
+        max: 2054.89
+      SLOW:
+        min: 1583.46
+        max: 1832.54
+    1.A.Green:
+      FAST:
+        min: 769.98
+        max: 1108.02
+      SLOW:
+        min: 623.31
+        max: 845.7
+    1.A.Blue:
+      FAST:
+        min: 1183.39
+        max: 1334.61
+      SLOW:
+        min: 628.34
+        max: 770.66
+    1.B.Red:
+      FAST:
+        min: 1335.97
+        max: 2012.03
+      SLOW:
+        min: 1559.64
+        max: 1924.36
+    1.B.Green:
+      FAST:
+        min: 872.32
+        max: 1352.68
+      SLOW:
+        min: 560.77
+        max: 863.23
+    1.B.Blue:
+      FAST:
+        min: 1183.39
+        max: 1334.61
+      SLOW:
+        min: 661.23
+        max: 785.77
+    2.A.Red:
+      FAST:
+        min: 613.76
+        max: 1254.24
+      SLOW:
+        min: 1483.43
+        max: 1812.57
+    2.A.Green:
+      FAST:
+        min: 682.87
+        max: 1172.13
+      SLOW:
+        min: 537.27
+        max: 839.73
+    2.A.Blue:
+      FAST:
+        min: 727.91
+        max: 968.09
+      SLOW:
+        min: 502.34
+        max: 644.66
+    2.B.Red:
+      FAST:
+        min: 1466.89
+        max: 2045.11
+      SLOW:
+        min: 1454.43
+        max: 1783.57
+    2.B.Green:
+      FAST:
+        min: 747.39
+        max: 898.61
+      SLOW:
+        min: 654.97
+        max: 735.03
+    2.B.Blue:
+      FAST:
+        min: 1402.18
+        max: 1517.82
+      SLOW:
+        min: 460.73
+        max: 585.27
+    3.A.Red:
+      FAST:
+        min: 1549.5
+        max: 2145.5
+      SLOW:
+        min: 1579.88
+        max: 1900.12
+    3.A.Green:
+      FAST:
+        min: 620.21
+        max: 1082.79
+      SLOW:
+        min: 602.12
+        max: 877.88
+    3.A.Blue:
+      FAST:
+        min: 1386.54
+        max: 1564.46
+      SLOW:
+        min: 453.73
+        max: 578.27
+    3.B.Red:
+      FAST:
+        min: 1232.94
+        max: 1989.06
+      SLOW:
+        min: 1478.9
+        max: 1888.1
+    3.B.Green:
+      FAST:
+        min: 699.37
+        max: 1188.63
+      SLOW:
+        min: 581.72
+        max: 875.28
+    3.B.Blue:
+      FAST:
+        min: 992.36
+        max: 1223.64
+      SLOW:
+        min: 772.54
+        max: 950.46
+    4.A.Red:
+      FAST:
+        min: 1305.55
+        max: 1910.45
+      SLOW:
+        min: 1429.88
+        max: 1750.12
+    4.A.Green:
+      FAST:
+        min: 708.06
+        max: 1143.94
+      SLOW:
+        min: 218.01
+        max: 475.99
+    4.A.Blue:
+      FAST:
+        min: 1183.39
+        max: 1334.61
+      SLOW:
+        min: 628.34
+        max: 770.66
+    4.B.Red:
+      FAST:
+        min: 1674.26
+        max: 2314.74
+      SLOW:
+        min: 1622.22
+        max: 1915.78
+    4.B.Green:
+      FAST:
+        min: 609.48
+        max: 1116.52
+      SLOW:
+        min: 561.88
+        max: 882.12
+    4.B.Blue:
+      FAST:
+        min: 781.86
+        max: 1013.14
+      SLOW:
+        min: 628.34
+        max: 770.66
+  struct_SKY_FLAT:
+    1.A.Red:
+      FAST:
+        row_max: 17828.421
+        col_max: 31614.7783
+      SLOW:
+        row_max: 10358.971
+        col_max: 16643.1435
+    1.A.Green:
+      FAST:
+        row_max: 10810.4913
+        col_max: 9410.4643
+      SLOW:
+        row_max: 7615.3426
+        col_max: 7733.9587
+    1.A.Blue:
+      FAST:
+        row_max: 5114.6687
+        col_max: 10145.0427
+      SLOW:
+        row_max: 4085.3368
+        col_max: 8118.4073
+    1.B.Red:
+      FAST:
+        row_max: 12135.9414
+        col_max: 36379.9868
+      SLOW:
+        row_max: 6711.4408
+        col_max: 18788.8875
+    1.B.Green:
+      FAST:
+        row_max: 11513.7668
+        col_max: 11118.3874
+      SLOW:
+        row_max: 8806.1434
+        col_max: 8856.5194
+    1.B.Blue:
+      FAST:
+        row_max: 4120.9461
+        col_max: 9222.4929
+      SLOW:
+        row_max: 3266.1362
+        col_max: 7325.2106
+    2.A.Red:
+      FAST:
+        row_max: 33257.7638
+        col_max: 39491.3645
+      SLOW:
+        row_max: 20627.7959
+        col_max: 21092.0723
+    2.A.Green:
+      FAST:
+        row_max: 12580.1581
+        col_max: 10365.7205
+      SLOW:
+        row_max: 9259.2481
+        col_max: 8308.294
+    2.A.Blue:
+      FAST:
+        row_max: 5294.5673
+        col_max: 10145.0427
+      SLOW:
+        row_max: 4259.3963
+        col_max: 8118.4073
+    2.B.Red:
+      FAST:
+        row_max: 38333.1635
+        col_max: 34193.7749
+      SLOW:
+        row_max: 21224.7432
+        col_max: 18079.6261
+    2.B.Green:
+      FAST:
+        row_max: 14444.2047
+        col_max: 10964.4874
+      SLOW:
+        row_max: 10484.1237
+        col_max: 8473.2768
+    2.B.Blue:
+      FAST:
+        row_max: 4776.032
+        col_max: 8742.9984
+      SLOW:
+        row_max: 3817.9653
+        col_max: 7002.6325
+    3.A.Red:
+      FAST:
+        row_max: 24943.962
+        col_max: 32902.3594
+      SLOW:
+        row_max: 14859.9861
+        col_max: 17842.8459
+    3.A.Green:
+      FAST:
+        row_max: 14277.449
+        col_max: 9539.49
+      SLOW:
+        row_max: 10428.1594
+        col_max: 7632.8873
+    3.A.Blue:
+      FAST:
+        row_max: 5471.9781
+        col_max: 9297.9223
+      SLOW:
+        row_max: 4521.5954
+        col_max: 7391.7706
+    3.B.Red:
+      FAST:
+        row_max: 13995.9399
+        col_max: 35389.9419
+      SLOW:
+        row_max: 7991.0312
+        col_max: 19002.3586
+    3.B.Green:
+      FAST:
+        row_max: 13091.7911
+        col_max: 12048.3146
+      SLOW:
+        row_max: 9728.0768
+        col_max: 9847.1677
+    3.B.Blue:
+      FAST:
+        row_max: 5103.4989
+        col_max: 10566.7462
+      SLOW:
+        row_max: 4085.3368
+        col_max: 8465.2693
+    4.A.Red:
+      FAST:
+        row_max: 39212.2003
+        col_max: 32435.9915
+      SLOW:
+        row_max: 21609.5499
+        col_max: 17261.9701
+    4.A.Green:
+      FAST:
+        row_max: 9852.2694
+        col_max: 12230.3034
+      SLOW:
+        row_max: 6766.3824
+        col_max: 8172.0423
+    4.A.Blue:
+      FAST:
+        row_max: 5114.6687
+        col_max: 10145.0427
+      SLOW:
+        row_max: 4085.3368
+        col_max: 8118.4073
+    4.B.Red:
+      FAST:
+        row_max: 17627.7039
+        col_max: 32848.4147
+      SLOW:
+        row_max: 10575.1507
+        col_max: 17573.0898
+    4.B.Green:
+      FAST:
+        row_max: 16297.5165
+        col_max: 11483.6981
+      SLOW:
+        row_max: 11981.5568
+        col_max: 9432.3348
+    4.B.Blue:
+      FAST:
+        row_max: 5114.6687
+        col_max: 10659.0475
+      SLOW:
+        row_max: 4082.24
+        col_max: 8521.663
+  sat_SKY_FLAT:
+    1.A.Red:
+      FAST:
+        frac_max: 0.0993
+      SLOW:
+        frac_max: 0.1775
+    1.A.Green:
+      FAST:
+        frac_max: 0.055
+      SLOW:
+        frac_max: 0.0105
+    1.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Red:
+      FAST:
+        frac_max: 0.0891
+      SLOW:
+        frac_max: 0.1976
+    1.B.Green:
+      FAST:
+        frac_max: 0.0043
+      SLOW:
+        frac_max: 0.0005
+    1.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Red:
+      FAST:
+        frac_max: 0.1538
+      SLOW:
+        frac_max: 0.2514
+    2.A.Green:
+      FAST:
+        frac_max: 0.0262
+      SLOW:
+        frac_max: 0.0021
+    2.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Red:
+      FAST:
+        frac_max: 0.1436
+      SLOW:
+        frac_max: 0.2295
+    2.B.Green:
+      FAST:
+        frac_max: 0.0514
+      SLOW:
+        frac_max: 0.0067
+    2.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Red:
+      FAST:
+        frac_max: 0.1357
+      SLOW:
+        frac_max: 0.2095
+    3.A.Green:
+      FAST:
+        frac_max: 0.0383
+      SLOW:
+        frac_max: 0.0035
+    3.A.Blue:
+      FAST:
+        frac_max: 0.0007
+      SLOW:
+        frac_max: 0.0007
+    3.B.Red:
+      FAST:
+        frac_max: 0.1449
+      SLOW:
+        frac_max: 0.2344
+    3.B.Green:
+      FAST:
+        frac_max: 0.0579
+      SLOW:
+        frac_max: 0.0096
+    3.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Red:
+      FAST:
+        frac_max: 0.1254
+      SLOW:
+        frac_max: 0.2117
+    4.A.Green:
+      FAST:
+        frac_max: 0.0294
+      SLOW:
+        frac_max: 0.0055
+    4.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Red:
+      FAST:
+        frac_max: 0.1477
+      SLOW:
+        frac_max: 0.2289
+    4.B.Green:
+      FAST:
+        frac_max: 0.0981
+      SLOW:
+        frac_max: 0.0324
+    4.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+  edge_bg_ARC_THAR:
+    1.A.Red:
+      FAST:
+        min: 1733.31
+        max: 1786.69
+      SLOW:
+        min: 1667.0
+        max: 1697.0
+    1.A.Green:
+      FAST:
+        min: 864.0
+        max: 894.0
+      SLOW:
+        min: 678.0
+        max: 708.0
+    1.A.Blue:
+      FAST:
+        min: 1212.0
+        max: 1242.0
+      SLOW:
+        min: 663.0
+        max: 693.0
+    1.B.Red:
+      FAST:
+        min: 1522.57
+        max: 1620.43
+      SLOW:
+        min: 1699.0
+        max: 1729.0
+    1.B.Green:
+      FAST:
+        min: 1029.0
+        max: 1059.0
+      SLOW:
+        min: 646.0
+        max: 676.0
+    1.B.Blue:
+      FAST:
+        min: 1212.0
+        max: 1242.0
+      SLOW:
+        min: 689.0
+        max: 719.0
+    2.A.Red:
+      FAST:
+        min: 799.47
+        max: 879.53
+      SLOW:
+        min: 1598.0
+        max: 1628.0
+    2.A.Green:
+      FAST:
+        min: 844.21
+        max: 879.79
+      SLOW:
+        min: 622.0
+        max: 652.0
+    2.A.Blue:
+      FAST:
+        min: 780.37
+        max: 842.63
+      SLOW:
+        min: 536.0
+        max: 566.0
+    2.B.Red:
+      FAST:
+        min: 1627.47
+        max: 1707.53
+      SLOW:
+        min: 1580.0
+        max: 1610.0
+    2.B.Green:
+      FAST:
+        min: 745.0
+        max: 775.0
+      SLOW:
+        min: 616.0
+        max: 646.0
+    2.B.Blue:
+      FAST:
+        min: 1416.0
+        max: 1446.0
+      SLOW:
+        min: 489.0
+        max: 519.0
+    3.A.Red:
+      FAST:
+        min: 1726.37
+        max: 1788.63
+      SLOW:
+        min: 1692.21
+        max: 1727.79
+    3.A.Green:
+      FAST:
+        min: 775.0
+        max: 805.0
+      SLOW:
+        min: 676.21
+        max: 711.79
+    3.A.Blue:
+      FAST:
+        min: 1433.0
+        max: 1463.0
+      SLOW:
+        min: 480.0
+        max: 510.0
+    3.B.Red:
+      FAST:
+        min: 1456.47
+        max: 1536.53
+      SLOW:
+        min: 1640.0
+        max: 1670.0
+    3.B.Green:
+      FAST:
+        min: 857.0
+        max: 887.0
+      SLOW:
+        min: 661.0
+        max: 691.0
+    3.B.Blue:
+      FAST:
+        min: 1056.0
+        max: 1086.0
+      SLOW:
+        min: 821.0
+        max: 851.0
+    4.A.Red:
+      FAST:
+        min: 1505.37
+        max: 1567.63
+      SLOW:
+        min: 1552.0
+        max: 1582.0
+    4.A.Green:
+      FAST:
+        min: 849.21
+        max: 884.79
+      SLOW:
+        min: 285.0
+        max: 315.0
+    4.A.Blue:
+      FAST:
+        min: 1212.0
+        max: 1242.0
+      SLOW:
+        min: 663.0
+        max: 693.0
+    4.B.Red:
+      FAST:
+        min: 1881.52
+        max: 1970.48
+      SLOW:
+        min: 1734.0
+        max: 1764.0
+    4.B.Green:
+      FAST:
+        min: 768.31
+        max: 821.69
+      SLOW:
+        min: 654.0
+        max: 684.0
+    4.B.Blue:
+      FAST:
+        min: 848.76
+        max: 893.24
+      SLOW:
+        min: 663.0
+        max: 693.0
+  struct_ARC_THAR:
+    1.A.Red:
+      FAST:
+        row_max: 997.3936
+        col_max: 3262.6579
+      SLOW:
+        row_max: 763.0388
+        col_max: 3193.106
+    1.A.Green:
+      FAST:
+        row_max: 25.2582
+        col_max: 40.7168
+      SLOW:
+        row_max: 51.8652
+        col_max: 80.7004
+    1.A.Blue:
+      FAST:
+        row_max: 38.6545
+        col_max: 62.0423
+      SLOW:
+        row_max: 75.5527
+        col_max: 123.2254
+    1.B.Red:
+      FAST:
+        row_max: 886.6017
+        col_max: 4712.8765
+      SLOW:
+        row_max: 883.6449
+        col_max: 5501.5259
+    1.B.Green:
+      FAST:
+        row_max: 38.2492
+        col_max: 57.1792
+      SLOW:
+        row_max: 75.5655
+        col_max: 111.173
+    1.B.Blue:
+      FAST:
+        row_max: 27.6633
+        col_max: 57.6325
+      SLOW:
+        row_max: 53.7528
+        col_max: 112.0981
+    2.A.Red:
+      FAST:
+        row_max: 2010.6047
+        col_max: 4458.0106
+      SLOW:
+        row_max: 1082.3198
+        col_max: 4647.0408
+    2.A.Green:
+      FAST:
+        row_max: 36.5302
+        col_max: 47.4603
+      SLOW:
+        row_max: 70.9029
+        col_max: 94.4342
+    2.A.Blue:
+      FAST:
+        row_max: 32.8818
+        col_max: 62.0423
+      SLOW:
+        row_max: 64.718
+        col_max: 123.2254
+    2.B.Red:
+      FAST:
+        row_max: 2031.4279
+        col_max: 4555.2109
+      SLOW:
+        row_max: 1120.5565
+        col_max: 5185.1058
+    2.B.Green:
+      FAST:
+        row_max: 50.7372
+        col_max: 59.4188
+      SLOW:
+        row_max: 93.6226
+        col_max: 111.5694
+    2.B.Blue:
+      FAST:
+        row_max: 33.4126
+        col_max: 59.3622
+      SLOW:
+        row_max: 64.4596
+        col_max: 114.7909
+    3.A.Red:
+      FAST:
+        row_max: 1368.1663
+        col_max: 3803.6004
+      SLOW:
+        row_max: 917.3802
+        col_max: 3462.3146
+    3.A.Green:
+      FAST:
+        row_max: 40.9507
+        col_max: 45.5469
+      SLOW:
+        row_max: 82.8292
+        col_max: 92.3345
+    3.A.Blue:
+      FAST:
+        row_max: 2104.2182
+        col_max: 57.7099
+      SLOW:
+        row_max: 2133.6196
+        col_max: 119.1763
+    3.B.Red:
+      FAST:
+        row_max: 878.8732
+        col_max: 4794.0744
+      SLOW:
+        row_max: 923.7595
+        col_max: 5297.9441
+    3.B.Green:
+      FAST:
+        row_max: 47.8563
+        col_max: 62.9426
+      SLOW:
+        row_max: 92.8685
+        col_max: 121.9043
+    3.B.Blue:
+      FAST:
+        row_max: 40.9854
+        col_max: 78.5719
+      SLOW:
+        row_max: 82.2172
+        col_max: 153.302
+    4.A.Red:
+      FAST:
+        row_max: 1997.2283
+        col_max: 4030.4216
+      SLOW:
+        row_max: 1163.0193
+        col_max: 4342.8523
+    4.A.Green:
+      FAST:
+        row_max: 29.7581
+        col_max: 53.4875
+      SLOW:
+        row_max: 59.1975
+        col_max: 108.5297
+    4.A.Blue:
+      FAST:
+        row_max: 38.6545
+        col_max: 62.0423
+      SLOW:
+        row_max: 75.5527
+        col_max: 123.2254
+    4.B.Red:
+      FAST:
+        row_max: 1133.4922
+        col_max: 4214.2977
+      SLOW:
+        row_max: 794.8412
+        col_max: 3932.4631
+    4.B.Green:
+      FAST:
+        row_max: 54.2826
+        col_max: 61.0872
+      SLOW:
+        row_max: 108.1785
+        col_max: 122.5443
+    4.B.Blue:
+      FAST:
+        row_max: 38.6545
+        col_max: 76.7823
+      SLOW:
+        row_max: 75.5527
+        col_max: 151.8241
+  sat_ARC_THAR:
+    1.A.Red:
+      FAST:
+        frac_max: 0.0097
+      SLOW:
+        frac_max: 0.0222
+    1.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Red:
+      FAST:
+        frac_max: 0.0152
+      SLOW:
+        frac_max: 0.036
+    1.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    1.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Red:
+      FAST:
+        frac_max: 0.0108
+      SLOW:
+        frac_max: 0.0296
+    2.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Red:
+      FAST:
+        frac_max: 0.0213
+      SLOW:
+        frac_max: 0.0454
+    2.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    2.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Red:
+      FAST:
+        frac_max: 0.0148
+      SLOW:
+        frac_max: 0.0271
+    3.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.A.Blue:
+      FAST:
+        frac_max: 0.0007
+      SLOW:
+        frac_max: 0.0007
+    3.B.Red:
+      FAST:
+        frac_max: 0.0169
+      SLOW:
+        frac_max: 0.0381
+    3.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    3.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Red:
+      FAST:
+        frac_max: 0.0182
+      SLOW:
+        frac_max: 0.0357
+    4.A.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.A.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Red:
+      FAST:
+        frac_max: 0.0205
+      SLOW:
+        frac_max: 0.0334
+    4.B.Green:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+    4.B.Blue:
+      FAST:
+        frac_max: 0.0005
+      SLOW:
+        frac_max: 0.0005
+rule_sets:
+  BIAS:
+    applies_when:
+      exposure_type: CAL.R-BIA
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 0.214
+        rel_tol: 0.1
+    - name: edge_background_level
+      region: bottom_stripe
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: edge_bg_BIAS
+        keys: &id001
+        - from: extension.name
+        - from: metadata.readout_mode
+        min_field: min
+        max_field: max
+    - name: frame_level_median
+      region: full_frame
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: level_BIAS
+        keys: *id001
+        min_field: med_min
+        max_field: med_max
+    - name: frame_noise_rms
+      region: full_frame
+      metric: rms
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: level_BIAS
+        keys: *id001
+        max_field: rms_max
+    - name: row_structure
+      region: full_frame
+      metric: row_banding
+      per_extension: true
+      severity: FAIL
+      expected_from_lookup:
+        table: struct_BIAS
+        keys: *id001
+        max_field: row_max
+    - name: column_structure
+      region: full_frame
+      metric: column_banding
+      per_extension: true
+      severity: FAIL
+      expected_from_lookup:
+        table: struct_BIAS
+        keys: *id001
+        max_field: col_max
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: FAIL
+      expected_from_lookup:
+        table: sat_BIAS
+        keys: *id001
+        max_field: frac_max
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0
+  DARK:
+    applies_when:
+      exposure_type: CAL.R-DRK
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 0.238
+        rel_tol: 0.1
+    - name: edge_background_level
+      region: bottom_stripe
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: edge_bg_DARK
+        keys: *id001
+        min_field: min
+        max_field: max
+    - name: frame_level_median
+      region: full_frame
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: level_DARK
+        keys: *id001
+        min_field: med_min
+        max_field: med_max
+    - name: frame_noise_rms
+      region: full_frame
+      metric: rms
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: level_DARK
+        keys: *id001
+        max_field: rms_max
+    - name: row_structure
+      region: full_frame
+      metric: row_banding
+      per_extension: true
+      severity: FAIL
+      expected_from_lookup:
+        table: struct_DARK
+        keys: *id001
+        max_field: row_max
+    - name: column_structure
+      region: full_frame
+      metric: column_banding
+      per_extension: true
+      severity: FAIL
+      expected_from_lookup:
+        table: struct_DARK
+        keys: *id001
+        max_field: col_max
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: sat_DARK
+        keys: *id001
+        max_field: frac_max
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0
+  LDLS_FLAT:
+    applies_when:
+      exposure_type: CAL.R-FLT
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 0.252
+        rel_tol: 0.1
+    - name: edge_background_level
+      region: bottom_stripe
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: edge_bg_LDLS_FLAT
+        keys: *id001
+        min_field: min
+        max_field: max
+    - name: row_structure
+      region: full_frame
+      metric: row_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_LDLS_FLAT
+        keys: *id001
+        max_field: row_max
+    - name: column_structure
+      region: full_frame
+      metric: column_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_LDLS_FLAT
+        keys: *id001
+        max_field: col_max
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: sat_LDLS_FLAT
+        keys: *id001
+        max_field: frac_max
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0
+  SKY_FLAT:
+    applies_when:
+      exposure_type: CAL.R-SKY
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 0.348
+        rel_tol: 0.1
+    - name: edge_background_level
+      region: bottom_stripe
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: edge_bg_SKY_FLAT
+        keys: *id001
+        min_field: min
+        max_field: max
+    - name: row_structure
+      region: full_frame
+      metric: row_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_SKY_FLAT
+        keys: *id001
+        max_field: row_max
+    - name: column_structure
+      region: full_frame
+      metric: column_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_SKY_FLAT
+        keys: *id001
+        max_field: col_max
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: sat_SKY_FLAT
+        keys: *id001
+        max_field: frac_max
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0
+  ARC_THAR:
+    applies_when:
+      exposure_type: CAL.R-ARC
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 0.328
+        rel_tol: 0.1
+    - name: edge_background_level
+      region: bottom_stripe
+      metric: median
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: edge_bg_ARC_THAR
+        keys: *id001
+        min_field: min
+        max_field: max
+    - name: row_structure
+      region: full_frame
+      metric: row_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_ARC_THAR
+        keys: *id001
+        max_field: row_max
+    - name: column_structure
+      region: full_frame
+      metric: column_banding
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: struct_ARC_THAR
+        keys: *id001
+        max_field: col_max
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: WARN
+      expected_from_lookup:
+        table: sat_ARC_THAR
+        keys: *id001
+        max_field: frac_max
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0

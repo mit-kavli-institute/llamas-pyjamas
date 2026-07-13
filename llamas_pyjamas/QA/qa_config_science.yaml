@@ -1,0 +1,200 @@
+# LLAMAS science QA config -- GENERATED from robust baseline analysis (2026-04-07/05-02/06-30). See QA_TESTS_SUMMARY.md; regenerate via baselines/scripts.
+config_version: '1.0'
+instrument:
+  name: LLAMAS
+  description: Data-driven QA rules for LLAMAS MEF frames
+metadata_keys:
+  exposure_type: PRODCATG
+  readout_mode: READ-MDE
+extensions:
+- name: 1.A.Red
+  hdu_index: 1
+  color: Red
+  bench: 1
+  side: A
+- name: 1.A.Green
+  hdu_index: 2
+  color: Green
+  bench: 1
+  side: A
+- name: 1.A.Blue
+  hdu_index: 3
+  color: Blue
+  bench: 1
+  side: A
+- name: 1.B.Red
+  hdu_index: 4
+  color: Red
+  bench: 1
+  side: B
+- name: 1.B.Green
+  hdu_index: 5
+  color: Green
+  bench: 1
+  side: B
+- name: 1.B.Blue
+  hdu_index: 6
+  color: Blue
+  bench: 1
+  side: B
+- name: 2.A.Red
+  hdu_index: 7
+  color: Red
+  bench: 2
+  side: A
+- name: 2.A.Green
+  hdu_index: 8
+  color: Green
+  bench: 2
+  side: A
+- name: 2.A.Blue
+  hdu_index: 9
+  color: Blue
+  bench: 2
+  side: A
+- name: 2.B.Red
+  hdu_index: 10
+  color: Red
+  bench: 2
+  side: B
+- name: 2.B.Green
+  hdu_index: 11
+  color: Green
+  bench: 2
+  side: B
+- name: 2.B.Blue
+  hdu_index: 12
+  color: Blue
+  bench: 2
+  side: B
+- name: 3.A.Red
+  hdu_index: 13
+  color: Red
+  bench: 3
+  side: A
+- name: 3.A.Green
+  hdu_index: 14
+  color: Green
+  bench: 3
+  side: A
+- name: 3.A.Blue
+  hdu_index: 15
+  color: Blue
+  bench: 3
+  side: A
+- name: 3.B.Red
+  hdu_index: 16
+  color: Red
+  bench: 3
+  side: B
+- name: 3.B.Green
+  hdu_index: 17
+  color: Green
+  bench: 3
+  side: B
+- name: 3.B.Blue
+  hdu_index: 18
+  color: Blue
+  bench: 3
+  side: B
+- name: 4.A.Red
+  hdu_index: 19
+  color: Red
+  bench: 4
+  side: A
+- name: 4.A.Green
+  hdu_index: 20
+  color: Green
+  bench: 4
+  side: A
+- name: 4.A.Blue
+  hdu_index: 21
+  color: Blue
+  bench: 4
+  side: A
+- name: 4.B.Red
+  hdu_index: 22
+  color: Red
+  bench: 4
+  side: B
+- name: 4.B.Green
+  hdu_index: 23
+  color: Green
+  bench: 4
+  side: B
+- name: 4.B.Blue
+  hdu_index: 24
+  color: Blue
+  bench: 4
+  side: B
+regions:
+  full_frame:
+    type: full
+  bottom_stripe:
+    type: rectangle
+    x_start: 100
+    x_end: 1948
+    y_start: 2
+    y_end: 28
+  top_stripe:
+    type: rectangle
+    x_start: 100
+    x_end: 1948
+    y_start: 2020
+    y_end: 2046
+metrics:
+  median:
+    type: median
+  rms:
+    type: std
+  saturated_fraction:
+    type: fraction_above
+    threshold: 63000
+  row_banding:
+    type: row_structure
+  column_banding:
+    type: column_structure
+verdict_policy:
+  fail_if_any_fail: true
+  warn_if_any_warn: true
+lookup_tables:
+  noop:
+    placeholder: 1
+rule_sets:
+  SCIENCE:
+    applies_when:
+      exposure_type: SCI.R-*
+    rules:
+    - name: shutter_exptime_consistency
+      severity: FAIL
+      header_check:
+        op: abs_or_rel_diff
+        source: SEXPTIME
+        other: REXPTIME
+        abs_tol: 1.0
+        rel_tol: 0.1
+    - name: saturation_fraction
+      region: full_frame
+      metric: saturated_fraction
+      per_extension: true
+      severity: WARN
+      limits:
+        max: 0.02
+    - name: ccd_temperature_warm
+      severity: WARN
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -73.8
+    - name: ccd_temperature_shutoff
+      severity: FAIL
+      per_extension: true
+      header_check:
+        op: range
+        per_extension_key: CCDTEMP_1
+        limits:
+          min: -140.0
+          max: -60.0

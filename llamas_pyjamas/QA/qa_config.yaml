@@ -1,0 +1,309 @@
+config_version: "0.1"
+ 
+instrument:
+  name: "LLAMAS"
+  description: "Quick QA rules for FITS/MEF detector data"
+ 
+ 
+metadata_keys:
+  exposure_type: "PRODCATG"
+  thar_lamp: "HIERARCH FRONTEND LAMPS THAR STATE"
+  kr_lamp: "HIERARCH FRONTEND LAMPS KR STATE"
+  ar_lamp: "HIERARCH FRONTEND LAMPS AR STATE"
+  ne_lamp: "HIERARCH FRONTEND LAMPS NE STATE"
+  readout_mode: "READ-MDE"
+ 
+ 
+extensions:
+  - name: "1.A.Red"
+    hdu_index: 1
+    color: "Red"
+ 
+  - name: "1.A.Green"
+    hdu_index: 2
+    color: "Green"
+ 
+  - name: "1.A.Blue"
+    hdu_index: 3
+    color: "Blue"
+ 
+  - name: "1.B.Red"
+    hdu_index: 4
+    color: "Red"
+ 
+  - name: "1.B.Green"
+    hdu_index: 5
+    color: "Green"
+ 
+  - name: "1.B.Blue"
+    hdu_index: 6
+    color: "Blue"
+ 
+  - name: "2.A.Red"
+    hdu_index: 7
+    color: "Red"
+ 
+  - name: "2.A.Green"
+    hdu_index: 8
+    color: "Green"
+ 
+  - name: "2.A.Blue"
+    hdu_index: 9
+    color: "Blue"
+ 
+  - name: "2.B.Red"
+    hdu_index: 10
+    color: "Red"
+ 
+  - name: "2.B.Green"
+    hdu_index: 11
+    color: "Green"
+ 
+  - name: "2.B.Blue"
+    hdu_index: 12
+    color: "Blue"
+ 
+  - name: "3.A.Red"
+    hdu_index: 13
+    color: "Red"
+ 
+  - name: "3.A.Green"
+    hdu_index: 14
+    color: "Green"
+ 
+  - name: "3.A.Blue"
+    hdu_index: 15
+    color: "Blue"
+ 
+  - name: "3.B.Red"
+    hdu_index: 16
+    color: "Red"
+ 
+  - name: "3.B.Green"
+    hdu_index: 17
+    color: "Green"
+ 
+  - name: "3.B.Blue"
+    hdu_index: 18
+    color: "Blue"
+ 
+  - name: "4.A.Red"
+    hdu_index: 19
+    color: "Red"
+ 
+  - name: "4.A.Green"
+    hdu_index: 20
+    color: "Green"
+ 
+  - name: "4.A.Blue"
+    hdu_index: 21
+    color: "Blue"
+ 
+  - name: "4.B.Red"
+    hdu_index: 22
+    color: "Red"
+ 
+  - name: "4.B.Green"
+    hdu_index: 23
+    color: "Green"
+ 
+  - name: "4.B.Blue"
+    hdu_index: 24
+    color: "Blue"
+ 
+ 
+regions:
+  full_frame:
+    type: "full"
+ 
+  dark_strip_default:
+    type: "rectangle"
+    x_start: 500
+    x_end: 1500
+    y_start: 20
+    y_end: 40
+ 
+  dark_strip_red:
+    type: "rectangle"
+    x_start: 500
+    x_end: 1500
+    y_start: 20
+    y_end: 40
+ 
+  dark_strip_green:
+    type: "rectangle"
+    x_start: 500
+    x_end: 1500
+    y_start: 20
+    y_end: 40
+ 
+  dark_strip_blue:
+    type: "rectangle"
+    x_start: 500
+    x_end: 1500
+    y_start: 20
+    y_end: 40
+ 
+  arc_thar_line_region_1:
+    type: "rectangle"
+    x_start: 1000
+    x_end: 1100
+    y_start: 800
+    y_end: 900
+ 
+ 
+metrics:
+  mean:
+    type: "mean"
+ 
+  median:
+    type: "median"
+ 
+  rms:
+    type: "std"
+ 
+  saturated_fraction:
+    type: "fraction_above"
+    threshold: 60000
+ 
+  total_flux:
+    type: "sum"
+ 
+  peak_value:
+    type: "max"
+
+  row_banding:
+    type: "row_structure"
+ 
+  column_banding:
+    type: "column_structure"
+ 
+ 
+lookup_tables:
+  bias_levels:
+    Red:
+      slow:
+        mean_min: 800
+        mean_max: 820
+        rms_max: 5
+ 
+      fast:
+        mean_min: 780
+        mean_max: 840
+        rms_max: 10
+ 
+    Green:
+      slow:
+        mean_min: 800
+        mean_max: 820
+        rms_max: 5
+ 
+      fast:
+        mean_min: 780
+        mean_max: 840
+        rms_max: 10
+ 
+    Blue:
+      slow:
+        mean_min: 900
+        mean_max: 930
+        rms_max: 6
+ 
+      fast:
+        mean_min: 870
+        mean_max: 960
+        rms_max: 12
+ 
+ 
+rule_sets:
+  BIAS:
+    applies_when:
+      exposure_type: "CAL.R-BIA"
+ 
+    rules:
+      - name: "bias_full_frame_mean"
+        region: "full_frame"
+        metric: "mean"
+        per_extension: true
+ 
+        expected_from_lookup:
+          table: "bias_levels"
+          keys:
+            - from: "extension.color"
+            - from: "metadata.readout_mode"
+          min_field: "mean_min"
+          max_field: "mean_max"
+ 
+        severity: "FAIL"
+ 
+      - name: "bias_full_frame_rms"
+        region: "full_frame"
+        metric: "rms"
+        per_extension: true
+ 
+        expected_from_lookup:
+          table: "bias_levels"
+          keys:
+            - from: "extension.color"
+            - from: "metadata.readout_mode"
+          max_field: "rms_max"
+ 
+        severity: "FAIL"
+ 
+ 
+  ARC_THAR:
+    applies_when:
+      exposure_type: "CAL.R-ARC"
+      thar_lamp: "ON"
+ 
+    rules:
+      - name: "thar_total_flux_region_1"
+        region: "arc_thar_line_region_1"
+        metric: "total_flux"
+        per_extension: true
+ 
+        limits:
+          min: 100000
+ 
+        severity: "FAIL"
+ 
+      - name: "thar_peak_region_1"
+        region: "arc_thar_line_region_1"
+        metric: "peak_value"
+        per_extension: true
+ 
+        limits:
+          min: 10000
+ 
+        severity: "FAIL"
+ 
+ 
+  SCIENCE:
+      applies_when:
+        exposure_type: "SCI.R-*"
+      rules:
+        - name: "science_saturation_fraction"
+          region: "full_frame"
+          metric: "saturated_fraction"
+          per_extension: true
+          limits:
+            max: 0.001
+          severity: "WARN"
+        - name: "science_background_dark_region"
+          region_by_extension:
+            key: "color"
+            default: "dark_strip_default"
+            values:
+              Red: "dark_strip_red"
+              Green: "dark_strip_green"
+              Blue: "dark_strip_blue"
+          metric: "median"
+          per_extension: true
+          limits:
+            max: 200
+          severity: "WARN"
+ 
+ 
+verdict_policy:
+  fail_if_any_fail: true
+  warn_if_any_warn: true
