@@ -198,6 +198,7 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
 
 def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
                                   signal_threshold=None, clip_range=(0.90, 1.10),
+                                  saturation_threshold=None,
                                   return_smooth_models=False):
     """Fiber-by-fiber 1D pixel sensitivity map for a single extension.
 
@@ -283,14 +284,30 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         if return_smooth_models:
             smooth_models[fib_idx] = smooth_1d.copy()
 
-        # 1D sensitivity ratio where signal is reliable
-        valid = smooth_1d > signal_threshold
+        # 1D sensitivity ratio where signal is reliable.
+        # F2: also reject non-finite, negative/zero, and saturated raw counts so
+        # corrupted pixels keep sensitivity 1.0 (no correction) instead of
+        # producing spurious ratios that the clip floors to clip_range[0].
+        valid = (smooth_1d > signal_threshold) & np.isfinite(raw_1d) & (raw_1d > 0)
+        if saturation_threshold is not None:
+            valid &= (raw_1d < saturation_threshold)
         ratio_1d = np.ones_like(raw_1d, dtype=np.float32)
         ratio_1d[valid] = raw_1d[valid] / smooth_1d[valid]
 
         # Project 1D correction onto the 2D fiber footprint
         fiber_mask = (trace_obj.fiberimg == fib_idx)
         sensitivity_map[fiber_mask] = ratio_1d[np.where(fiber_mask)[1]]
+
+    # Un-flip to match raw FITS coordinates.
+    # process_fits_by_color applies channel-specific flips before extraction, so the
+    # sensitivity_map is in flipped space.  The flat is applied to the raw (un-flipped)
+    # science FITS, so we must invert those flips here.
+    ch = (channel or getattr(extraction_obj, 'channel', 'green')).lower()
+    if ch == 'green':
+        sensitivity_map = np.fliplr(sensitivity_map)
+    elif ch == 'blue':
+        sensitivity_map = np.flipud(np.fliplr(sensitivity_map))
+    # red: no flip applied by process_fits_by_color, nothing to undo
 
     # Clip to remove outliers
     sensitivity_map = np.clip(sensitivity_map, clip_range[0], clip_range[1])
@@ -731,11 +748,69 @@ def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
                 f"({len(hdul) - 1} extensions)")
 
 
+def _build_flat_unillum_mask(ext_obj, smooth_models, unillum_frac=0.1):
+    """2-D boolean mask of on-fibre pixels that are unilluminated in the flat.
+
+    For each fibre, columns where the smooth flat model falls below
+    ``unillum_frac`` of that fibre's own peak are 'dark' (dichroic crossover /
+    low-sensitivity ends). Mapped back to 2-D via the tracer ``fiberimg``, giving
+    the per-pixel, y-dependent unilluminated mask used by edge-bias Tier 2.
+    Returns None if the tracer/fiberimg is unavailable.
+    """
+    trace = getattr(ext_obj, 'trace', None)
+    fiberimg = getattr(trace, 'fiberimg', None) if trace is not None else None
+    if fiberimg is None:
+        return None
+    ny, nx = fiberimg.shape
+    mask = np.zeros((ny, nx), dtype=bool)
+    for fid, sm in (smooth_models or {}).items():
+        sm = np.asarray(sm, dtype=float).ravel()
+        if sm.size == 0:
+            continue
+        peak = np.nanmax(sm)
+        if not np.isfinite(peak) or peak <= 0:
+            continue
+        col_dark = np.zeros(nx, dtype=bool)
+        n = min(nx, sm.size)
+        col_dark[:n] = sm[:n] < (unillum_frac * peak)
+        if not col_dark.any():
+            continue
+        mask |= (fiberimg == fid) & col_dark[np.newaxis, :]
+    return mask
+
+
+def _write_unillum_mask_fits(unillum_masks, path, unillum_frac):
+    """Write a boolean unilluminated-mask MEF keyed by camera.
+
+    One ImageHDU per detector holds a uint8 mask (1 = unilluminated on-fibre
+    pixel), tagged with BENCH/SIDE/COLOR so guiExtract._load_unillum_mask can
+    match it to a science detector.
+    """
+    from astropy.io import fits
+    primary = fits.PrimaryHDU()
+    primary.header['UNILFRAC'] = (float(unillum_frac),
+                                  'Flat frac below which pixel is dark')
+    hdus = [primary]
+    for ext_name, info in unillum_masks.items():
+        m = info.get('mask')
+        if m is None:
+            continue
+        hdu = fits.ImageHDU(data=m.astype(np.uint8), name=ext_name)
+        hdu.header['COLOR']   = str(info['channel'])
+        hdu.header['BENCH']   = str(info['bench'])
+        hdu.header['SIDE']    = str(info['side'])
+        hdu.header['EXTNAME'] = ext_name
+        hdu.header['NDARK']   = (int(m.sum()), 'Unilluminated on-fibre pixel count')
+        hdus.append(hdu)
+    fits.HDUList(hdus).writeto(path, overwrite=True)
+
+
 def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
                               arc_calib_file=None, use_bias=None,
                               output_dir=OUTPUT_DIR, trace_dir=CALIB_DIR,
                               verbose=False, filter_size=12,
-                              signal_thresholds=None, clip_range=(0.90, 1.10)):
+                              signal_thresholds=None, clip_range=(0.90, 1.10),
+                              saturation_threshold=None, unillum_frac=0.1):
     """Generate pixel-to-pixel sensitivity maps using the simple median+Gaussian method.
 
     Workflow:
@@ -802,6 +877,14 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     concat_extractions([red_pkl, green_pkl, blue_pkl], combined_flat_file)
     logger.info(f"Combined extractions saved to {combined_flat_file}")
 
+    # Remove per-color intermediate pkls now that they are merged
+    for _pkl in [red_pkl, green_pkl, blue_pkl]:
+        try:
+            os.remove(_pkl)
+            logger.info(f"Removed intermediate file: {os.path.basename(_pkl)}")
+        except OSError:
+            pass
+
     # ── Step 3: Apply wavelength solution (mandatory) ──
     logger.info("Step 3: Applying wavelength solution from arc calibration")
 
@@ -847,6 +930,13 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
         pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
 
+    # Raw combined pkl is superseded by the calibrated version; remove it
+    try:
+        os.remove(combined_flat_file)
+        logger.info(f"Removed intermediate file: {os.path.basename(combined_flat_file)}")
+    except OSError:
+        pass
+
     # ── Step 4: Generate pixel maps using wavelength-calibrated extractions ──
     logger.info("Step 4: Generating pixel sensitivity maps (simple method)")
 
@@ -859,6 +949,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
 
     pixel_maps = {}  # keyed by underscore-separated ext_name
     all_smooth_data = {}  # keyed by ext_name, for fibre flat
+    unillum_masks = {}  # keyed by ext_name, for edge-bias Tier 2 (flat-derived L/R darks)
 
     for ext_idx, (ext_obj, meta) in enumerate(zip(extractions, metadata)):
         channel = meta['channel']
@@ -884,9 +975,22 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
             filter_size=filter_size,
             signal_threshold=threshold,
             clip_range=clip_range,
+            saturation_threshold=saturation_threshold,
             return_smooth_models=True,
         )
         pixel_maps[ext_name] = pixel_map
+
+        # Edge-bias Tier 2: build the flat-derived unilluminated mask for this
+        # detector. On-fibre pixels whose smooth flat model drops below
+        # ``unillum_frac`` of that fibre's own peak are the dichroic-crossover /
+        # low-sensitivity dark zones (per-pixel, y-dependent). Never raises.
+        try:
+            unillum_masks[ext_name] = {
+                'mask': _build_flat_unillum_mask(ext_obj, smooth_models, unillum_frac),
+                'channel': channel, 'bench': bench, 'side': side,
+            }
+        except Exception as _um_exc:
+            logger.warning(f"  {ext_name}: unillum mask build failed ({_um_exc})")
 
         # Build FIBER_ID list keyed by physical ID, excluding dead fibres
         dead_set = set(getattr(ext_obj, 'dead_fibers', []) or [])
@@ -928,6 +1032,16 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     smooth_models_path = os.path.join(output_dir, 'flat_smooth_models.fits')
     _write_smooth_models_fits(all_smooth_data, smooth_models_path,
                               filter_size=filter_size)
+
+    # ── Step 7: Write flat-derived unilluminated mask (edge-bias Tier 2) ──
+    logger.info("Step 7: Writing flat-derived unilluminated mask FITS")
+    unillum_mask_path = os.path.join(output_dir, 'unillum_mask.fits')
+    try:
+        _write_unillum_mask_fits(unillum_masks, unillum_mask_path, unillum_frac)
+        logger.info(f"Unilluminated mask saved to: {unillum_mask_path}")
+    except Exception as _um_exc:
+        logger.warning(f"Failed to write unillum_mask.fits ({_um_exc}); "
+                       f"edge-bias Tier 2 will fall back to stripes only")
 
     logger.info(f"Pixel flat processing complete: {pixel_map_path}")
     logger.info(f"Smooth models saved to: {smooth_models_path}")

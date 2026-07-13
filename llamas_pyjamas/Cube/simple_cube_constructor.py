@@ -34,12 +34,17 @@ import argparse
 import sys
 import os
 from astropy.io import fits
+from astropy.io.fits.verify import VerifyWarning
 from astropy.table import Table
 from astropy.wcs import WCS
 from scipy.spatial import cKDTree
 from scipy.interpolate import interp1d
 import warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning)
+# Raw Magellan/LLAMAS headers carry long, spaced keywords (e.g. 'TEL ROTATOR
+# SERVO STATUS'); astropy stores these as FITS-standard HIERARCH cards and emits
+# a VerifyWarning each time. The output is compliant, so silence the noise.
+warnings.filterwarnings('ignore', category=VerifyWarning)
 
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
 
@@ -118,6 +123,10 @@ class SimpleCubeConstructor:
 
         with fits.open(rss_file) as hdul:
             print(f"  Found {len(hdul)} extensions")
+
+            # Capture the primary header so the cube WCS can inherit the real
+            # telescope pointing (F6) instead of a (0,0) placeholder.
+            self.primary_header = hdul[0].header.copy()
 
             # Load main data
             if 'FLUX' in hdul:
@@ -675,13 +684,16 @@ class SimpleCubeConstructor:
         total_spaxels = nx * ny
         print(f"  Valid spaxels: {valid_spaxels}/{total_spaxels} ({100*valid_spaxels/total_spaxels:.1f}%)")
 
-    def create_wcs(self, ra_center=0.0, dec_center=0.0):
+    def create_wcs(self, ra_center=0.0, dec_center=0.0, rotation_deg=0.0):
         """
         Create WCS (World Coordinate System) for the cube.
 
         Parameters:
             ra_center (float): RA of field center in degrees
             dec_center (float): Dec of field center in degrees
+            rotation_deg (float): on-sky field rotation (e.g. instrument PA, deg
+                E of N) applied as a PC matrix in the spatial plane. Provisional
+                sign convention — validate against a known source (F6).
         """
         print("\nCreating WCS...")
 
@@ -721,12 +733,22 @@ class SimpleCubeConstructor:
             wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
             wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
 
+        # F6: apply on-sky field rotation as a PC matrix in the spatial plane.
+        if rotation_deg:
+            theta = np.radians(rotation_deg)
+            c, s = np.cos(theta), np.sin(theta)
+            wcs.wcs.pc = np.array([[c, -s, 0.0],
+                                   [s,  c, 0.0],
+                                   [0.0, 0.0, 1.0]])
+
         self.wcs = wcs
 
         print(f"  Grid method: {self.grid_method}")
         print(f"  Reference pixel: {wcs.wcs.crpix}")
         print(f"  Reference value: {wcs.wcs.crval}")
         print(f"  Pixel scale: {wcs.wcs.cdelt}")
+        if rotation_deg:
+            print(f"  Field rotation: {rotation_deg:.3f} deg (PC matrix)")
 
     def save_cube(self, output_file, overwrite=True):
         """

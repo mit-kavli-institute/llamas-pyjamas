@@ -34,6 +34,7 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import traceback
 from typing import Tuple
 import json
@@ -46,6 +47,13 @@ from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 
 logger = logging.getLogger(__name__)
+
+# Detector noise defaults used for per-fibre variance (F4) when the FITS header
+# does not carry EGAIN/RDNOISE. The Poisson term dominates, so these only set
+# the read-noise floor; override via header keywords when available.
+DEFAULT_GAIN = 1.0        # e-/ADU
+DEFAULT_READNOISE = 2.5   # e-
+
 
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
@@ -86,40 +94,52 @@ class ExtractLlamas:
 
         if (trace is None or hdu_data is None or hdr is None):
             # Instantiate a blank object that can be used for a deep copy
-            self.trace = None
-            self.bench = None
-            self.side = None
-            self.channel = None
-            self.fitsfile = None     
-            self.counts = None
-            self.hdr    = None
-            self.frame  = None
-            self.x      = None
-            self.xshift = None
-            self.wave   = None
-            self.counts = None
-            self.errors = None
-            self.ximage = None
+            self.trace      = None
+            self.bench      = None
+            self.side       = None
+            self.channel    = None
+            self.fitsfile   = None     
+            self.hdr        = None
+            self.frame      = None
+            self.fiberid    = None
             self.relative_throughput = None
+            self.x          = None
+            self.ximage     = None  
+            self.xshift     = None
+            self.wave       = None
+            self.counts     = None
+            self.counts_err = None
+            self.sky        = None
+            self.sensfunc   = None
+            self.flux       = None
+            self.flux_err   = None
 
         else:
+
             self.trace = trace
             self.bench = trace.bench
             self.side = trace.side
             self.channel = trace.channel
             self.fitsfile = self.trace.fitsfile
             ##put in a check here for hdu against trace attributes when I have more brain capacity        
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            
             self.hdr    = hdr
             self.frame  = hdu_data.astype(float)
+            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+            self.relative_throughput = np.zeros(shape=(trace.nfibers))
+
             self.x      = np.arange(trace.naxis1)
+            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
             # xshift and wave will be populated only after an arc solution
             self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
-            self.relative_throughput = np.zeros(shape=(trace.nfibers))
-            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+
+            self.counts     = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.counts_err = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sky        = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sensfunc   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux       = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux_err   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             
             # Get detector properties from header if available
             # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
@@ -238,6 +258,37 @@ class ExtractLlamas:
                 self.fiberid = np.arange(total_fibers)
                 logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
 
+            # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
+            # Populates `errors`, which llamasRSS writes to the ERROR extension
+            # and which fibreFlat/skySubtract propagate. Previously unset, so the
+            # ERROR extension was all zeros and no S/N was derivable from products.
+            # Detector gain (e-/ADU) and read noise (e-) are read from the header
+            # when available; the Poisson term dominates either way.
+            def _hdr_num(keys, default):
+                for k in keys:
+                    v = self.hdr.get(k)
+                    if v is not None:
+                        try:
+                            fv = float(v)
+                            if fv > 0:
+                                return fv
+                        except (TypeError, ValueError):
+                            pass
+                return default
+            gain = _hdr_num(('EGAIN', 'GAIN', 'GAIN1', 'CCDGAIN'), DEFAULT_GAIN)
+            readnoise = _hdr_num(('RDNOISE', 'RDNOISE1', 'READNOIS', 'RON'),
+                                 DEFAULT_READNOISE)
+            aperture_pix = float(getattr(self.trace, 'extraction_aperture', 9.0))
+            counts_e = np.clip(self.counts, 0.0, None) * gain
+            var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            self.counts_err = np.sqrt(var_adu).astype(np.float32)
+            # At extraction, flux == counts (no flux cal), so the error on the
+            # written FLUX/COUNTS is the same array.
+            self.errors = self.counts_err.copy()
+            logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
+                        f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
+                        f'pix); median error={np.median(self.counts_err):.3f}')
+
                     
                 
                 
@@ -283,6 +334,36 @@ class ExtractLlamas:
         
         return x_spec,f_spec,weights
 
+
+    # Set to False to include full 2D detector images in pickled files (for QA/troubleshooting).
+    # Default True strips ~7 GB of per-pixel arrays that are not needed after extraction.
+    _slim_pickle = True
+
+    def __getstate__(self):
+        """Custom pickle state: optionally strip large 2D detector images.
+
+        When _slim_pickle is True (default), removes frame, ximage, and the trace's
+        2D images (data, fiberimg, profimg, bpmask), which together account for ~7 GB
+        per extraction batch.  Per-fiber arrays (counts, sky, wave, xshift,
+        relative_throughput, sensfunc, flux, flux_err, etc.) are always preserved.
+
+        To keep the full images for QA, set before saving:
+            ExtractLlamas._slim_pickle = False
+        """
+        import copy
+        state = self.__dict__.copy()
+        if ExtractLlamas._slim_pickle:
+            # Strip large per-pixel 2D arrays from the extraction object itself
+            state['frame']  = None
+            state['ximage'] = None
+            # Strip trace.data (raw detector image copy in the trace) but keep
+            # fiberimg and profimg — they are needed by generate_pixel_flat_extension
+            # when the flat extraction pkl is reloaded for flat field generation.
+            if state.get('trace') is not None:
+                slim_trace = copy.copy(state['trace'])
+                slim_trace.data = None
+                state['trace'] = slim_trace
+        return state
 
     def saveExtraction(self, save_dir: str)-> None:
         """Save the current extraction object to a file in the specified directory.
@@ -551,9 +632,9 @@ if __name__ == '__main__':
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
@@ -587,6 +668,5 @@ if __name__ == '__main__':
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
+
+    shutdown_ray()   # standalone CLI: release Ray (scratch cleaned by atexit)

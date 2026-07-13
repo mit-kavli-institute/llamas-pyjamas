@@ -10,11 +10,13 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+from llamas_pyjamas.Utils.rayManager import init_ray
 import traceback
 
 import pkg_resources
 from pathlib import Path
 
+import llamas_pyjamas
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, BIAS_DIR
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu, TraceRay
 import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
@@ -28,7 +30,9 @@ import time
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
-from llamas_pyjamas.Bias.biasChecking import build_interfibre_mask
+from llamas_pyjamas.Bias.biasChecking import (build_interfibre_mask,
+                                              build_topbottom_stripe_mask,
+                                              measure_edge_dc_offset)
 from llamas_pyjamas.Masking.cosmicLlamas import clean_cosmic_rays, save_cosmic_ray_masks
 
 # Set up logging
@@ -162,9 +166,138 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
     return matches
 
 # Define a Ray remote function for processing a single trace extraction.
-@ray.remote(memory=350 * 1024 * 1024)  # 350 MB per task
+# NOTE: no hard `memory=` reservation here. A fixed per-task memory reservation
+# can deadlock extraction when Ray's auto-detected logical `memory` pool (≈ free
+# RAM − object store) drops below the reservation, in which case the task becomes
+# permanently unschedulable. Concurrency is governed by `num_cpus` instead. To opt
+# back into a reservation on low-RAM machines, set `ray_task_memory_mb` in the
+# config (applied via `.options(memory=...)` at dispatch).
+def _load_unillum_mask(mask_dir, bench, side, color, shape):
+    """Load the per-camera flat-derived unilluminated mask extension, or None.
 
-def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None, remove_cosmic_rays=True):
+    Looks for ``unillum_mask.fits`` in ``mask_dir`` (written by the flat stage)
+    and returns the boolean 2-D mask whose BENCH/SIDE/COLOR match this detector.
+    """
+    if not mask_dir:
+        return None
+    path = os.path.join(mask_dir, 'unillum_mask.fits')
+    if not os.path.exists(path):
+        return None
+    try:
+        with fits.open(path) as hml:
+            for h in hml[1:]:
+                hh = h.header
+                if (str(hh.get('BENCH', '')).strip() == str(bench)
+                        and str(hh.get('SIDE', '')).strip().upper() == str(side).upper()
+                        and str(hh.get('COLOR', '')).strip().lower() == str(color).lower()):
+                    if h.data is None:
+                        return None
+                    m = np.asarray(h.data).astype(bool)
+                    return m if m.shape == tuple(shape) else None
+    except Exception as exc:
+        logger.warning(f"_load_unillum_mask: failed to read {path}: {exc}")
+    return None
+
+
+def _apply_edge_bias(data, tracer, header, bench, side, color, edge_bias):
+    """Measure and subtract a per-extension DC offset from unilluminated pixels.
+
+    Runs *after* master-bias subtraction so it captures the residual nightly DC
+    drift the static master bias misses. The mask is the top/bottom stripes
+    outside the fibre stack (always), optionally unioned with a flat-derived
+    per-pixel dark mask (Tier 2). Writes EDGE* header keywords and returns
+    ``(corrected_data, stats_dict)``. The ``stats_dict`` also carries the
+    stripes-only and stripes+flat candidate levels for QA comparison.
+    """
+    eb = edge_bias or {}
+    dmin = float(eb.get('min_distance', 20.0))
+    min_px = int(eb.get('min_pixels', 500))
+    stats = {'edge_dc': 0.0, 'edge_npix': 0, 'edge_dmin': dmin, 'edge_src': 'disabled',
+             'level_stripes': float('nan'), 'level_combined': float('nan'),
+             'bench': bench, 'side': side, 'color': color}
+
+    if not eb.get('enabled', True):
+        header['EDGEDC']   = (0.0, 'Edge-bias DC offset subtracted (DN)')
+        header['EDGENPIX'] = (0, 'Edge-bias mask pixel count')
+        header['EDGEDMIN'] = (dmin, 'Edge-bias min distance from fibre (px)')
+        header['EDGESRC']  = ('disabled', 'Edge-bias mask source')
+        return data, stats
+
+    stripe_mask = build_topbottom_stripe_mask(tracer, data.shape, min_distance=dmin)
+    lvl_s, n_s, st_s = measure_edge_dc_offset(data, stripe_mask, min_pixels=min_px)
+    stats['level_stripes'] = lvl_s if st_s == 'ok' else float('nan')
+
+    chosen_lvl, chosen_n, chosen_st, src = lvl_s, n_s, st_s, 'stripes'
+
+    # Tier 2: optionally union with the flat-derived L/R dark zones.
+    if eb.get('use_flat_mask', False):
+        flat_mask = _load_unillum_mask(eb.get('flat_mask_dir'), bench, side, color, data.shape)
+        if (flat_mask is not None and hasattr(tracer, 'fiberimg')
+                and tracer.fiberimg is not None):
+            onfib = tracer.fiberimg >= 0
+            combined = stripe_mask | (onfib & flat_mask)
+            lvl_c, n_c, st_c = measure_edge_dc_offset(data, combined, min_pixels=min_px)
+            stats['level_combined'] = lvl_c if st_c == 'ok' else float('nan')
+            chosen_lvl, chosen_n, chosen_st, src = lvl_c, n_c, st_c, 'stripes+flat'
+        else:
+            logger.info(
+                f"Edge-bias: flat mask requested but unavailable for "
+                f"{bench}{side} {color}; using stripes only")
+
+    if chosen_st == 'ok':
+        corrected = data - chosen_lvl
+        edge_dc, edge_src = float(chosen_lvl), src
+    else:
+        corrected = data
+        edge_dc, edge_src = 0.0, ('skipped_placeholder' if chosen_n > 0 else 'skipped')
+
+    stats.update(edge_dc=edge_dc, edge_npix=int(chosen_n), edge_src=edge_src)
+    header['EDGEDC']   = (edge_dc, 'Edge-bias DC offset subtracted (DN)')
+    header['EDGENPIX'] = (int(chosen_n), 'Edge-bias mask pixel count')
+    header['EDGEDMIN'] = (dmin, 'Edge-bias min distance from fibre (px)')
+    header['EDGESRC']  = (edge_src, 'Edge-bias mask source')
+    logger.info(f"Edge-bias {bench}{side} {color}: subtracted {edge_dc:.2f} DN "
+                f"(src={edge_src}, n={chosen_n})")
+    return corrected, stats
+
+
+def _write_edge_qa_rows(qa_csv, science_file, primary_hdr, results):
+    """Append one edge-bias QA row per extension to ``qa_csv`` (driver-side).
+
+    Writing here (after ray.get) rather than inside the Ray workers avoids
+    concurrent-append races on the shared CSV. Logs both the stripes-only and
+    stripes+flat candidate levels so the two can be compared during refinement.
+    """
+    import csv
+    def _fmt(v):
+        return '' if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.3f}"
+    ts = primary_hdr.get('DATE-OBS', primary_hdr.get('DATE', ''))
+    wth = primary_hdr.get('WTH-TEMP', '')
+    os.makedirs(os.path.dirname(qa_csv) or '.', exist_ok=True)
+    is_new = not os.path.exists(qa_csv)
+    with open(qa_csv, 'a', newline='') as fh:
+        w = csv.writer(fh)
+        if is_new:
+            w.writerow(['timestamp', 'science_file', 'camera', 'bench', 'side', 'color',
+                        'edge_dc', 'edge_npix', 'level_stripes', 'level_stripes_plus_flat',
+                        'edge_src', 'wth_temp'])
+        for r in results:
+            if not r:
+                continue
+            st = r.get('edge_stats')
+            if not st:
+                continue
+            cam = f"{st['color']}{st['bench']}{st['side']}"
+            w.writerow([ts, os.path.basename(str(science_file)), cam,
+                        st['bench'], st['side'], st['color'],
+                        _fmt(st['edge_dc']), st['edge_npix'],
+                        _fmt(st['level_stripes']), _fmt(st['level_combined']),
+                        st['edge_src'], wth])
+
+
+@ray.remote
+def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
+                  remove_cosmic_rays=True, edge_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
 
@@ -306,6 +439,13 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             header['BIASSRC'] = (bias.header.get('BIASSRC', 'master_bias'), 'Source of bias subtracted')
             header['BIASLVL'] = (float(np.nanmedian(bias_data)), 'Median bias level subtracted (DN)')
 
+        # --- Per-frame edge-bias (DC offset) correction, on top of master bias ---
+        # Measures the residual DC level from unilluminated pixels of THIS frame and
+        # subtracts it, tracking the nightly temperature drift the static master bias
+        # cannot. No-op (records EDGESRC) when disabled or on placeholder extensions.
+        bias_subtracted_data, edge_stats = _apply_edge_bias(
+            bias_subtracted_data, tracer, header, bench, side, color, edge_bias)
+
         # Cosmic ray removal (after bias subtraction, before extraction)
         cr_mask = None
         if remove_cosmic_rays:
@@ -330,12 +470,14 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
             'extraction': extraction,
             'detector_background': detector_background,
             'hdu_index': hdu_index,
-            'cr_mask': cr_mask
+            'cr_mask': cr_mask,
+            'edge_stats': edge_stats
         }
     except Exception as e:
         logger.error(f"Error extracting trace from {trace_file}")
         logger.error(traceback.format_exc())
-        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index, 'cr_mask': None}
+        return {'extraction': None, 'detector_background': None, 'hdu_index': hdu_index,
+                'cr_mask': None, 'edge_stats': None}
 
 
 def make_writable(extraction_obj):
@@ -420,7 +562,8 @@ def compute_detector_background(data, rows=(30, 50)):
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
                 method='optimal', trace_dir=None, mastercalib_trace_dir=None,
-                remove_cosmic_rays=True, mask_output_dir=None) -> None:
+                remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False,
+                edge_bias=None) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -459,41 +602,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         if not master_pkls:
             raise ValueError("No master calibration files found in CALIB_DIR")
         
-        #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package directory
-        package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
-        package_root = os.path.dirname(package_path)
+        # Per-task memory reservation for extraction (0 ⇒ schedule purely on CPUs).
+        task_mem_mb = int(os.environ.get('LLAMAS_RAY_TASK_MEMORY_MB', 0))
 
-        # Clear stale Ray py_modules cache so updated source files are always re-bundled
-        import shutil as _shutil, glob as _glob2
-        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-            _shutil.rmtree(_stale, ignore_errors=True)
-
-        # Configure Ray runtime environment.
-        # py_modules ships the repo root so workers can `import llamas_pyjamas`
-        # and resolve all subpackages including Bias/.
-        # (working_dir is not used because the repo root exceeds Ray's 512 MB limit.)
-        runtime_env = {
-            "py_modules": [package_root],
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
-            "excludes": [
-                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
-                "**/*.pkl",                  # Exclude all pickle files anywhere
-                "**/.git/**",               # Exclude git directory
-                "**/*.zip/**",
-                "**/*.tar.gz/**",
-                "**/mastercalib*/**",
-                "**/*.zip",
-                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-                "**/testing/**",
-            ]
-        }
-
-        # Initialize Ray
-        num_cpus = int(os.environ.get('LLAMAS_RAY_CPUS', 8))
-        ray.shutdown()
-        ray.init(num_cpus=num_cpus, runtime_env=runtime_env)
+        # Attach to (or start) the one consolidated Ray session — object store clamped
+        # to 30% RAM, temp/spill redirected into the owned scratch dir, package uploaded
+        # once per run. In the pipeline this attaches to the session reduce.py started;
+        # the GUI passes force_refresh=True so each click re-bundles source (per-click reset).
+        init_ray(force_refresh=force_refresh)
 
         # Import placeholder detection utilities
         from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
@@ -622,19 +738,34 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         ### Process each HDU-trace pair in parallel using Ray
 
+        # Optional per-task memory reservation (opt-in via `ray_task_memory_mb`).
+        # Default 0 ⇒ schedule on CPU only, so concurrency = num_cpus.
+        extract_fn = (process_trace.options(memory=task_mem_mb * 1024 * 1024)
+                      if task_mem_mb > 0 else process_trace)
+
         futures = []
         for hdu_index, trace_file in hdu_trace_pairs:
             hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
 
             if (method == 'optimal'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
             elif (method == 'boxcar'):
-                future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays)
+                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
             futures.append(future)
 
         # Wait for all remote tasks to complete
         results = ray.get(futures)
+
+        # Edge-bias QA CSV (driver-side, race-free). Logged whenever a qa_csv path
+        # is supplied, regardless of whether Tier 2 is on, so both candidate levels
+        # can be compared over the night.
+        try:
+            _eb = edge_bias or {}
+            if _eb.get('qa_csv') and _eb.get('enabled', True):
+                _write_edge_qa_rows(_eb['qa_csv'], file, primary_hdr, results)
+        except Exception as _qa_exc:
+            logger.warning(f"Edge-bias QA logging failed: {_qa_exc}")
 
         # First, make all extraction objects writable (Ray returns read-only objects)
         writable_results = []
@@ -737,36 +868,8 @@ def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None)
         if not master_pkls:
             raise ValueError("No master calibration files found in CALIB_DIR")
         
-        #getting package sources for Ray
-        # Get absolute path to llamas_pyjamas package directory
-        package_path = pkg_resources.resource_filename('llamas_pyjamas', '')
-        package_root = os.path.dirname(package_path)
-
-        # Clear stale Ray py_modules cache so updated source files are always re-bundled
-        import shutil as _shutil, glob as _glob2
-        for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-            _shutil.rmtree(_stale, ignore_errors=True)
-
-        # Configure Ray runtime environment
-        runtime_env = {
-            "py_modules": [package_root],
-            "env_vars": {"PYTHONPATH": f"{package_root}:{os.environ.get('PYTHONPATH', '')}"},
-            "excludes": [
-                str(Path(DATA_DIR) / "**"),  # Exclude DATA_DIR and all subdirectories
-                "**/*.fits",                 # Exclude all FITS files (too large for 512 MB bundle limit)
-                "**/*.pkl",                  # Exclude all pickle files anywhere
-                "**/.git/**",               # Exclude git directory
-                "**/*.zip/**",
-                "**/*.tar.gz/**",
-                "**/mastercalib*/**",
-                "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-                "**/testing/**",
-            ]
-        }
-
-        # Initialize Ray
-        ray.shutdown()
-        ray.init(runtime_env=runtime_env)
+        # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
+        init_ray()
 
         #opening the fitsfile
         hdu, _ = process_fits_by_color(file)

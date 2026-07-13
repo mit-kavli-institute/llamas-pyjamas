@@ -25,6 +25,7 @@ Date: September 2025
 
 import numpy as np
 import ray
+from llamas_pyjamas.Utils.rayManager import init_ray
 from typing import Dict, List, Tuple, Optional, Any, Union
 import logging
 import psutil
@@ -63,20 +64,14 @@ def setup_ray_cluster(n_workers: Optional[int] = None,
         total_memory_gb = psutil.virtual_memory().total / (1024**3)
         memory_limit_gb = max(2.0, total_memory_gb * 0.8 / n_workers)  # 80% of total, divided by workers
     
-    # Ray initialization configuration
-    ray_config = {
-        'num_cpus': n_workers,
-        'object_store_memory': int(memory_limit_gb * 1024**3 * 0.3),  # 30% for object store
-        'logging_level': logging.INFO
-    }
-    
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py).
     if local_mode:
-        ray.init(**ray_config)
+        init_ray(num_cpus=n_workers, object_store_mb=int(memory_limit_gb * 1024 * 0.3))
         logger.info(f"Ray initialized locally: {n_workers} workers, "
                    f"{memory_limit_gb:.1f} GB memory limit per worker")
     else:
-        # Connect to existing cluster
-        ray.init(address='auto')
+        # Connect to an external Ray cluster (its head owns temp/store/spill).
+        init_ray(address='auto')
         logger.info("Connected to existing Ray cluster")
     
     cluster_info = ray.cluster_resources()
@@ -407,9 +402,9 @@ def parallel_cube_construction(rss_data: RSSData,
         return output_cube
         
     finally:
-        # Cleanup Ray resources
-        if ray.is_initialized():
-            ray.shutdown()
+        # No ray.shutdown(): the run shares one session managed by rayManager
+        # (torn down once at pipeline end via cleanup_scratch / atexit).
+        pass
 
 
 def assemble_cube_from_batches(batch_results: List[Dict[str, Any]],
