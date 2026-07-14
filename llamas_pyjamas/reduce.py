@@ -476,6 +476,55 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
     return extraction_file_path
 
 
+def apply_twilight_throughput(extraction_dict, twilight_dir):
+    """Set per-fibre relative_throughput from the twilight (sky) flat extraction.
+
+    The twilight illuminates the fibres with the same geometry as the night sky
+    (unlike the dome lamp), and — because it is extracted with the same method
+    as the science in the same run — its per-fibre response is directly
+    applicable (validated 2026-07: predicts the stable on-sky 5577 response at
+    corr 0.97 on cameras where the lamp throughput reads 0.40). Objects never
+    contaminate it (dedicated sky-illuminated frames).
+
+    Finds the newest twilight extraction pickle in ``twilight_dir`` and, for
+    every camera present in both, replaces ``relative_throughput`` with the
+    fibre's median twilight counts normalised to the camera median (clipped to
+    [0.1, 3.0]; out-of-range/dead fibres get 1.0). Cameras without a twilight
+    counterpart keep their existing (arc-carried) values.
+
+    Returns the number of cameras updated (0 => nothing done / no twilight).
+    """
+    import glob as _glob
+    cands = sorted(
+        _glob.glob(os.path.join(twilight_dir, '*_extract_corrected_extractions.pkl'))
+        + _glob.glob(os.path.join(twilight_dir, '*_extract.pkl')),
+        key=os.path.getmtime, reverse=True)
+    if not cands:
+        return 0
+    twi = ExtractLlamas.loadExtraction(cands[0])
+    twi_map = {}
+    for e, m in zip(twi['extractions'], twi['metadata']):
+        twi_map[(m['channel'], str(m['bench']), str(m['side']).upper())] = e
+    n_done = 0
+    for e, m in zip(extraction_dict['extractions'], extraction_dict['metadata']):
+        et = twi_map.get((m['channel'], str(m['bench']), str(m['side']).upper()))
+        if et is None:
+            continue
+        counts = np.asarray(et.counts, dtype=float)
+        wl = np.nanmedian(counts[:, 700:1500], axis=1)
+        good = np.isfinite(wl) & (wl > 0)
+        if good.sum() < 30:
+            continue
+        tp = wl / np.nanmedian(wl[good])
+        tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
+        n = min(np.asarray(e.counts).shape[0], tp.size)
+        e.relative_throughput = tp[:n].copy()
+        n_done += 1
+    logger.info(f"apply_twilight_throughput: updated {n_done} cameras from "
+                f"{os.path.basename(cands[0])}")
+    return n_done
+
+
 def build_edge_bias_config(config, extraction_path, flat_field_dir=None):
     """Assemble the edge-bias (per-frame DC offset) settings from the pipeline config.
 
@@ -1740,6 +1789,25 @@ def main(config_path):
     os.environ['LLAMAS_RAY_OBJECT_STORE_MB'] = str(ray_object_store_mb)
     print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
 
+    # ── Extraction method (applies to EVERY extraction in the run) ──────────
+    # 'boxcar' (default): trace-following aperture with fractional pixel weights
+    # at the edges (continuous across half-pixel trace crossings). Interim
+    # default until the Horne optimal extraction is rebuilt — the current
+    # profile-weighted 'optimal' is unstable on cameras with blended profiles.
+    # Threaded via environment so science, arc, flat, twilight and sky
+    # extractions all use the SAME method — mixing methods breaks the
+    # per-fibre throughput calibration.
+    extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
+    if extraction_method not in ('optimal', 'boxcar'):
+        print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
+        extraction_method = 'boxcar'
+    boxcar_halfwidth = float(config.get('boxcar_halfwidth', 2.5))
+    os.environ['LLAMAS_EXTRACT_METHOD'] = extraction_method
+    os.environ['LLAMAS_BOXCAR_HALFWIDTH'] = str(boxcar_halfwidth)
+    print(f"Extraction method: {extraction_method}"
+          + (f" (fractional aperture half-width {boxcar_halfwidth} px)"
+             if extraction_method == 'boxcar' else ""))
+
     # Optional per-task memory reservation for extraction (default 0 = none).
     # A non-zero value throttles extraction concurrency on low-RAM machines; leave
     # at 0 to schedule purely on ray_num_cpus and avoid the infeasible-memory deadlock.
@@ -2507,7 +2575,7 @@ def main(config_path):
         # Resolve which fibres/regions build the sky model. 'frame' extracts a
         # dedicated blank-sky MEF here (once, reused for every science file);
         # 'skymap' preloads the user sky map; 'dimmest'/'middle-third' need no setup.
-        sky_selection_method = str(config.get('sky_selection_method', 'dimmest')).lower()
+        sky_selection_method = str(config.get('sky_selection_method', 'quantile')).lower()
         sky_n_fibres = int(config.get('sky_n_fibres', 20))
         sky_map_obj = None
         # Backward-compatible: an explicit sky_extraction_file still works.
@@ -2521,8 +2589,8 @@ def main(config_path):
                 sky_map_obj = skySelect.load_sky_map(sky_map_path)
             else:
                 print("WARNING: sky_selection_method='skymap' but no sky_map_file set; "
-                      "falling back to 'dimmest'")
-                sky_selection_method = 'dimmest'
+                      "falling back to 'quantile'")
+                sky_selection_method = 'quantile'
 
         if sky_selection_method == 'frame' and not sky_frame_extraction_file:
             sky_frame_files = config.get('sky_frame_files', None)
@@ -2544,8 +2612,8 @@ def main(config_path):
                     flat_pixel_maps=flat_pixel_maps if use_flat else None)
             else:
                 print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
-                      "falling back to 'dimmest'")
-                sky_selection_method = 'dimmest'
+                      "falling back to 'quantile'")
+                sky_selection_method = 'quantile'
 
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
@@ -2554,6 +2622,21 @@ def main(config_path):
 
             # Correct wavelengths for each extraction file
             corr_extractions, _ = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+
+            # Per-fibre throughput from the twilight (sky) flat, extracted with
+            # the same method as the science (default on; twilight_throughput =
+            # false reverts to the arc-carried lamp values).
+            if config.get('twilight_throughput', True):
+                _twi_dir = os.path.join(
+                    config.get('flat_field_output_dir',
+                               os.path.join(extraction_path, 'flat')), 'twilight')
+                _n_twi = apply_twilight_throughput(corr_extractions, _twi_dir) \
+                    if os.path.isdir(_twi_dir) else 0
+                if _n_twi:
+                    print(f"Twilight throughput applied to {_n_twi} cameras")
+                else:
+                    print("Twilight throughput: no twilight extraction found — "
+                          "keeping arc-carried values")
 
             corr_extraction_list = corr_extractions['extractions']
 

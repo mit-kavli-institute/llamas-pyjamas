@@ -63,6 +63,30 @@ remove_cosmic_rays = True
 # emission lines (spurious "sky lines", worst in the blue).
 
 #==============================================================================
+# EXTRACTION METHOD
+#==============================================================================
+# Applies to EVERY extraction in the run (science, arc, flat, twilight, sky) so
+# that the per-fibre throughput calibration and the science share one method.
+#
+# boxcar (default): trace-following aperture with FRACTIONAL pixel weights at
+#   the aperture edges (continuous across half-pixel trace crossings). The
+#   interim standard until the Horne optimal extraction is rebuilt: validated
+#   frame-to-frame per-fibre flux stability 0.98-0.99.
+# optimal: legacy profile-weighted extraction. Known to be unstable on cameras
+#   with blended fibre profiles (e.g. green 3B) — use only for comparison.
+extraction_method = boxcar
+# Boxcar aperture half-width in pixels (total aperture = 2x this). 2.5 px keeps
+# the aperture on the target fibre at the ~6.9 px fibre pitch; the legacy 4.5 px
+# window reached the neighbouring fibres' cores.
+boxcar_halfwidth = 2.5
+
+# Per-fibre relative throughput from the twilight (sky) flat extraction instead
+# of the arc-carried lamp values (default true; requires a twilight flat). The
+# twilight matches the sky's illumination geometry and is extracted with the
+# same method as the science. Set false to revert to arc-carried values.
+twilight_throughput = true
+
+#==============================================================================
 # EDGE BIAS (DC OFFSET) CORRECTION
 #==============================================================================
 # LLAMAS CCDs have no overscan region, and the per-channel bias DC level drifts

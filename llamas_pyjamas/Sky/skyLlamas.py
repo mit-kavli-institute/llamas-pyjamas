@@ -400,10 +400,10 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             counts, usable, method=selection_method,
             n_fibres=n_sky_fibres, in_sky_region=in_region)
 
-        # Min-fibre floor for 'dimmest': low-signal cameras (e.g. faint blue) may
-        # have very few positive fibres, leaving a fit built from 1-2 fibres.
-        # Broaden to the middle-third of finite fibres for a sturdier fit.
-        if (selection_method == 'dimmest'
+        # Min-fibre floor for 'dimmest'/'quantile': low-signal cameras (e.g. faint
+        # blue) may have very few positive fibres, leaving a fit built from 1-2
+        # fibres. Broaden to the middle-third of finite fibres for a sturdier fit.
+        if (selection_method in ('dimmest', 'quantile')
                 and sel_mask.sum() < skySelect.MIN_SKY_FIT_FIBRES
                 and finite_any.sum() >= skySelect.MIN_SKY_FIBRES):
             broadened = skySelect.select_sky_fibres(counts, finite_any, method='middle-third')

@@ -33,7 +33,14 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Methods understood by select_sky_fibres / SkySubtractConfig.
-VALID_METHODS = ("dimmest", "middle-third", "skymap", "frame", "all")
+VALID_METHODS = ("quantile", "dimmest", "middle-third", "skymap", "frame", "all")
+
+# Rank band for the 'quantile' method: fibres whose white-light brightness rank
+# (among finite fibres) falls in [QUANTILE_LO, QUANTILE_HI). Sits just above the
+# dead/vignetted low tail that 'dimmest' camps on, while staying far below any
+# object flux. ~5% of ~300 fibres => ~15 sky fibres per camera.
+QUANTILE_LO = 0.05
+QUANTILE_HI = 0.10
 
 # A selection that leaves fewer than this many fibres is treated as degenerate
 # and falls back (mirrors the relaxation in skyMask.build_sky_fiber_mask).
@@ -49,7 +56,7 @@ MIN_SKY_FIT_FIBRES = 10
 # Core fibre selector
 # ----------------------------------------------------------------------------
 def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
-                      in_sky_region=None):
+                      in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI):
     """Return a boolean mask of the fibres to use for the sky estimate.
 
     Parameters
@@ -104,12 +111,35 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
         return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                        label="middle-third")
 
+    if method == "quantile":
+        # Fibres whose brightness RANK among finite fibres lies in
+        # [QUANTILE_LO, QUANTILE_HI).  Unlike 'dimmest' this skips the
+        # dead/vignetted low tail while staying far below any object flux.
+        mask = _quantile_band(finite, brightness, q_lo, q_hi)
+        return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
+                                       label="quantile")
+
     # Default: dimmest-N among finite fibres.
     if method != "dimmest":
         logger.warning("skySelect: unknown method %r; using 'dimmest'", method)
     mask = _dimmest_n(finite, brightness, n_fibres)
     return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                    label="dimmest")
+
+
+def _quantile_band(finite, brightness, q_lo, q_hi):
+    """Boolean mask of finite fibres in the [q_lo, q_hi) brightness-rank band."""
+    n = brightness.size
+    idx_finite = np.where(finite)[0]
+    mask = np.zeros(n, dtype=bool)
+    nf = idx_finite.size
+    if nf == 0:
+        return mask
+    order = idx_finite[np.argsort(brightness[idx_finite])]  # ascending
+    i0 = int(np.floor(q_lo * nf))
+    i1 = max(i0 + 1, int(np.ceil(q_hi * nf)))
+    mask[order[i0:i1]] = True
+    return mask
 
 
 def _dimmest_n(finite, brightness, n_fibres):

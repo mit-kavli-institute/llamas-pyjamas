@@ -79,7 +79,7 @@ class SkySubtractConfig:
     # 'dimmest'/'frame' -> faint-population (white-light percentile) basis;
     # 'middle-third' -> central third by brightness; 'skymap' -> fibres in the
     # user sky map.  See llamas_pyjamas.Sky.skySelect.
-    selection_method: str = "dimmest"
+    selection_method: str = "quantile"
     sky_map_file: Optional[str] = None
 
     # source masking
