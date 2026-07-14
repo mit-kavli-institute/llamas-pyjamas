@@ -33,7 +33,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Methods understood by select_sky_fibres / SkySubtractConfig.
-VALID_METHODS = ("quantile", "dimmest", "middle-third", "skymap", "frame", "all")
+VALID_METHODS = ("stratified", "quantile", "dimmest", "middle-third",
+                 "skymap", "frame", "all")
 
 # Rank band for the 'quantile' method: fibres whose white-light brightness rank
 # (among finite fibres) falls in [QUANTILE_LO, QUANTILE_HI). Sits just above the
@@ -41,6 +42,17 @@ VALID_METHODS = ("quantile", "dimmest", "middle-third", "skymap", "frame", "all"
 # object flux. ~5% of ~300 fibres => ~15 sky fibres per camera.
 QUANTILE_LO = 0.05
 QUANTILE_HI = 0.10
+
+# 'stratified' method: bin fibres by slit position (trace-y) and take the
+# faintest few per bin, so the sky model is built from fibres spanning the
+# whole slit. This removes a width bias: the plain faint selections pick the
+# low-throughput SLIT-EDGE fibres, so the pooled model carries edge-LSF and,
+# applied slit-wide, leaves ~2x larger residuals on OH lines (measured green,
+# 2026-07). Object guard: fibres brighter than STRAT_CAP_PCT (global) are
+# excluded first, so a compact object cannot enter any bin.
+STRAT_NBINS = 6        # trace-y bins across the slit
+STRAT_PER_BIN = 3      # faintest fibres kept per bin
+STRAT_CAP_PCT = 60.0   # exclude fibres above this global brightness percentile
 
 # A selection that leaves fewer than this many fibres is treated as degenerate
 # and falls back (mirrors the relaxation in skyMask.build_sky_fiber_mask).
@@ -56,7 +68,8 @@ MIN_SKY_FIT_FIBRES = 10
 # Core fibre selector
 # ----------------------------------------------------------------------------
 def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
-                      in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI):
+                      in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI,
+                      fiber_y=None):
     """Return a boolean mask of the fibres to use for the sky estimate.
 
     Parameters
@@ -111,6 +124,18 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
         return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                        label="middle-third")
 
+    if method == "stratified":
+        # Faintest few per trace-y bin (spans the slit), object-capped. Needs
+        # per-fibre slit position; without it, fall back to quantile.
+        if fiber_y is None:
+            logger.warning("skySelect: method='stratified' but no fiber_y given; "
+                           "falling back to 'quantile'")
+            return select_sky_fibres(brightness, finite, method="quantile",
+                                     n_fibres=n_fibres, q_lo=q_lo, q_hi=q_hi)
+        mask = _stratified(finite, brightness, np.asarray(fiber_y, dtype=float))
+        return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
+                                       label="stratified")
+
     if method == "quantile":
         # Fibres whose brightness RANK among finite fibres lies in
         # [QUANTILE_LO, QUANTILE_HI).  Unlike 'dimmest' this skips the
@@ -125,6 +150,38 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
     mask = _dimmest_n(finite, brightness, n_fibres)
     return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                    label="dimmest")
+
+
+def _stratified(finite, brightness, fiber_y,
+                nbin=STRAT_NBINS, per=STRAT_PER_BIN, cap_pct=STRAT_CAP_PCT):
+    """Mask of the faintest ``per`` fibres in each of ``nbin`` trace-y bins,
+    after excluding fibres brighter than the global ``cap_pct`` percentile.
+
+    Spans the slit (removes the edge-LSF bias of the plain faint selections)
+    while the global cap keeps a compact object out of every bin.
+    """
+    n = brightness.size
+    mask = np.zeros(n, dtype=bool)
+    pool = finite & np.isfinite(fiber_y)
+    if pool.sum() == 0:
+        return mask
+    cap = np.nanpercentile(brightness[pool], cap_pct)
+    pool = pool & (brightness <= cap)
+    if pool.sum() == 0:
+        return mask
+    yv = fiber_y[pool]
+    edges = np.linspace(np.nanmin(yv), np.nanmax(yv), nbin + 1)
+    idx_pool = np.where(pool)[0]
+    for k in range(nbin):
+        lo, hi = edges[k], edges[k + 1]
+        inb = idx_pool[(fiber_y[idx_pool] >= lo) &
+                       (fiber_y[idx_pool] <= hi if k == nbin - 1
+                        else fiber_y[idx_pool] < hi)]
+        if inb.size == 0:
+            continue
+        faint = inb[np.argsort(brightness[inb])][:per]
+        mask[faint] = True
+    return mask
 
 
 def _quantile_band(finite, brightness, q_lo, q_hi):

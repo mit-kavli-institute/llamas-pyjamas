@@ -291,11 +291,18 @@ sky_subtract = True
 
 # Which fibres/regions build the sky model. This drives BOTH the base model
 # (skyModel_1d) and, for consistency, the advanced framework's PCA basis below.
-#   dimmest       (default) the sky_n_fibres faintest fibres per camera.
+#   stratified    (default) the faintest few fibres in each of several trace-y
+#                 bins, so the sky model is built from fibres spanning the whole
+#                 slit. The plain-faint methods pick the low-throughput SLIT-EDGE
+#                 fibres, so their pooled model carries edge-LSF and leaves ~2x
+#                 larger residuals on OH lines (measured green). A global
+#                 brightness cap first removes any compact object.
+#   quantile      the 5-10th brightness-percentile fibres (skips the dead tail).
+#   dimmest       the sky_n_fibres faintest fibres per camera.
 #   middle-third  legacy: the central third of fibres ranked by brightness.
 #   skymap        fibres falling in a user sky region -> set sky_map_file.
 #   frame         build from dedicated blank-sky exposures -> set sky_frame_files.
-sky_selection_method = dimmest
+sky_selection_method = stratified
 # Number of faint fibres for the 'dimmest' method (default 20).
 # sky_n_fibres = 20
 # For sky_selection_method = skymap: a 2-D FITS marking sky regions. Either a

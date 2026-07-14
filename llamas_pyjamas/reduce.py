@@ -2577,7 +2577,7 @@ def main(config_path):
         # Resolve which fibres/regions build the sky model. 'frame' extracts a
         # dedicated blank-sky MEF here (once, reused for every science file);
         # 'skymap' preloads the user sky map; 'dimmest'/'middle-third' need no setup.
-        sky_selection_method = str(config.get('sky_selection_method', 'quantile')).lower()
+        sky_selection_method = str(config.get('sky_selection_method', 'stratified')).lower()
         sky_n_fibres = int(config.get('sky_n_fibres', 20))
         sky_map_obj = None
         # Backward-compatible: an explicit sky_extraction_file still works.
@@ -2592,7 +2592,7 @@ def main(config_path):
             else:
                 print("WARNING: sky_selection_method='skymap' but no sky_map_file set; "
                       "falling back to 'quantile'")
-                sky_selection_method = 'quantile'
+                sky_selection_method = 'stratified'
 
         if sky_selection_method == 'frame' and not sky_frame_extraction_file:
             sky_frame_files = config.get('sky_frame_files', None)
@@ -2615,7 +2615,7 @@ def main(config_path):
             else:
                 print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
                       "falling back to 'quantile'")
-                sky_selection_method = 'quantile'
+                sky_selection_method = 'stratified'
 
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")

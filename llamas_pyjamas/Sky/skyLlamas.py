@@ -396,14 +396,25 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         if selection_method == 'skymap' and sky_map is not None:
             benchsides_cam = np.array([f"{bench}{side}"] * n_fibers)
             in_region = skySelect.fibres_in_sky_region(benchsides_cam, fiber, sky_map)
+        # Per-fibre slit position (trace-y at mid column) for 'stratified'.
+        fiber_y = None
+        if selection_method == 'stratified':
+            fiber_y = np.full(n_fibers, np.nan)
+            for k in range(n_fibers):
+                tr = getattr(sky[extension[k]], 'trace', None)
+                traces = getattr(tr, 'traces', None) if tr is not None else None
+                if traces is not None and fiber[k] < traces.shape[0]:
+                    fiber_y[k] = traces[fiber[k], traces.shape[1] // 2]
+            if not np.isfinite(fiber_y).any():
+                fiber_y = None  # no trace info -> select_sky_fibres falls back to quantile
         sel_mask = skySelect.select_sky_fibres(
             counts, usable, method=selection_method,
-            n_fibres=n_sky_fibres, in_sky_region=in_region)
+            n_fibres=n_sky_fibres, in_sky_region=in_region, fiber_y=fiber_y)
 
         # Min-fibre floor for 'dimmest'/'quantile': low-signal cameras (e.g. faint
         # blue) may have very few positive fibres, leaving a fit built from 1-2
         # fibres. Broaden to the middle-third of finite fibres for a sturdier fit.
-        if (selection_method in ('dimmest', 'quantile')
+        if (selection_method in ('dimmest', 'quantile', 'stratified')
                 and sel_mask.sum() < skySelect.MIN_SKY_FIT_FIBRES
                 and finite_any.sum() >= skySelect.MIN_SKY_FIBRES):
             broadened = skySelect.select_sky_fibres(counts, finite_any, method='middle-third')
@@ -433,50 +444,56 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                                          fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
-        # Guard: drop selected fibres whose xshift map deviates wildly from the
-        # camera consensus (bogus wavelength solutions on dead/edge fibres).
-        # Such a fibre extends the fit domain into a region only IT covers;
-        # the bspline knots there are singular ("NaN in cholesky_band") and
-        # pypeit then returns an sset that evaluates to zero EVERYWHERE —
-        # silently zeroing the whole camera's sky model (green 3B, 2026-07-14).
-        _XSHIFT_FIBRE_TOL = 10.0  # px; per-fibre median xshift offset vs camera median
-        _cam_med = np.nanmedian([np.nanmedian(sky[extension[i]].xshift[fiber[i], :]
-                                              - np.arange(sky[extension[i]].xshift.shape[1]))
-                                 for i in sel_idx])
-        _kept = []
-        for i in sel_idx:
-            _off = np.nanmedian(sky[extension[i]].xshift[fiber[i], :]
-                                - np.arange(sky[extension[i]].xshift.shape[1]))
-            if np.isfinite(_off) and abs(_off - _cam_med) <= _XSHIFT_FIBRE_TOL:
-                _kept.append(i)
-        if len(_kept) < len(sel_idx):
-            print(f"  Dropped {len(sel_idx) - len(_kept)} sky fibre(s) with deviant "
-                  f"xshift maps (>{_XSHIFT_FIBRE_TOL:.0f} px from camera consensus)")
-            logger.warning("skyModel_1d: %s %s%s dropped %d sky fibre(s) with "
-                           "deviant xshift maps", channel, bench, side,
-                           len(sel_idx) - len(_kept))
-        if len(_kept) >= MIN_CAMERA_SKY_FIBRES:
-            sel_idx = np.asarray(_kept)
-
         sky_fitx = np.array([])
         sky_fity = np.array([])
+        sky_fitf = np.array([])   # source-fibre id per point (for coverage trimming)
 
         for i in sel_idx:
             tp = sky[extension[i]].relative_throughput[fiber[i]]
             if not np.isfinite(tp) or tp <= 0:
                 tp = 1.0
-            sky_fitx = np.append(sky_fitx, sky[extension[i]].xshift[fiber[i],:])
-            sky_fity = np.append(sky_fity, sky[extension[i]].counts[fiber[i],:] / tp)
+            xr = sky[extension[i]].xshift[fiber[i], :]
+            sky_fitx = np.append(sky_fitx, xr)
+            sky_fity = np.append(sky_fity, sky[extension[i]].counts[fiber[i], :] / tp)
+            sky_fitf = np.append(sky_fitf, np.full(xr.size, i))
 
         # Re-sort in order of increasing wavelength
         idx = np.argsort(sky_fitx)
         sky_fitx = sky_fitx[idx]
         sky_fity = sky_fity[idx]
+        sky_fitf = sky_fitf[idx]
 
         # Filter out bad pixels before the fit
         gd = (~np.isnan(sky_fity))
         sky_fitx = sky_fitx[gd]
         sky_fity = sky_fity[gd]
+        sky_fitf = sky_fitf[gd]
+
+        # Fit-domain trimming: restrict the fit to the xshift range covered by at
+        # least MIN_CAMERA_SKY_FIBRES distinct fibres. A fibre with a deviant
+        # wavelength solution (e.g. green 3B's ~-71 px edge fibres) extends the
+        # pooled domain into a region only IT covers; the bspline knots there are
+        # singular ("NaN in cholesky_band") and pypeit then returns an sset that
+        # evaluates to zero EVERYWHERE, silently zeroing the camera's sky. Unlike
+        # a per-fibre offset cut, coverage trimming keeps every fibre over the
+        # well-sampled range (the legit fibre-to-fibre xshift spread is ~23 px,
+        # so no offset threshold cleanly separates bogus from real).
+        if sky_fitx.size:
+            _nbin = 256
+            _lo, _hi = np.nanmin(sky_fitx), np.nanmax(sky_fitx)
+            if _hi > _lo:
+                _edges = np.linspace(_lo, _hi, _nbin + 1)
+                _bi = np.clip(np.digitize(sky_fitx, _edges) - 1, 0, _nbin - 1)
+                _cov = np.array([len(np.unique(sky_fitf[_bi == k])) for k in range(_nbin)])
+                _ok_bins = np.where(_cov >= MIN_CAMERA_SKY_FIBRES)[0]
+                if _ok_bins.size:
+                    _dlo, _dhi = _edges[_ok_bins.min()], _edges[_ok_bins.max() + 1]
+                    _keep = (sky_fitx >= _dlo) & (sky_fitx <= _dhi)
+                    if _keep.sum() < sky_fitx.size:
+                        print(f"  Trimmed sky-fit domain to [{_dlo:.0f},{_dhi:.0f}] "
+                              f"(>= {MIN_CAMERA_SKY_FIBRES} fibres/bin); dropped "
+                              f"{sky_fitx.size - int(_keep.sum())} sparse edge pixels")
+                        sky_fitx = sky_fitx[_keep]; sky_fity = sky_fity[_keep]; sky_fitf = sky_fitf[_keep]
 
         if sky_fitx.size == 0:
             # F3: defer to channel-global fallback instead of a silent zero sky.
