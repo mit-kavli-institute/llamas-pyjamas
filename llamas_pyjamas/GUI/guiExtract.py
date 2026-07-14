@@ -628,7 +628,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
     if method is None:
         method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'optimal').strip().lower()
-    if method not in ('optimal', 'boxcar', 'horne'):
+    if method not in ('optimal', 'boxcar', 'horne', 'legacy'):
         logger.warning(f"Unknown extraction method '{method}'; using 'optimal'")
         method = 'optimal'
     print(f'Extraction method: {method}')

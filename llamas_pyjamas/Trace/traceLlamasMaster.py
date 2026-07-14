@@ -817,56 +817,65 @@ class TraceLlamas:
         """
 
         
-        ref = self.data[12,:]
+        # Per-column background from the unilluminated rows below the fibre
+        # bundle (traces span ~130-1950). Replaces the old single-row hack
+        # (ref = data[12,:]) which injected one row's noise into every row and
+        # left row 12 itself unsubtracted. Frames arrive bias-corrected
+        # (bias-first), so this only removes residual scattered light.
+        bg = np.nanmedian(self.data[4:20, :], axis=0)
+        data0 = self.data - bg[None, :]
 
-        # Use a working copy of "data" so as not to overwrite that with normalized data
-        data_work = np.copy(self.data) 
-        for i in range(self.naxis2):
-            if (i != 12):
-                data_work[i,:] = self.data[i,:] - ref
+        # Profile window half-width [px]. Measured trade at the ~6.9 px fibre
+        # pitch (2026-07): 3.0 admits the neighbouring fibres' wings — with a
+        # bright dithering object next door, frame-to-frame flux stability on
+        # blended cameras drops (green 4B 0.97 -> 0.80). 2.0 is the optimum;
+        # the Horne S/N gain comes from variance weighting, not window width.
+        PROF_HALFWIDTH = 2.0
 
         fiberimg = np.full(self.data.shape, -1, dtype=int)   # Lists the fiber # of each pixel
         profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
         bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
-        
+
         for index, item in enumerate(self.traces):
-            
-            ytrace = item 
+
+            ytrace = item
 
             # Generate a curved "y" image
             yy = np.outer(np.arange(self.naxis2),np.ones(self.naxis1)) \
                 - np.outer(np.ones(self.naxis2),ytrace)
 
-            # Normalize out the spectral shape of the lamp for profile fitting
-            for i in range(self.naxis1):
-                norm = np.nansum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
-                data_work[:,i] = data_work[:,i] / norm
+            profmask = np.abs(yy) < PROF_HALFWIDTH
+
+            # Normalize out the spectral shape of the lamp for profile fitting.
+            # Per-column flux of THIS fibre from the ORIGINAL background-
+            # subtracted data — the old code divided data_work in place inside
+            # the fibre loop, so each fibre saw data normalized by every
+            # previous fibre's flux, and a near-zero norm at a dead fibre
+            # exploded the column for all subsequent fibres.
+            colnorm = np.nansum(np.where(profmask, data0, 0.0), axis=0)
+            _floor = 0.05 * max(np.nanmedian(colnorm[colnorm > 0]), 1e-3)
+            goodcol = np.isfinite(colnorm) & (colnorm > _floor)
+            data_work = data0 / np.where(goodcol, colnorm, np.nan)[None, :]
 
             # Generate a mask of pixels that are
-            # (a) within 4 pixels of the profile center for this fiber and
-            # (b) not NaNs or Infs
+            # (a) within the profile window of this fiber's trace,
+            # (b) in a column with usable normalization, and
+            # (c) not NaNs/Infs/outliers.
             # Also generate an inverse variance array that is presently flat weighting
 
-            infmask = np.ones(data_work.shape,dtype=bool)
-            NaNmask = np.ones(data_work.shape,dtype=bool)
-            badmask = np.ones(data_work.shape,dtype=bool)
-            profmask = np.zeros(data_work.shape,dtype=bool)
+            infmask = ~np.isinf(data_work)
+            NaNmask = ~np.isnan(data_work)
+            badmask = (data_work <= 20) & (data_work >= -5)
             invvar = np.ones(data_work.shape,dtype=float)
-            
-            infmask[np.where(np.isinf(data_work))]  = False
-            NaNmask[np.where(np.isnan(data_work))] = False
-            badmask[np.where(data_work > 20)] = False
-            badmask[np.where(data_work < -5)] = False
-            ##this is where we ajust the width of the profile mask in pixels
-            profmask[np.where(np.abs(yy) < 2)] = True #originally this was 4
 
-            inprof = np.where(infmask & profmask & NaNmask & badmask)
+            inprof = np.where(infmask & profmask & NaNmask & badmask
+                              & goodcol[None, :])
 
             # Fit the fiber spatial profile with a bspline
-            
+
             sset,outmask = iterfit(yy[inprof],data_work[inprof],maxiter=6, \
                         invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
-            
+
             self.profmask = profmask
             self.inprof = inprof
 

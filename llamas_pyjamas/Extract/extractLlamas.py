@@ -152,6 +152,11 @@ class ExtractLlamas:
             if method is None:
                 method = 'optimal' if optimal else 'boxcar'
             method = str(method).lower()
+            # 'optimal' is the user-facing name for the Horne estimator; the
+            # pre-2026-07 profile-weighted mean survives as 'legacy' for
+            # comparison only.
+            if method == 'optimal':
+                method = 'horne'
             print(f'Extraction method: {method}')
             print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
 
@@ -212,7 +217,25 @@ class ExtractLlamas:
                     colP = np.zeros(_nx)
                     np.add.at(colP, xs, P)
                     Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
-                    V = _rn2 + np.clip(fpix, 0, None)
+
+                    # Pass 1: profile-weighted flux with constant variance,
+                    # used only to build the MODEL-based variance. Weighting by
+                    # the raw data instead (V = RN^2 + f) anti-correlates the
+                    # weights with the noise and costs ~10% S/N.
+                    num0 = np.zeros(_nx); den0 = np.zeros(_nx)
+                    np.add.at(num0, xs, Pn * fpix)
+                    np.add.at(den0, xs, Pn * Pn)
+                    F0 = np.where(den0 > 0, num0 / np.where(den0 > 0, den0, 1.0), 0.0)
+                    # Smooth the model along the dispersion axis before it
+                    # enters the variance: an unsmoothed F0 makes the weights
+                    # track the frame's own noise, decorrelating repeat
+                    # exposures (measured: 4B stability 0.96 -> 0.80). Real
+                    # spectral structure is preserved at the 9-px scale.
+                    _k = 9
+                    F0s = np.convolve(np.clip(F0, 0, None), np.ones(_k) / _k, mode='same')
+
+                    # Pass 2: Horne with model variance V = RN^2 + max(F0s*P, 0)
+                    V = _rn2 + np.clip(F0s[xs] * Pn, 0, None)
                     w = Pn / V
                     num = np.zeros(_nx)
                     den = np.zeros(_nx)
@@ -222,7 +245,7 @@ class ExtractLlamas:
                     self.counts[ifiber, :] = np.where(ok, num / np.where(ok, den, 1.0), 0.0)
                     self.counts_err[ifiber, :] = np.where(ok, 1.0 / np.sqrt(np.where(ok, den, 1.0)), 0.0)
 
-                elif method == 'optimal':
+                elif method == 'legacy':
                     # LEGACY profile-weighted mean (NOT Horne): kept for
                     # comparison only. Not flux conserving; dropped pixels bias
                     # the flux low because the denominator keeps their weight.

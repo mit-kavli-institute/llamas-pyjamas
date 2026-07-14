@@ -1798,12 +1798,14 @@ def main(config_path):
     # extractions all use the SAME method — mixing methods breaks the
     # per-fibre throughput calibration.
     extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
-    if extraction_method not in ('optimal', 'boxcar', 'horne'):
+    if extraction_method not in ('optimal', 'boxcar', 'horne', 'legacy'):
         print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
         extraction_method = 'boxcar'
     boxcar_halfwidth = float(config.get('boxcar_halfwidth', 2.5))
     os.environ['LLAMAS_EXTRACT_METHOD'] = extraction_method
     os.environ['LLAMAS_BOXCAR_HALFWIDTH'] = str(boxcar_halfwidth)
+    # Detector read noise [DN] for Horne variance weighting (read_noise config key).
+    os.environ['LLAMAS_READ_NOISE'] = str(float(config.get('read_noise', 3.5)))
     print(f"Extraction method: {extraction_method}"
           + (f" (fractional aperture half-width {boxcar_halfwidth} px)"
              if extraction_method == 'boxcar' else ""))
