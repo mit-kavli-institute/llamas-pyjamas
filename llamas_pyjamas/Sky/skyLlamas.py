@@ -520,6 +520,36 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                                          fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
+        # Cross-fibre consensus rejection (before the bspline). A REAL sky line
+        # is high in every fibre; a per-fibre artifact (hot pixel, surviving
+        # cosmic ray, flat feature) is high in ONE. The bspline's own rejection
+        # cannot tell them apart because its upper limit is deliberately lenient
+        # (kept high so real sky lines are not clipped), so a 1-fibre spike gets
+        # fit as if it were sky and its narrow model bump over-subtracts that one
+        # camera (green 3A/3B/4B, 2026-07). Here each point is compared to the
+        # running cross-fibre median at its xshift (window ~ a couple of fibres'
+        # worth of the xshift-sorted pool): points far ABOVE the consensus are
+        # dropped, real lines (all fibres high => high median) survive.
+        if len(sel_idx) >= 8 and sky_fitx.size > 4 * len(sel_idx):
+            from scipy.ndimage import median_filter
+            # Window ~ one fibre's worth of the xshift-sorted pool, so the
+            # running median tracks even a sharp line's PEAK (a wider window
+            # spans the line shoulders and would clip real bright peaks).
+            # Threshold 8*MAD: single-fibre artifacts sit tens of MAD above the
+            # consensus, real bright lines only a few, so this catches the
+            # former without touching the latter.
+            win = int(max(len(sel_idx), 15))
+            base = median_filter(sky_fity, size=win, mode='nearest')
+            mad = 1.4826 * median_filter(np.abs(sky_fity - base), size=win, mode='nearest')
+            mad = np.maximum(mad, 0.05 * np.nanmedian(np.abs(base)) + 1.0)
+            keep_c = (sky_fity - base) <= 8.0 * mad
+            n_rej = int((~keep_c).sum())
+            if 0 < n_rej < 0.2 * sky_fity.size:   # sanity: never drop a big fraction
+                sky_fitx = sky_fitx[keep_c]; sky_fity = sky_fity[keep_c]
+                sky_fitf = sky_fitf[keep_c]
+                print(f"  Consensus rejection: dropped {n_rej} single-fibre outlier "
+                      f"pixels ({channel} {bench}{side})")
+
         print(f"  Fitting sky with {len(sky_fitx)} points from {len(sel_idx)} fibers "
               f"(method='{selection_method}')")
         # Rejection: sky EMISSION lines are real positive signal, not outliers.

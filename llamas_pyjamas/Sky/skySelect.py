@@ -50,8 +50,9 @@ QUANTILE_HI = 0.10
 # applied slit-wide, leaves ~2x larger residuals on OH lines (measured green,
 # 2026-07). Object guard: fibres brighter than STRAT_CAP_PCT (global) are
 # excluded first, so a compact object cannot enter any bin.
-STRAT_NBINS = 6        # trace-y bins across the slit
-STRAT_PER_BIN = 3      # faintest fibres kept per bin
+STRAT_NBINS = 8        # trace-y bins across the slit
+STRAT_PER_BIN = 5      # faintest fibres kept per bin (=> ~30-40 sky fibres,
+                       # enough for robust cross-fibre outlier rejection)
 STRAT_CAP_PCT = 60.0   # exclude fibres above this global brightness percentile
 
 # A selection that leaves fewer than this many fibres is treated as degenerate
