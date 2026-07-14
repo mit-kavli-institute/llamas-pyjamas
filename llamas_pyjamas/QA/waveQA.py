@@ -658,6 +658,14 @@ def sky_xshift_error_qa(sky1d_input, qa_dir=None, label='', emit='png',
             'n_matched_lines': int(all_err.size),
         }
 
+        if emit == 'none':
+            # Metrics-only (e.g. parameter sweeps): skip the figure entirely.
+            results[cam] = stats
+            logger.info(
+                f"waveQA skyXerr {cam}: rms={stats['skyx_err_rms_pix']:.2f}px "
+                f"med|err|={stats['skyx_median_abs_err_pix']:.2f}px")
+            continue
+
         try:
             import matplotlib
             matplotlib.use('Agg', force=False)

@@ -235,18 +235,41 @@ def _fit_surface(px, fc, target, w, order_x, order_fiber, naxis1):
                       minx2=-1.0, maxx2=1.0)
 
 
-def _fit_perturbation(px, resid, w, order, shrink_lines, naxis1):
+def _soft_threshold(value, se, min_snr):
+    """Significance-gate a fitted coefficient by soft-thresholding at min_snr*se.
+
+    Genuine offsets (|value| well above their standard error se) survive, merely
+    reduced by the threshold; offsets consistent with zero collapse to zero.
+    With min_snr <= 0 this is a no-op (returns value unchanged). This is what
+    stops the per-fibre perturbation from injecting fibre-to-fibre noise when the
+    matched lines don't actually constrain a real slit-tolerance offset.
+    """
+    if min_snr <= 0 or not np.isfinite(se) or se <= 0:
+        return value
+    thr = float(min_snr) * float(se)
+    return float(np.sign(value) * max(0.0, abs(value) - thr))
+
+
+def _fit_perturbation(px, resid, w, order, shrink_lines, naxis1, min_snr=0.0):
     """Small per-fibre correction about the surface, shrunk toward zero.
 
     order 0: weighted-mean offset with a zero-prior worth ``shrink_lines``
-    median-weight lines. order 1: ridge-regularized offset + tilt.
+    median-weight lines. order 1: ridge-regularized offset + tilt. Each fitted
+    coefficient is then significance-gated (soft-thresholded at ``min_snr`` times
+    its standard error) so noise-level offsets do not perturb the fibre.
     Returns a callable evaluating the perturbation on a pixel grid.
     """
     if px.size == 0:
         return lambda xg: np.zeros_like(np.asarray(xg, dtype=float))
     lam = float(shrink_lines) * float(np.median(w))
+    sw = float(np.sum(w))
+    # Effective sample size and weighted residual scatter -> coefficient errors.
+    n_eff = (sw ** 2) / float(np.sum(w ** 2)) if np.sum(w ** 2) > 0 else px.size
     if order <= 0:
-        offset = float(np.sum(w * resid) / (np.sum(w) + lam))
+        offset = float(np.sum(w * resid) / (sw + lam))
+        wvar = float(np.sum(w * (resid - offset) ** 2) / sw) if sw > 0 else 0.0
+        se = np.sqrt(max(wvar, 0.0) / max(n_eff, 1.0))
+        offset = _soft_threshold(offset, se, min_snr)
         return lambda xg: np.full(np.asarray(xg, dtype=float).shape, offset)
     # order 1: ridge on [1, xn]
     half = (naxis1 - 1) / 2.0
@@ -259,11 +282,80 @@ def _fit_perturbation(px, resid, w, order, shrink_lines, naxis1):
         c = np.linalg.solve(lhs, rhs)
     except np.linalg.LinAlgError:
         c = np.zeros(2)
+    if min_snr > 0:
+        model = c[0] + c[1] * xn
+        wvar = float(np.sum(w * (resid - model) ** 2) / sw) if sw > 0 else 0.0
+        try:
+            cov = np.linalg.inv(lhs) * wvar
+            se = np.sqrt(np.clip(np.diag(cov), 0, None))
+        except np.linalg.LinAlgError:
+            se = np.zeros(2)
+        c = np.array([_soft_threshold(c[0], se[0], min_snr),
+                      _soft_threshold(c[1], se[1], min_snr)])
     return lambda xg: c[0] + c[1] * (np.asarray(xg, dtype=float) / half - 1.0)
 
 
 def _monotonic(arr):
     return bool(np.all(np.diff(arr) > 0))
+
+
+def _cluster_consensus(vals, cams, tol, min_cams):
+    """Group common-frame line positions and keep those seen in enough cameras.
+
+    ``vals`` are candidate line xshifts pooled across cameras, ``cams`` the
+    parallel camera index of each. Positions within ``tol`` form a cluster; a
+    cluster confirmed by at least ``min_cams`` distinct cameras is a real line
+    (noise does not repeat coherently across cameras) and its median position is
+    returned. This is how blue-end lines missing from the catalog get harvested
+    without any wavelength ID.
+    """
+    vals = np.asarray(vals, float)
+    cams = np.asarray(cams)
+    if vals.size == 0:
+        return np.array([])
+    order = np.argsort(vals)
+    vals, cams = vals[order], cams[order]
+    splits = np.where(np.diff(vals) > tol)[0] + 1
+    out = []
+    for g in np.split(np.arange(vals.size), splits):
+        if len(set(cams[g].tolist())) >= min_cams:
+            out.append(float(np.median(vals[g])))
+    return np.array(out)
+
+
+def _apply_edge_extrap(vals, x, x_lo, x_hi, mode='linear', slope_win=50):
+    """Replace the surface beyond the constrained range with a controlled tail.
+
+    Past the outermost matched arc line the Legendre surface is unconstrained and
+    can swing several pixels (measured 2-6 px on blue), which misaligns the sky
+    model at the wavelength extremes and produces broad P-Cygni residuals. This
+    continues each fibre's xshift with a C1 linear (or quadratic) extension using
+    the local slope/curvature at the boundary, so every fibre extrapolates the
+    same smooth, controlled way. ``mode='none'`` disables (raw polynomial tail).
+    """
+    if mode == 'none':
+        return vals
+    out = vals.copy()
+    n = len(x)
+    hi = int(np.clip(np.floor(x_hi), 0, n - 1))
+    lo = int(np.clip(np.ceil(x_lo), 0, n - 1))
+    # High-x (long-wavelength / "red") end
+    if hi < n - 1 and hi - slope_win >= 0:
+        if mode == 'quadratic':
+            c = np.polyfit(x[hi - slope_win:hi + 1], vals[hi - slope_win:hi + 1], 2)
+            out[hi + 1:] = np.polyval(c, x[hi + 1:])
+        else:
+            slope = (vals[hi] - vals[hi - slope_win]) / (x[hi] - x[hi - slope_win])
+            out[hi + 1:] = vals[hi] + slope * (x[hi + 1:] - x[hi])
+    # Low-x (short-wavelength / "blue") end
+    if lo > 0 and lo + slope_win < n:
+        if mode == 'quadratic':
+            c = np.polyfit(x[lo:lo + slope_win + 1], vals[lo:lo + slope_win + 1], 2)
+            out[:lo] = np.polyval(c, x[:lo])
+        else:
+            slope = (vals[lo + slope_win] - vals[lo]) / (x[lo + slope_win] - x[lo])
+            out[:lo] = vals[lo] + slope * (x[:lo] - x[lo])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -273,9 +365,12 @@ def _monotonic(arr):
 def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None,
                  surface_order_x=3, surface_order_fiber=2,
                  perturb_order=0, perturb_min_lines=8, perturb_shrink_lines=5.0,
+                 perturb_min_snr=0.0,
                  use_unidentified_peaks=True, blend_min_sep=8.0,
                  match_tol_pass1=4.0, match_tol_pass2=4.0,
-                 sigdetect=5.0, fwhm=4.0, line_source=None):
+                 sigdetect=5.0, fwhm=4.0, line_source=None, detection_cache=None,
+                 edge_extrap='linear', harvest_lines=True, harvest_sigdetect=3.0,
+                 harvest_min_cameras=3, harvest_tol=2.0):
     """Hybrid per-camera 2D surface + per-fibre perturbation xshift refinement.
 
     Saves ``<input>_refined2d.pkl`` (same conventions as refineArcX) and
@@ -295,7 +390,15 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         matching. Without line_source, centroids come from the reference
         pickle's own (old-epoch) spectra as before.
     """
-    arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_shifted_pickle)
+    # Accept either a pickle path or an already-loaded arcdict. The dict form
+    # (operated on in place, returned instead of saved) lets callers run many
+    # refinements without disk I/O — e.g. a parameter sweep.
+    if isinstance(arc_extraction_shifted_pickle, dict):
+        arcdict = arc_extraction_shifted_pickle
+        _save_result = False
+    else:
+        arcdict = extract.ExtractLlamas.loadExtraction(arc_extraction_shifted_pickle)
+        _save_result = True
     arcspec = arcdict['extractions']
     metadata = arcdict['metadata']
 
@@ -324,6 +427,48 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         # Catalog positions expressed in the reference xshift frame (mirrors
         # refineArcX's ref_line_xshift construction).
         ref_line_xshift = np.interp(catalog_pixels, x, ref_xshift)
+        n_catalog = ref_line_xshift.size
+
+        # --- Harvest extra line targets (self-calibrating) ---
+        # The hand-built catalog under-samples the wavelength extremes (blue: 6 of
+        # ~24 available lines below the mid-blue), leaving the xshift fit under-
+        # constrained there -> misaligned sky -> edge residuals. Detect lines on
+        # every real camera's reference fibre at ``harvest_sigdetect``, map each to
+        # the common xshift frame via that camera's own xshift, and keep those
+        # confirmed across >= ``harvest_min_cameras`` cameras. These add xshift
+        # constraints only; the wavelength solution (wv_fit below) is unchanged.
+        det_sig = harvest_sigdetect if harvest_lines else sigdetect
+        if harvest_lines:
+            hv, hc = [], []
+            for e_idx in range(len(arcspec)):
+                if metadata[e_idx]['channel'] != channel:
+                    continue
+                o = arcspec[e_idx]
+                rf = min(REF_FIBER, o.counts.shape[0] - 1)
+                s150 = np.nan_to_num(o.counts[rf, :])
+                if np.nanmax(s150) <= 1:
+                    continue  # placeholder camera
+                xs150 = o.xshift[rf, :]
+                if not _monotonic(xs150):
+                    continue
+                tc, _ = _detect_lines(s150, harvest_sigdetect, fwhm)
+                if tc is None:
+                    continue
+                cm = np.interp(tc, x, xs150)   # common-frame xshift of each line
+                hv.append(cm)
+                hc.append(np.full(cm.size, e_idx))
+            if hv:
+                harvested = _cluster_consensus(np.concatenate(hv),
+                                               np.concatenate(hc),
+                                               harvest_tol, harvest_min_cameras)
+                # keep only harvested targets not already covered by the catalog
+                new = np.array([t for t in harvested
+                                if ref_line_xshift.size == 0
+                                or np.min(np.abs(ref_line_xshift - t)) > harvest_tol])
+                if new.size:
+                    ref_line_xshift = np.sort(np.concatenate([ref_line_xshift, new]))
+                print(f"  {channel}: harvested {new.size} extra line targets "
+                      f"(catalog {n_catalog}, total {ref_line_xshift.size})")
 
         # Global xshift -> wavelength map from the reference fibre, exactly as
         # refineArcX builds wv_fit.
@@ -414,17 +559,33 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                         print(f"  {cam}: bootstrap xcorr failed — assuming "
                               f"zero epoch offset for pass 1")
 
-            # Detection once per fibre (cached; reused by both passes)
-            detections = []
+            # Detection once per fibre (cached in-run; reused by both passes).
+            # ``detection_cache`` (optional): a {(bench, side): [(tcent, ecent), ...]}
+            # dict of pre-computed centroids. Detection depends only on the line
+            # source and (sigdetect, fwhm), so when those are fixed across calls
+            # (e.g. a parameter sweep over fit-only knobs) the caller can supply
+            # the cache to skip the expensive re-detection. On a miss the
+            # detections are computed and stored back into the dict for reuse.
+            cache_key = (str(bench), side)
+            cached = detection_cache.get(cache_key) if detection_cache is not None else None
             n_det_total = 0
-            for i in range(nfibers):
-                if i < n_det_fibers:
-                    tcent, ecent = _detect_lines(det_counts[i, :], sigdetect, fwhm)
-                else:
-                    tcent, ecent = None, None
-                detections.append((tcent, ecent))
-                if tcent is not None:
-                    n_det_total += len(tcent)
+            if cached is not None:
+                detections = cached
+                for tcent, _ in detections:
+                    if tcent is not None:
+                        n_det_total += len(tcent)
+            else:
+                detections = []
+                for i in range(nfibers):
+                    if i < n_det_fibers:
+                        tcent, ecent = _detect_lines(det_counts[i, :], det_sig, fwhm)
+                    else:
+                        tcent, ecent = None, None
+                    detections.append((tcent, ecent))
+                    if tcent is not None:
+                        n_det_total += len(tcent)
+                if detection_cache is not None:
+                    detection_cache[cache_key] = detections
 
             identity = np.array([np.allclose(orig_xshift[i], x)
                                  for i in range(nfibers)])
@@ -484,6 +645,14 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                                     surface_order_x, surface_order_fiber,
                                     naxis1)
 
+            # Camera-wide constrained x-range (outermost matched arc lines);
+            # the surface is only trustworthy inside this, so xshift is
+            # extrapolated in a controlled way beyond it (see _apply_edge_extrap).
+            _pooled = (np.concatenate(q_px) if q_px
+                       else (np.concatenate(p_px) if p_px
+                             else np.array([0.0, naxis1 - 1.0])))
+            x_lo_c, x_hi_c = float(np.min(_pooled)), float(np.max(_pooled))
+
             # ---- Stage C: per-fibre perturbation + assembly ----
             n_perturb = n_surface_only = n_nomatch = n_revert = 0
             for i in range(nfibers):
@@ -504,7 +673,8 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                         perturb = _fit_perturbation(mp, resid_surface, mw,
                                                     perturb_order,
                                                     perturb_shrink_lines,
-                                                    naxis1)
+                                                    naxis1,
+                                                    min_snr=perturb_min_snr)
                         mode = 'surface+perturb'
                         n_perturb += 1
                     else:
@@ -517,6 +687,11 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                                   + perturb(mp))
                     pixels = mp
                     n_m = int(mp.size)
+
+                # Controlled extrapolation past the outermost matched line
+                # (kills the multi-px polynomial swing -> edge sky residuals).
+                new_xshift = _apply_edge_extrap(new_xshift, x, x_lo_c, x_hi_c,
+                                                edge_extrap)
 
                 if not _monotonic(new_xshift):
                     n_revert += 1
@@ -547,6 +722,8 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         src_dict = None
         src_lookup = {}
 
+    if not _save_result:
+        return arcdict
     sv = arc_extraction_shifted_pickle.replace('.pkl', '_refined2d.pkl')
     print(f"Saving 2D-refined arc solution to {sv}")
     extract.save_extractions(arcspec, savefile=sv)

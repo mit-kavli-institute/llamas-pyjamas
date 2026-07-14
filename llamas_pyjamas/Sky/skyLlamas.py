@@ -480,7 +480,17 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
 
         print(f"  Fitting sky with {len(sky_fitx)} points from {len(sel_idx)} fibers "
               f"(method='{selection_method}')")
-        sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6, kwargs_bspline={'bkspace':0.5})
+        # Rejection: sky EMISSION lines are real positive signal, not outliers.
+        # The pypeit default (upper=lower=5) clips line peaks — a bright blue line
+        # is ~7 sigma above the continuum scatter — so the bspline fits only the
+        # continuum and the lines are left ~90% unsubtracted. Use a high upper so
+        # true lines are kept, and a moderate lower to still reject dead/negative
+        # pixels. (bkspace 0.5 px is fine enough to represent the line profile.)
+        sky_reject_upper = 30.0
+        sky_reject_lower = 5.0
+        sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6,
+                                upper=sky_reject_upper, lower=sky_reject_lower,
+                                kwargs_bspline={'bkspace': 0.5})
 
         # F2: bound the sky model OUTPUT. Clipping the input xshift (below) is not
         # sufficient — the bspline can still return catastrophic values (~1e8–1e11)
