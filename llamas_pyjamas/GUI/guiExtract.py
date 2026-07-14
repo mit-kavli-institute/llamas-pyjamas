@@ -216,6 +216,16 @@ def _apply_edge_bias(data, tracer, header, bench, side, color, edge_bias):
              'level_stripes': float('nan'), 'level_combined': float('nan'),
              'bench': bench, 'side': side, 'color': color}
 
+    # Guard against double application: bias-first preprocessing (biasFirst.py)
+    # already measured and subtracted the edge DC and stamped EDGEDC/EDGESRC.
+    if 'EDGEDC' in header and str(header.get('EDGESRC', '')) not in ('', 'disabled'):
+        stats.update(edge_dc=float(header.get('EDGEDC', 0.0)),
+                     edge_npix=int(header.get('EDGENPIX', 0)),
+                     edge_src='pre-applied')
+        logger.info(f"Edge-bias {bench}{side} {color}: already applied upstream "
+                    f"(EDGEDC={header.get('EDGEDC', 0.0):.2f} DN) — skipping")
+        return data, stats
+
     if not eb.get('enabled', True):
         header['EDGEDC']   = (0.0, 'Edge-bias DC offset subtracted (DN)')
         header['EDGENPIX'] = (0, 'Edge-bias mask pixel count')
@@ -295,6 +305,108 @@ def _write_edge_qa_rows(qa_csv, science_file, primary_hdr, results):
                         st['edge_src'], wth])
 
 
+def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, color):
+    """Resolve the master-bias HDU for one extension, with verification + fallback.
+
+    Selection logic (shared by process_trace and Bias.biasFirst so the two can
+    never drift apart):
+    1. Try to load the master bias extension from ``use_bias`` (mode-checked
+       against the frame's READ-MDE).
+    2. Verify bench/side/color match; discard on mismatch.
+    3. If no valid master bias remains, build an inter-fibre/test-region
+       fallback bias from the frame itself.
+
+    Returns the chosen bias HDU (never None).
+    """
+    _BIAS_INTERFIBRE_LOG_THRESHOLD = 10.0  # DN — divergence above which a diagnostic warning is logged
+
+    frame_mode = header.get('READ-MDE', None)
+    bias = None
+
+    if use_bias is not None:
+        bias_file = os.fspath(use_bias)
+        print(f'Bias file: {bias_file}')
+        try:
+            bias = _grab_bias_hdu(bench=bench, side=side, color=color,
+                                  dir=bias_file, required_readmode=frame_mode)
+            logger.info(f"Loaded master bias for {bench}{side} {color}")
+        except (BiasNotFoundError, BiasReadModeError) as e:
+            logger.warning(f"Master bias failed for {bench}{side} {color}: {e}")
+            bias = None
+    else:
+        logger.info(f"No bias file path received for {bench}{side} {color}; using inter-fibre fallback")
+
+    if bias is not None:
+        # --- Bench/side/color verification before subtraction ---
+        bias_bench = str(bias.header.get('BENCH', '')).strip()
+        bias_side  = str(bias.header.get('SIDE',  '')).strip().upper()
+        bias_color = str(bias.header.get('COLOR', '')).strip().lower()
+        # CAM_NAME fallback if individual keywords are absent
+        if not (bias_bench and bias_side and bias_color) and 'CAM_NAME' in bias.header:
+            cam = bias.header['CAM_NAME']
+            parts = cam.split('_')
+            bias_color = parts[1].lower() if len(parts) >= 2 else ''
+            bias_bench = parts[0][0] if parts else ''
+            bias_side  = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
+
+        if (bias_bench and bias_side and bias_color and
+                (bias_bench != str(bench) or bias_side != str(side).upper() or
+                 bias_color != str(color).lower())):
+            logger.error(
+                f"Bias BSC mismatch: expected {bench}{side} {color}, "
+                f"got {bias_bench}{bias_side} {bias_color} — using inter-fibre fallback"
+            )
+            bias = None
+
+    if bias is not None:
+        # --- Inter-fibre diagnostic (informational only) ---
+        # Log the divergence between the raw frame's inter-fibre median and the
+        # master bias's inter-fibre median.  For science frames, this divergence
+        # is dominated by sky background in the gaps and can legitimately be
+        # hundreds of DN — it does NOT indicate a bad bias file.  The master
+        # bias is never discarded here; hard failures (missing file, read-mode
+        # mismatch, wrong detector) are handled earlier.
+        try:
+            gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
+            n_gap = int(gap_mask.sum())
+            if n_gap >= 100:
+                frame_if_level = float(np.nanmedian(hdu_data.astype(float)[gap_mask]))
+                bias_if_level  = float(np.nanmedian(bias.data[gap_mask]))
+                divergence = abs(frame_if_level - bias_if_level)
+                if divergence > _BIAS_INTERFIBRE_LOG_THRESHOLD:
+                    logger.warning(
+                        f"Master bias inter-fibre divergence for {bench}{side} {color}: "
+                        f"|frame_if={frame_if_level:.2f} - bias_if={bias_if_level:.2f}| = "
+                        f"{divergence:.2f} DN "
+                        f"(expected for sky-illuminated frames; master bias retained)"
+                    )
+                else:
+                    logger.info(
+                        f"Master bias inter-fibre check OK for {bench}{side} {color}: "
+                        f"divergence={divergence:.2f} DN"
+                    )
+            else:
+                logger.warning(
+                    f"Inter-fibre diagnostic skipped for {bench}{side} {color}: "
+                    f"only {n_gap} gap pixels (< 100)"
+                )
+        except Exception as exc:
+            logger.warning(
+                f"Inter-fibre bias diagnostic failed for {bench}{side} {color} "
+                f"({exc}); continuing with master bias"
+            )
+
+    if bias is None:
+        logger.warning(
+            f"No valid master bias for {bench}{side} {color} — "
+            f"using inter-fibre/test-region fallback."
+        )
+        bias = generate_fallback_bias_hdu(hdu_data, tracer=tracer)
+        logger.info(f"Fallback bias source: {bias.header['BIASSRC']}")
+
+    return bias
+
+
 @ray.remote
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
                   remove_cosmic_rays=True, edge_bias=None):
@@ -337,98 +449,16 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         with open(trace_file, mode='rb') as f:
             tracer = cloudpickle.load(f)
 
-        # Guard against double-subtraction
+        # Guard against double-subtraction (bias-first preprocessing stamps BIASSUB)
         if header.get('BIASSUB', False):
-            logger.warning(
+            logger.info(
                 f"BIASSUB already set for {bench}{side} {color} — skipping bias subtraction"
             )
             bias_subtracted_data = hdu_data.astype(float)
         else:
             # use_bias is the resolved bias file path from GUI_extract (may be None)
-            frame_mode = header.get('READ-MDE', None)
-            bias = None
-
-            if use_bias is not None:
-                bias_file = os.fspath(use_bias)
-                print(f'Bias file: {bias_file}')
-                try:
-                    bias = _grab_bias_hdu(bench=bench, side=side, color=color,
-                                          dir=bias_file, required_readmode=frame_mode)
-                    logger.info(f"Loaded master bias for {bench}{side} {color}")
-                except (BiasNotFoundError, BiasReadModeError) as e:
-                    logger.warning(f"Master bias failed for {bench}{side} {color}: {e}")
-                    bias = None
-            else:
-                logger.info(f"No bias file path received for {bench}{side} {color}; using inter-fibre fallback")
-
-            if bias is not None:
-                # --- Bench/side/color verification before subtraction ---
-                bias_bench = str(bias.header.get('BENCH', '')).strip()
-                bias_side  = str(bias.header.get('SIDE',  '')).strip().upper()
-                bias_color = str(bias.header.get('COLOR', '')).strip().lower()
-                # CAM_NAME fallback if individual keywords are absent
-                if not (bias_bench and bias_side and bias_color) and 'CAM_NAME' in bias.header:
-                    cam = bias.header['CAM_NAME']
-                    parts = cam.split('_')
-                    bias_color = parts[1].lower() if len(parts) >= 2 else ''
-                    bias_bench = parts[0][0] if parts else ''
-                    bias_side  = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
-
-                if (bias_bench and bias_side and bias_color and
-                        (bias_bench != str(bench) or bias_side != str(side).upper() or
-                         bias_color != str(color).lower())):
-                    logger.error(
-                        f"Bias BSC mismatch: expected {bench}{side} {color}, "
-                        f"got {bias_bench}{bias_side} {bias_color} — using inter-fibre fallback"
-                    )
-                    bias = None
-
-            if bias is not None:
-                # --- Inter-fibre diagnostic (informational only) ---
-                # Log the divergence between the raw frame's inter-fibre median and the
-                # master bias's inter-fibre median.  For science frames, this divergence
-                # is dominated by sky background in the gaps and can legitimately be
-                # hundreds of DN — it does NOT indicate a bad bias file.  The master
-                # bias is never discarded here; hard failures (missing file, read-mode
-                # mismatch, wrong detector) are handled earlier.
-                try:
-                    gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
-                    n_gap = int(gap_mask.sum())
-                    if n_gap >= 100:
-                        frame_if_level = float(np.nanmedian(hdu_data.astype(float)[gap_mask]))
-                        bias_if_level  = float(np.nanmedian(bias.data[gap_mask]))
-                        divergence = abs(frame_if_level - bias_if_level)
-                        if divergence > _BIAS_INTERFIBRE_LOG_THRESHOLD:
-                            logger.warning(
-                                f"Master bias inter-fibre divergence for {bench}{side} {color}: "
-                                f"|frame_if={frame_if_level:.2f} - bias_if={bias_if_level:.2f}| = "
-                                f"{divergence:.2f} DN "
-                                f"(expected for sky-illuminated frames; master bias retained)"
-                            )
-                        else:
-                            logger.info(
-                                f"Master bias inter-fibre check OK for {bench}{side} {color}: "
-                                f"divergence={divergence:.2f} DN"
-                            )
-                    else:
-                        logger.warning(
-                            f"Inter-fibre diagnostic skipped for {bench}{side} {color}: "
-                            f"only {n_gap} gap pixels (< 100)"
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        f"Inter-fibre bias diagnostic failed for {bench}{side} {color} "
-                        f"({exc}); continuing with master bias"
-                    )
-
-            if bias is None:
-                logger.warning(
-                    f"No valid master bias for {bench}{side} {color} — "
-                    f"using inter-fibre/test-region fallback."
-                )
-                bias = generate_fallback_bias_hdu(hdu_data, tracer=tracer)
-                logger.info(f"Fallback bias source: {bias.header['BIASSRC']}")
-
+            bias = select_bias_for_extension(hdu_data, header, tracer, use_bias,
+                                             bench, side, color)
             bias_data = bias.data
 
             # Compute bias-subtracted data

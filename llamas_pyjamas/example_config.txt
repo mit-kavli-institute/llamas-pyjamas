@@ -49,6 +49,20 @@ remove_cosmic_rays = True
 #mask_output_dir = /path/to/custom/mask/output
 
 #==============================================================================
+# BIAS-FIRST PREPROCESSING (always on, not configurable)
+#==============================================================================
+# Bias subtraction is ALWAYS the first data operation applied to every frame
+# (science, arc, flat, twilight, sky): the mode-appropriate (FAST/SLOW)
+# 2D master bias plus the per-frame edge DC offset (see below) are removed
+# up front and the corrected frames written to {output_dir}/bias_corrected/.
+# All later stages (flat division, tracing, extraction) then operate on
+# pedestal-free signal and skip their internal bias handling via the BIASSUB
+# header stamp. There is no switch for this: dividing a flat into a frame
+# that still carries its ~500 DN bias pedestal is unphysical and imprints
+# the pixel flat's percent-level spectral features as tens-of-DN fake
+# emission lines (spurious "sky lines", worst in the blue).
+
+#==============================================================================
 # EDGE BIAS (DC OFFSET) CORRECTION
 #==============================================================================
 # LLAMAS CCDs have no overscan region, and the per-channel bias DC level drifts

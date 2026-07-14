@@ -1831,6 +1831,68 @@ def main(config_path):
           f"min_distance={edge_bias_cfg['min_distance']}px, "
           f"use_flat_mask={edge_bias_cfg['use_flat_mask']}")
 
+    # ── BIAS-FIRST PREPROCESSING (unconditional) ────────────────────────────
+    # Bias subtraction is ALWAYS the first data operation for EVERY frame —
+    # science, arc, flat, twilight and sky — before flat division, tracing or
+    # extraction. Each raw MEF gets (1) the mode-appropriate (READ-MDE) 2D
+    # master bias and (2) the per-frame edge DC measured from the
+    # unilluminated stripes outside the fibre bundle, then is written to
+    # {output_dir}/bias_corrected/ with BIASSUB/EDGE* header stamps that make
+    # every downstream stage skip its internal bias handling (exactly-once).
+    # Not configurable: any other order is unphysical.
+    #
+    # WHY: the flat-field division previously ran on frames still carrying
+    # their ~500 DN bias pedestal, so percent-level spectral structure in the
+    # pixel flat was multiplied by the pedestal instead of the signal,
+    # imprinting tens-of-DN fake emission lines (the spurious blue "sky
+    # lines" of 2026-07). With the pedestal removed first, the same flat
+    # structure perturbs the signal by <1 DN.
+    from llamas_pyjamas.Bias.biasFirst import bias_correct_frame
+    print("\n" + "=" * 60)
+    print("BIAS-FIRST PREPROCESSING (master bias + edge DC, before all else)")
+    print("=" * 60)
+    _bias_corr_dir = os.path.join(output_dir, 'bias_corrected')
+
+    def _bias_first(path):
+        """Bias-correct one raw frame (resume-aware); returns the new path."""
+        if not path or not os.path.exists(path):
+            return path
+        _expected = os.path.join(
+            _bias_corr_dir,
+            os.path.splitext(os.path.basename(path))[0] + '_bias_corrected.fits')
+        if resume and os.path.exists(_expected):
+            print(f"RESUME: reusing bias-corrected {os.path.basename(_expected)}")
+            return _expected
+        return bias_correct_frame(
+            path, _bias_corr_dir,
+            slow_bias=slow_bias_file, fast_bias=fast_bias_file,
+            trace_dir=config.get('trace_output_dir'),
+            mastercalib_trace_dir=CALIB_DIR,
+            edge_bias=edge_bias_cfg)
+
+    # Calibration frames (single-path keys)
+    for _k in ('red_flat_file', 'green_flat_file', 'blue_flat_file',
+               'red_arc_file', 'green_arc_file', 'blue_arc_file',
+               'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
+               'blue_twilight_flat'):
+        if config.get(_k):
+            config[_k] = _bias_first(config[_k])
+
+    # Sky frames (list or comma-separated string)
+    _sky_frames = config.get('sky_frame_files')
+    if _sky_frames:
+        if isinstance(_sky_frames, str):
+            _sky_frames = [s.strip() for s in _sky_frames.split(',') if s.strip()]
+        config['sky_frame_files'] = [_bias_first(_f) for _f in _sky_frames]
+
+    # Science frames (list or single path)
+    _sci = config.get('science_files')
+    if isinstance(_sci, list):
+        config['science_files'] = [_bias_first(_f) for _f in _sci]
+    elif _sci:
+        config['science_files'] = _bias_first(_sci)
+    print("=" * 60 + "\n")
+
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
     # No need to pre-create a separate pixel_maps directory
     try:

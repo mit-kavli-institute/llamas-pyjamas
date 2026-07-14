@@ -595,22 +595,29 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            if use_bias:
-                if os.path.isfile(use_bias):
-                    bias_file = use_bias
-                else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            # Guard against double subtraction: frames preprocessed by the
+            # bias-first step (Bias/biasFirst.py) arrive with BIASSUB set and
+            # are already fully bias- and edge-DC-corrected.
+            if self.hdr.get('BIASSUB', False):
+                logger.info(f"BIASSUB already set for {self.benchside} {self.channel} "
+                            f"— skipping trace-time bias subtraction")
             else:
-                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-            print(f'Bias file: {bias_file}')
-            #### fix the directory here!
-            bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
-            
-            #should we be using the whole bias or just an overscan region?
-            bias_data = np.median(bias.data[20:50])
-            
-            self.data = self.data - bias_data
+                if use_bias:
+                    if os.path.isfile(use_bias):
+                        bias_file = use_bias
+                    else:
+                        logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                        bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                else:
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                print(f'Bias file: {bias_file}')
+                #### fix the directory here!
+                bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+
+                #should we be using the whole bias or just an overscan region?
+                bias_data = np.median(bias.data[20:50])
+
+                self.data = self.data - bias_data
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             
