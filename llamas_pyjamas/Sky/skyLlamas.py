@@ -433,6 +433,31 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                                          fiber=fiber.copy(), n_fibers=n_fibers))
             continue
 
+        # Guard: drop selected fibres whose xshift map deviates wildly from the
+        # camera consensus (bogus wavelength solutions on dead/edge fibres).
+        # Such a fibre extends the fit domain into a region only IT covers;
+        # the bspline knots there are singular ("NaN in cholesky_band") and
+        # pypeit then returns an sset that evaluates to zero EVERYWHERE —
+        # silently zeroing the whole camera's sky model (green 3B, 2026-07-14).
+        _XSHIFT_FIBRE_TOL = 10.0  # px; per-fibre median xshift offset vs camera median
+        _cam_med = np.nanmedian([np.nanmedian(sky[extension[i]].xshift[fiber[i], :]
+                                              - np.arange(sky[extension[i]].xshift.shape[1]))
+                                 for i in sel_idx])
+        _kept = []
+        for i in sel_idx:
+            _off = np.nanmedian(sky[extension[i]].xshift[fiber[i], :]
+                                - np.arange(sky[extension[i]].xshift.shape[1]))
+            if np.isfinite(_off) and abs(_off - _cam_med) <= _XSHIFT_FIBRE_TOL:
+                _kept.append(i)
+        if len(_kept) < len(sel_idx):
+            print(f"  Dropped {len(sel_idx) - len(_kept)} sky fibre(s) with deviant "
+                  f"xshift maps (>{_XSHIFT_FIBRE_TOL:.0f} px from camera consensus)")
+            logger.warning("skyModel_1d: %s %s%s dropped %d sky fibre(s) with "
+                           "deviant xshift maps", channel, bench, side,
+                           len(sel_idx) - len(_kept))
+        if len(_kept) >= MIN_CAMERA_SKY_FIBRES:
+            sel_idx = np.asarray(_kept)
+
         sky_fitx = np.array([])
         sky_fity = np.array([])
 
@@ -491,6 +516,26 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6,
                                 upper=sky_reject_upper, lower=sky_reject_lower,
                                 kwargs_bspline={'bkspace': 0.5})
+
+        # Guard: a singular fit (e.g. "NaN in cholesky_band") returns an sset
+        # that evaluates to ~zero everywhere while the data are healthy. Never
+        # accept such a model silently — defer to the channel-global fallback.
+        _probe = np.nanpercentile(sky_fitx, [10, 30, 50, 70, 90])
+        _mvals = sset.value(np.sort(_probe))[0]
+        _data_med = float(np.nanmedian(sky_fity))
+        if (not np.isfinite(_mvals).any()) or \
+           (np.nanmax(_mvals) <= 0) or \
+           (_data_med > 10 and float(np.nanmedian(_mvals)) < 0.05 * _data_med):
+            print(f"  WARNING: degenerate sky-model fit for {channel} {bench}{side} "
+                  f"(model median {float(np.nanmedian(_mvals)):.2f} vs data median "
+                  f"{_data_med:.2f}) — deferring to channel-global fallback.")
+            logger.warning("skyModel_1d: %s %s%s degenerate sky-model fit "
+                           "(model~0, data median %.1f); deferring to "
+                           "channel-global fallback", channel, bench, side, _data_med)
+            deferred_cameras.append(dict(channel=channel, bench=bench, side=side,
+                                         extension=extension.copy(),
+                                         fiber=fiber.copy(), n_fibers=n_fibers))
+            continue
 
         # F2: bound the sky model OUTPUT. Clipping the input xshift (below) is not
         # sufficient — the bspline can still return catastrophic values (~1e8–1e11)
