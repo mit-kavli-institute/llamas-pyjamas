@@ -78,15 +78,19 @@ class ExtractLlamas:
         fiberid (np.ndarray): Array storing fiber IDs.
     """
 
-    def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True) -> None:
+    def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True,
+                 method=None) -> None:
         """Initialize the ExtractLlamas object.
 
         Args:
             trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
             hdu_data (np.ndarray): The HDU data array from the FITS file.
             hdr (dict): Header information from the FITS file.
-            optimal (bool, optional): If True, use optimal extraction. If False, use boxcar extraction. 
-                Defaults to True.
+            optimal (bool, optional): Legacy switch — True = profile-weighted mean,
+                False = boxcar. Ignored when ``method`` is given.
+            method (str, optional): 'horne' | 'boxcar' | 'optimal'. 'horne' is the
+                variance-weighted, flux-conserving, mask-aware estimator
+                (Horne 1986) built on the bspline profile images.
 
         Returns:
             None
@@ -145,8 +149,16 @@ class ExtractLlamas:
             # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
             # self.readnoise = hdr.get('RDNOISE', 3.0) 
 
-            print(f'Optimal {optimal}')
+            if method is None:
+                method = 'optimal' if optimal else 'boxcar'
+            method = str(method).lower()
+            print(f'Extraction method: {method}')
             print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
+
+            # Read noise [DN] for Horne variance weighting; modest errors here
+            # only perturb the weights, not the flux normalisation.
+            _rn2 = float(os.environ.get('LLAMAS_READ_NOISE', '3.5')) ** 2
+            _nx = trace.naxis1
             
             benchside = str(self.bench) + str(self.side)
             with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
@@ -177,13 +189,47 @@ class ExtractLlamas:
                     self.counts[ifiber,:] = extracted
                     continue
 
-                if (optimal == True):
-                    # Optimally weighted extraction (a la Horne et al ~1986)
-                    #logger.info("..Optimally Extracting fiber #{}".format(ifiber))
+                if method == 'horne':
+                    # Horne (1986) optimal extraction: variance-weighted,
+                    # flux-conserving, mask-aware.
+                    #   F = sum(P*f/V) / sum(P^2/V),  Var(F) = 1/sum(P^2/V)
+                    # with the bspline profile P renormalised to sum to 1 per
+                    # column over the VALID pixels — so missing/bad pixels
+                    # renormalise the profile instead of silently biasing the
+                    # flux (the old profile-weighted mean kept dropped pixels'
+                    # weight in the denominator).
+                    ys, xs = np.where(self.trace.fiberimg == ifiber)
+                    if ys.size == 0:
+                        logger.warning("No profile pixels for fiber #{}".format(ifiber))
+                        continue
+                    P = self.trace.profimg[ys, xs]
+                    fpix = self.frame[ys, xs]
+                    good = np.isfinite(fpix) & np.isfinite(P) & (P > 0)
+                    ys, xs, P, fpix = ys[good], xs[good], P[good], fpix[good]
+                    if xs.size == 0:
+                        continue
+                    # per-column profile normalisation over valid pixels
+                    colP = np.zeros(_nx)
+                    np.add.at(colP, xs, P)
+                    Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
+                    V = _rn2 + np.clip(fpix, 0, None)
+                    w = Pn / V
+                    num = np.zeros(_nx)
+                    den = np.zeros(_nx)
+                    np.add.at(num, xs, w * fpix)
+                    np.add.at(den, xs, w * Pn)
+                    ok = den > 0
+                    self.counts[ifiber, :] = np.where(ok, num / np.where(ok, den, 1.0), 0.0)
+                    self.counts_err[ifiber, :] = np.where(ok, 1.0 / np.sqrt(np.where(ok, den, 1.0)), 0.0)
+
+                elif method == 'optimal':
+                    # LEGACY profile-weighted mean (NOT Horne): kept for
+                    # comparison only. Not flux conserving; dropped pixels bias
+                    # the flux low because the denominator keeps their weight.
                     x_spec,f_spec,weights = self.isolateProfile(ifiber)
                     if x_spec is None:
                         continue
-                
+
                     extracted = np.zeros(self.trace.naxis1)
                     for i in range(self.trace.naxis1):
                         thisx = (x_spec == i)
@@ -195,7 +241,7 @@ class ExtractLlamas:
 
                     self.counts[ifiber,:] = extracted
                 
-                elif optimal == False:
+                elif method == 'boxcar':
                     # Boxcar extraction with a trace-following aperture and
                     # FRACTIONAL pixel weights at the aperture edges.  An
                     # integer-rounded window (the previous implementation)

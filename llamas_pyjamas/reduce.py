@@ -1798,7 +1798,7 @@ def main(config_path):
     # extractions all use the SAME method — mixing methods breaks the
     # per-fibre throughput calibration.
     extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
-    if extraction_method not in ('optimal', 'boxcar'):
+    if extraction_method not in ('optimal', 'boxcar', 'horne'):
         print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
         extraction_method = 'boxcar'
     boxcar_halfwidth = float(config.get('boxcar_halfwidth', 2.5))

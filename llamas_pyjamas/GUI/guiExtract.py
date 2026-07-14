@@ -491,10 +491,7 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
 
         # Create an ExtractLlamas object with bias-subtracted data
-        if (method == 'optimal'):
-            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=True)
-        elif (method == 'boxcar'):
-            extraction = ExtractLlamas(tracer, bias_subtracted_data, header, optimal=False)
+        extraction = ExtractLlamas(tracer, bias_subtracted_data, header, method=method)
 
         return {
             'extraction': extraction,
@@ -631,7 +628,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
     if method is None:
         method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'optimal').strip().lower()
-    if method not in ('optimal', 'boxcar'):
+    if method not in ('optimal', 'boxcar', 'horne'):
         logger.warning(f"Unknown extraction method '{method}'; using 'optimal'")
         method = 'optimal'
     print(f'Extraction method: {method}')
@@ -792,10 +789,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
 
-            if (method == 'optimal'):
-                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
-            elif (method == 'boxcar'):
-                future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method='boxcar', use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
+            future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method=method, use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
             futures.append(future)
 
         # Wait for all remote tasks to complete
