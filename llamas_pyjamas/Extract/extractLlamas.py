@@ -196,23 +196,41 @@ class ExtractLlamas:
                     self.counts[ifiber,:] = extracted
                 
                 elif optimal == False:
-                    # Boxcar Extraction - fast!
+                    # Boxcar extraction with a trace-following aperture and
+                    # FRACTIONAL pixel weights at the aperture edges.  An
+                    # integer-rounded window (the previous implementation)
+                    # jumps by a whole pixel row whenever the trace crosses a
+                    # half-pixel boundary, imprinting discontinuities along
+                    # the spectrum; weighting the edge pixels by their
+                    # geometric overlap keeps the aperture continuous.
                     logger.info("..Boxcar extracting fiber #{}".format(ifiber))
-                    x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
-                    
-                    if x_spec is None:
-                        continue
-                
                     extracted = np.zeros(self.trace.naxis1)
                     tracey = self.trace.traces[ifiber,:]
+                    # Aperture half-width [px]. The legacy window was 9 px total
+                    # (half=4.5), but at the ~6.9 px fibre pitch that reaches the
+                    # neighbouring fibres' cores; 2.5 px (validated on-sky
+                    # 2026-07: frame-to-frame flux stability 0.98-0.99) keeps the
+                    # aperture on this fibre. Overridable via
+                    # LLAMAS_BOXCAR_HALFWIDTH (set by reduce.py from the
+                    # boxcar_halfwidth config key).
+                    half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
+                    ny = self.frame.shape[0]
                     for i in range(self.trace.naxis1):
-                        thisx = (x_spec == i)   
-                        if np.nansum(thisx) > 0:
-                            extracted[i] = np.nansum(f_spec[thisx])
-                        #handles case where there are no elements
-                        else:
-                            extracted[i] = 0.0
-                        extracted[i] = np.nansum(self.frame[round(tracey[i])-4:round(tracey[i])+5,i])
+                        yc = tracey[i]
+                        if not np.isfinite(yc):
+                            continue
+                        lo, hi = yc - half, yc + half
+                        # pixel j (centre convention) spans [j-0.5, j+0.5)
+                        j0 = int(np.floor(lo + 0.5))          # first pixel with any overlap
+                        j1 = int(np.floor(hi + 0.5 - 1e-9))   # last pixel with any overlap
+                        if j0 < 0 or j1 >= ny:
+                            continue   # aperture falls off the detector
+                        total = 0.0
+                        for jj in range(j0, j1 + 1):
+                            w = min(hi, jj + 0.5) - max(lo, jj - 0.5)
+                            if w > 0:
+                                total += self.frame[jj, i] * min(w, 1.0)
+                        extracted[i] = total
 
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape

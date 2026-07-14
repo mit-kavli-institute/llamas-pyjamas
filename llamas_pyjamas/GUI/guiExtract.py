@@ -591,7 +591,7 @@ def compute_detector_background(data, rows=(30, 50)):
 
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
-                method='optimal', trace_dir=None, mastercalib_trace_dir=None,
+                method=None, trace_dir=None, mastercalib_trace_dir=None,
                 remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False,
                 edge_bias=None) -> None:
 
@@ -612,7 +612,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     output_dir (str, optional): Output directory for extraction files. Defaults to None.
     slow_bias (str, optional): Path to the SLOW-mode master bias FITS file. Defaults to None.
     fast_bias (str, optional): Path to the FAST-mode master bias FITS file. Defaults to None.
-    method (str, optional): Extraction method ('optimal' or 'boxcar'). Defaults to 'optimal'.
+    method (str, optional): Extraction method ('optimal' or 'boxcar'). None (default)
+                            resolves from the LLAMAS_EXTRACT_METHOD environment
+                            variable (set once by reduce.py from the config's
+                            extraction_method key), falling back to 'optimal'.
+                            The env mechanism keeps EVERY extraction in a run
+                            (science, arc, flat, twilight, sky) on the same
+                            method — mixing methods breaks the per-fibre
+                            throughput calibration.
     trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
     mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
                                            Defaults to CALIB_DIR if None.
@@ -621,6 +628,13 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     Tuple[str, int]: (extraction_file_path, number_of_placeholder_extensions)
     """
     start_time = time.perf_counter()  # Start timer
+
+    if method is None:
+        method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'optimal').strip().lower()
+    if method not in ('optimal', 'boxcar'):
+        logger.warning(f"Unknown extraction method '{method}'; using 'optimal'")
+        method = 'optimal'
+    print(f'Extraction method: {method}')
     
     try:
         print(f'file is {file}')
