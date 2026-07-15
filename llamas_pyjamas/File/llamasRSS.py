@@ -154,27 +154,31 @@ class RSSgeneration:
                     original_n_fibers = n_fibers  # Track original count before any removals
 
                     # Get relative throughput (1D, one scalar per fiber); fall back to 1.0
+                    # The following per-object fallbacks are all expected for
+                    # several product types (flats/twilights carry no per-fibre
+                    # errors/DQ/FWHM), handled by creating defaults, and fire once
+                    # per camera — so they are INFO, not WARNING.
                     throughput = getattr(obj, 'relative_throughput', None)
                     if throughput is None or len(throughput) != n_fibers:
-                        self.logger.warning(f"Object {i}: missing or mismatched relative_throughput — no throughput correction applied")
+                        self.logger.info(f"Object {i}: missing or mismatched relative_throughput — no throughput correction applied")
                         throughput = np.ones(n_fibers, dtype=np.float32)
                     else:
                         throughput = np.array(throughput, dtype=np.float32)
                         bad_tp = ~np.isfinite(throughput) | (throughput <= 0)
                         if np.any(bad_tp):
-                            self.logger.warning(f"Object {i}: {bad_tp.sum()} fibers have invalid throughput values — setting those to 1.0")
+                            self.logger.info(f"Object {i}: {bad_tp.sum()} fibers have invalid throughput values — setting those to 1.0")
                             throughput[bad_tp] = 1.0
-                    
+
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
                     if errors is None or errors.shape != counts.shape:
-                        self.logger.warning(f"No valid error data for object {i}. Creating zero array.")
+                        self.logger.info(f"No valid error data for object {i}. Creating zero array.")
                         errors = np.zeros_like(counts, dtype=np.float32)
-                    
+
                     # Get or create data quality (mask) arrays
                     dq = getattr(obj, 'dq', None)
                     if dq is None or dq.shape != counts.shape:
-                        self.logger.warning(f"No valid DQ data for object {i}. Creating zero array.")
+                        self.logger.info(f"No valid DQ data for object {i}. Creating zero array.")
                         dq = np.zeros_like(counts, dtype=np.int16)
                     
                     # Get wavelength arrays with improved shape handling
@@ -183,8 +187,10 @@ class RSSgeneration:
                         self.logger.warning(f"No wavelength attribute for object {i}. Using NaN arrays.")
                         waves = np.full(counts.shape, np.nan, dtype=np.float32)
                     elif waves.shape != counts.shape:
-                        # Shape mismatch might be due to dead fiber insertion during extraction
-                        self.logger.warning(f"Object {i} wavelength shape {waves.shape} != counts shape {counts.shape}")
+                        # Shape mismatch is usually just missing dead-fibre rows and
+                        # is reconciled below; info here, warn only if it cannot be
+                        # reconciled (see below).
+                        self.logger.info(f"Object {i} wavelength shape {waves.shape} != counts shape {counts.shape}")
 
                         # Check if wavelength array is smaller (missing dead fiber rows)
                         if waves.shape[0] < counts.shape[0] and waves.shape[1] == counts.shape[1]:
@@ -216,8 +222,8 @@ class RSSgeneration:
                     
                     # Get or create FWHM arrays (may not exist in all extractions)
                     fwhm = getattr(obj, 'fwhm', None)
-                    if fwhm is None or fwhm.shape != counts.shape:
-                        self.logger.warning(f"No valid FWHM data for object {i}. Creating default array.")
+                    if (fwhm is None or fwhm.shape != counts.shape):
+                        self.logger.info(f"No valid FWHM data for object {i}. Creating default array.")
                         fwhm = np.full(counts.shape, 2.5, dtype=np.float32)  # Default FWHM of 2.5 pixels
 
                     # Get sky model array (populated by skyModel_1d; zeros if not available)

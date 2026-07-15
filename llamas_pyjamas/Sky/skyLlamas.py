@@ -616,9 +616,14 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             sset, xshift_min, xshift_max, _sky_hi, _sky_lo,
             extension, fiber, n_fibers, sky, science, channel, bench, side)
         if _n_clipped_fibers:
-            logger.warning("skyModel_1d: %s %s%s clipped catastrophic sky-model "
-                           "output in %d/%d fibres (cap=%.1f)", channel, bench,
-                           side, _n_clipped_fibers, n_fibers, _sky_hi)
+            # Info, not warning: the output clamp is a safety net that bounds the
+            # bspline's edge/extrapolation overshoot; it fires on nearly every
+            # camera (every fibre has spectrum-edge pixels) and does not degrade
+            # the fitted sky over the well-sampled range. Logged for diagnosis;
+            # surfaced as a per-run tally below rather than one line per camera.
+            logger.info("skyModel_1d: %s %s%s clipped catastrophic sky-model "
+                        "output in %d/%d fibres (cap=%.1f)", channel, bench,
+                        side, _n_clipped_fibers, n_fibers, _sky_hi)
 
     # ── F3 pass 2: channel-global fallback for deferred cameras ──
     for cam in deferred_cameras:

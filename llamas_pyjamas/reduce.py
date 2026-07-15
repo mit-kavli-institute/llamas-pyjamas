@@ -810,7 +810,9 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
             output_dir,
             os.path.basename(corr_pkl).replace('_corrected_extractions.pkl', '_RSS.fits')
         )
-        rss_logger = setup_logger(__name__, f'{label}_RSS_{timestamp}.log')
+        # Under the 'llamas_pyjamas' parent so RSS messages inherit the curated
+        # file/console handling (a __main__-based logger would escape to stderr).
+        rss_logger = logging.getLogger('llamas_pyjamas.rss')
         rss_gen = RSSgeneration(logger=rss_logger)
         out = rss_gen.generate_rss(corr_pkl, rss_base)
         if out:
@@ -1749,6 +1751,10 @@ def main(config_path):
     # is noise; it fires hundreds of times during arc refinement/line detection.
     _warnings.filterwarnings('ignore',
                              message='Covariance of the parameters could not be estimated')
+    # pypeit's bspline solver (util.py) warns "NaN found in cholesky_band" when a
+    # fit is locally singular (sparse spectrum edges); it handles it internally
+    # and the pipeline guards the resulting model, so it is noise too.
+    _warnings.filterwarnings('ignore', message='.*NaN found in cholesky_band.*')
     terminal_verbose = bool(config.get('terminal_verbose', False))
     _sf = config.get('science_files')
     _n_frames = len(_sf) if isinstance(_sf, list) else (1 if _sf else 0)
@@ -2859,7 +2865,7 @@ def main(config_path):
                               f"({orig_science!r}) — skipping NOFLAT extension")
 
             # Create a logger for RSS generation
-            rss_logger = logging.getLogger(__name__ + '.rss')
+            rss_logger = logging.getLogger('llamas_pyjamas.rss')
             rss_logger.info(f"Starting RSS generation for {base_name}")
 
             rss_output_file = os.path.join(extraction_path, f'{base_name}_RSS.fits')

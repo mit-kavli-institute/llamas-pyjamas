@@ -391,10 +391,12 @@ def sky_line_residual_qa(sky1d_input, qa_dir=None, label='', emit='png'):
             results[cam] = {'note': 'placeholder_camera'}
             continue
         if sky.shape != counts.shape:
-            # Seen in real data: counts and sky rows disagree (e.g. 300 vs 298).
-            # Trim to the common fibre count and flag it — worth investigating
-            # upstream, but QA must not crash on it.
-            logger.warning(
+            # Seen in real data: counts and sky rows disagree (e.g. 300 vs 298)
+            # from inconsistent dead-fibre insertion. Handled by trimming to the
+            # common fibre count; info, not warning (it fires per camera and does
+            # not affect the QA result). The underlying dead-fibre inconsistency
+            # is tracked separately.
+            logger.info(
                 f"waveQA sky {cam}: counts {counts.shape} vs sky {sky.shape} "
                 f"shape mismatch — trimming to common rows")
             n_common = min(counts.shape[0], sky.shape[0])
