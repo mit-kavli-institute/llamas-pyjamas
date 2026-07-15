@@ -1739,9 +1739,16 @@ def main(config_path):
     # and show a compact live phase summary on the terminal instead. Ray worker
     # output is already off the terminal (log_to_driver=False). Set
     # terminal_verbose = true to restore the full firehose for debugging.
-    import sys as _sys, atexit as _atexit
+    import sys as _sys, atexit as _atexit, warnings as _warnings
     from llamas_pyjamas.Utils.reporter import (PipelineReporter, StdoutToLog,
                                                ReporterLogHandler)
+    # Suppress a benign, high-frequency third-party warning: pypeit's per-line
+    # Gaussian centroid fit (fitting.py fit_gauss -> curve_fit) reports
+    # "Covariance of the parameters could not be estimated" for marginal/blended
+    # lines. The pipeline uses the fitted centroid, not its covariance, so this
+    # is noise; it fires hundreds of times during arc refinement/line detection.
+    _warnings.filterwarnings('ignore',
+                             message='Covariance of the parameters could not be estimated')
     terminal_verbose = bool(config.get('terminal_verbose', False))
     _sf = config.get('science_files')
     _n_frames = len(_sf) if isinstance(_sf, list) else (1 if _sf else 0)
@@ -1761,6 +1768,16 @@ def main(config_path):
             if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
                 _parent.removeHandler(_h)
         _parent.addHandler(ReporterLogHandler(reporter))
+        # Route remaining Python warnings (which go to stderr and would clutter
+        # the curated terminal) to the log file only, via the 'py.warnings'
+        # logger — sharing the pipeline's file handler, not the reporter.
+        logging.captureWarnings(True)
+        _pw = logging.getLogger('py.warnings')
+        _pw.handlers.clear()
+        _pw.propagate = False
+        for _h in _parent.handlers:
+            if isinstance(_h, logging.FileHandler):
+                _pw.addHandler(_h)
 
     def _restore_terminal(ok=True):
         if _restored['done']:
@@ -1771,6 +1788,11 @@ def main(config_path):
         except Exception:
             pass
         _sys.stdout = _orig_stdout
+        if not terminal_verbose:
+            try:
+                logging.captureWarnings(False)
+            except Exception:
+                pass
     _atexit.register(_restore_terminal)
     reporter.start(total_phases=_total_phases)
 
