@@ -365,8 +365,11 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             # the fibres so downstream products are not mistaken for subtracted.
             print(f"  Skipping sky model for camera {channel} {bench}{side}: "
                   f"missing/placeholder extension.")
-            logger.warning("skyModel_1d: skipping camera %s %s%s "
-                           "(missing/placeholder extension)", channel, bench, side)
+            # Info, not warning: placeholder (missing-hardware) cameras are a
+            # permanent, expected condition and would otherwise repeat on the
+            # curated terminal for every frame.
+            logger.info("skyModel_1d: skipping camera %s %s%s "
+                        "(missing/placeholder extension)", channel, bench, side)
             for i in range(n_fibers):
                 sci = science[extension[i]]
                 if getattr(sci, 'sky_quality', None) is None:

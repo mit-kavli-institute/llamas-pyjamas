@@ -366,15 +366,26 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
         # hundreds of DN — it does NOT indicate a bad bias file.  The master
         # bias is never discarded here; hard failures (missing file, read-mode
         # mismatch, wrong detector) are handled earlier.
+        # This diagnostic is INFORMATIONAL ONLY — the master bias is never
+        # discarded here — so every outcome is logged at INFO (not WARNING): a
+        # large sky-illuminated divergence is expected and would otherwise
+        # flood the curated terminal (~166 lines/run).
         try:
             gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
-            n_gap = int(gap_mask.sum())
+            # Raw frames may carry an extra row (2049 vs the 2048 mask); index on
+            # the common overlap so the diagnostic doesn't spuriously fail.
+            gny, gnx = gap_mask.shape
+            fr = hdu_data.astype(float)
+            bd = np.asarray(bias.data, dtype=float)
+            ny = min(gny, fr.shape[0], bd.shape[0]); nx = min(gnx, fr.shape[1], bd.shape[1])
+            gm = gap_mask[:ny, :nx]
+            n_gap = int(gm.sum())
             if n_gap >= 100:
-                frame_if_level = float(np.nanmedian(hdu_data.astype(float)[gap_mask]))
-                bias_if_level  = float(np.nanmedian(bias.data[gap_mask]))
+                frame_if_level = float(np.nanmedian(fr[:ny, :nx][gm]))
+                bias_if_level  = float(np.nanmedian(bd[:ny, :nx][gm]))
                 divergence = abs(frame_if_level - bias_if_level)
                 if divergence > _BIAS_INTERFIBRE_LOG_THRESHOLD:
-                    logger.warning(
+                    logger.info(
                         f"Master bias inter-fibre divergence for {bench}{side} {color}: "
                         f"|frame_if={frame_if_level:.2f} - bias_if={bias_if_level:.2f}| = "
                         f"{divergence:.2f} DN "
@@ -386,12 +397,12 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
                         f"divergence={divergence:.2f} DN"
                     )
             else:
-                logger.warning(
+                logger.info(
                     f"Inter-fibre diagnostic skipped for {bench}{side} {color}: "
                     f"only {n_gap} gap pixels (< 100)"
                 )
         except Exception as exc:
-            logger.warning(
+            logger.info(
                 f"Inter-fibre bias diagnostic failed for {bench}{side} {color} "
                 f"({exc}); continuing with master bias"
             )
