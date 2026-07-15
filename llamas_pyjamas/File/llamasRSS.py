@@ -8,6 +8,8 @@ from astropy import units as u
 import logging
 from datetime import datetime
 
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+
 
 class RSSgeneration:
     def __init__(self, logger=None):
@@ -247,56 +249,18 @@ class RSSgeneration:
                             self.logger.warning(f"Sky shape {sky.shape} != counts shape {counts.shape} for object {i}. Using zeros.")
                             sky = np.zeros_like(counts, dtype=np.float32)
 
-                    # Handle dead fibers
+                    # Dead fibres are NOT removed here: the extraction now keeps
+                    # every per-fibre array LIVE-indexed (dead fibres already
+                    # absent, all arrays mutually aligned). The dead_fibers list
+                    # holds the fibremap positions and is used only to assign the
+                    # physical fibre id of each live row (below). Removing rows
+                    # here would (a) desync counts from the fibre-id list and
+                    # (b) wrongly drop a faint live fibre whose row reads as zero.
                     dead_fibers = getattr(obj, 'dead_fibers', None)
-                    removed_dead_fibers = []  # Track which fibers were actually removed
-                    if dead_fibers is not None:
-                        self.logger.info(f"Object {i} has dead fibers: {dead_fibers}")
-                        # Validate each dead fiber
-                        valid_dead_fibers = []
-                        for dead_fiber in dead_fibers:
-                            # Verify that the dead fiber index is valid
-                            if 0 <= dead_fiber < n_fibers:
-                                # Check if all values in the row are zero (or close to zero)
-                                is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
-                                if is_zero_row:
-                                    valid_dead_fibers.append(dead_fiber)
-                                    self.logger.info(f"Validated dead fiber {dead_fiber}: all zeros = True")
-                                else:
-                                    self.logger.warning(f"Dead fiber {dead_fiber} in object {i} has non-zero values - not removing")
-                            else:
-                                self.logger.warning(f"Dead fiber index {dead_fiber} is out of range for object {i} with {n_fibers} fibers")
+                    removed_dead_fibers = []
+                    if dead_fibers:
+                        self.logger.debug(f"Object {i} dead fibres (fibremap positions, live-indexed): {dead_fibers}")
 
-                        # Remove the valid dead fibers using boolean mask to avoid index shifting issues
-                        if valid_dead_fibers:
-                            self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from object {i}")
-
-                            # Log wavelength stats BEFORE removal for debugging
-                            self.logger.info(f"BEFORE dead fiber removal - Wavelength shape: {waves.shape}, " +
-                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
-
-                            # Create boolean mask: True for fibers to KEEP, False for fibers to REMOVE
-                            keep_mask = np.ones(n_fibers, dtype=bool)
-                            keep_mask[valid_dead_fibers] = False
-
-                            # Apply mask to all arrays simultaneously
-                            counts = counts[keep_mask]
-                            errors = errors[keep_mask]
-                            waves = waves[keep_mask]
-                            dq = dq[keep_mask]
-                            fwhm = fwhm[keep_mask]
-                            sky = sky[keep_mask]
-                            throughput = throughput[keep_mask]
-
-                            # Track which fibers were removed for fiber ID generation
-                            removed_dead_fibers = valid_dead_fibers
-
-                            # Log the final shape and wavelength stats after removal
-                            self.logger.info(f"New arrays shape after removal: {counts.shape}")
-                            self.logger.info(f"AFTER dead fiber removal - Wavelength shape: {waves.shape}, " +
-                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
-                            n_fibers = counts.shape[0]  # Update fiber count
-                    
                     # Enhanced wavelength validation logging
                     if waves is not None:
                         nan_count = np.sum(np.isnan(waves))
@@ -364,21 +328,18 @@ class RSSgeneration:
 
                     benchsides.extend([benchside_str] * n_fibers)
 
-                    # Generate fiber IDs that preserve original fiber indices (skip dead fibers)
-                    if removed_dead_fibers:
-                        # Build list of alive fiber IDs by skipping dead ones
-                        fibers = []
-                        counter = 0
-                        while len(fibers) < n_fibers:
-                            if counter in removed_dead_fibers:
-                                counter += 1
-                            else:
-                                fibers.append(counter)
-                                counter += 1
+                    # Physical fibre id of each (live-indexed) row: the fibremap
+                    # positions skipping the camera's dead fibres. Derived from
+                    # the canonical dead_fibers list so it is correct whether or
+                    # not the (legacy, backward-compat) removal path above fired —
+                    # arrays are live-indexed, so removed_dead_fibers is normally
+                    # empty and sequential IDs would be wrong.
+                    _dead_for_ids = dead_fibers if dead_fibers else removed_dead_fibers
+                    if _dead_for_ids and len(_dead_for_ids) > 0:
+                        fibers = live_fibre_ids(n_fibers, _dead_for_ids)
                         fiber_ids.extend(fibers)
-                        self.logger.info(f"Object {i}: Generated fiber IDs {fibers} (skipped dead fibers {removed_dead_fibers})")
+                        self.logger.info(f"Object {i}: fibre IDs skip dead fibres {sorted(_dead_for_ids)}")
                     else:
-                        # No dead fibers removed, use sequential IDs
                         fiber_ids.extend(np.arange(n_fibers))
 
                     fiber_types.extend(fiber_type if len(fiber_type) == n_fibers else ['UNKNOWN'] * n_fibers)

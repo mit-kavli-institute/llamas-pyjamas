@@ -304,46 +304,16 @@ class ExtractLlamas:
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape
             logger.info(f'Benchside {benchside} counts shape {self.counts.shape}')
-            # Process the dead fibers by inserting dummy arrays at specific indices
-            # if self.dead_fibers:
-            #     logger.info(f'Processing dead fibers: {self.dead_fibers}')
-                
-
-            #     # Sort dead fibers in descending order to avoid index shifting
-            #     # when we insert multiple rows
-            #     for dead_idx in sorted(self.dead_fibers, reverse=True):
-            #         # Create a row of zeros for the dead fiber
-            #         dummy_counts = np.zeros(trace.naxis1)
-                    
-            #         self.counts = np.insert(self.counts, dead_idx, dummy_counts, axis=0)
-            
-            if self.dead_fibers:
-                logger.info(f'Processing dead fibers: {self.dead_fibers}')
-                
-                # Create new array with space for dead fibers
-                total_fibers = trace.nfibers + len(self.dead_fibers)
-                new_counts = np.zeros((total_fibers, trace.naxis1))
-                
-                # Copy data from original counts array to correct positions in new array
-                current_idx = 0
-                dead_set = set(self.dead_fibers)  # Convert to set for faster lookup
-                
-                for i in range(total_fibers):
-                    if i in dead_set:
-                        new_counts[i] = np.zeros(trace.naxis1)
-                        # Leave zeros for dead fiber positions
-                        logger.info(f"Inserting dead fiber at index {i}")
-                        continue
-                    else:
-                        # Copy data from original array if position exists
-                        #if current_idx < len(self.counts):
-                        new_counts[i] = self.counts[current_idx]
-                        current_idx += 1
-                
-                # Replace the counts array with the new one
-                self.counts = new_counts
-                self.fiberid = np.arange(total_fibers)
-                logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
+            # NOTE: dead fibres are NOT inserted into counts here. Every per-fibre
+            # array (counts, wave, xshift, sky, throughput, errors, ...) stays
+            # LIVE-indexed and mutually aligned, so per-fibre operations
+            # (arcTransfer, skyModel) pair the correct rows. Previously only
+            # counts was padded to fibremap indexing while wave/xshift/sky stayed
+            # live, so counts[i] and wave[i] described different fibres after the
+            # first dead fibre (a silent misalignment). The fibermap expansion is
+            # done once, explicitly, at RSS generation via
+            # llamas_pyjamas.Utils.deadfibers (dead_fibers holds the fibremap
+            # positions). self.dead_fibers is preserved for that step.
 
             # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
             # Populates `errors`, which llamasRSS writes to the ERROR extension
