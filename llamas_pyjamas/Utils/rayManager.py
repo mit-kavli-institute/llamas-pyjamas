@@ -668,6 +668,10 @@ def init_ray(config=None, num_cpus=None, object_store_mb=None, runtime_env=None,
         runtime_env=runtime_env or build_runtime_env(),
         include_dashboard=False,
         log_to_driver=False,
+        # Quiet Ray's own driver-side INFO chatter ("Started a local Ray
+        # instance", runtime-env packaging.py "Pushing file package ...") which
+        # otherwise clutters the curated terminal at startup. Errors still show.
+        logging_level=logging.WARNING,
         ignore_reinit_error=True,
     )
     if temp_dir:

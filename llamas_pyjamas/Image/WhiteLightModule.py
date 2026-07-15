@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
-print(f'Fibre map path: {fibre_map_path}')
+logger.debug(f'Fibre map path: {fibre_map_path}')   # was print(): fires at import, cluttered startup
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 

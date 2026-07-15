@@ -1711,7 +1711,7 @@ def main(config_path):
                 config[key] = value
         
         
-    print("Configuration:", config)
+    # (full configuration is logged to the file once logging is set up, below)
 
     # Resume control: by default the pipeline reuses any intermediate products
     # already on disk (flat pixel maps, per-science RSS/_FF products, cubes) and
@@ -1721,11 +1721,7 @@ def main(config_path):
     # reused when ``use_existing_traces`` is true, which is the default).
     clobber = bool(config.get('clobber', False))
     resume = not clobber
-    if clobber:
-        print("clobber=True — all stages will run from scratch (no resume).")
-    else:
-        print("Resume enabled — existing intermediate products will be reused "
-              "(set clobber=true to force a full re-run).")
+    # (clobber/resume status is logged to the file below, after logging setup)
 
     # Configure pipeline logging — log file goes next to the config file
     if 'log_output_dir' in config:
@@ -1801,6 +1797,11 @@ def main(config_path):
                 pass
     _atexit.register(_restore_terminal)
     reporter.start(total_phases=_total_phases)
+    # Full configuration + run mode -> log file only (console handler is now at
+    # WARNING in curated mode; these are too verbose for the terminal).
+    logger.info("Configuration: %s", config)
+    logger.info("Run mode: %s", "clobber (all stages from scratch, no resume)"
+                if clobber else "resume (reuse existing intermediate products)")
 
     # --- Ray / temp scratch management ---------------------------------------
     # Redirect all of Ray's temp output (session logs, object-store spill, and the
