@@ -219,6 +219,16 @@ ray_num_cpus = 8
 # log_retention: keep only the newest N llamas_pipeline_*.log files (default 10).
 # log_retention = 10
 #
+# terminal_verbose: terminal output mode (default false). When false (curated),
+# the ~hundreds of per-stage print/info lines go ONLY to the log file and the
+# terminal shows a compact live summary — one line per pipeline phase with an
+# emoji, a tick and elapsed time on completion, a spinner on the active phase,
+# and a [k/N] counter as it loops over science frames; genuine WARNING/ERROR
+# messages still print (and are logged). Set true to restore the full firehose
+# on the terminal for debugging. Everything is always written to the log file
+# regardless.
+# terminal_verbose = false
+#
 # To reclaim scratch left by OLDER runs (before this fix, or after a hard kill), run:
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch           # preview (dry run)
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch --yes     # actually delete

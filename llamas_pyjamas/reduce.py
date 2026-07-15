@@ -1607,6 +1607,19 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     return cube_files
 
 
+def _frame_label(science_file):
+    """Compact human label for a science exposure, e.g. '02-49 SCI22'.
+
+    Used only for the curated terminal reporter's per-frame sub-status.
+    """
+    import re as _re
+    base = os.path.basename(str(science_file))
+    m = _re.search(r'(\d{2}-\d{2})-[\d.]+_((?:SCI|CAL|sci|cal)\d+)', base)
+    if m:
+        return f"{m.group(1)} {m.group(2).upper()}"
+    return os.path.splitext(base)[0][:24]
+
+
 def _science_stem(science_file):
     """Return a stable identifier for a science exposure.
 
@@ -1720,6 +1733,46 @@ def main(config_path):
     log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)))
     logger = logging.getLogger(__name__)
     logger.info(f"Pipeline started. Config: {config_path}")
+
+    # ── Curated terminal reporting (terminal_verbose = false, default) ──────
+    # Route the driver's ~hundreds of print()/logger.info lines to the log file
+    # and show a compact live phase summary on the terminal instead. Ray worker
+    # output is already off the terminal (log_to_driver=False). Set
+    # terminal_verbose = true to restore the full firehose for debugging.
+    import sys as _sys, atexit as _atexit
+    from llamas_pyjamas.Utils.reporter import (PipelineReporter, StdoutToLog,
+                                               ReporterLogHandler)
+    terminal_verbose = bool(config.get('terminal_verbose', False))
+    _sf = config.get('science_files')
+    _n_frames = len(_sf) if isinstance(_sf, list) else (1 if _sf else 0)
+    # Planned phases: bias, trace, [arc], [flat], extract, wave+sky, finalise.
+    _total_phases = 5
+    if config.get('refine_arc', False) and not config.get('generate_new_wavelength_soln'):
+        _total_phases += 1
+    if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
+        _total_phases += 1
+    reporter = PipelineReporter(n_frames=_n_frames, enabled=not terminal_verbose)
+    _orig_stdout = _sys.stdout
+    _restored = {'done': False}
+    if not terminal_verbose:
+        _sys.stdout = StdoutToLog(logging.getLogger('llamas_pyjamas.stdout'))
+        _parent = logging.getLogger('llamas_pyjamas')
+        for _h in list(_parent.handlers):
+            if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
+                _parent.removeHandler(_h)
+        _parent.addHandler(ReporterLogHandler(reporter))
+
+    def _restore_terminal(ok=True):
+        if _restored['done']:
+            return
+        _restored['done'] = True
+        try:
+            reporter.finish(ok=ok)
+        except Exception:
+            pass
+        _sys.stdout = _orig_stdout
+    _atexit.register(_restore_terminal)
+    reporter.start(total_phases=_total_phases)
 
     # --- Ray / temp scratch management ---------------------------------------
     # Redirect all of Ray's temp output (session logs, object-store spill, and the
@@ -1918,6 +1971,7 @@ def main(config_path):
     # lines" of 2026-07). With the pedestal removed first, the same flat
     # structure perturbs the signal by <1 DN.
     from llamas_pyjamas.Bias.biasFirst import bias_correct_frame
+    reporter.phase("🧾", "Bias subtraction")
     print("\n" + "=" * 60)
     print("BIAS-FIRST PREPROCESSING (master bias + edge DC, before all else)")
     print("=" * 60)
@@ -1966,7 +2020,8 @@ def main(config_path):
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
     # No need to pre-create a separate pixel_maps directory
     try:
-        
+        reporter.phase("🔦", "Tracing fibres")
+
         # =====================================================================
         # CENTRALIZED TRACE DIRECTORY SELECTION
         # This is the SINGLE decision point for traces used throughout pipeline
@@ -2115,6 +2170,7 @@ def main(config_path):
         # ── Arc xshift refinement (moved after trace selection so the 2d
         # method can extract the night's own arc exposures) ──
         if config.get('refine_arc', False) and not config.get('generate_new_wavelength_soln'):
+            reporter.phase("🌈", "Arc wavelength refinement")
             refine_channels = config.get('refine_arc_channels', None)
             if isinstance(refine_channels, str):
                 refine_channels = [c.strip() for c in refine_channels.split(',')]
@@ -2205,6 +2261,8 @@ def main(config_path):
                 logger.warning(f"Wavelength QA (arc stage) failed: {_qa_exc}")
 
         # Generate flat field pixel maps if flat correction is enabled
+        if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
+            reporter.phase("💡", "Flat field")
         flat_pixel_maps = []
         flat_field_method = config.get('flat_field_method', 'simple')
         # Resume: flat_pixel_maps is always a single-element list holding the path
@@ -2523,11 +2581,13 @@ def main(config_path):
         if not isinstance(original_science_files, list):
             original_science_files = [original_science_files]
 
+        reporter.phase("✳️", "Extracting spectra")
         if isinstance(science_files_to_process, list):
             print(f'\nFound {len(science_files_to_process)} science files to process for extraction.')
             logger.info(f"Stage: Extracting {len(science_files_to_process)} science files")
 
             for i, (science_file, orig_file) in enumerate(zip(science_files_to_process, original_science_files)):
+                reporter.frame(i + 1, len(science_files_to_process), _frame_label(orig_file))
                 # Resume: if this exposure already has an RSS product on disk, its
                 # whole extraction -> wavelength -> sky -> RSS chain is done. Skip it
                 # (not appending to science_pkl_pairs skips its post-processing too).
@@ -2617,7 +2677,9 @@ def main(config_path):
                       "falling back to 'quantile'")
                 sky_selection_method = 'stratified'
 
+        reporter.phase("🌌", "Wavelength & sky subtraction")
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
+            reporter.frame(index + 1, len(science_pkl_pairs), _frame_label(orig_science_file))
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
             if not os.path.exists(correction_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
@@ -2981,6 +3043,7 @@ def main(config_path):
                 logger.warning("sky_framework=True but no _FF.fits files present")
 
         # Cube construction from RSS files
+        reporter.phase("🧊", "RSS & cubes")
         print("Constructing cubes from RSS files...")
         logger.info("Stage: Constructing cubes from RSS files")
         all_rss = [os.path.join(extraction_path, f)
@@ -3060,6 +3123,10 @@ def main(config_path):
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
     finally:
+        # Restore the terminal (finalise the reporter, un-redirect stdout) before
+        # teardown so the completion line and any traceback render normally.
+        # exc_info is set iff an exception is propagating through this finally.
+        _restore_terminal(ok=(_sys.exc_info()[0] is None))
         # Prompt teardown: shut Ray down and remove the run scratch dir (honours
         # cleanup_scratch=false). The atexit/SIGTERM backstops guarantee this also
         # runs for failures before this try (validate/flat/arc) and on signals.
