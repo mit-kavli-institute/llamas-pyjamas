@@ -60,6 +60,38 @@ logger = logging.getLogger(__name__)
 LOG = []
 
 
+# Cache of processed master-bias HDUs, keyed by absolute path (+ mtime). A
+# master bias is ~800 MB / 24 cameras; process_fits_by_color rebuilds the whole
+# file on every call, and _grab_bias_hdu is called once PER CAMERA PER FRAME
+# (bias-first processes ~24 x N frames), so without this the 800 MB file was
+# re-processed hundreds of times (~6 min of the bias-first stage). Holds at most
+# the slow + fast master bias in memory. Per-process (Ray workers get their own).
+_BIAS_HDU_CACHE = {}
+
+
+def _load_bias_hdus_cached(path):
+    """process_fits_by_color(path) with a per-path cache keyed on mtime."""
+    try:
+        key = os.path.abspath(path)
+        mt = os.path.getmtime(path) if os.path.exists(path) else None
+    except Exception:
+        key, mt = str(path), None
+    hit = _BIAS_HDU_CACHE.get(key)
+    if hit is not None and hit[0] == mt:
+        return hit[1]
+    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
+                                          dir=get_ray_temp_dir())
+    os.close(_tmp_fd)
+    try:
+        bias_hdus, _ = process_fits_by_color(path, output_file=_tmp_path)
+    finally:
+        if os.path.exists(_tmp_path):
+            os.remove(_tmp_path)
+    if bias_hdus is not None:
+        _BIAS_HDU_CACHE[key] = (mt, bias_hdus)
+    return bias_hdus
+
+
 def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
                    dir=os.path.join(BIAS_DIR, 'slow_master_bias.fits'),
                    required_readmode=None) -> fits.ImageHDU:
@@ -90,16 +122,8 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    # Write the intermediate bias FITS into the owned scratch dir and always remove it
-    # (the old NamedTemporaryFile(delete=True) pattern leaked a real .fits into /tmp).
-    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
-                                          dir=get_ray_temp_dir())
-    os.close(_tmp_fd)
-    try:
-        bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
-    finally:
-        if os.path.exists(_tmp_path):
-            os.remove(_tmp_path)
+    # Load (cached) the processed master-bias HDUs for this file.
+    bias_hdus = _load_bias_hdus_cached(dir)
 
     if bias_hdus is None:
         # Try BIAS_DIR fallback before giving up
@@ -107,14 +131,7 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
             calib_path = os.path.join(BIAS_DIR, f'{required_readmode.lower()}_master_bias.fits')
         else:
             calib_path = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-        _tmp_fd2, _tmp_path2 = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
-                                                dir=get_ray_temp_dir())
-        os.close(_tmp_fd2)
-        try:
-            bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
-        finally:
-            if os.path.exists(_tmp_path2):
-                os.remove(_tmp_path2)
+        bias_hdus = _load_bias_hdus_cached(calib_path)
         if bias_hdus is None:
             raise BiasNotFoundError(dir)
         logger.warning(
