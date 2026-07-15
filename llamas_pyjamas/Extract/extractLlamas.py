@@ -45,6 +45,7 @@ from pathlib import Path
 
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
+from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger(__name__)
 
@@ -321,20 +322,13 @@ class ExtractLlamas:
             # ERROR extension was all zeros and no S/N was derivable from products.
             # Detector gain (e-/ADU) and read noise (e-) are read from the header
             # when available; the Poisson term dominates either way.
-            def _hdr_num(keys, default):
-                for k in keys:
-                    v = self.hdr.get(k)
-                    if v is not None:
-                        try:
-                            fv = float(v)
-                            if fv > 0:
-                                return fv
-                        except (TypeError, ValueError):
-                            pass
-                return default
-            gain = _hdr_num(('EGAIN', 'GAIN', 'GAIN1', 'CCDGAIN'), DEFAULT_GAIN)
-            readnoise = _hdr_num(('RDNOISE', 'RDNOISE1', 'READNOIS', 'RON'),
-                                 DEFAULT_READNOISE)
+            # Gain/read-noise resolution: explicit header keyword, then the lab
+            # characterisation table (keyed on the CAMSN serial), then defaults.
+            # The lab values make the ERROR extension honest per detector — most
+            # important in the red where sky is faint and read noise is a larger
+            # fraction of the budget, and for S/N-weighted cube combination.
+            gain, readnoise, src = props_for_header(
+                self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
             aperture_pix = float(getattr(self.trace, 'extraction_aperture', 9.0))
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
@@ -344,7 +338,7 @@ class ExtractLlamas:
             self.errors = self.counts_err.copy()
             logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
                         f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
-                        f'pix); median error={np.median(self.counts_err):.3f}')
+                        f'pix, source={src}); median error={np.median(self.counts_err):.3f}')
 
                     
                 
