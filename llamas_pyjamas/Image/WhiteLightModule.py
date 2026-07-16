@@ -21,6 +21,7 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import cKDTree
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 from llamas_pyjamas.QA import plot_ds9
@@ -63,6 +64,41 @@ FIELD_YMAX = float(np.max(fibermap_lut['ypos']))
 WHITELIGHT_SUBSAMPLE = 1.5
 
 
+def _lattice_pitch(x, y) -> float:
+    """Median nearest-neighbour distance = the fibre lattice spacing."""
+    pts = np.column_stack([np.asarray(x, float), np.asarray(y, float)])
+    if len(pts) < 2:
+        return 1.0
+    d, _ = cKDTree(pts).query(pts, k=2)
+    return float(np.median(d[:, 1]))
+
+
+# Fibre lattice spacing from the (static) map: exactly 1.0 -- every fibre has all
+# six neighbours at unit distance, rows sqrt(3)/2 apart, alternate rows offset 0.5.
+HEX_PITCH = _lattice_pitch(fibermap_lut['xpos'], fibermap_lut['ypos'])
+
+
+def hex_header_keys(pix_per_unit: int = 10, pitch: float = None) -> dict:
+    """FITS keys describing a :func:`hex_tile_image` render.
+
+    Records that the image is hexagonal tiles rather than a resampling, and the
+    pixel scale needed to map image pixels back to fibre-map coordinates.
+    """
+    pitch = HEX_PITCH if pitch is None else float(pitch)
+    step = 1.0 / float(pix_per_unit)
+    return {
+        'HEXTILE': (True, 'Hexagonal fibre tiles, no interpolation'),
+        'HEXPITCH': (float(pitch), 'Fibre lattice spacing (fibre-map units)'),
+        'PIXUNIT': (int(pix_per_unit), 'Output pixels per fibre-map unit'),
+        'CRPIX1': (1.0, 'Reference pixel (1-indexed)'),
+        'CRPIX2': (1.0, 'Reference pixel (1-indexed)'),
+        'CRVAL1': (0.0, 'Fibre-map x at reference pixel'),
+        'CRVAL2': (0.0, 'Fibre-map y at reference pixel'),
+        'CDELT1': (step, 'Fibre-map units per pixel'),
+        'CDELT2': (step, 'Fibre-map units per pixel'),
+    }
+
+
 def whitelight_grid(subsample: float = WHITELIGHT_SUBSAMPLE):
     """Canonical white-light sampling grid, tight to the fibre field.
 
@@ -82,6 +118,78 @@ def whitelight_grid(subsample: float = WHITELIGHT_SUBSAMPLE):
     xx = step * np.arange(nx)
     yy = step * np.arange(ny)
     return np.meshgrid(xx, yy)
+
+
+def hex_tile_image(xdata, ydata, flux, pix_per_unit: int = 10, pitch: float = None):
+    """Render each fibre's flux as a flat hexagonal tile -- no interpolation.
+
+    The LLAMAS fibre map is an exact regular hexagonal lattice (spacing 1.0,
+    rows sqrt(3)/2 apart, alternate rows offset 0.5), so each fibre's Voronoi
+    cell IS its hexagon: pointy-top, inradius ``r = pitch/2``, with flat vertical
+    edges shared with its x-neighbours.  Every output pixel therefore takes the
+    raw, unresampled flux of the fibre whose hexagon contains it, and NaN if it
+    falls outside every hexagon.
+
+    Unlike the interpolated white light, this preserves per-fibre values exactly
+    and leaves dead/missing fibres as visible empty hexagons rather than filling
+    them in from their neighbours.
+
+    Parameters
+    ----------
+    xdata, ydata, flux : array_like
+        Per-fibre positions (fibre-map units) and scalar fluxes.
+    pix_per_unit : int
+        Output pixels per lattice unit; 10 gives hexagons 10 px wide (~460x442
+        over the full field).
+    pitch : float, optional
+        Lattice spacing. Defaults to the median nearest-neighbour distance of
+        the supplied fibres (1.0 for the real map), so a subset still works.
+
+    Returns
+    -------
+    (image, header) : (np.ndarray, dict)
+        ``image`` is ``(ny, nx)``; ``header`` carries the pixel scale so image
+        pixels map back to fibre-map coordinates.
+    """
+    x = np.asarray(xdata, dtype=float)
+    y = np.asarray(ydata, dtype=float)
+    f = np.asarray(flux, dtype=float)
+
+    good = np.isfinite(x) & np.isfinite(y)
+    x, y, f = x[good], y[good], f[good]
+    if x.size == 0:
+        raise ValueError("hex_tile_image: no finite fibre positions")
+
+    pts = np.column_stack([x, y])
+    if pitch is None:
+        pitch = _lattice_pitch(x, y)
+    r = 0.5 * float(pitch)          # hexagon inradius (half the lattice spacing)
+
+    step = 1.0 / float(pix_per_unit)
+    nx = int(np.floor(FIELD_XMAX / step)) + 1
+    ny = int(np.floor(FIELD_YMAX / step)) + 1
+    X, Y = np.meshgrid(step * np.arange(nx), step * np.arange(ny))
+
+    # Voronoi cell of a regular hex lattice == the hexagon, so nearest-neighbour
+    # assignment is exact inside the field; the slab test below then clips the
+    # boundary fibres to true hexagons instead of smearing them outward.
+    _, idx = cKDTree(pts).query(np.column_stack([X.ravel(), Y.ravel()]), k=1)
+    dx = X.ravel() - x[idx]
+    dy = Y.ravel() - y[idx]
+
+    # Tolerance so pixels landing exactly on a hexagon edge are kept: the pitch is
+    # derived from finite-precision map coordinates (0.9999996, not 1.0), and pixel
+    # centres fall exactly on dx=+/-r, which would otherwise leave a NaN seam around
+    # every tile. The nearest-neighbour step already assigns each pixel to exactly
+    # one fibre, so a tolerance cannot double-paint.
+    tol = 1e-6 * pitch
+    s3 = np.sqrt(3.0) / 2.0
+    inside = ((np.abs(dx) <= r + tol) &
+              (np.abs(0.5 * dx + s3 * dy) <= r + tol) &
+              (np.abs(0.5 * dx - s3 * dy) <= r + tol))
+
+    image = np.where(inside, f[idx], np.nan).reshape(X.shape)
+    return image, hex_header_keys(pix_per_unit, pitch=pitch)
 
 
 def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]:
@@ -116,8 +224,14 @@ def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]
     return blue_extractions, green_extractions, red_extractions, blue_meta, green_meta, red_meta
 
 
-def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
+def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
+                   hex_tiles: bool = False, pix_per_unit: int = 10)-> str:
     """Process extraction data to create a white light FITS file.
+
+    Set ``hex_tiles=True`` to render each fibre as a flat hexagonal tile of its
+    raw flux (no interpolation; see :func:`hex_tile_image`) instead of the
+    default resampling onto the rectangular grid. The per-fibre ``{COLOR}_TAB``
+    extension is written either way.
 
     This function takes an array of extracted color data and creates a FITS file 
     containing white light images for each bench/side/channel combination.
@@ -160,8 +274,11 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
     # Process blue data if exists
     if blue:
         
-        blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, blue_meta, ds9plot=False)
+        blue_whitelight, blue_x, blue_y, blue_flux = WhiteLight(blue, blue_meta, ds9plot=False, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
         blue_hdu = fits.ImageHDU(data=blue_whitelight.astype(float), name='BLUE')
+        if hex_tiles:
+            for _k, _v in hex_header_keys(pix_per_unit).items():
+                blue_hdu.header[_k] = _v
         hdul.append(blue_hdu)
         
         blue_tab = fits.BinTableHDU.from_columns([
@@ -174,8 +291,11 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
     # Process green data if exists
     if green:
       
-        green_whitelight, green_x, green_y, green_flux = WhiteLight(green, green_meta, ds9plot=False)
+        green_whitelight, green_x, green_y, green_flux = WhiteLight(green, green_meta, ds9plot=False, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
         green_hdu = fits.ImageHDU(data=green_whitelight.astype(float), name='GREEN')
+        if hex_tiles:
+            for _k, _v in hex_header_keys(pix_per_unit).items():
+                green_hdu.header[_k] = _v
         hdul.append(green_hdu)
         
         green_tab = fits.BinTableHDU.from_columns([
@@ -187,8 +307,11 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
     
     # Process red data if exists
     if red:
-        red_whitelight, red_x, red_y, red_flux = WhiteLight(red, red_meta, ds9plot=False)
+        red_whitelight, red_x, red_y, red_flux = WhiteLight(red, red_meta, ds9plot=False, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
         red_hdu = fits.ImageHDU(data=red_whitelight.astype(np.float32), name='RED')
+        if hex_tiles:
+            for _k, _v in hex_header_keys(pix_per_unit).items():
+                red_hdu.header[_k] = _v
         hdul.append(red_hdu)
         
         red_tab = fits.BinTableHDU.from_columns([
@@ -214,12 +337,19 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None)-> str:
     return white_light_file
 
 
-def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def WhiteLight(extraction_array: list, metadata: list, ds9plot=True,
+               hex_tiles: bool = False, pix_per_unit: int = 10)-> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Generate a white light image from an array of extraction files or objects.
     Parameters:
     extraction_array (list): A list of extraction files (str) or ExtractLlamas objects.
     ds9plot (bool, optional): If True, plot the white light image using DS9. Default is True.
+    hex_tiles (bool, optional): If True, render each fibre as a flat hexagonal
+        tile of its raw flux (no interpolation, dead fibres left as holes) via
+        :func:`hex_tile_image` instead of resampling onto the rectangular grid.
+        Default False -- the interpolated image is unchanged.
+    pix_per_unit (int, optional): Output pixels per fibre-map unit; only used
+        when ``hex_tiles`` is True. Default 10 (~460x442).
     Returns:
     tuple: A tuple containing:
         - whitelight (numpy.ndarray): The interpolated white light image.
@@ -281,11 +411,14 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
 
-    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
-        
-    x_grid, y_grid = whitelight_grid()
+    if hex_tiles:
+        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
+    else:
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
 
-    whitelight = flux_interpolator(x_grid, y_grid)
+        x_grid, y_grid = whitelight_grid()
+
+        whitelight = flux_interpolator(x_grid, y_grid)
     # whitelight = np.fliplr(whitelight)
     if (ds9plot):
         #ds9 = pyds9.DS9(target='DS9:*', start=True, wait=10, verify=True)
@@ -296,7 +429,8 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
 
 
 def WhiteLightFromRSS(rss_file: str, outfile: str = None,
-                      wave_min: float = None, wave_max: float = None) -> str:
+                      wave_min: float = None, wave_max: float = None,
+                      hex_tiles: bool = False, pix_per_unit: int = 10) -> str:
     """Create a white light image by summing the sky-subtracted FLUX extension of an RSS file.
 
     Reads the FLUX (extension 1), WAVE (extension 5), and FIBERMAP extensions,
@@ -357,10 +491,15 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         logger.error(f'WhiteLightFromRSS: no fibers mapped for {rss_file}')
         return None
 
-    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), fdata,
-                                             fill_value=np.nan)
-    x_grid, y_grid = whitelight_grid()
-    whitelight = flux_interpolator(x_grid, y_grid)
+    hex_header = None
+    if hex_tiles:
+        whitelight, hex_header = hex_tile_image(xdata, ydata, fdata,
+                                                pix_per_unit=pix_per_unit)
+    else:
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), fdata,
+                                                 fill_value=np.nan)
+        x_grid, y_grid = whitelight_grid()
+        whitelight = flux_interpolator(x_grid, y_grid)
 
     primary_hdu = fits.PrimaryHDU()
     primary_hdu.header['ORIGFILE'] = os.path.basename(rss_file)
@@ -371,6 +510,9 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         primary_hdu.header['WAVEMAX'] = (wave_max, 'Maximum wavelength (Angstroms)')
 
     img_hdu = fits.ImageHDU(data=whitelight.astype(np.float32), name=channel.upper())
+    if hex_header:
+        for key, val in hex_header.items():
+            img_hdu.header[key] = val
 
     tab_hdu = fits.BinTableHDU.from_columns([
         fits.Column(name='XDATA', format='E', array=xdata.astype(np.float32)),
@@ -829,7 +971,8 @@ def rerun():
 
 ######### Testing qucik whitelight
 
-def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
+def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
+                    hex_tiles: bool = False, pix_per_unit: int = 10):
     """
     Generate a white light image by directly summing unmasked fiber values without extraction.
     
@@ -932,13 +1075,15 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     # Create interpolated image using only valid fibers
     # Dead fibers are simply absent from the interpolation inputs;
     # LinearNDInterpolator will naturally fill those positions from neighbours.
-    flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
-
-    # Define grid for interpolation (shared with the pipeline white-light paths)
-    x_grid, y_grid = whitelight_grid()
-
-    # Generate white light image
-    whitelight = flux_interpolator(x_grid, y_grid)
+    # Generate white light image: either flat hexagonal fibre tiles (no
+    # interpolation) or the default resampling onto the shared rectangular grid.
+    if hex_tiles:
+        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
+    else:
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux,
+                                                 fill_value=np.nan)
+        x_grid, y_grid = whitelight_grid()
+        whitelight = flux_interpolator(x_grid, y_grid)
 
     # Optional DS9 plot
     if ds9plot:
@@ -967,7 +1112,9 @@ def compute_residual_background(data, regions=((5, 20), (20, 50), (30, 50))):
     return np.median(medians)
 
 
-def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, outfile: str = None, use_dir: str = None) -> str:
+def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
+                        outfile: str = None, use_dir: str = None,
+                        hex_tiles: bool = False, pix_per_unit: int = 10) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
         The function groups the mastercalib dictionary by color (keys: blue, green, red),
@@ -1141,7 +1288,8 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
             ('red', red_traces, red_data, red_meta)
         ]:
             if traces_list and data_list:
-                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot)
+                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot,
+                                                         hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
                 whitelight_results[col] = (wl, xdata, ydata, flux)
             else:
                 logger.info(f"No data found for {col} color.")
@@ -1153,6 +1301,9 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False, o
                 continue
             # Create an image HDU for the white light image
             image_hdu = fits.ImageHDU(data=wl.astype(np.float32), name=color.upper())
+            if hex_tiles:
+                for _k, _v in hex_header_keys(pix_per_unit).items():
+                    image_hdu.header[_k] = _v
             hdul.append(image_hdu)
             
             # Create a binary table HDU with the fiber x, y positions and flux data
