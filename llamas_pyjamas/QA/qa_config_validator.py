@@ -69,6 +69,7 @@ class QAConfigValidator:
         "count_above",
         "row_structure",
         "column_structure",
+        "background_gradient_rate",
     }
     SEVERITIES = {"PASS", "WARN", "FAIL"}
     HEADER_OPS = {"range", "abs_diff", "rel_diff", "abs_or_rel_diff"}
@@ -244,6 +245,16 @@ class QAConfigValidator:
                 allowed.add("threshold")
                 if not self.is_number(metric.get("threshold")):
                     self.add_error(f"{path}.threshold", "is required and must be numeric")
+            if mtype == "background_gradient_rate":
+                # optional: header keywords to read exposure time from, and the minimum
+                # exposure below which the rate is not computed (rule SKIPs)
+                allowed.update({"exptime_keys", "min_exptime"})
+                keys = metric.get("exptime_keys")
+                if keys is not None and not (isinstance(keys, list)
+                                             and all(isinstance(k, str) and k for k in keys)):
+                    self.add_error(f"{path}.exptime_keys", "must be a list of non-empty strings")
+                if "min_exptime" in metric and not self.is_number(metric.get("min_exptime")):
+                    self.add_error(f"{path}.min_exptime", "must be numeric")
             for field, value in metric.items():
                 if field not in allowed:
                     self.add_error(f"{path}.{field}", "unknown field for this metric type")
@@ -350,7 +361,7 @@ class QAConfigValidator:
         is_header = "header_check" in rule
         allowed = {"name", "severity", "per_extension"}
         allowed |= (
-            {"header_check"} if is_header
+            {"header_check", "expected_from_lookup"} if is_header
             else {"region", "region_by_extension", "metric", "limits", "expected_from_lookup"}
         )
         for field in rule:
@@ -370,8 +381,17 @@ class QAConfigValidator:
             self.add_error(f"{path}.per_extension", "must be boolean")
 
         if is_header:
+            has_rule_lookup = "expected_from_lookup" in rule
             self.validate_header_check(rule.get("header_check"), f"{path}.header_check",
-                                       rule.get("per_extension", False))
+                                       rule.get("per_extension", False), has_rule_lookup)
+            if has_rule_lookup:
+                self.validate_expected_from_lookup(
+                    rule.get("expected_from_lookup"),
+                    f"{path}.expected_from_lookup",
+                    metadata_keys,
+                    lookup_tables,
+                    extensions,
+                )
             return
 
         has_region = "region" in rule
@@ -409,11 +429,16 @@ class QAConfigValidator:
                 extensions,
             )
  
-    def validate_header_check(self, hc: Any, path: str, per_extension: bool = False) -> None:
+    def validate_header_check(self, hc: Any, path: str, per_extension: bool = False,
+                              has_rule_lookup: bool = False) -> None:
         """Validate a ``header_check`` rule block (shutter/temperature checks).
 
         ``source``/``other``/``per_extension_key`` are raw FITS header keywords
         (e.g. REXPTIME, SEXPTIME, CCDTEMP_1), not metadata_keys aliases.
+        ``per_extension_key`` may be a single keyword or a list of spelling
+        variants (the first populated one is used). When the rule carries a
+        rule-level ``expected_from_lookup`` (``has_rule_lookup``), a ``range``
+        op takes its limits from that lookup instead of a static ``limits`` block.
         """
         if not isinstance(hc, dict) or not hc:
             self.add_error(path, "must be a non-empty mapping")
@@ -433,6 +458,8 @@ class QAConfigValidator:
         if "per_extension_key" in hc and not per_extension:
             self.add_error(path, "header_check with 'per_extension_key' requires the rule "
                                  "to set 'per_extension: true'")
+        if has_rule_lookup and op != "range":
+            self.add_error(path, "rule-level 'expected_from_lookup' is only valid with op 'range'")
 
         if op == "range":
             has_source = "source" in hc
@@ -440,11 +467,20 @@ class QAConfigValidator:
             if has_source == has_pek:
                 self.add_error(path, "op 'range' must define exactly one of "
                                      "'source' or 'per_extension_key'")
-            key = hc.get("source") if has_source else hc.get("per_extension_key")
-            if key is not None and (not isinstance(key, str) or not key.strip()):
-                key_field = "source" if has_source else "per_extension_key"
-                self.add_error(f"{path}.{key_field}", "must be a non-empty header keyword string")
-            self.validate_limits(hc.get("limits"), f"{path}.limits")
+            if has_source:
+                self._validate_header_keyword(hc.get("source"), f"{path}.source")
+            elif has_pek:
+                self._validate_per_extension_key(hc.get("per_extension_key"),
+                                                 f"{path}.per_extension_key")
+            # Limits come from a static block OR (for per-detector checks) the
+            # rule-level expected_from_lookup — exactly one of the two.
+            has_limits = "limits" in hc
+            if has_rule_lookup:
+                if has_limits:
+                    self.add_error(path, "op 'range' with rule-level 'expected_from_lookup' "
+                                         "must not also define 'limits'")
+            else:
+                self.validate_limits(hc.get("limits"), f"{path}.limits")
             for extra in ("other", "abs_tol", "rel_tol"):
                 if extra in hc:
                     self.add_error(f"{path}.{extra}", "not allowed for op 'range'")
@@ -467,6 +503,21 @@ class QAConfigValidator:
         for extra in ("per_extension_key", "limits"):
             if extra in hc:
                 self.add_error(f"{path}.{extra}", f"not allowed for op {op!r}")
+
+    def _validate_header_keyword(self, key: Any, path: str) -> None:
+        if not isinstance(key, str) or not key.strip():
+            self.add_error(path, "must be a non-empty header keyword string")
+
+    def _validate_per_extension_key(self, key: Any, path: str) -> None:
+        """A per_extension_key is a single keyword or a non-empty list of them."""
+        if isinstance(key, str):
+            if not key.strip():
+                self.add_error(path, "must be a non-empty header keyword string")
+        elif isinstance(key, list):
+            if not key or not all(isinstance(k, str) and k.strip() for k in key):
+                self.add_error(path, "must be a non-empty list of header keyword strings")
+        else:
+            self.add_error(path, "must be a header keyword string or a list of them")
 
     def validate_region_by_extension(
         self,

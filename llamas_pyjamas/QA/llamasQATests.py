@@ -27,6 +27,9 @@ from .qa_config_validator import QAConfigValidator
 from .qa_engine import QAEngine, QAEngineError, fits as _fits, load_yaml
 
 DEFAULT_CONFIG_NAME = "qa_config.yaml"
+# Generated per-type configs (in the QA package dir), auto-selected by PRODCATG.
+CAL_CONFIG_NAME = "qa_config_cal.yaml"
+SCIENCE_CONFIG_NAME = "qa_config_science.yaml"
 _VERDICT_TO_STATUS = {"PASS": "pass", "WARN": "warn", "FAIL": "fail"}
 
 
@@ -38,7 +41,7 @@ def check_image(
     report: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    """Run the QA suite on a single calibration FITS/MEF image.
+    """Run the QA suite on a single calibration or science FITS/MEF image.
 
     Returns a dict with at least ``status`` ("pass"|"warn"|"fail") and
     ``message``. Raises ``QAEngineError`` on system-level problems.
@@ -50,7 +53,7 @@ def check_image(
         raise QAEngineError("astropy is required to read FITS files; install with "
                             "`pip install astropy`.")
 
-    config_path = _resolve_config_path(qa_yaml, calib_root, suite)
+    config_path = _resolve_config_path(qa_yaml, calib_root, suite, image_path)
     config = load_yaml(config_path)
     _validate_config(config, config_path)
 
@@ -76,12 +79,42 @@ def check_image(
     return _result(status, message, suite, image_path, report, engine_report)
 
 
-def _resolve_config_path(qa_yaml: str | None, calib_root: str | None, suite: str) -> Path:
+def _resolve_config_path(qa_yaml: str | None, calib_root: str | None, suite: str,
+                         image_path: Path) -> Path:
     if qa_yaml:
         return Path(qa_yaml).expanduser()
     base = Path(calib_root).expanduser() if calib_root else Path(__file__).resolve().parent
-    by_suite = base / f"{suite}.yaml"
-    return by_suite if by_suite.exists() else base / DEFAULT_CONFIG_NAME
+    if suite:
+        by_suite = base / f"{suite}.yaml"
+        if by_suite.exists():
+            return by_suite
+    # Default path: auto-select the generated cal/science config from the frame's
+    # PRODCATG so QA_assess runs the real per-type rules, not the stale base config.
+    auto = _config_for_prodcatg(image_path, base)
+    if auto is not None:
+        return auto
+    return base / DEFAULT_CONFIG_NAME
+
+
+def _config_for_prodcatg(image_path: Path, base: Path) -> Path | None:
+    """Pick the generated per-type config from the frame's primary-header PRODCATG.
+
+    Returns the cal config for ``CAL*`` frames and the science config for ``SCI*``
+    frames, or ``None`` when the type is unknown/missing, the config file is absent,
+    or the FITS cannot be opened (the caller then falls back to the base config).
+    """
+    try:
+        with _fits.open(image_path, memmap=False) as hdul:
+            prodcatg = str(hdul[0].header.get("PRODCATG", "")).strip().upper()
+    except Exception:
+        return None
+    if prodcatg.startswith("CAL"):
+        candidate = base / CAL_CONFIG_NAME
+    elif prodcatg.startswith("SCI"):
+        candidate = base / SCIENCE_CONFIG_NAME
+    else:
+        return None
+    return candidate if candidate.exists() else None
 
 
 def _validate_config(config: dict[str, Any], config_path: Path) -> None:

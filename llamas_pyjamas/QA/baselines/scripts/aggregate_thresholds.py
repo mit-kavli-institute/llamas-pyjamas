@@ -21,9 +21,11 @@ import numpy as np
 from astropy.io import fits
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+BASELINES = os.path.dirname(HERE)   # derived artifacts live in baselines/ (parent of scripts/),
+                                    # where gen_configs.py and the committed copies read them
 RAW = os.path.join(HERE, "qa_stats_raw.json")
-OUT_JSON = os.path.join(HERE, "qa_thresholds_derived.json")
-OUT_CSV = os.path.join(HERE, "qa_tracking_baselines.csv")
+OUT_JSON = os.path.join(BASELINES, "qa_thresholds_derived.json")
+OUT_CSV = os.path.join(BASELINES, "qa_tracking_baselines.csv")
 ODD_TAG = "2026-06-04_20-36-33"
 WARM_DIR = "/Users/slh/Downloads/20260505_06-selected"
 
@@ -34,6 +36,15 @@ N_CAP = 8            # one-sided caps in robust sigmas
 FLOOR_STRUCT = 2.0   # min structure cap
 FLOOR_RMS = 5.0      # min rms cap, ADU
 FLOOR_SAT = 0.0005   # min saturation-fraction cap
+
+# Per-detector CCD temperature: each camera is monitored against its OWN healthy
+# baseline and WARN/FAIL on warming above it. Colour-aware margins -- the red
+# detectors run warmer and can be more thermally variable, so they get extra
+# headroom. Absolute -60 C is a hard TEC-limit safety FAIL for every camera.
+TEMP_WARN_MARGIN = {"red": 10.0, "green": 8.0, "blue": 8.0}   # deg C above baseline -> WARN
+TEMP_FAIL_MARGIN = {"red": 16.0, "green": 15.0, "blue": 15.0}  # deg C above baseline -> FAIL
+TEMP_COLD_MIN = -140.0    # absolute cold-garbage floor (sensor fault)
+TEMP_ABS_FAIL = -60.0     # absolute TEC-limit safety FAIL
 
 
 def det_name(rec):
@@ -166,11 +177,40 @@ def main():
 
     temps = sigma_clip([r["ccdtemp"] for r in normal if r.get("ccdtemp") is not None])
     tstat = obs_stats(temps) if temps.size else None
-    # warm thresholds tied to the observed cold distribution
+    # legacy pooled warm threshold (kept for reference; superseded by per-detector)
     warm_warn = round(float(np.median(temps) + 5 * robust_sigma(temps)), 1) if temps.size else -72.0
-    ccd = {"observed": tstat, "cold_min": -140.0,
-           "warm_warn_above": warm_warn,     # ~ med + 4 sigma
-           "warm_fail_above": -60.0}         # catastrophic / shut-off
+
+    # per-detector healthy baselines: group each camera's own CCD temps and derive
+    # colour-aware warm/fail caps relative to that camera's median. Pooling all
+    # cameras (as the legacy global does) hides the warm-running detectors -- e.g.
+    # 1A.red sits ~-78 C, 12 C above the -90 array median -- so we must go per camera.
+    temp_by_det = {}
+    for r in normal:
+        t = r.get("ccdtemp")
+        if t is None or not np.isfinite(t):
+            continue
+        temp_by_det.setdefault(det_name(r), []).append(t)
+    temp_pd = {}
+    for det, vals in sorted(temp_by_det.items()):
+        a = sigma_clip(vals)              # drop rare cold-excursion glitches
+        if a.size == 0:
+            continue
+        med = float(np.median(a))
+        color = det.split(".")[-1].lower()
+        temp_pd[det] = {
+            "baseline_med": round(med, 2),
+            "warn_max": round(med + TEMP_WARN_MARGIN.get(color, 8.0), 2),
+            "fail_max": round(med + TEMP_FAIL_MARGIN.get(color, 15.0), 2),
+            "cold_min": TEMP_COLD_MIN,
+            "observed": obs_stats(a),
+        }
+    ccd = {"observed": tstat, "cold_min": TEMP_COLD_MIN,
+           "abs_fail_above": TEMP_ABS_FAIL,           # absolute TEC-limit safety FAIL
+           "warn_margin": TEMP_WARN_MARGIN,           # deg C above per-camera baseline
+           "fail_margin": TEMP_FAIL_MARGIN,
+           "per_detector": temp_pd,                   # per-camera warn/fail caps
+           "warm_warn_above": warm_warn,              # legacy pooled (reference only)
+           "warm_fail_above": -60.0}
 
     out = {"meta": {"n_normal_records": len(normal), "excluded_odd": ODD_TAG,
                     "epochs": sorted(set(r["date"] for r in normal)),
@@ -188,7 +228,11 @@ def main():
     # ---------------- VALIDATION ----------------
     print("=== ROBUST DERIVATION ===")
     print(f"normal={len(normal)} groups={len(groups)} epochs={out['meta']['epochs']}")
-    print(f"CCD temp cold band: {tstat}; warm_warn>{warm_warn} warm_fail>-60")
+    print(f"CCD temp per-detector baselines: {len(temp_pd)} cameras; "
+          f"warn=base+{TEMP_WARN_MARGIN} fail=base+{TEMP_FAIL_MARGIN}; abs_fail>{TEMP_ABS_FAIL}")
+    for det in sorted(temp_pd):
+        e = temp_pd[det]
+        print(f"   {det:10s} base={e['baseline_med']:7.1f} warn>{e['warn_max']:7.1f} fail>{e['fail_max']:7.1f}")
     print("\n=== self-check: does any NORMAL frame breach its own derived band? (should be ~0) ===")
     breaches = 0
     for r in normal:
@@ -244,13 +288,19 @@ def main():
                 ent = btab.get(nm)
                 if ent and em > ent["edge_bg"]["max"]:
                     n_edge_hot += 1
-                try:
-                    t = float(e.header.get("CCDTEMP_1"))
+                t = None
+                for kk in ("CCDTEMP_1", "CCDTEMP1", "CCDTEMP-1"):
+                    vv = e.header.get(kk)
+                    if vv is not None:
+                        try:
+                            t = float(vv); break
+                        except (TypeError, ValueError):
+                            pass
+                pdent = temp_pd.get(nm)
+                if t is not None and pdent:
                     n_temp_checked += 1
-                    if t > warm_warn:
+                    if t > pdent["warn_max"]:
                         n_temp_warm += 1
-                except (TypeError, ValueError):
-                    pass
             print(f"  {os.path.basename(p)[:34]:34s} {pc:9s} {mode:4s} {sh:13s} "
                   f"edge_hot_det={n_edge_hot} temp_warm={n_temp_warm}/{n_temp_checked}")
     print(f"\nWrote {OUT_JSON}\nWrote {OUT_CSV}")

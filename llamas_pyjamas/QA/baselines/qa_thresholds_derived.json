@@ -8704,6 +8704,327 @@
    "p95": -86.0
   },
   "cold_min": -140.0,
+  "abs_fail_above": -60.0,
+  "warn_margin": {
+   "red": 10.0,
+   "green": 8.0,
+   "blue": 8.0
+  },
+  "fail_margin": {
+   "red": 16.0,
+   "green": 15.0,
+   "blue": 15.0
+  },
+  "per_detector": {
+   "1.A.Green": {
+    "baseline_med": -104.7,
+    "warn_max": -96.7,
+    "fail_max": -89.7,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 22,
+     "min": -105.1,
+     "max": -104.1,
+     "med": -104.7,
+     "sigma_robust": 0.2965,
+     "p95": -104.3
+    }
+   },
+   "1.A.Red": {
+    "baseline_med": -78.3,
+    "warn_max": -68.3,
+    "fail_max": -62.3,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 20,
+     "min": -78.7,
+     "max": -78.1,
+     "med": -78.3,
+     "sigma_robust": 0.0,
+     "p95": -78.1
+    }
+   },
+   "1.B.Blue": {
+    "baseline_med": -85.8,
+    "warn_max": -77.8,
+    "fail_max": -70.8,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -86.2,
+     "max": -85.2,
+     "med": -85.8,
+     "sigma_robust": 0.2965,
+     "p95": -85.7
+    }
+   },
+   "1.B.Green": {
+    "baseline_med": -89.4,
+    "warn_max": -81.4,
+    "fail_max": -74.4,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -89.6,
+     "max": -89.2,
+     "med": -89.4,
+     "sigma_robust": 0.0,
+     "p95": -89.4
+    }
+   },
+   "1.B.Red": {
+    "baseline_med": -94.4,
+    "warn_max": -84.4,
+    "fail_max": -78.4,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -94.6,
+     "max": -94.2,
+     "med": -94.4,
+     "sigma_robust": 0.0,
+     "p95": -94.4
+    }
+   },
+   "2.A.Blue": {
+    "baseline_med": -94.5,
+    "warn_max": -86.5,
+    "fail_max": -79.5,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -95.6,
+     "max": -92.7,
+     "med": -94.5,
+     "sigma_robust": 1.3343,
+     "p95": -92.78
+    }
+   },
+   "2.A.Green": {
+    "baseline_med": -89.9,
+    "warn_max": -81.9,
+    "fail_max": -74.9,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -91.6,
+     "max": -88.8,
+     "med": -89.9,
+     "sigma_robust": 0.593,
+     "p95": -89.08
+    }
+   },
+   "2.A.Red": {
+    "baseline_med": -94.1,
+    "warn_max": -84.1,
+    "fail_max": -78.1,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 28,
+     "min": -94.6,
+     "max": -93.7,
+     "med": -94.1,
+     "sigma_robust": 0.2965,
+     "p95": -93.77000000000001
+    }
+   },
+   "2.B.Blue": {
+    "baseline_med": -94.2,
+    "warn_max": -86.2,
+    "fail_max": -79.2,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -94.3,
+     "max": -94.0,
+     "med": -94.2,
+     "sigma_robust": 0.1483,
+     "p95": -94.0
+    }
+   },
+   "2.B.Green": {
+    "baseline_med": -90.6,
+    "warn_max": -82.6,
+    "fail_max": -75.6,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 27,
+     "min": -91.0,
+     "max": -90.3,
+     "med": -90.6,
+     "sigma_robust": 0.1483,
+     "p95": -90.3
+    }
+   },
+   "2.B.Red": {
+    "baseline_med": -95.8,
+    "warn_max": -85.8,
+    "fail_max": -79.8,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -96.0,
+     "max": -95.2,
+     "med": -95.8,
+     "sigma_robust": 0.0,
+     "p95": -95.8
+    }
+   },
+   "3.A.Blue": {
+    "baseline_med": -91.7,
+    "warn_max": -83.7,
+    "fail_max": -76.7,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -92.2,
+     "max": -91.1,
+     "med": -91.7,
+     "sigma_robust": 0.2965,
+     "p95": -91.3
+    }
+   },
+   "3.A.Green": {
+    "baseline_med": -91.6,
+    "warn_max": -83.6,
+    "fail_max": -76.6,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -93.0,
+     "max": -90.1,
+     "med": -91.6,
+     "sigma_robust": 1.3343,
+     "p95": -90.1
+    }
+   },
+   "3.A.Red": {
+    "baseline_med": -86.45,
+    "warn_max": -76.45,
+    "fail_max": -70.45,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 28,
+     "min": -87.1,
+     "max": -86.2,
+     "med": -86.45,
+     "sigma_robust": 0.3706,
+     "p95": -86.2
+    }
+   },
+   "3.B.Blue": {
+    "baseline_med": -95.3,
+    "warn_max": -87.3,
+    "fail_max": -80.3,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -95.4,
+     "max": -95.3,
+     "med": -95.3,
+     "sigma_robust": 0.0,
+     "p95": -95.3
+    }
+   },
+   "3.B.Green": {
+    "baseline_med": -89.4,
+    "warn_max": -81.4,
+    "fail_max": -74.4,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -89.8,
+     "max": -87.6,
+     "med": -89.4,
+     "sigma_robust": 0.0,
+     "p95": -89.4
+    }
+   },
+   "3.B.Red": {
+    "baseline_med": -93.7,
+    "warn_max": -83.7,
+    "fail_max": -77.7,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 28,
+     "min": -94.2,
+     "max": -93.3,
+     "med": -93.7,
+     "sigma_robust": 0.2965,
+     "p95": -93.5
+    }
+   },
+   "4.A.Green": {
+    "baseline_med": -91.8,
+    "warn_max": -83.8,
+    "fail_max": -76.8,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -91.9,
+     "max": -91.6,
+     "med": -91.8,
+     "sigma_robust": 0.0,
+     "p95": -91.6
+    }
+   },
+   "4.A.Red": {
+    "baseline_med": -89.4,
+    "warn_max": -79.4,
+    "fail_max": -73.4,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -90.5,
+     "max": -89.1,
+     "med": -89.4,
+     "sigma_robust": 0.4448,
+     "p95": -89.1
+    }
+   },
+   "4.B.Blue": {
+    "baseline_med": -96.6,
+    "warn_max": -88.6,
+    "fail_max": -81.6,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -97.3,
+     "max": -96.2,
+     "med": -96.6,
+     "sigma_robust": 0.2965,
+     "p95": -96.4
+    }
+   },
+   "4.B.Green": {
+    "baseline_med": -90.7,
+    "warn_max": -82.7,
+    "fail_max": -75.7,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 28,
+     "min": -91.1,
+     "max": -90.4,
+     "med": -90.7,
+     "sigma_robust": 0.1483,
+     "p95": -90.6
+    }
+   },
+   "4.B.Red": {
+    "baseline_med": -87.5,
+    "warn_max": -77.5,
+    "fail_max": -71.5,
+    "cold_min": -140.0,
+    "observed": {
+     "n": 29,
+     "min": -88.2,
+     "max": -86.7,
+     "med": -87.5,
+     "sigma_robust": 0.7413,
+     "p95": -86.7
+    }
+   }
+  },
   "warm_warn_above": -73.8,
   "warm_fail_above": -60.0
  }

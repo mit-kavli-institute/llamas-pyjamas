@@ -106,7 +106,7 @@ class QAEngine:
                 for rule in rule_set["rules"]:
                     if "header_check" in rule:
                         results.extend(
-                            self._evaluate_header_rule(hdul, rule_set_name, rule)
+                            self._evaluate_header_rule(hdul, metadata, rule_set_name, rule)
                         )
                     elif rule.get("per_extension", False):
                         for extension in self.config["extensions"]:
@@ -201,6 +201,7 @@ class QAEngine:
     def _evaluate_header_rule(
         self,
         hdul: Any,
+        metadata: dict[str, Any],
         rule_set_name: str,
         rule: dict[str, Any],
     ) -> list[RuleResult]:
@@ -209,19 +210,22 @@ class QAEngine:
         Header rules check FITS header values rather than image-region metrics.
         A non-``per_extension`` rule (e.g. shutter REXPTIME vs SEXPTIME) is
         evaluated once from the file's global header. A ``per_extension`` rule
-        (e.g. per-detector CCDTEMP_1) is evaluated once per configured extension,
-        reading the keyword from that extension's own header. Absent keywords are
-        reported with status ``SKIPPED`` and never affect the verdict, because
-        keywords such as CCDTEMP_1 are only intermittently populated.
+        (e.g. per-detector CCD temperature) is evaluated once per configured
+        extension, reading the keyword from that extension's own header. Absent
+        keywords are reported with status ``SKIPPED`` and never affect the
+        verdict, because keywords such as CCDTEMP_1 are only intermittently
+        populated. ``metadata`` is threaded through so a ``range`` check can
+        resolve per-detector limits from a lookup table (``expected_from_lookup``).
         """
         if rule.get("per_extension", False):
-            return [self._eval_header_one(hdul, rule_set_name, rule, extension)
+            return [self._eval_header_one(hdul, metadata, rule_set_name, rule, extension)
                     for extension in self.config["extensions"]]
-        return [self._eval_header_one(hdul, rule_set_name, rule, None)]
+        return [self._eval_header_one(hdul, metadata, rule_set_name, rule, None)]
 
     def _eval_header_one(
         self,
         hdul: Any,
+        metadata: dict[str, Any],
         rule_set_name: str,
         rule: dict[str, Any],
         extension: dict[str, Any] | None,
@@ -251,15 +255,35 @@ class QAEngine:
         # --- single-value range check ---
         if op == "range":
             if "per_extension_key" in hc:
-                key = hc["per_extension_key"]
-                raw = ext_header.get(key) if ext_header is not None else None
+                # per_extension_key may be a single keyword or a list of spelling
+                # variants (e.g. CCDTEMP_1 / CCDTEMP1 / CCDTEMP-1 differ across
+                # file generations); use the first one populated in this header.
+                keys = hc["per_extension_key"]
+                keys = [keys] if isinstance(keys, str) else list(keys)
+                key, raw = keys[0], None
+                if ext_header is not None:
+                    for candidate in keys:
+                        if ext_header.get(candidate) is not None:
+                            key, raw = candidate, ext_header.get(candidate)
+                            break
             else:
                 key = hc["source"]
                 raw = self._find_header_value(hdul, key)
             value = self._to_number(raw)
             if value is None:
                 return skipped(f"header keyword {key!r} absent or non-numeric")
-            limits = {k: float(v) for k, v in hc["limits"].items()}
+            # Limits come either from a static block (hc["limits"]) or, for
+            # per-detector checks (e.g. per-camera temperature caps), from a
+            # lookup table via the rule's expected_from_lookup.
+            if "expected_from_lookup" in rule:
+                if extension is None:
+                    return skipped("expected_from_lookup requires a per_extension rule")
+                try:
+                    limits, _ = self._resolve_rule_limits(rule, metadata, extension)
+                except LookupMissError:
+                    return skipped(f"no lookup entry for extension {ext_name!r}")
+            else:
+                limits = {k: float(v) for k, v in hc["limits"].items()}
             passed, message = self._check_limits(value, limits)
             return self._header_result(rule_set_name, rule, op, ext_name, hdu_index,
                                        f"header:{key}", value, passed, severity,
@@ -497,7 +521,12 @@ class QAEngine:
             region = self.config["regions"][region_name]
             metric = self.config["metrics"][metric_name]
             region_data = self._extract_region(np.asarray(data), region, region_name, extension_name)
-            measured_value = self._compute_metric(region_data, metric)
+            if metric.get("type") == "background_gradient_rate":
+                # rate metrics need the exposure time; absent/too-short -> SKIP this rule
+                exptime = self._resolve_exptime(hdul, metric)
+                measured_value = self._compute_metric(region_data, metric, exptime=exptime)
+            else:
+                measured_value = self._compute_metric(region_data, metric)
             limits, lookup_path = self._resolve_rule_limits(rule, metadata, extension)
         except LookupMissError as exc:
             return self._skipped_rule_result(rule_set_name, rule, extension,
@@ -555,8 +584,24 @@ class QAEngine:
             )
         return data[..., y_start:y_end, x_start:x_end]
  
+    def _resolve_exptime(self, hdul: Any, metric: dict[str, Any]) -> float:
+        """Exposure time (s) for a rate metric: first populated positive value among
+        ``metric['exptime_keys']`` (default SEXPTIME -> REXPTIME -> EXPTIME; SEXPTIME
+        is the actual shutter-open time, the correct integration for dark current).
+        Absent or below ``min_exptime`` raises LookupMissError -> the rule is SKIPPED
+        (a rate is undefined/noise-dominated for a ~0 s frame), never failed."""
+        keys = metric.get("exptime_keys", ["SEXPTIME", "REXPTIME", "EXPTIME"])
+        min_exptime = float(metric.get("min_exptime", 1.0))
+        for key in keys:
+            value = self._to_number(self._find_header_value(hdul, key))
+            if value is not None and value >= min_exptime:
+                return float(value)
+        raise LookupMissError(f"no usable exposure time ({', '.join(keys)}) "
+                              f">= {min_exptime}s for gradient-rate metric")
+
     @staticmethod
-    def _compute_metric(region_data: Any, metric: dict[str, Any]) -> float:
+    def _compute_metric(region_data: Any, metric: dict[str, Any],
+                        exptime: float | None = None) -> float:
         values = np.asarray(region_data, dtype=float)
         finite_values = values[np.isfinite(values)]
         if finite_values.size == 0:
@@ -564,6 +609,26 @@ class QAEngine:
                                 "region contains no finite pixels")
  
         metric_type = metric["type"]
+
+        if metric_type == "background_gradient_rate":
+            # Camera-warming signal. A warming detector grows a dark-current glow --
+            # a smooth large-scale background gradient -- at a rate (ADU/s) far above
+            # the slow sky/scattered-light gradient of a normal frame. Measure the
+            # gradient with quarter-block MEDIANS (robust to the sparse bright fiber/
+            # target flux, so it tracks the background, not the astrophysical signal)
+            # and divide by exposure time to isolate the dark-current RATE -- which
+            # separates a warming detector (~2 ADU/s) from bright/long science (whose
+            # background gradient accrues at <=~0.06 ADU/s). See QA_TESTS_SUMMARY.md.
+            if values.ndim < 2:
+                raise QAEngineError("background_gradient_rate requires a 2D region")
+            if not exptime or exptime <= 0:
+                raise QAEngineError("background_gradient_rate requires a positive exposure time")
+            ny, nx = values.shape[-2], values.shape[-1]
+            qy, qx = max(ny // 4, 1), max(nx // 4, 1)
+            v_grad = abs(np.nanmedian(values[..., :qy, :]) - np.nanmedian(values[..., -qy:, :]))
+            h_grad = abs(np.nanmedian(values[..., :, :qx]) - np.nanmedian(values[..., :, -qx:]))
+            return float(max(v_grad, h_grad) / exptime)
+
         if metric_type == "mean":
             return float(np.mean(finite_values))
         
@@ -572,7 +637,7 @@ class QAEngine:
         
         if metric_type == "std":
             return float(np.std(finite_values))
-        
+
         if metric_type == "min":
             return float(np.min(finite_values))
         
