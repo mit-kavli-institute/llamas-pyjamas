@@ -243,6 +243,98 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
 
 
 
+def drop_spacing_outliers(indices, mid_positions, expected_count, benchside='') -> np.ndarray:
+    """Trim ``indices`` to ``expected_count`` by removing the most ISOLATED traces.
+
+    Fibres form an evenly spaced comb (pitch ~6.5 px), so every real trace --
+    including the one at either end of the slit -- has a neighbour about one
+    pitch away.  A spurious peak (detector-edge artifact) sits several pitches
+    from anything else.  Repeatedly dropping the trace with the largest
+    nearest-neighbour distance therefore removes ghosts and never the genuine
+    end fibre.
+
+    This replaces an earlier rule that trimmed by distance to the detector edge.
+    That rule dropped the REAL end-of-slit fibre and kept the ghost whenever the
+    ghost happened to sit marginally further from the opposite edge (3B: real
+    fibre at y=44.9 vs ghost at y=1997.3 -> edge scores 44.9 vs 50.7), which
+    shifted every fibre index by one for the whole bench.
+    """
+    keep = [int(i) for i in np.asarray(indices).ravel()]
+    excess = len(keep) - int(expected_count)
+
+    for _ in range(max(0, excess)):
+        pos = np.asarray([mid_positions[i] for i in keep], dtype=float)
+        order = np.argsort(pos)
+        p = pos[order]
+        if p.size < 2:
+            break
+        gaps = np.diff(p)
+        pitch = float(np.median(gaps))
+        # distance to the nearest neighbour on either side
+        nn = np.minimum(np.concatenate(([np.inf], gaps)),
+                        np.concatenate((gaps, [np.inf])))
+        worst = int(np.argmax(nn))
+        ratio = nn[worst] / pitch if pitch > 0 else float('nan')
+        if ratio < 1.5:
+            # No clear ghost: the comb is regular but still over-count. Dropping
+            # any trace here is a guess, so say so rather than silently shifting.
+            logger.warning(
+                "traceLlamas %s: %d traces vs %d expected but no isolated "
+                "outlier (worst neighbour gap %.1fx pitch) -- trim is ambiguous",
+                benchside, len(keep), int(expected_count), ratio)
+        else:
+            logger.info(
+                "traceLlamas %s: dropping isolated trace at y=%.1f "
+                "(nearest neighbour %.1f px = %.1fx pitch %.2f) as a ghost",
+                benchside, p[worst], nn[worst], ratio, pitch)
+        keep.remove(keep[order[worst]])
+
+    return np.sort(np.asarray(keep, dtype=int))
+
+
+def validate_trace_comb(mid_positions, benchside, dead_fibers=None,
+                        expected_count=None) -> bool:
+    """Check the traced fibre comb is regular; warn (loudly) if it is not.
+
+    A healthy comb has every gap ~= the median pitch, except at a genuinely dead
+    fibre (which leaves a ~2x gap).  Anything else means a fibre was missed or a
+    spurious peak was traced -- which silently misindexes every fibre after it
+    and lands their flux on the wrong sky position.  Dead fibres at either END
+    of the slit leave no gap, so ``n_big <= n_dead`` is fine; more big gaps than
+    dead fibres is not.
+    """
+    pos = np.sort(np.asarray([p for p in np.asarray(mid_positions).ravel()
+                              if p is not None and np.isfinite(p)], dtype=float))
+    if pos.size < 2:
+        logger.warning("traceLlamas %s: too few traces (%d) to validate comb",
+                       benchside, pos.size)
+        return False
+
+    gaps = np.diff(pos)
+    pitch = float(np.median(gaps))
+    n_dead = len(dead_fibers or [])
+    big = np.where(gaps > 1.5 * pitch)[0]
+    ok = True
+
+    if len(big) > n_dead:
+        ok = False
+        detail = ", ".join(f"y={pos[i]:.1f}(+{gaps[i]/pitch:.1f}x)" for i in big[:6])
+        logger.warning(
+            "traceLlamas %s: comb has %d gaps >1.5x pitch but only %d known dead "
+            "fibre(s) -- a fibre was missed or a ghost traced; fibre indices may "
+            "be shifted. Gaps at: %s", benchside, len(big), n_dead, detail)
+
+    if expected_count is not None and pos.size != int(expected_count):
+        ok = False
+        logger.warning("traceLlamas %s: traced %d fibres, expected %d",
+                       benchside, pos.size, int(expected_count))
+
+    if ok:
+        logger.info("traceLlamas %s: comb OK (%d fibres, pitch %.2f px, "
+                    "%d dead-fibre gap(s))", benchside, pos.size, pitch, len(big))
+    return ok
+
+
 def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
     """
     Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.
@@ -783,18 +875,15 @@ class TraceLlamas:
                 # Decide how to handle this situation. For example, you might use all valid edges:
                 keep_indices = valid_edge_indices
             else:
-                # Now, for the traces that remain, calculate edge proximity scores.
-                valid_traces = self.traces[valid_edge_indices]
-                valid_mid_positions = mid_positions[valid_edge_indices]
-                edge_scores = np.array([
-                    min(pos, self.naxis2 - pos) for pos in valid_mid_positions
-                ])
-
-                # Sort traces by their edge scores (descending keeps those furthest from edges)
-                sorted_valid_indices = valid_edge_indices[np.argsort(edge_scores)[::-1]]
-
-                # Keep only the expected number of traces from the remaining valid traces.
-                keep_indices = np.sort(sorted_valid_indices[:expected_count])
+                # Trim any excess by removing SPACING OUTLIERS (ghost peaks), never
+                # by distance to the detector edge: a real end-of-slit fibre still
+                # has a neighbour one pitch away, while a ghost sits several
+                # pitches from anything. The old edge-distance rule sacrificed the
+                # real end fibre to keep a ghost on 3B/4A, shifting every fibre
+                # index by one for the whole bench.
+                keep_indices = drop_spacing_outliers(
+                    valid_edge_indices, safe_mid_positions, expected_count,
+                    benchside=self.benchside)
 
             # Now filter the trace arrays using the final indices.
             self.traces = self.traces[keep_indices]
@@ -802,6 +891,14 @@ class TraceLlamas:
             self.xtracefit = self.xtracefit[keep_indices]
             self.nfibers = len(self.traces)
             print(f"Filtered to {self.nfibers} traces for {self.benchside} after edge trimming.")
+
+            # A mis-trimmed comb misindexes every fibre after the gap and puts its
+            # flux at the wrong sky position, so check it explicitly rather than
+            # trusting the count alone (the 3B/4A off-by-one kept nfibers=300).
+            validate_trace_comb(
+                self.traces[:, mid_x], self.benchside,
+                dead_fibers=(self.dead_fibres or {}).get(self.benchside, []),
+                expected_count=expected_count)
                  
 
         except Exception as e:
