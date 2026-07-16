@@ -22,6 +22,7 @@ import pickle
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
@@ -53,6 +54,34 @@ orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '
 fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
 logger.debug(f'Fibre map path: {fibre_map_path}')   # was print(): fires at import, cluttered startup
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
+
+# Extent of the fibre field, taken from the (static) fibre map: x 0.5..46.0,
+# y 0.0..44.2. Every white-light path samples this same field, so the grid is
+# defined once here rather than re-derived (differently) in each function.
+FIELD_XMAX = float(np.max(fibermap_lut['xpos']))
+FIELD_YMAX = float(np.max(fibermap_lut['ypos']))
+WHITELIGHT_SUBSAMPLE = 1.5
+
+
+def whitelight_grid(subsample: float = WHITELIGHT_SUBSAMPLE):
+    """Canonical white-light sampling grid, tight to the fibre field.
+
+    Returns ``(x_grid, y_grid)`` covering ``0..FIELD_XMAX`` by ``0..FIELD_YMAX``
+    in steps of ``1/subsample``.
+
+    The old grid hard-coded 53 units on both axes while the fibres only reach
+    x=46.0, y=44.2, so ~28% of every frame was NaN padding beyond the last fibre.
+    Deriving the extent from the fibre map removes that dead margin and keeps the
+    grid identical across frames, channels and code paths (the map is static) —
+    previously WhiteLight and QuickWhiteLight built their grids separately and
+    silently disagreed about the sky coverage.
+    """
+    step = 1.0 / float(subsample)
+    nx = int(np.floor(FIELD_XMAX / step)) + 1
+    ny = int(np.floor(FIELD_YMAX / step)) + 1
+    xx = step * np.arange(nx)
+    yy = step * np.arange(ny)
+    return np.meshgrid(xx, yy)
 
 
 def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]:
@@ -227,19 +256,25 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
         
         
         nfib, naxis1 = np.shape(extraction.counts)
-        
+
+        # counts is LIVE-indexed (dead fibres absent, since commit c8ab75f), so
+        # row `ifib` is NOT the fibremap position. Map each live row to its
+        # physical fibremap position before the LUT lookup, else every fibre
+        # after the first dead one is placed at the wrong (x, y).
+        fibmap_pos = live_fibre_ids(nfib, getattr(extraction, 'dead_fibers', []))
+
         for ifib in range(nfib):
             benchside = f'{extraction.bench}{extraction.side}'
-            
-            
+            fpos = fibmap_pos[ifib]
+
             try:
-                x, y = FiberMap_LUT(benchside,ifib)
+                x, y = FiberMap_LUT(benchside, fpos)
             except Exception as e:
-                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside} for color {extraction.channel}')
+                logger.info(f'Fiber {fpos} (live row {ifib}) not found in fiber map for bench {benchside} for color {extraction.channel}')
                 logger.error(traceback.format_exc())
                 continue
-            
-            
+
+
             # thisflux = np.nansum(extraction.counts[ifib])
             thisflux = np.nansum(counts[ifib])
             flux = np.append(flux, thisflux)
@@ -248,18 +283,8 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True)-> Tuple[np.
 
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
         
-    if (False):
-        xx = np.arange(53)
-        yy = np.arange(53)
-    else:
+    x_grid, y_grid = whitelight_grid()
 
-        subsample = 1.5
-
-        xx = 1.0/subsample * np.arange(53*subsample)
-        yy = 1.0/subsample * np.arange(53*subsample)
-
-    x_grid, y_grid = np.meshgrid(xx/subsample, yy/subsample)
-    
     whitelight = flux_interpolator(x_grid, y_grid)
     # whitelight = np.fliplr(whitelight)
     if (ds9plot):
@@ -334,10 +359,7 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
 
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), fdata,
                                              fill_value=np.nan)
-    subsample = 1.5
-    xx = (1.0 / subsample) * np.arange(int(53 * subsample))
-    yy = (1.0 / subsample) * np.arange(int(53 * subsample))
-    x_grid, y_grid = np.meshgrid(xx / subsample, yy / subsample)
+    x_grid, y_grid = whitelight_grid()
     whitelight = flux_interpolator(x_grid, y_grid)
 
     primary_hdu = fits.PrimaryHDU()
@@ -411,10 +433,10 @@ def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np
 
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
         
-    xx = np.arange(46)
-    yy = np.arange(43)
-    x_grid, y_grid = np.meshgrid(xx, yy)
-    
+    # Shared field grid: the old 46x43 grid stopped at y=42 and clipped the top of
+    # bench 1A (which runs to y=44.2).
+    x_grid, y_grid = whitelight_grid()
+
     whitelight = flux_interpolator(x_grid, y_grid)
 
     ds9plot = False
@@ -912,11 +934,8 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False):
     # LinearNDInterpolator will naturally fill those positions from neighbours.
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
 
-    # Define grid for interpolation
-    subsample = 1.5
-    xx = 1.0/subsample * np.arange(53*subsample)
-    yy = 1.0/subsample * np.arange(53*subsample)
-    x_grid, y_grid = np.meshgrid(xx, yy)
+    # Define grid for interpolation (shared with the pipeline white-light paths)
+    x_grid, y_grid = whitelight_grid()
 
     # Generate white light image
     whitelight = flux_interpolator(x_grid, y_grid)
@@ -1241,19 +1260,24 @@ def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None,
         counts = extraction_obj.counts
         
         nfib, naxis1 = np.shape(counts)
-        
+
+        # counts is LIVE-indexed (dead fibres absent); map each live row to its
+        # physical fibremap position before the LUT lookup (see WhiteLight).
+        fibmap_pos = live_fibre_ids(nfib, getattr(extraction_obj, 'dead_fibers', []))
+
         for ifib in range(nfib):
             benchside = f'{extraction_obj.bench}{extraction_obj.side}'
-            
+            fpos = fibmap_pos[ifib]
+
             try:
-                x, y = FiberMap_LUT(benchside, ifib)
+                x, y = FiberMap_LUT(benchside, fpos)
                 if x == -1 and y == -1:
                     continue  # Skip if fiber mapping not found
             except Exception as e:
-                logger.info(f'Fiber {ifib} not found in fiber map for bench {benchside}')
+                logger.info(f'Fiber {fpos} (live row {ifib}) not found in fiber map for bench {benchside}')
                 logger.error(traceback.format_exc())
                 continue
-            
+
             # Get fiber value
             thisflux = np.nansum(counts[ifib])
             if mask is not None and len(mask) > 0:

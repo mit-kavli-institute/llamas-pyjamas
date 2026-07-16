@@ -333,6 +333,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         extension = np.array([])
         fiber = np.array([])
         counts = np.array([])
+        cam_dead_fibers = []      # fibremap positions of this camera's dead fibres
 
         print(f"Generating sky model for camera {channel} bench {bench}{side}")
 
@@ -341,6 +342,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             if (sky_metadata[i]['channel'] == channel and
                     str(sky_metadata[i]['bench']) == bench and
                     sky_metadata[i]['side'] == side):
+                cam_dead_fibers = list(getattr(sky[i], 'dead_fibers', []) or [])
                 for thisfiber in range(sky_metadata[i]['nfibers']):
                     fiber = np.append(fiber, thisfiber)
                     extension = np.append(extension, i)
@@ -398,7 +400,14 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         in_region = None
         if selection_method == 'skymap' and sky_map is not None:
             benchsides_cam = np.array([f"{bench}{side}"] * n_fibers)
-            in_region = skySelect.fibres_in_sky_region(benchsides_cam, fiber, sky_map)
+            # `fiber` is a LIVE row index (0..n-1); FiberMap_LUT (via
+            # fibres_in_sky_region) needs the physical fibremap position, which
+            # differs after the first dead fibre. Map live -> physical.
+            from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+            phys_fiber = np.asarray(live_fibre_ids(n_fibers, cam_dead_fibers),
+                                    dtype=int)
+            in_region = skySelect.fibres_in_sky_region(benchsides_cam, phys_fiber,
+                                                       sky_map)
         # Per-fibre slit position (trace-y at mid column) for 'stratified'.
         fiber_y = None
         if selection_method == 'stratified':
