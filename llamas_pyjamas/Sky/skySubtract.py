@@ -40,6 +40,15 @@ from llamas_pyjamas.Sky.skyResidual import clean_residuals
 logger = logging.getLogger(__name__)
 
 
+def _color_from_name(path):
+    """Infer camera colour from a ``..._RSS_{color}_FF...`` filename."""
+    name = os.path.basename(path).lower()
+    for c in ("blue", "green", "red"):
+        if f"_rss_{c}_" in name or f"_{c}_ff" in name:
+            return c
+    return None
+
+
 def _get_data(hdul, extname):
     """Return a float64 copy of an extension's data, or None if absent."""
     try:
@@ -71,8 +80,9 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
         base, ext = os.path.splitext(ff_fits)
         output_file = f"{base}_SKYSUB{ext}"
 
-    logger.info("skySubtract: %s -> %s",
-                os.path.basename(ff_fits), os.path.basename(output_file))
+    color = _color_from_name(ff_fits)
+    logger.info("skySubtract: %s -> %s (color=%s)",
+                os.path.basename(ff_fits), os.path.basename(output_file), color)
 
     with fits.open(ff_fits) as hdul:
         flux = _get_data(hdul, "FLUX")
@@ -99,7 +109,8 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         # 2. Per-fibre OH scaling (in FLUX space).
         scale, scale_corr, flux1 = scale_sky_per_fiber(flux, sky, config,
-                                                       sky_mask=sky_mask)
+                                                       sky_mask=sky_mask,
+                                                       color=color)
 
         # 3. PCA residual cleaning (optional).
         if config.run_pca:

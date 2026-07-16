@@ -19,7 +19,7 @@ SkySubtractConfig -- dataclass of every tunable, with ``from_pipeline_config``
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -58,6 +58,26 @@ class SkySubtractConfig:
     min_oh_lines : int
         Minimum OH lines required to attempt a per-fibre scale fit; otherwise
         the fibre keeps the base model (scale = 1, no correction).
+    scale_deriv_order : int
+        Order of the derivative-augmented line fit.  ``0`` = amplitude only
+        (``alpha*S``, the classic scaled-sky behaviour).  ``1`` also fits a
+        wavelength-shift term (``beta*S'``) that removes antisymmetric
+        "P-Cygni" residuals.  ``2`` additionally fits a width term
+        (``gamma*S''``) that removes the symmetric pos-neg-pos / neg-pos-neg
+        residual from an along-slit LSF mismatch.  Default ``2``.
+    scale_deriv_ridge : float
+        Column-relative Tikhonov damping on the derivative terms only (never on
+        the amplitude).  Shrinks ``beta``/``gamma`` toward zero unless the data
+        strongly support them, protecting against fitting noise.  Default 0.1.
+    scale_deriv_gate : float
+        Minimum fractional reduction of the line-pixel residual sum-of-squares
+        required to keep the derivative terms.  Where the base model is already
+        good the terms buy nothing and are dropped (amplitude-only fallback),
+        so a well-subtracted colour is left essentially untouched.  Default 0.05.
+    scale_deriv_skip_colors : list[str]
+        Camera colours for which the derivative augmentation is disabled
+        (forced to amplitude-only).  Default ``['blue']`` — blue is already
+        clean and must not be perturbed.
 
     # --- PCA residual cleaning (skyResidual) ---
     pca_ncomp : int
@@ -94,6 +114,10 @@ class SkySubtractConfig:
     scale_min: float = 0.5
     scale_max: float = 1.5
     min_oh_lines: int = 3
+    scale_deriv_order: int = 2
+    scale_deriv_ridge: float = 0.1
+    scale_deriv_gate: float = 0.05
+    scale_deriv_skip_colors: List[str] = field(default_factory=lambda: ["blue"])
 
     # PCA residual cleaning
     pca_ncomp: int = 20
@@ -114,6 +138,11 @@ class SkySubtractConfig:
         if self.selection_method not in VALID_METHODS:
             raise ValueError(f"Unknown selection_method {self.selection_method!r}; "
                              f"expected one of {VALID_METHODS}")
+        if self.scale_deriv_order not in (0, 1, 2):
+            raise ValueError(f"scale_deriv_order must be 0, 1 or 2, "
+                             f"got {self.scale_deriv_order!r}")
+        self.scale_deriv_skip_colors = [str(c).lower()
+                                        for c in self.scale_deriv_skip_colors]
 
     @property
     def run_pca(self) -> bool:
@@ -151,6 +180,14 @@ class SkySubtractConfig:
             scale_min=float(get("sky_scale_min", default=cls.scale_min)),
             scale_max=float(get("sky_scale_max", default=cls.scale_max)),
             min_oh_lines=int(get("sky_min_oh_lines", default=cls.min_oh_lines)),
+            scale_deriv_order=int(get("sky_scale_deriv_order",
+                                      default=cls.scale_deriv_order)),
+            scale_deriv_ridge=float(get("sky_scale_deriv_ridge",
+                                        default=cls.scale_deriv_ridge)),
+            scale_deriv_gate=float(get("sky_scale_deriv_gate",
+                                       default=cls.scale_deriv_gate)),
+            scale_deriv_skip_colors=list(get("sky_scale_deriv_skip_colors",
+                                             default=["blue"])),
             pca_ncomp=int(get("sky_pca_ncomp", default=cls.pca_ncomp)),
             pca_max_basis_fibers=int(get("sky_pca_max_basis_fibers",
                                          default=cls.pca_max_basis_fibers)),
@@ -167,6 +204,10 @@ class SkySubtractConfig:
                          "PCA residual components removed"),
             "SKYMASKP": (self.sky_fiber_percentile,
                          "Sky-fibre white-light percentile cut"),
+            "SKYDVORD": (self.scale_deriv_order,
+                         "OH-scale derivative order (0=amp,1=+shift,2=+width)"),
+            "SKYDVGAT": (self.scale_deriv_gate,
+                         "Min frac SSR reduction to keep derivative terms"),
         }
 
     def as_dict(self) -> dict:

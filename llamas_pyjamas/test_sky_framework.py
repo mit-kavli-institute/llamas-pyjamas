@@ -165,6 +165,39 @@ class TestSkyScale(unittest.TestCase):
         self.assertLess(rms_after, rms_before,
                         "OH-line residual RMS should drop after scaling")
 
+    def test_derivative_removes_shift_and_width_residual(self):
+        """Shift ('P-Cygni') and width (pos-neg-pos) residuals are invisible to
+        amplitude-only scaling but are removed by the derivative augmentation,
+        which is disabled for blue."""
+        x = np.arange(N_WAVE)
+        sky = np.tile(_sky_template(np.random.default_rng(0)),
+                      (N_FIBER, 1)).astype(float)
+        rng = np.random.default_rng(7)
+        flux = np.zeros((N_FIBER, N_WAVE))
+        for f in range(N_FIBER):
+            # Sub-pixel shift + small width mismatch: antisymmetric + symmetric.
+            row = sum(_gaussian(x, c + 0.25, OH_AMP)          # shifted line
+                      + _gaussian(x, c, OH_AMP, sigma=2.15)   # broadened line
+                      - 2 * _gaussian(x, c, OH_AMP)           # minus base model
+                      for c in OH_CENTERS)
+            flux[f] = row + rng.normal(0.0, 0.3, N_WAVE)
+
+        cfg0 = SkySubtractConfig(method="scaled", scale_deriv_order=0)
+        cfg2 = SkySubtractConfig(method="scaled", scale_deriv_order=2)
+        line_px = _oh_pixel_mask(sky[0], cfg2)
+        rows = np.arange(N_FIBER)
+
+        _, _, f0 = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg0, color="green")
+        _, _, f2 = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg2, color="green")
+        _, _, fb = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg2, color="blue")
+
+        rms0 = _line_rms(f0, line_px, rows)
+        rms2 = _line_rms(f2, line_px, rows)
+        self.assertLess(rms2, 0.8 * rms0,
+                        "derivative fit should substantially cut the residual")
+        # Blue is on the skip list -> identical to amplitude-only.
+        np.testing.assert_allclose(fb, f0, rtol=0, atol=0)
+
 
 class TestSkyResidual(unittest.TestCase):
     def test_removes_common_pattern(self):
