@@ -16,7 +16,7 @@ import numpy as np
 from PyQt6.QtWidgets import QApplication
 
 from llamas_pyjamas.CubeViewer.cubeViewPick import MARKER_TAG, ElementPicker
-from llamas_pyjamas.CubeViewer.cubeViewScene import Spectrum, SpectralScene
+from llamas_pyjamas.CubeViewer.cubeViewScene import Spectrum, SpectralScene, combine
 from llamas_pyjamas.CubeViewer.cubeViewSpecPlot import SpectrumPanel
 
 _app = QApplication.instance() or QApplication([])
@@ -245,6 +245,44 @@ def test_panel_wavelength_range_survives_empty_window():
     panel.set_wavelength_range(8000, 9000)   # no samples here
     assert panel.axes.get_xlim() == (8000.0, 9000.0), 'keep the requested range so the '\
                                                       'emptiness is visible'
+
+
+def test_panel_flam_toggle_enables_only_with_calibration():
+    panel = SpectrumPanel()
+    # uncalibrated selection: toggle disabled
+    panel.set_spectra([Spectrum(np.linspace(5000, 6000, 20), np.ones(20),
+                                channel='green', label='f')])
+    assert not panel.flam_box.isEnabled()
+    # calibrated selection: toggle enabled
+    panel.set_spectra([Spectrum(np.linspace(5000, 6000, 20), np.ones(20),
+                                channel='green', label='f', flam=np.full(20, 2e-16))])
+    assert panel.flam_box.isEnabled()
+
+
+def test_panel_flam_toggle_switches_plane_and_label():
+    wave = np.linspace(5000, 6000, 20)
+    panel = SpectrumPanel()
+    panel.set_spectra([Spectrum(wave, np.full(20, 100.0), channel='green', label='f',
+                                flam=np.full(20, 2e-16))])
+    assert 'Counts' in panel.axes.get_ylabel()
+    panel.flam_box.setChecked(True)
+    panel._replot()
+    assert 'Flux' in panel.axes.get_ylabel()
+    # the plotted y-data should now be the FLAM values, not the counts
+    ydata = panel.axes.lines[0].get_ydata()
+    assert np.allclose(ydata, 2e-16)
+
+
+def test_combine_sums_flam_when_all_present():
+    wave = np.linspace(5000, 6000, 10)
+    members = [Spectrum(wave, np.full(10, 100.0), channel='green', label=str(i),
+                        flam=np.full(10, 1e-16)) for i in range(3)]
+    out = combine(members, mode='sum')[0]
+    assert out.has_flam and np.allclose(out.flam, 3e-16)
+    # if any member lacks flam, the combination carries none
+    members[1].flam = None
+    out2 = combine(members, mode='sum')[0]
+    assert not out2.has_flam
 
 
 def test_panel_survives_all_masked_spectrum():

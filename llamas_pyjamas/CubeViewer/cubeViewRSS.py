@@ -141,6 +141,8 @@ class RSSChannel:
             self.flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
             self.wave = np.asarray(hdul['WAVE'].data, dtype=float)
             self.mask = (np.asarray(hdul['MASK'].data) if 'MASK' in hdul else None)
+            # Flux-calibrated plane, present only after apply_fluxcal has run on this RSS.
+            self.flam = (np.asarray(hdul['FLAM'].data, dtype=float) if 'FLAM' in hdul else None)
 
             fibermap = hdul['FIBERMAP'].data
             benchsides = [str(b).strip() for b in fibermap['BENCHSIDE']]
@@ -201,6 +203,7 @@ class RSSChannel:
             channel=self.channel,
             label=f'{benchside} fibre {fibre_id}',
             mask=(self.mask[row] != 0) if self.mask is not None else None,
+            flam=(self.flam[row] if self.flam is not None else None),
         )
 
 

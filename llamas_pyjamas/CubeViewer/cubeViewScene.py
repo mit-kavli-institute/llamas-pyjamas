@@ -63,6 +63,9 @@ class Spectrum:
         Contribution weight, for aperture combination. 1.0 for a single element.
     mask : ndarray, optional
         Boolean, True where the sample is bad. Plotted as a gap.
+    flam : ndarray, optional
+        Flux-calibrated spectrum (erg/s/cm^2/A) from the RSS FLAM extension, if the file has
+        been flux-calibrated. None when uncalibrated. Same length as `wave`.
     """
 
     wave: np.ndarray
@@ -71,13 +74,25 @@ class Spectrum:
     label: str
     weight: float = 1.0
     mask: Optional[np.ndarray] = None
+    flam: Optional[np.ndarray] = None
 
-    def good(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Wavelength and flux with masked and non-finite samples removed."""
-        ok = np.isfinite(self.wave) & np.isfinite(self.flux)
+    @property
+    def has_flam(self) -> bool:
+        return self.flam is not None
+
+    def good(self, calibrated: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+        """Wavelength and flux with masked and non-finite samples removed.
+
+        With ``calibrated=True`` returns the flux-calibrated ``flam`` plane instead of the
+        instrumental ``flux``; raises if this spectrum carries no calibration.
+        """
+        values = self.flam if calibrated else self.flux
+        if values is None:
+            raise ValueError('spectrum has no calibrated (FLAM) plane')
+        ok = np.isfinite(self.wave) & np.isfinite(values)
         if self.mask is not None:
             ok &= ~self.mask.astype(bool)
-        return self.wave[ok], self.flux[ok]
+        return self.wave[ok], values[ok]
 
 
 def linear_wcs(crpix: Sequence[float], crval: Sequence[float],
@@ -143,16 +158,20 @@ def combine(spectra: Sequence[Spectrum], label: str = 'aperture',
             logger.warning("Zero total weight combining %d %s spectra", len(members), channel)
             continue
 
-        stack = np.zeros_like(reference, dtype=float)
-        for member in members:
-            values = (member.flux if member.wave is reference
-                      else np.interp(reference, member.wave, member.flux,
-                                     left=np.nan, right=np.nan))
-            stack += member.weight * np.nan_to_num(values, nan=0.0)
-        if mode == 'mean':
-            stack /= total_weight
+        def _stack(getter):
+            acc = np.zeros_like(reference, dtype=float)
+            for member in members:
+                vals = getter(member)
+                if member.wave is not reference:
+                    vals = np.interp(reference, member.wave, vals, left=np.nan, right=np.nan)
+                acc += member.weight * np.nan_to_num(vals, nan=0.0)
+            return acc / total_weight if mode == 'mean' else acc
+
+        stack = _stack(lambda m: m.flux)
+        # Calibrated flux adds the same way; carry it only if every member has it.
+        flam = (_stack(lambda m: m.flam) if all(m.has_flam for m in members) else None)
         out.append(Spectrum(wave=reference, flux=stack, channel=channel, label=label,
-                            weight=total_weight))
+                            weight=total_weight, flam=flam))
     return out
 
 

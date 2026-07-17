@@ -84,6 +84,16 @@ class SpectrumPanel(QWidget):
             'Keep the current axis limits when the selection changes, instead of autoscaling'
         )
         controls.addWidget(self.hold_box)
+
+        # Show the flux-calibrated FLAM plane instead of sky-subtracted counts. Enabled only
+        # when the selection actually carries calibration (the RSS has a FLAM extension).
+        self.flam_box = QCheckBox('Flux-cal')
+        self.flam_box.setToolTip('Plot the flux-calibrated spectrum (FLAM, erg/s/cm²/Å) '
+                                 'instead of sky-subtracted counts. Available once the RSS '
+                                 'has been flux-calibrated.')
+        self.flam_box.setEnabled(False)
+        self.flam_box.stateChanged.connect(self._replot)
+        controls.addWidget(self.flam_box)
         controls.addStretch(1)
 
         self.title = QLabel('No selection')
@@ -127,14 +137,24 @@ class SpectrumPanel(QWidget):
     def set_spectra(self, spectra: Sequence[Spectrum]) -> None:
         """Show a new selection. An empty sequence clears the plot."""
         self._spectra = list(spectra)
+        # Offer the flux-cal view only when the selection carries a FLAM plane.
+        have_flam = bool(spectra) and all(s.has_flam for s in spectra)
+        self.flam_box.setEnabled(have_flam)
+        if not have_flam:
+            self.flam_box.setChecked(False)
         self._replot()
+
+    def _show_calibrated(self) -> bool:
+        return self.flam_box.isEnabled() and self.flam_box.isChecked()
 
     def _replot(self) -> None:
         limits = (self.axes.get_xlim(), self.axes.get_ylim())
         had_data = bool(self.axes.lines)
+        calibrated = self._show_calibrated()
 
         self.axes.clear()
         self._decorate()
+        self.axes.set_ylabel('Flux (erg/s/cm²/Å)' if calibrated else 'Counts (sky-subtracted)')
 
         if not self._spectra:
             self.title.setText('No selection')
@@ -148,7 +168,7 @@ class SpectrumPanel(QWidget):
             box = self._visible.get(spectrum.channel)
             if box is not None and not box.isChecked():
                 continue
-            wave, flux = spectrum.good()
+            wave, flux = spectrum.good(calibrated=calibrated)
             if wave.size == 0:
                 continue
             self.axes.plot(wave, flux, linewidth=0.8,
@@ -156,7 +176,8 @@ class SpectrumPanel(QWidget):
                            label=spectrum.channel)
             plotted += 1
 
-        self.title.setText(self._spectra[0].label)
+        suffix = '  [flux-calibrated]' if calibrated else ''
+        self.title.setText(self._spectra[0].label + suffix)
         if plotted:
             self.axes.legend(loc='upper right', fontsize='small', framealpha=0.8)
 
@@ -174,12 +195,13 @@ class SpectrumPanel(QWidget):
         continuum; a plain autoscale on those flattens the spectrum into a line at zero. A
         high percentile keeps the continuum legible while still showing real lines.
         """
+        calibrated = self._show_calibrated()
         values, waves = [], []
         for spectrum in self._spectra:
             box = self._visible.get(spectrum.channel)
             if box is not None and not box.isChecked():
                 continue
-            wave, flux = spectrum.good()
+            wave, flux = spectrum.good(calibrated=calibrated)
             if self._wave_range is not None:
                 inside = (wave >= self._wave_range[0]) & (wave <= self._wave_range[1])
                 wave, flux = wave[inside], flux[inside]
