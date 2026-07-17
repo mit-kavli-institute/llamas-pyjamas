@@ -59,6 +59,24 @@ def test_flux_standard_files_omitted_when_none(tmp_path):
     assert not active
 
 
+def test_flux_standards_appended_when_template_lacks_key(tmp_path):
+    # Regression: rewriting a config written before this feature (no flux_standard_files line)
+    # must still record the standards by appending, not silently drop them. The substitution
+    # loop only fills keys already present, so absence of the key was the failure mode.
+    legacy = os.path.join(tmp_path, 'legacy.txt')
+    with open(legacy, 'w') as fh:
+        fh.write('science_files = /d/sci.fits\nclobber = true\nsky_method = scaled\n')
+    text = generate_config(
+        {'science': ['/d/sci.fits'], 'flux_standard': ['/d/gd108.fits', '/d/feige.fits']},
+        output_dir='/tmp/out', template_path=legacy)
+    active = [l for l in text.splitlines()
+              if l.strip().startswith('flux_standard_files') and not l.startswith('#')]
+    assert active, 'flux_standard_files must be appended when the template lacks it'
+    assert '/d/gd108.fits' in active[0] and '/d/feige.fits' in active[0]
+    # hand-edited parameters in the legacy config must survive the rewrite
+    assert 'clobber = true' in text and 'sky_method = scaled' in text
+
+
 def test_config_roundtrip_multiple_standards(tmp_path):
     stds = ['/data/gd108_a.fits', '/data/gd108_b.fits', '/data/feige110.fits']
     config = _write_and_parse({'science': ['/data/s.fits'], 'flux_standard': stds}, str(tmp_path))

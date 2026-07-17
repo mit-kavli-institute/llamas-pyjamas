@@ -217,6 +217,16 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         for key, path in new_arcs.items():
             out.append(f'{key} = {path}\n')
 
+    # flux_standard_files assigned but absent from the template goes in an appended line.
+    # An existing config written before this feature has no such key for the substitution
+    # loop above to fill, so without this the standards would be silently dropped on rewrite.
+    if assignments.get('flux_standard') and 'flux_standard_files' not in substituted:
+        out.append('\n# Spectrophotometric standard-star exposures (identified in the setup '
+                   'GUI by\n# crossmatching the pointing against the bundled catalogue). '
+                   'Extracted like\n# science; used in postprocessing to build a sensitivity '
+                   'function.\n')
+        out.append('flux_standard_files = ' + ', '.join(assignments['flux_standard']) + '\n')
+
     if assignments.get('bad'):
         out.append(f'\n{BAD_HEADER}\n')
         for path in assignments['bad']:
@@ -495,6 +505,9 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
                 typeItem.setToolTip(tip)
                 self.table.item(row, self.COL_OBJ).setToolTip(tip)
         self.table.setSortingEnabled(True)
+        # Default to filename order, which for LLAMAS names (ISO date + time) is the order
+        # the frames were observed. The user can still re-sort by clicking any header.
+        self.table.sortItems(self.COL_FILE, QtCore.Qt.SortOrder.AscendingOrder)
 
     def apply_standard_recommendations(self):
         """Pre-assign the flux-standard role to crossmatched frames.
