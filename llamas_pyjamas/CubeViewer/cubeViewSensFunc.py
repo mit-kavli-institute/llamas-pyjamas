@@ -74,6 +74,7 @@ class SensFuncModel:
     ref_wave: np.ndarray
     ref_flux: np.ndarray
     standard_name: str = ''
+    airmass: Optional[float] = None
     use_default_masks: bool = True
     added_regions: List[Tuple[float, float]] = field(default_factory=list)
     bkspace: Optional[float] = None
@@ -111,7 +112,8 @@ class SensFuncModel:
         full_meta.update(meta or {})
         return build_sensfunc(self.spectra, self.exptime, self.ref_wave, self.ref_flux,
                               regions=self.regions(), bkspace=self.bkspace,
-                              nord=self.nord, sigma=self.sigma, meta=full_meta)
+                              nord=self.nord, sigma=self.sigma, airmass=self.airmass,
+                              meta=full_meta)
 
 
 class SensFuncDialog(QDialog):

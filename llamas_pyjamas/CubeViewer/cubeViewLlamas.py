@@ -443,10 +443,18 @@ class CubeViewerWindow(QMainWindow):
         # The picker already summed the aperture per channel; hand those spectra straight in.
         spectra = {s.channel: s.good() for s in self._current_spectra}
 
+        airmass = None
+        if self._header is not None:
+            airmass = self._header.get('AIRMASS', self._header.get('TEL AIRMASS'))
+            try:
+                airmass = float(airmass)
+            except (TypeError, ValueError):
+                airmass = None
+
         from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncDialog, SensFuncModel
         model = SensFuncModel(spectra=spectra, exptime=exptime,
                               ref_wave=ref_wave, ref_flux=ref_flux,
-                              standard_name=self._standard.name)
+                              standard_name=self._standard.name, airmass=airmass)
         default_path = ''
         if self._path:
             base = os.path.splitext(os.path.basename(self._path))[0]

@@ -300,7 +300,8 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
                    exptime: float, ref_wave: np.ndarray, ref_flux: np.ndarray,
                    regions: Optional[Sequence[Tuple[float, float]]] = None,
                    bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
-                   sigma: float = DEFAULT_SIGMA, meta: Optional[Dict] = None) -> SensFunc:
+                   sigma: float = DEFAULT_SIGMA, airmass: Optional[float] = None,
+                   meta: Optional[Dict] = None) -> SensFunc:
     """Build a :class:`SensFunc` from a standard's aperture spectra and reference flux.
 
     Parameters
@@ -338,6 +339,10 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
     if not channels:
         raise ValueError('no channel produced a sensitivity fit')
 
+    # airmass is stored so the apply step can do the differential extinction correction
+    # (X_science - X_standard); without it, only same-airmass application is exact.
     full_meta = {'exptime': exptime}
+    if airmass is not None:
+        full_meta['airmass'] = float(airmass)
     full_meta.update(meta or {})
     return SensFunc(channels=channels, meta=full_meta)
