@@ -31,8 +31,8 @@ combine         Weighted combination of spectra sharing a channel
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Dict, Hashable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from astropy.wcs import WCS
@@ -168,6 +168,16 @@ class SpectralScene(ABC):
         meta : dict
             Extra FITS header keys describing the render, plus a ``'contributions'`` entry
             giving the per-channel sample count, so the GUI can show what actually went in.
+        """
+
+    @abstractmethod
+    def element_at(self, x_pix: float, y_pix: float) -> Optional[Hashable]:
+        """Opaque identity of the spatial element under an image pixel, or None.
+
+        The value is compared for equality and nothing else — a fibre key, a spaxel index, a
+        mosaic cell. It exists so the crosshair poller can tell "still the same element" from
+        "moved to a new one" without knowing what kind of element a scene has, and so the
+        expensive work only runs when the selection actually changes.
         """
 
     @abstractmethod

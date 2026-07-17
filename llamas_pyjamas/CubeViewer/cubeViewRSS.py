@@ -315,8 +315,14 @@ class RSSScene(SpectralScene):
         meta['WAVEMAX'] = (float(wave_max), 'Collapse window end (Angstrom)')
         return image, wcs, meta
 
-    def _key_at(self, x_pix: float, y_pix: float) -> Optional[FibreKey]:
-        """The fibre whose hexagon contains an image pixel, or None."""
+    def element_at(self, x_pix: float, y_pix: float) -> Optional[FibreKey]:
+        """The fibre whose hexagon contains an image pixel, or None.
+
+        Exact in the hex render: each pixel belongs to exactly one fibre's Voronoi cell, and a
+        point inside a pointy-top hexagon is at most one circumradius from its centre, so the
+        nearest-neighbour query plus that bound is the hexagon test. Off-field pixels and dead
+        fibres' empty tiles both return None.
+        """
         step = 1.0 / float(self.pix_per_unit) if self.hex_tiles else None
         if step is None:
             grid_x, _ = whitelight_grid()
@@ -330,7 +336,7 @@ class RSSScene(SpectralScene):
         return self.keys[int(row)]
 
     def spectra_at(self, x_pix: float, y_pix: float) -> List[Spectrum]:
-        key = self._key_at(x_pix, y_pix)
+        key = self.element_at(x_pix, y_pix)
         if key is None:
             return []
         spectra = [self._channels[name].spectrum(key) for name in self.channels]
@@ -338,7 +344,7 @@ class RSSScene(SpectralScene):
 
     def marker_region(self, x_pix: float, y_pix: float) -> str:
         """A DS9 polygon tracing the selected fibre's hexagon, in image coordinates."""
-        key = self._key_at(x_pix, y_pix)
+        key = self.element_at(x_pix, y_pix)
         if key is None:
             return ''
         centre = self.positions[self.keys.index(key)]

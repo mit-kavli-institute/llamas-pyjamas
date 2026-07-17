@@ -28,6 +28,7 @@ DS9                A connection to one DS9 instance
 
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 from io import BytesIO
@@ -250,28 +251,64 @@ class DS9:
             # Older builds without -n answer yes/no.
             return reply.strip().lower() == 'yes'
 
-    def get(self, command: str) -> str:
+    @staticmethod
+    def _split(command) -> List[str]:
+        """Split a command into argv, respecting quotes.
+
+        A plain ``str.split()`` shreds quoted arguments, which DS9 then rejects — region
+        specifications carry ``{}`` and ``#`` and must survive intact. Pass a list to bypass
+        splitting entirely.
+        """
+        if isinstance(command, str):
+            return shlex.split(command)
+        return list(command)
+
+    def get(self, command) -> str:
         """Send an XPA *get* and return DS9's reply.
 
         Example: ``ds9.get('crosshair image')`` -> ``'123.5 88.0'``.
         """
-        return self._run([self.tools['xpaget'], self.target] + command.split())
+        return self._run([self.tools['xpaget'], self.target] + self._split(command))
 
-    def set(self, command: str, data: Optional[bytes] = None) -> None:
+    def set(self, command, data: Optional[bytes] = None) -> None:
         """Send an XPA *set*.
 
         Parameters
         ----------
-        command : str
-            e.g. ``'frame new'``, ``'scale zscale'``, ``'mode crosshair'``.
+        command : str or sequence of str
+            e.g. ``'frame new'``, ``'scale zscale'``, ``'mode crosshair'``. Strings are split
+            with :mod:`shlex`, so quoted arguments survive.
         data : bytes, optional
             Payload piped to the command's stdin. When None, ``-p`` (no data) is used.
         """
+        argv = [self.tools['xpaset']]
         if data is None:
-            argv = [self.tools['xpaset'], '-p', self.target] + command.split()
-        else:
-            argv = [self.tools['xpaset'], self.target] + command.split()
+            argv.append('-p')
+        argv.append(self.target)
+        argv.extend(self._split(command))
         self._run(argv, data=data)
+
+    def set_regions(self, text: str) -> None:
+        """Load region text into the current frame, piped on stdin.
+
+        Regions are sent as a payload rather than as command arguments because a region
+        specification contains braces, hashes and spaces that do not survive argv quoting.
+        """
+        if not text:
+            return
+        payload = text if text.endswith('\n') else text + '\n'
+        self.set('regions', data=payload.encode('utf-8'))
+
+    def delete_region_group(self, tag: str) -> None:
+        """Delete only the regions carrying `tag`, leaving the user's own regions alone.
+
+        Best-effort: a DS9 build that rejects group addressing simply leaves the marker in
+        place, which is preferable to ``regions delete all`` destroying the user's work.
+        """
+        try:
+            self.set(f'regions group {tag} delete')
+        except DS9Error as exc:
+            logger.debug('Could not delete region group %r: %s', tag, exc)
 
     def set_fits(self, hdulist: fits.HDUList, frame: Optional[int] = None,
                  preserve: bool = True) -> None:
