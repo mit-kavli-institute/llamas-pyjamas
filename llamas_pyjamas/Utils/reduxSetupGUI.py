@@ -484,9 +484,16 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             self.table.setItem(row, self.COL_ROLE, QtWidgets.QTableWidgetItem(''))
             if e.get('standard'):
                 name, sep = e['standard']
-                tip = f'Matches flux standard {name} ({sep:.1f}" away)'
-                for col in (self.COL_OBJ, self.COL_TYPE):
-                    self.table.item(row, col).setToolTip(tip)
+                # Annotate the Type column so the crossmatch is visible where a user looks for
+                # the frame's classification. This is independent of the role assignment, so it
+                # shows even when a loaded config has (mis)labelled the standard as science. The
+                # header's own PRODCATG type is kept in the tooltip.
+                typeItem = self.table.item(row, self.COL_TYPE)
+                typeItem.setText(f'Flux Std: {name}')
+                tip = (f'Matches flux standard {name}, {sep:.1f}" from catalogue position.\n'
+                       f'Header type: {e["type"] or "unknown"}.')
+                typeItem.setToolTip(tip)
+                self.table.item(row, self.COL_OBJ).setToolTip(tip)
         self.table.setSortingEnabled(True)
 
     def apply_standard_recommendations(self):
