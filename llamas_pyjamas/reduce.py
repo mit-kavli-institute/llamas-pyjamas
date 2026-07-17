@@ -1725,8 +1725,11 @@ def main(config_path):
         _sci = config.get('science_files', [])
         _sci_list = [_sci] if isinstance(_sci, str) else list(_sci or [])
         config['science_files'] = _sci_list + [s for s in _std_list if s not in _sci_list]
-        logger.info("Folded %d flux-standard exposure(s) into the science extraction list",
-                    len(_std_list))
+        # print, not logger: this runs before logging is configured below, and `logger`
+        # is a local in main() (assigned later), so referencing it here would be an
+        # UnboundLocalError. The full merged config is logged once logging is set up.
+        print(f"Folded {len(_std_list)} flux-standard exposure(s) into the science "
+              f"extraction list")
 
     # (full configuration is logged to the file once logging is set up, below)
 
