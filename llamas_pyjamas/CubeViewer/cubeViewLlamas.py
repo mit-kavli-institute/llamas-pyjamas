@@ -69,6 +69,10 @@ class CubeViewerWindow(QMainWindow):
 
         self.ds9 = DS9(target=target)
         self.scene: Optional[SpectralScene] = None
+        self._path: Optional[str] = None
+        self._header = None
+        self._standard = None                 # StandardMatch if the loaded file is a standard
+        self._current_spectra: List[Spectrum] = []
         self.picker = ElementPicker(self.ds9)
         self.picker.selectionChanged.connect(self._on_selection)
         self.picker.statusChanged.connect(self._on_pick_status)
@@ -182,6 +186,13 @@ class CubeViewerWindow(QMainWindow):
         self.clear_button.setEnabled(False)
         row.addWidget(self.clear_button)
 
+        self.sensfunc_button = QPushButton('Sensitivity Fn…')
+        self.sensfunc_button.setToolTip('Build a sensitivity function from the aperture '
+                                        '(enabled when the loaded file is a flux standard)')
+        self.sensfunc_button.clicked.connect(self.build_sensfunc)
+        self.sensfunc_button.setEnabled(False)
+        row.addWidget(self.sensfunc_button)
+
         row.addStretch(1)
         return row
 
@@ -226,8 +237,10 @@ class CubeViewerWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
 
         self.scene = scene
+        self._path = path
         self.picker.set_scene(scene)
         self.panel.set_spectra([])
+        self._current_spectra = []
 
         for channel, box in self.collapse_boxes.items():
             present = channel in scene.channels
@@ -240,10 +253,42 @@ class CubeViewerWindow(QMainWindow):
         self._reset_wave_range()
         self._on_radius_changed(self.radius_spin.value())
 
+        # Is this a standard? Crossmatch the header so the sensfunc action knows the reference.
+        self._header, self._standard = self._identify_standard(path)
+
         low, high = scene.wavelength_range()
+        std_note = ''
+        if self._standard is not None:
+            std_note = f" | STANDARD: {self._standard.name} ({self._standard.separation_arcsec:.1f}\")"
+        self._update_sensfunc_button()
         self.statusBar().showMessage(
             f"{len(scene.keys)} fibres | channels: {', '.join(scene.channels)} | "
-            f"{low:.0f}-{high:.0f} A")
+            f"{low:.0f}-{high:.0f} A{std_note}")
+
+    @staticmethod
+    def _identify_standard(path: str):
+        """Return (primary_header, StandardMatch|None) for the loaded file."""
+        try:
+            from astropy.io import fits
+            from llamas_pyjamas.Flux.fluxStandards import load_catalog
+            header = fits.getheader(path, 0)
+            match = load_catalog().match_header(header)
+            return header, match
+        except Exception as exc:                       # noqa: BLE001
+            logger.debug('standard identification skipped: %s', exc)
+            return None, None
+
+    def _update_sensfunc_button(self) -> None:
+        is_std = self._standard is not None and self._standard.standard.has_spectrum
+        self.sensfunc_button.setEnabled(is_std)
+        if self._standard is not None and not self._standard.standard.has_spectrum:
+            self.sensfunc_button.setToolTip(
+                f'{self._standard.name} has no bundled reference spectrum')
+        elif is_std:
+            self.sensfunc_button.setToolTip(
+                f'Build a sensitivity function from the aperture on {self._standard.name}')
+        else:
+            self.sensfunc_button.setToolTip('Loaded file is not a recognised flux standard')
 
     def _reset_wave_range(self) -> None:
         if self.scene is None:
@@ -354,6 +399,7 @@ class CubeViewerWindow(QMainWindow):
 
     @pyqtSlot(list)
     def _on_selection(self, spectra: List[Spectrum]) -> None:
+        self._current_spectra = list(spectra)
         self.panel.set_spectra(spectra)
 
     @pyqtSlot(str)
@@ -364,6 +410,50 @@ class CubeViewerWindow(QMainWindow):
     def _on_ds9_lost(self, message: str) -> None:
         self.pick_box.setChecked(False)
         self.statusBar().showMessage(f'Lost DS9: {message}')
+
+    def build_sensfunc(self) -> None:
+        """Open the sensitivity-function dialog for the current aperture on the standard."""
+        if self._standard is None or not self._standard.standard.has_spectrum:
+            return
+        if not self._current_spectra:
+            QMessageBox.information(
+                self, 'Sensitivity function',
+                'Define an aperture on the standard first: enable Pick (and Grow for a '
+                'multi-fibre aperture) and select the star in DS9.')
+            return
+
+        exptime = None
+        if self._header is not None:
+            exptime = self._header.get('SEXPTIME', self._header.get('REXPTIME',
+                                       self._header.get('EXPTIME')))
+        try:
+            exptime = float(exptime)
+        except (TypeError, ValueError):
+            QMessageBox.warning(self, 'Sensitivity function',
+                                'Could not read the exposure time from the header.')
+            return
+
+        try:
+            ref_wave, ref_flux = self._standard.standard.load_spectrum()
+        except Exception as exc:                       # noqa: BLE001
+            QMessageBox.warning(self, 'Sensitivity function',
+                                f'Could not load the reference spectrum: {exc}')
+            return
+
+        # The picker already summed the aperture per channel; hand those spectra straight in.
+        spectra = {s.channel: s.good() for s in self._current_spectra}
+
+        from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncDialog, SensFuncModel
+        model = SensFuncModel(spectra=spectra, exptime=exptime,
+                              ref_wave=ref_wave, ref_flux=ref_flux,
+                              standard_name=self._standard.name)
+        default_path = ''
+        if self._path:
+            base = os.path.splitext(os.path.basename(self._path))[0]
+            default_path = os.path.join(os.path.dirname(self._path), f'{base}_sensfunc.fits')
+        dialog = SensFuncDialog(model, default_path=default_path, parent=self)
+        if dialog.exec() and dialog.saved_path:
+            self.statusBar().showMessage(f'Saved sensitivity function: {dialog.saved_path}')
 
     def _report_ds9(self, exc: Exception) -> None:
         QMessageBox.warning(
