@@ -98,27 +98,43 @@ def linear_wcs(crpix: Sequence[float], crval: Sequence[float],
     return wcs
 
 
-def combine(spectra: Sequence[Spectrum], label: str = 'aperture') -> List[Spectrum]:
-    """Weighted-combine spectra, per channel, onto the first member's wavelength grid.
+def combine(spectra: Sequence[Spectrum], label: str = 'aperture',
+            mode: str = 'sum') -> List[Spectrum]:
+    """Combine spectra, per channel, onto the first member's wavelength grid.
 
-    Present for the aperture-extraction future; v1 selects a single element, for which this
-    is the identity. Spectra of different channels are never mixed.
+    Spectra of different channels are never mixed — the result has one entry per channel.
 
-    Returns
-    -------
-    list of Spectrum
-        One combined spectrum per channel present in the input.
+    Parameters
+    ----------
+    spectra : sequence of Spectrum
+    label : str
+        Label for the combined spectra.
+    mode : {'sum', 'mean'}
+        ``'sum'`` totals the members (weighted by :attr:`Spectrum.weight`), which is what an
+        aperture extraction wants: the source's total flux. ``'mean'`` divides by the total
+        weight, giving a representative spectrum rather than a total.
+
+    Notes
+    -----
+    **Combining resamples.** Each LLAMAS fibre carries its own wavelength solution, so members
+    are interpolated onto the first member's grid before they can be added at all. Linear
+    interpolation is not flux-conserving; over a handful of fibres on a source the error is
+    small compared with the gain in signal, but it is an approximation, and a
+    flux-conserving resampling would be the honest fix if this is ever used photometrically.
+    A single unweighted member is returned untouched, so picking one fibre never resamples.
     """
     if not spectra:
         return []
+    if mode not in ('sum', 'mean'):
+        raise ValueError(f"mode must be 'sum' or 'mean', not {mode!r}")
 
     out: List[Spectrum] = []
     for channel in CHANNEL_ORDER:
         members = [s for s in spectra if s.channel == channel]
         if not members:
             continue
-        if len(members) == 1:
-            out.append(members[0])
+        if len(members) == 1 and members[0].weight == 1.0:
+            out.append(members[0])          # identity: no resampling for a single fibre
             continue
 
         reference = members[0].wave
@@ -132,9 +148,11 @@ def combine(spectra: Sequence[Spectrum], label: str = 'aperture') -> List[Spectr
             values = (member.flux if member.wave is reference
                       else np.interp(reference, member.wave, member.flux,
                                      left=np.nan, right=np.nan))
-            stack += member.weight * values
-        out.append(Spectrum(wave=reference, flux=stack / total_weight,
-                            channel=channel, label=label, weight=total_weight))
+            stack += member.weight * np.nan_to_num(values, nan=0.0)
+        if mode == 'mean':
+            stack /= total_weight
+        out.append(Spectrum(wave=reference, flux=stack, channel=channel, label=label,
+                            weight=total_weight))
     return out
 
 
@@ -193,6 +211,30 @@ class SpectralScene(ABC):
         """A DS9 region string outlining the element under an image pixel.
 
         Empty string when nothing is selected.
+        """
+
+    @abstractmethod
+    def elements_within(self, x_pix: float, y_pix: float,
+                        radius_pix: float) -> List[Hashable]:
+        """Every element whose centre lies within `radius_pix` of an image pixel.
+
+        A radius of zero means the single element under the pixel, so an aperture of zero
+        degenerates to a normal pick. Returns an empty list when the aperture catches nothing.
+        """
+
+    @abstractmethod
+    def spectra_of(self, elements: Sequence[Hashable]) -> List[Spectrum]:
+        """The individual spectra of the given elements — one per element per channel.
+
+        Not combined: the caller decides whether to sum, average or weight, so this stays
+        useful for aperture extraction and for inspecting members individually.
+        """
+
+    @abstractmethod
+    def region_for(self, elements: Sequence[Hashable]) -> str:
+        """A DS9 region outlining every element in `elements`.
+
+        Empty string for an empty selection.
         """
 
     def describe_at(self, x_pix: float, y_pix: float) -> str:

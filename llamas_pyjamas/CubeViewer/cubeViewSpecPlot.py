@@ -96,8 +96,27 @@ class SpectrumPanel(QWidget):
         layout.addWidget(self.toolbar)
 
         self._spectra: List[Spectrum] = []
+        self._wave_range: Optional[tuple] = None
         self._decorate()
         self.canvas.draw_idle()
+
+    @pyqtSlot(float, float)
+    def set_wavelength_range(self, wave_min: float, wave_max: float) -> None:
+        """Zoom the plot to a wavelength window, and keep it there across selections.
+
+        Called when the white-light window changes, so the spectrum shows the same range the
+        image was built from. The y range then follows the samples *inside* this window
+        rather than the whole spectrum, which is the point — scaling to 3170-10051 A while
+        looking at a 1000 A slice would flatten whatever is in the slice.
+        """
+        if wave_max > wave_min:
+            self._wave_range = (float(wave_min), float(wave_max))
+            self._replot()
+
+    def clear_wavelength_range(self) -> None:
+        """Return to scaling on the full extent of the data."""
+        self._wave_range = None
+        self._replot()
 
     def _decorate(self) -> None:
         self.axes.set_xlabel('Wavelength (Å)')
@@ -161,15 +180,24 @@ class SpectrumPanel(QWidget):
             if box is not None and not box.isChecked():
                 continue
             wave, flux = spectrum.good()
+            if self._wave_range is not None:
+                inside = (wave >= self._wave_range[0]) & (wave <= self._wave_range[1])
+                wave, flux = wave[inside], flux[inside]
             if wave.size:
                 values.append(flux)
                 waves.append(wave)
+
+        if self._wave_range is not None:
+            self.axes.set_xlim(*self._wave_range)
         if not values:
+            # The window may fall outside every visible channel; keep the requested x range
+            # so the user can see that it is empty rather than silently rescaling.
             return
 
         flux = np.concatenate(values)
         wave = np.concatenate(waves)
-        self.axes.set_xlim(float(wave.min()), float(wave.max()))
+        if self._wave_range is None:
+            self.axes.set_xlim(float(wave.min()), float(wave.max()))
 
         low, high = np.percentile(flux, [1.0, 99.5])
         if not np.isfinite(low) or not np.isfinite(high):

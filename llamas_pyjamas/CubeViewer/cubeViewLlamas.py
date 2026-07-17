@@ -38,6 +38,7 @@ from PyQt6.QtGui import QAction, QDoubleValidator
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -152,6 +153,35 @@ class CubeViewerWindow(QMainWindow):
         self.pick_box.toggled.connect(self._toggle_picking)
         row.addWidget(self.pick_box)
 
+        row.addWidget(QLabel('Aperture'))
+        self.radius_spin = QDoubleSpinBox()
+        self.radius_spin.setRange(0.0, 20.0)
+        self.radius_spin.setSingleStep(0.5)
+        self.radius_spin.setDecimals(1)
+        self.radius_spin.setValue(0.0)
+        self.radius_spin.setSuffix(' fib')
+        self.radius_spin.setMaximumWidth(80)
+        self.radius_spin.setToolTip(
+            'Aperture radius in fibre spacings. 0 selects the single fibre under the '
+            'crosshair; larger sums every fibre whose centre falls inside.')
+        self.radius_spin.valueChanged.connect(self._on_radius_changed)
+        row.addWidget(self.radius_spin)
+
+        self.grow_box = QCheckBox('Grow')
+        self.grow_box.setToolTip(
+            'Click fibres in DS9 to build up an aperture instead of replacing the selection.\n'
+            'Click a fibre again to drop it (move away and back — DS9 only reports the '
+            'crosshair position, so a second click in place looks identical to the first).\n'
+            'Drag to paint. Spectra are summed.')
+        self.grow_box.toggled.connect(self._on_grow_toggled)
+        row.addWidget(self.grow_box)
+
+        self.clear_button = QPushButton('Clear')
+        self.clear_button.setToolTip('Empty the accumulated aperture')
+        self.clear_button.clicked.connect(self.picker.clear_aperture)
+        self.clear_button.setEnabled(False)
+        row.addWidget(self.clear_button)
+
         row.addStretch(1)
         return row
 
@@ -169,7 +199,8 @@ class CubeViewerWindow(QMainWindow):
 
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
-                       self.display_button, self.pick_box):
+                       self.display_button, self.pick_box, self.radius_spin,
+                       self.grow_box):
             widget.setEnabled(enabled)
         for box in self.collapse_boxes.values():
             box.setEnabled(enabled)
@@ -207,6 +238,7 @@ class CubeViewerWindow(QMainWindow):
         self.file_label.setStyleSheet('')
         self._set_enabled(True)
         self._reset_wave_range()
+        self._on_radius_changed(self.radius_spin.value())
 
         low, high = scene.wavelength_range()
         self.statusBar().showMessage(
@@ -274,6 +306,8 @@ class CubeViewerWindow(QMainWindow):
             return
         QApplication.restoreOverrideCursor()
 
+        self.panel.set_wavelength_range(wave_min, wave_max)
+
         contributions = meta.get('contributions', {})
         summary = ', '.join(f'{c}:{n}' for c, n in contributions.items())
         self.statusBar().showMessage(
@@ -284,6 +318,28 @@ class CubeViewerWindow(QMainWindow):
             self.pick_box.setChecked(True)          # starts picking
 
     # ------------------------------------------------------------------ picking
+
+    @pyqtSlot(float)
+    def _on_radius_changed(self, value: float) -> None:
+        """Convert an aperture radius in fibre spacings to image pixels for the picker.
+
+        The user thinks in fibres, not pixels, and the pixel scale changes with the render
+        (hex tiles vs the interpolated grid), so the conversion has to come from the scene.
+        """
+        if self.scene is None:
+            return
+        step = getattr(self.scene, '_step', None)
+        pitch = getattr(self.scene, 'pitch', None) or 1.0
+        if step is None:
+            return
+        self.picker.set_radius(value * pitch / step())
+
+    @pyqtSlot(bool)
+    def _on_grow_toggled(self, enabled: bool) -> None:
+        self.picker.set_accumulate(enabled)
+        self.clear_button.setEnabled(enabled)
+        if enabled and not self.pick_box.isChecked():
+            self.pick_box.setChecked(True)     # growing an aperture implies picking
 
     @pyqtSlot(bool)
     def _toggle_picking(self, enabled: bool) -> None:

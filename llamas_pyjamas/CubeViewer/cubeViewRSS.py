@@ -65,6 +65,21 @@ DEFAULT_PIX_PER_UNIT = 10
 #: A point inside a pointy-top hexagon lies at most one circumradius from its centre.
 HEX_CIRCUMRADIUS = HEX_PITCH / np.sqrt(3.0)
 
+#: Slack for distance comparisons against the lattice.
+#:
+#: An aperture of "N fibre spacings" lands exactly on a ring of neighbours, and the fibre map's
+#: coordinates are not exact: HEX_PITCH derives as 0.9999996 rather than 1.0, and a ring that
+#: should sit at 1.0 actually spreads over 0.999999-1.000002. Without slack a radius of one
+#: pitch admits whichever neighbours happen to round below it -- 5 of 7 on real data, which
+#: looks plausible enough to ship unnoticed.
+#:
+#: 1e-3 is chosen from the geometry rather than by taste: it is ~500x the observed coordinate
+#: jitter (~2e-6), and ~700x smaller than the gap to the next ring (1.0 -> 1.732, i.e. 0.73
+#: pitch), so it cannot pull in a ring that does not belong. hex_tile_image needs only 1e-6
+#: because it compares against exact pixel-centre offsets; nearest-neighbour distances
+#: accumulate error from both coordinates and need more room.
+LATTICE_TOL = 1e-3 * HEX_PITCH
+
 FibreKey = Tuple[str, int]
 
 
@@ -214,6 +229,8 @@ class RSSScene(SpectralScene):
         self.channels = tuple(self._channels)
         self.pix_per_unit = int(pix_per_unit)
         self.hex_tiles = bool(hex_tiles)
+        #: Fibre lattice spacing, so callers can express apertures in fibres, not pixels.
+        self.pitch = HEX_PITCH
 
         # Fibre geometry, from the union of channels. Position comes from (benchside, fibre
         # id) via the LUT -- never from the row index.
@@ -323,13 +340,7 @@ class RSSScene(SpectralScene):
         nearest-neighbour query plus that bound is the hexagon test. Off-field pixels and dead
         fibres' empty tiles both return None.
         """
-        step = 1.0 / float(self.pix_per_unit) if self.hex_tiles else None
-        if step is None:
-            grid_x, _ = whitelight_grid()
-            step = float(grid_x[0, 1] - grid_x[0, 0])
-        # hex_header_keys pins CRPIX=1 (1-indexed), CRVAL=0, CDELT=step.
-        world = ((x_pix - 1.0) * step, (y_pix - 1.0) * step)
-
+        world = self._to_world(x_pix, y_pix)
         distance, row = self._tree.query(world, k=1)
         if not np.isfinite(distance) or distance > HEX_CIRCUMRADIUS:
             return None
@@ -337,23 +348,83 @@ class RSSScene(SpectralScene):
 
     def spectra_at(self, x_pix: float, y_pix: float) -> List[Spectrum]:
         key = self.element_at(x_pix, y_pix)
-        if key is None:
-            return []
-        spectra = [self._channels[name].spectrum(key) for name in self.channels]
-        return [s for s in spectra if s is not None]
+        return [] if key is None else self.spectra_of([key])
+
+    def spectra_of(self, elements: Sequence[FibreKey]) -> List[Spectrum]:
+        spectra: List[Spectrum] = []
+        for key in elements:
+            for name in self.channels:
+                spectrum = self._channels[name].spectrum(key)
+                if spectrum is not None:
+                    spectra.append(spectrum)
+        return spectra
+
+    def elements_within(self, x_pix: float, y_pix: float,
+                        radius_pix: float) -> List[FibreKey]:
+        """Fibres whose centres fall within `radius_pix` of an image pixel.
+
+        A radius of zero degenerates to the single fibre under the pixel, so the aperture and
+        single-pick paths are the same code.
+        """
+        if radius_pix <= 0:
+            key = self.element_at(x_pix, y_pix)
+            return [] if key is None else [key]
+
+        world = self._to_world(x_pix, y_pix)
+        # The lattice pitch derived from the LUT is 0.9999996, not 1.0 (finite precision in
+        # the fibre map), while the true nearest-neighbour distances are exactly 1.0. An
+        # aperture of "one fibre spacing" is therefore 0.9999996 and lands *just inside* the
+        # neighbour ring, admitting only whichever neighbours happen to round below it -- 3
+        # of 6 on real data. hex_tile_image hit the same trap and solved it the same way.
+        radius_world = radius_pix * self._step() + LATTICE_TOL
+        rows = self._tree.query_ball_point(world, radius_world)
+        # Nearest first, so the aperture's reference grid is the central fibre's -- the
+        # sensible choice when members must be interpolated onto one of them.
+        rows.sort(key=lambda r: float(np.hypot(*(self.positions[r] - np.asarray(world)))))
+        return [self.keys[r] for r in rows]
+
+    def _step(self) -> float:
+        """Fibre-map units per image pixel, for the active render."""
+        if self.hex_tiles:
+            return 1.0 / float(self.pix_per_unit)
+        grid_x, _ = whitelight_grid()
+        return float(grid_x[0, 1] - grid_x[0, 0])
+
+    def _to_world(self, x_pix: float, y_pix: float) -> Tuple[float, float]:
+        """Image pixel -> fibre-map coordinates. hex_header_keys pins CRPIX=1, CRVAL=0."""
+        step = self._step()
+        return ((x_pix - 1.0) * step, (y_pix - 1.0) * step)
+
+    def _hexagon(self, centre: np.ndarray, step: float) -> str:
+        """One pointy-top hexagon as a DS9 image-coordinate polygon."""
+        angles = np.deg2rad(90.0 + 60.0 * np.arange(6))
+        vertices = [
+            f'{(centre[0] + HEX_CIRCUMRADIUS * np.cos(a)) / step + 1.0:.3f},'
+            f'{(centre[1] + HEX_CIRCUMRADIUS * np.sin(a)) / step + 1.0:.3f}'
+            for a in angles
+        ]
+        return f'polygon({",".join(vertices)})'
 
     def marker_region(self, x_pix: float, y_pix: float) -> str:
         """A DS9 polygon tracing the selected fibre's hexagon, in image coordinates."""
         key = self.element_at(x_pix, y_pix)
-        if key is None:
+        return '' if key is None else self.region_for([key])
+
+    def region_for(self, elements: Sequence[FibreKey]) -> str:
+        """DS9 polygons tracing every fibre's hexagon.
+
+        One region per line: DS9 accepts a multi-line region payload, so an aperture is drawn
+        as the union of its members' hexagons rather than as an approximating circle. The
+        fibres that actually went into the sum are then exactly what is outlined.
+        """
+        if not elements:
             return ''
-        centre = self.positions[self.keys.index(key)]
-        step = 1.0 / float(self.pix_per_unit)
-        # Pointy-top hexagon: vertices every 60 deg starting at 90 deg.
-        angles = np.deg2rad(90.0 + 60.0 * np.arange(6))
-        vertices = []
-        for angle in angles:
-            wx = centre[0] + HEX_CIRCUMRADIUS * np.cos(angle)
-            wy = centre[1] + HEX_CIRCUMRADIUS * np.sin(angle)
-            vertices.append(f'{wx / step + 1.0:.3f},{wy / step + 1.0:.3f}')
-        return f'image; polygon({",".join(vertices)}) # color=cyan width=2'
+        step = self._step()
+        index = {key: row for row, key in enumerate(self.keys)}
+        lines = ['image']
+        for key in elements:
+            row = index.get(key)
+            if row is None:
+                continue
+            lines.append(f'{self._hexagon(self.positions[row], step)} # color=cyan width=2')
+        return '\n'.join(lines) if len(lines) > 1 else ''

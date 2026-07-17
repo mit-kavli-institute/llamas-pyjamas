@@ -44,11 +44,20 @@ class FakeScene(SpectralScene):
 
     def spectra_at(self, x_pix, y_pix):
         self.spectra_calls += 1
+        return self.spectra_of([e for e in [self._which(x_pix)] if e is not None])
+
+    def spectra_of(self, elements):
+        return [Spectrum(wave=np.linspace(4000, 5000, 10), flux=np.ones(10),
+                         channel='green', label=f'element {e}') for e in elements]
+
+    def elements_within(self, x_pix, y_pix, radius_pix):
+        self.spectra_calls += 1
         element = self._which(x_pix)
-        if element is None:
-            return []
-        return [Spectrum(wave=np.linspace(4000, 5000, 10),
-                         flux=np.ones(10), channel='green', label=f'element {element}')]
+        return [] if element is None else [element]
+
+    def region_for(self, elements):
+        return '' if not elements else 'image\n' + '\n'.join(
+            f'circle({i},2,3) # color=cyan' for i, _ in enumerate(elements))
 
     def marker_region(self, x_pix, y_pix):
         return '' if self._which(x_pix) is None else 'image; circle(1,2,3)'
@@ -104,6 +113,67 @@ def test_picker_reselects_after_scene_swap():
     assert len(seen) == 2, 'a scene swap must invalidate the remembered element'
 
 
+def test_accumulate_grows_and_toggles():
+    scene = FakeScene()
+    picker = ElementPicker(NullDS9(), scene)
+    seen = []
+    picker.selectionChanged.connect(seen.append)
+    picker.set_accumulate(True)
+
+    picker._on_moved(10, 10)       # element A
+    assert picker._chosen == ['A']
+    picker._on_moved(150, 10)      # element B
+    assert picker._chosen == ['A', 'B']
+    assert len(seen[-1]) == 1, 'members are summed into one spectrum per channel'
+    assert seen[-1][0].weight == 2.0
+
+    picker._on_moved(10, 10)       # revisiting A drops it
+    assert picker._chosen == ['B']
+
+    picker.clear_aperture()
+    assert picker._chosen == []
+    assert seen[-1] == []
+
+
+def test_accumulate_off_restores_single_pick():
+    scene = FakeScene()
+    picker = ElementPicker(NullDS9(), scene)
+    seen = []
+    picker.selectionChanged.connect(seen.append)
+    picker.set_accumulate(True)
+    picker._on_moved(10, 10)
+    picker._on_moved(150, 10)
+    assert len(picker._chosen) == 2
+
+    picker.set_accumulate(False)   # must drop the aperture, not keep summing it
+    assert picker._chosen == []
+    picker._on_moved(10, 10)
+    assert seen[-1][0].label == 'element A'
+
+
+def test_radius_change_forces_recompute():
+    # The selection depends on the radius, so changing it must not be swallowed by the
+    # position-based dedupe.
+    scene = FakeScene()
+    picker = ElementPicker(NullDS9(), scene)
+    seen = []
+    picker.selectionChanged.connect(seen.append)
+    picker._on_moved(10, 10)
+    assert len(seen) == 1
+    picker.set_radius(5.0)
+    picker._on_moved(10, 10)       # same position, new radius
+    assert len(seen) == 2
+
+
+def test_marker_tagging_covers_every_shape():
+    # An aperture marker is one shape per fibre; tagging only the last would strand the rest
+    # on the next `regions group delete`.
+    region = 'image\ncircle(1,2,3) # color=cyan\ncircle(4,5,6) # color=cyan'
+    tagged = ElementPicker._tagged(region)
+    assert tagged.count(f'tag={{{MARKER_TAG}}}') == 2
+    assert tagged.splitlines()[0] == 'image', 'the coordinate system line carries no tag'
+
+
 def test_marker_tagging():
     tagged = ElementPicker._tagged('image; polygon(1,2,3,4) # color=cyan')
     assert f'tag={{{MARKER_TAG}}}' in tagged
@@ -149,6 +219,32 @@ def test_panel_channel_toggle():
     assert len(panel.axes.lines) == 1
     panel._visible['blue'].setChecked(True)
     assert len(panel.axes.lines) == 2
+
+
+def test_panel_wavelength_range_zooms_and_scales_within_it():
+    # Setting the white-light window must zoom the plot to it, and the y range must follow
+    # the samples inside that window -- scaling to the whole spectrum would flatten the slice.
+    wave = np.linspace(4000, 7000, 3000)
+    flux = np.ones(3000)
+    flux[wave > 6000] = 500.0            # a bright region outside the window of interest
+    panel = SpectrumPanel()
+    panel.set_spectra([Spectrum(wave=wave, flux=flux, channel='green', label='f')])
+    panel.set_wavelength_range(4000, 5000)
+
+    assert panel.axes.get_xlim() == (4000.0, 5000.0)
+    assert panel.axes.get_ylim()[1] < 10, 'y must scale to the window, not the whole spectrum'
+
+    panel.clear_wavelength_range()
+    assert panel.axes.get_ylim()[1] > 10, 'clearing restores full-extent scaling'
+
+
+def test_panel_wavelength_range_survives_empty_window():
+    panel = SpectrumPanel()
+    panel.set_spectra([Spectrum(wave=np.linspace(4000, 5000, 100), flux=np.ones(100),
+                                channel='green', label='f')])
+    panel.set_wavelength_range(8000, 9000)   # no samples here
+    assert panel.axes.get_xlim() == (8000.0, 9000.0), 'keep the requested range so the '\
+                                                      'emptiness is visible'
 
 
 def test_panel_survives_all_masked_spectrum():

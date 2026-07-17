@@ -29,7 +29,7 @@ from typing import List, Optional
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 
 from llamas_pyjamas.CubeViewer.cubeViewDS9 import DS9, DS9Error
-from llamas_pyjamas.CubeViewer.cubeViewScene import Spectrum, SpectralScene
+from llamas_pyjamas.CubeViewer.cubeViewScene import Spectrum, SpectralScene, combine
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,9 @@ class ElementPicker(QObject):
         self._interval_ms = interval_ms
         self._element = None
         self._have_selection = False
+        self._radius_pix = 0.0
+        self._accumulate = False
+        self._chosen: List = []          # ordered: first click is the aperture's reference
         self._thread: Optional[QThread] = None
         self._poller: Optional[CrosshairPoller] = None
 
@@ -134,6 +137,37 @@ class ElementPicker(QObject):
         self._scene = scene
         self._element = None
         self._have_selection = False
+
+    def set_radius(self, radius_pix: float) -> None:
+        """Set the aperture radius in image pixels. Zero means a single element.
+
+        Forces the next poll to recompute even if the crosshair has not moved, since the
+        selection depends on the radius as well as the position.
+        """
+        self._radius_pix = max(0.0, float(radius_pix))
+        self._have_selection = False
+
+    def set_accumulate(self, enabled: bool) -> None:
+        """Grow an aperture by clicking, instead of replacing the selection each time.
+
+        DS9's crosshair only moves when the user clicks or drags it, so every element the
+        crosshair arrives at is a deliberate choice. Accumulating turns that into aperture
+        building: click fibres to add them, click one again to drop it, drag to paint. Nothing
+        needs to detect a click, because in crosshair mode a move *is* a click.
+        """
+        self._accumulate = bool(enabled)
+        if not enabled:
+            self._chosen.clear()
+        self._have_selection = False
+
+    def clear_aperture(self) -> None:
+        """Drop every accumulated element."""
+        self._chosen.clear()
+        self._have_selection = False
+        self.selectionChanged.emit([])
+        self.statusChanged.emit('aperture cleared')
+        if self._poller is not None:
+            self._poller.send_regions('')
 
     @property
     def running(self) -> bool:
@@ -187,25 +221,65 @@ class ElementPicker(QObject):
                 self._poller.send_regions('')
             return
 
-        spectra: List[Spectrum] = self._scene.spectra_at(x_pix, y_pix)
+        under = self._scene.elements_within(x_pix, y_pix, self._radius_pix)
+
+        if self._accumulate:
+            # Clicking an element already in the aperture removes it, so a misclick is
+            # undone by repeating it rather than by starting over.
+            for item in under:
+                if item in self._chosen:
+                    self._chosen.remove(item)
+                else:
+                    self._chosen.append(item)
+            members = list(self._chosen)
+        else:
+            members = under
+
+        if not members:
+            self.selectionChanged.emit([])
+            self.statusChanged.emit('aperture empty' if self._accumulate else 'no data')
+            if self._poller is not None:
+                self._poller.send_regions('')
+            return
+
+        individual = self._scene.spectra_of(members)
+        if len(members) == 1:
+            spectra: List[Spectrum] = individual
+            status = (f"{spectra[0].label} — {', '.join(s.channel for s in spectra)}"
+                      if spectra else 'no data')
+        else:
+            label = f'{len(members)} fibres'
+            spectra = combine(individual, label=label, mode='sum')
+            status = f"{label} summed — {', '.join(s.channel for s in spectra)}"
+            if self._accumulate:
+                status += ' (click to add/remove, Clear to reset)'
+
         self.selectionChanged.emit(spectra)
-        self.statusChanged.emit(
-            f"{spectra[0].label} — {', '.join(s.channel for s in spectra)}"
-            if spectra else 'no data'
-        )
+        self.statusChanged.emit(status)
         if self._poller is not None:
-            region = self._scene.marker_region(x_pix, y_pix)
-            if region:
-                region = self._tagged(region)
-            self._poller.send_regions(region)
+            region = self._scene.region_for(members)
+            self._poller.send_regions(self._tagged(region) if region else '')
 
     @staticmethod
     def _tagged(region: str) -> str:
-        """Attach :data:`MARKER_TAG` so the marker can be deleted on its own."""
-        if 'tag=' in region:
-            return region
-        return (f'{region} tag={{{MARKER_TAG}}}' if '#' in region
-                else f'{region} # tag={{{MARKER_TAG}}}')
+        """Attach :data:`MARKER_TAG` to every shape so the marker can be deleted on its own.
+
+        An aperture marker is one shape per member fibre, so each line must be tagged
+        individually — tagging only the last would leave the rest of the hexagons behind on
+        the next ``regions group delete``. Coordinate-system lines (``image``, ``physical``,
+        ``fk5`` …) carry no shape and are passed through untouched.
+        """
+        systems = {'image', 'physical', 'fk5', 'icrs', 'galactic', 'wcs', 'amplifier',
+                   'detector', 'ecliptic'}
+        out = []
+        for line in region.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.lower().rstrip(';') in systems or 'tag=' in stripped:
+                out.append(line)
+                continue
+            out.append(f'{line} tag={{{MARKER_TAG}}}' if '#' in line
+                       else f'{line} # tag={{{MARKER_TAG}}}')
+        return '\n'.join(out)
 
     @pyqtSlot(str)
     def _on_failed(self, message: str) -> None:
