@@ -142,10 +142,10 @@ class CubeConstructor:
                 extname = hdu.header.get('EXTNAME', '').upper()
 
                 try:
-                    if extname == 'FLUX':
-                        # FLUX: [NFIBER x NWAVE] array
+                    if extname in ('SKYSUB', 'FLUX'):
+                        # sky-subtracted plane: [NFIBER x NWAVE] array
                         flux = hdu.data
-                        self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
+                        self.logger.info(f"Loaded {extname} extension with shape {flux.shape}")
                         extraction['flux'] = flux
 
                     elif extname == 'ERROR':
@@ -818,10 +818,13 @@ class CubeConstructor:
             # Initialize the channel dictionary
             channels[channel] = {}
 
-            # Check if all required extensions are present
-            required_extensions = ['FLUX', 'ERROR', 'MASK', 'WAVE', 'FWHM', 'FIBERMAP']
-            for ext in required_extensions:
-                if not any(hdu.header.get('EXTNAME', '') == ext for hdu in hdul[1:]):
+            # Check if all required extensions are present. The sky-subtracted plane is SKYSUB
+            # (or FLUX in files written before the rename) — accept either.
+            present = {hdu.header.get('EXTNAME', '') for hdu in hdul[1:]}
+            if not ({'SKYSUB', 'FLUX'} & present):
+                self.logger.warning("Required extension SKYSUB/FLUX not found in RSS file")
+            for ext in ('ERROR', 'MASK', 'WAVE', 'FWHM', 'FIBERMAP'):
+                if ext not in present:
                     self.logger.warning(f"Required extension {ext} not found in RSS file")
 
             # Process all extensions
@@ -830,10 +833,10 @@ class CubeConstructor:
                 extname = hdu.header.get('EXTNAME', '').upper()
 
                 try:
-                    if extname == 'FLUX':
-                        # FLUX: [NFIBER x NWAVE] array
+                    if extname in ('SKYSUB', 'FLUX'):
+                        # sky-subtracted plane: [NFIBER x NWAVE] array
                         flux = hdu.data
-                        self.logger.info(f"Loaded FLUX extension with shape {flux.shape}")
+                        self.logger.info(f"Loaded {extname} extension with shape {flux.shape}")
                         channels[channel]['flux'] = flux
 
                     elif extname == 'ERROR':

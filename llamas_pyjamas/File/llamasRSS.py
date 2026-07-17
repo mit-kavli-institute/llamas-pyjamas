@@ -11,6 +11,22 @@ from datetime import datetime
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 
 
+def skysub_extname(hdul):
+    """Name of the sky-subtracted science plane in an RSS HDUList.
+
+    Returns ``'SKYSUB'`` when present, else ``'FLUX'``. This bridges the ``FLUX -> SKYSUB``
+    rename: files written before the rename still hold ``FLUX``, files after hold ``SKYSUB``,
+    and every reader goes through here so both load. ``FLUX`` was a misleading name for the
+    sky-subtracted *instrumental* spectrum — the flux-calibrated spectrum is ``FLAM``.
+    """
+    names = {hdu.name for hdu in hdul}
+    if 'SKYSUB' in names:
+        return 'SKYSUB'
+    if 'FLUX' in names:
+        return 'FLUX'
+    raise KeyError('RSS has neither a SKYSUB nor a FLUX extension')
+
+
 class RSSgeneration:
     def __init__(self, logger=None):
         """
@@ -399,14 +415,16 @@ class RSSgeneration:
                 except Exception as e:
                     self.logger.error(f"Could not determine wavelength range: {str(e)}")
                 
-                # Extension 1 - FLUX: sky-subtracted flux [NFIBER x NWAVE]
-                # FLUX = COUNTS - SKY when subtract_sky=True and sky model is present
+                # Extension 1 - SKYSUB: sky-subtracted instrumental spectrum [NFIBER x NWAVE].
+                # = COUNTS - SKY when subtract_sky=True and a sky model is present. Named SKYSUB
+                # (was FLUX) so it is not confused with the flux-calibrated FLAM extension; the
+                # units are instrumental, not physical flux, despite the BUNIT label.
                 flux_hdu = fits.ImageHDU(flux_stack, header=common_header)
-                flux_hdu.header['EXTNAME'] = 'FLUX'
+                flux_hdu.header['EXTNAME'] = 'SKYSUB'
                 flux_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 flux_hdu.header['SKYSUB'] = subtract_sky and has_sky
                 hdul.append(flux_hdu)
-                self.logger.info(f"Added FLUX extension with shape {flux_stack.shape}")
+                self.logger.info(f"Added SKYSUB extension with shape {flux_stack.shape}")
 
                 # Extension - ERROR: 1-sigma uncertainty per fiber [NFIBER x NWAVE].
                 # error_stack is already computed above; emit it so the fibre-flat stage

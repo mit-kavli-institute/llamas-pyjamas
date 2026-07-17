@@ -455,7 +455,8 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         outfile = rss_file.replace('.fits', '_whitelight.fits')
 
     with fits.open(rss_file) as hdul:
-        flux     = hdul['FLUX'].data          # shape: (n_fibers, n_wave)
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        flux     = hdul[skysub_extname(hdul)].data   # sky-subtracted plane (SKYSUB, or FLUX pre-rename)
         wave     = hdul['WAVE'].data          # shape: (n_fibers, n_wave)
         fibermap = hdul['FIBERMAP'].data
         channel  = hdul[0].header.get('CHANNEL', 'UNKNOWN')

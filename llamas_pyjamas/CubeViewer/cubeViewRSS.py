@@ -47,6 +47,7 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import (
     SpectralScene,
     linear_wcs,
 )
+from llamas_pyjamas.File.llamasRSS import skysub_extname
 from llamas_pyjamas.Image.WhiteLightModule import (
     HEX_PITCH,
     FiberMap_LUT,
@@ -137,7 +138,7 @@ class RSSChannel:
             if self.channel not in CHANNEL_ORDER:
                 raise ValueError(f"{path}: primary CHANNEL={self.channel!r} is not one of "
                                  f"{CHANNEL_ORDER}")
-            self.flux = np.asarray(hdul['FLUX'].data, dtype=float)
+            self.flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
             self.wave = np.asarray(hdul['WAVE'].data, dtype=float)
             self.mask = (np.asarray(hdul['MASK'].data) if 'MASK' in hdul else None)
 

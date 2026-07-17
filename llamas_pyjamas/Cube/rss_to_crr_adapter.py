@@ -167,9 +167,9 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
         for hdu in hdul[1:]:
             extname = hdu.header.get('EXTNAME', '').upper()
             
-            if extname == 'FLUX' and hdu.data is not None:
+            if extname in ('SKYSUB', 'FLUX') and hdu.data is not None:
                 flux_data = hdu.data.astype(np.float32)
-                logger.info(f"Loaded FLUX: {flux_data.shape}")
+                logger.info(f"Loaded {extname}: {flux_data.shape}")
                 
             elif extname == 'ERROR' and hdu.data is not None:
                 error_data = hdu.data.astype(np.float32)

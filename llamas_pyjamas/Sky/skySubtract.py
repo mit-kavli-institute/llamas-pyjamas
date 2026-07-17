@@ -85,9 +85,11 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
                 os.path.basename(ff_fits), os.path.basename(output_file), color)
 
     with fits.open(ff_fits) as hdul:
-        flux = _get_data(hdul, "FLUX")
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
+        flux = _get_data(hdul, sky_plane)
         if flux is None:
-            raise ValueError(f"{ff_fits}: no FLUX extension")
+            raise ValueError(f"{ff_fits}: no sky-subtracted ({sky_plane}) extension")
         sky = _get_data(hdul, "SKY")
         counts = _get_data(hdul, "COUNTS")
         wave = _get_data(hdul, "WAVE")
@@ -124,19 +126,19 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         # --- assemble output, copying every input extension ---
         out = fits.HDUList([h.copy() for h in hdul])
-        out["FLUX"].data = flux_out
-        out["FLUX"].header["SKYSUB2"] = (True, "Sky framework refinement applied")
+        out[sky_plane].data = flux_out
+        out[sky_plane].header["SKYSUB2"] = (True, "Sky framework refinement applied")
         for key, val in config.to_header_dict().items():
-            out["FLUX"].header[key] = val
-        out["FLUX"].header["SKYNMASK"] = (int(sky_mask.sum()),
-                                          "N sky fibres used")
-        out["FLUX"].header["SKYNBAS"] = (int(pca_info.get("n_basis", 0)),
-                                         "N PCA basis fibres")
-        out["FLUX"].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
-                                          "N PCA components removed")
+            out[sky_plane].header[key] = val
+        out[sky_plane].header["SKYNMASK"] = (int(sky_mask.sum()),
+                                             "N sky fibres used")
+        out[sky_plane].header["SKYNBAS"] = (int(pca_info.get("n_basis", 0)),
+                                            "N PCA basis fibres")
+        out[sky_plane].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
+                                             "N PCA components removed")
 
-        # Traceability: total residual removed from the FF FLUX.
-        resid_hdu = fits.ImageHDU(total_removed, header=out["FLUX"].header.copy())
+        # Traceability: total residual removed from the sky-subtracted plane.
+        resid_hdu = fits.ImageHDU(total_removed, header=out[sky_plane].header.copy())
         resid_hdu.header["EXTNAME"] = "SKYRESID"
         resid_hdu.header["COMMENT"] = ("Total removed from FF FLUX: "
                                        "OH scaling + PCA residual")

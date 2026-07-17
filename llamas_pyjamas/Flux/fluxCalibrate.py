@@ -40,6 +40,7 @@ from typing import Optional
 import numpy as np
 from astropy.io import fits
 
+from llamas_pyjamas.File.llamasRSS import skysub_extname
 from llamas_pyjamas.Flux.sensFunc import SensFunc
 
 logger = logging.getLogger(__name__)
@@ -64,19 +65,6 @@ def load_lco_extinction():
         from pypeit.core.flux_calib import load_extinction_data
         _EXT_CACHE = load_extinction_data(LCO_LONGITUDE, LCO_LATITUDE, 'closest')
     return _EXT_CACHE
-
-
-def skysub_extname(hdul: fits.HDUList) -> str:
-    """Return the name of the sky-subtracted plane: 'SKYSUB' if present, else 'FLUX'.
-
-    Bridges the planned rename so callers do not care which one a given file uses.
-    """
-    names = {hdu.name for hdu in hdul}
-    if 'SKYSUB' in names:
-        return 'SKYSUB'
-    if 'FLUX' in names:
-        return 'FLUX'
-    raise KeyError('RSS has neither a SKYSUB nor a FLUX extension')
 
 
 def _header_value(header, *keys, default=None):

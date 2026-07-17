@@ -128,12 +128,13 @@ class SimpleCubeConstructor:
             # telescope pointing (F6) instead of a (0,0) placeholder.
             self.primary_header = hdul[0].header.copy()
 
-            # Load main data
-            if 'FLUX' in hdul:
-                self.flux = hdul['FLUX'].data
-                print(f"  FLUX: {self.flux.shape}")
+            # Load main data (sky-subtracted plane: SKYSUB, or FLUX pre-rename)
+            from llamas_pyjamas.File.llamasRSS import skysub_extname
+            if 'SKYSUB' in hdul or 'FLUX' in hdul:
+                self.flux = hdul[skysub_extname(hdul)].data
+                print(f"  {skysub_extname(hdul)}: {self.flux.shape}")
             else:
-                raise ValueError("No FLUX extension found in RSS file")
+                raise ValueError("No SKYSUB/FLUX extension found in RSS file")
 
             if 'WAVE' in hdul:
                 self.wave = hdul['WAVE'].data
