@@ -36,12 +36,17 @@ with open(os.path.join(here, os.path.basename(sys.argv[0]) + ".call.json"), "w")
 reply_path = os.path.join(here, os.path.basename(sys.argv[0]) + ".reply")
 if os.path.exists(reply_path):
     sys.stdout.write(open(reply_path).read())
-sys.exit(0)
+status_path = os.path.join(here, os.path.basename(sys.argv[0]) + ".status")
+sys.exit(int(open(status_path).read().strip()) if os.path.exists(status_path) else 0)
 """
 
 
-def _make_fake_xpa(directory, replies=None):
-    """Write fake xpaset/xpaget/xpaaccess into `directory`; return that directory."""
+def _make_fake_xpa(directory, replies=None, statuses=None):
+    """Write fake xpaset/xpaget/xpaaccess into `directory`; return that directory.
+
+    `statuses` sets a tool's exit code, which matters because xpaaccess reports its match
+    *count* through the exit status rather than success/failure.
+    """
     for tool in ('xpaset', 'xpaget', 'xpaaccess'):
         path = os.path.join(directory, tool)
         with open(path, 'w') as fh:
@@ -50,6 +55,9 @@ def _make_fake_xpa(directory, replies=None):
     for tool, reply in (replies or {}).items():
         with open(os.path.join(directory, tool + '.reply'), 'w') as fh:
             fh.write(reply)
+    for tool, status in (statuses or {}).items():
+        with open(os.path.join(directory, tool + '.status'), 'w') as fh:
+            fh.write(str(status))
     return directory
 
 
@@ -160,20 +168,52 @@ def test_set_fits_pipes_real_fits_bytes_and_never_touches_disk():
             os.environ.pop('CUBEVIEWER_XPA_DIR', None)
 
 
-def test_is_alive_true_and_false():
+def test_is_alive_matches_real_xpaaccess_exit_semantics():
+    # Regression. xpaaccess reports the MATCH COUNT via its exit status, so a running DS9
+    # exits 1 (one match) and an absent one exits 0 -- inverted from the shell convention.
+    # Verified against xpa 2.1.20: `xpaaccess ds9` -> "yes", exit=1;
+    # `xpaaccess -n nosuchthing` -> "0", exit=0. Treating exit!=0 as failure made is_alive()
+    # raise exactly when DS9 *was* running.
     with tempfile.TemporaryDirectory() as tmp:
-        _make_fake_xpa(tmp, replies={'xpaaccess': 'yes\n'})
+        _make_fake_xpa(tmp, replies={'xpaaccess': '1\n'}, statuses={'xpaaccess': 1})
+        os.environ['CUBEVIEWER_XPA_DIR'] = tmp
+        try:
+            assert DS9().is_alive() is True, 'exit=1 means one match, not an error'
+            assert _last_call(tmp, 'xpaaccess')['argv'] == ['-n', 'ds9']
+        finally:
+            os.environ.pop('CUBEVIEWER_XPA_DIR', None)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        _make_fake_xpa(tmp, replies={'xpaaccess': '0\n'}, statuses={'xpaaccess': 0})
+        os.environ['CUBEVIEWER_XPA_DIR'] = tmp
+        try:
+            assert DS9().is_alive() is False, 'zero matches means no DS9'
+        finally:
+            os.environ.pop('CUBEVIEWER_XPA_DIR', None)
+
+
+def test_is_alive_falls_back_to_yes_no():
+    # Older xpaaccess builds without -n answer "yes"/"no" on stdout.
+    with tempfile.TemporaryDirectory() as tmp:
+        _make_fake_xpa(tmp, replies={'xpaaccess': 'yes\n'}, statuses={'xpaaccess': 1})
         os.environ['CUBEVIEWER_XPA_DIR'] = tmp
         try:
             assert DS9().is_alive() is True
         finally:
             os.environ.pop('CUBEVIEWER_XPA_DIR', None)
 
+
+def test_get_and_set_still_treat_nonzero_as_failure():
+    # Only xpaaccess has the odd exit semantics; a genuinely failing xpaget must still raise.
     with tempfile.TemporaryDirectory() as tmp:
-        _make_fake_xpa(tmp, replies={'xpaaccess': 'no\n'})
+        _make_fake_xpa(tmp, replies={'xpaget': ''}, statuses={'xpaget': 1})
         os.environ['CUBEVIEWER_XPA_DIR'] = tmp
         try:
-            assert DS9().is_alive() is False
+            DS9().get('version')
+        except DS9Error:
+            pass
+        else:
+            raise AssertionError('a failing xpaget must raise')
         finally:
             os.environ.pop('CUBEVIEWER_XPA_DIR', None)
 

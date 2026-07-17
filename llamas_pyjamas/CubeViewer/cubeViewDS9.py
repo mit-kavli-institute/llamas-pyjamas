@@ -185,11 +185,16 @@ class DS9:
             self._tools = find_xpa_tools()
         return self._tools
 
-    def _run(self, argv: Sequence[str], data: Optional[bytes] = None) -> str:
+    def _run(self, argv: Sequence[str], data: Optional[bytes] = None,
+             check: bool = True) -> str:
         try:
             proc = subprocess.run(
                 list(argv),
                 input=data,
+                # Without this the child inherits our stdin when there is no payload, so an
+                # XPA client that reads stdin can block on the parent's terminal. A GUI must
+                # never hand its stdin to a subprocess.
+                stdin=(subprocess.DEVNULL if data is None else None),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=self.timeout,
@@ -201,7 +206,7 @@ class DS9:
             raise DS9Error(f"Could not execute {argv[0]}: {exc}") from exc
 
         stderr = proc.stderr.decode('utf-8', 'replace').strip()
-        if proc.returncode != 0:
+        if check and proc.returncode != 0:
             raise DS9Error(f"XPA command failed ({' '.join(argv)}): {stderr or 'no error text'}")
         # xpaset/xpaget report "no 'xpaset' access points match" on stderr with a zero exit
         # status, so a clean return code alone is not proof of success.
@@ -230,9 +235,20 @@ class DS9:
 
         Never raises for the ordinary "DS9 is not running" case — returns False. Missing XPA
         tools still raise :class:`DS9Error`, since that is a setup problem, not a state.
+
+        Notes
+        -----
+        ``xpaaccess`` uses its **exit status to report the number of matching access points**,
+        not success or failure. A running DS9 gives ``exit=1`` (one match) while an absent one
+        gives ``exit=0`` — inverted from the usual shell convention. The exit status is
+        therefore ignored here and the count is read from stdout via ``-n``.
         """
-        reply = self._run([self.tools['xpaaccess'], self.target])
-        return reply.strip().lower() in ('yes', '1')
+        reply = self._run([self.tools['xpaaccess'], '-n', self.target], check=False)
+        try:
+            return int(reply.strip()) > 0
+        except ValueError:
+            # Older builds without -n answer yes/no.
+            return reply.strip().lower() == 'yes'
 
     def get(self, command: str) -> str:
         """Send an XPA *get* and return DS9's reply.
