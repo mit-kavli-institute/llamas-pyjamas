@@ -157,6 +157,11 @@ science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/L
 #example of a list of science files to batch process
 #science_files = path/to/file1.fits, path/to/file2.fits, path/to/file3.fits
 
+#spectrophotometric standard-star exposures (identified in the setup GUI by crossmatching the
+#pointing against the bundled ESO/Oke catalogue). Extracted identically to science frames; used
+#in postprocessing to build a sensitivity function. Comma-separated, same format as science_files.
+#flux_standard_files = path/to/standard_mef.fits
+
 #optional output directories for the trace generation and extraction files
 #If these directories do not already exist they will be created at the time of processing
 

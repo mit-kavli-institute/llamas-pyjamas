@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 import llamas_pyjamas
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+
+logger = logging.getLogger(__name__)
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(llamas_pyjamas.__file__), 'example_config.txt')
 
@@ -52,6 +55,7 @@ ROLES = {
     'red_arc': ('Red Arc', False, QtGui.QColor(248, 173, 173), BLACK),
     'green_arc': ('Green Arc', False, QtGui.QColor(168, 226, 168), BLACK),
     'blue_arc': ('Blue Arc', False, QtGui.QColor(173, 196, 250), BLACK),
+    'flux_standard': ('Flux Standard', True, QtGui.QColor(255, 224, 130), BLACK),
     'science': ('Science', True, QtGui.QColor(230, 205, 250), BLACK),
     'bias': ('Bias', True, QtGui.QColor(212, 212, 212), BLACK),
     'bad': ('BAD', True, QtGui.QColor(90, 90, 90), QtGui.QColor('white')),
@@ -110,7 +114,8 @@ def scan_directory(data_dir, progress_callback=None):
         if progress_callback and not progress_callback(i, len(files), os.path.basename(path)):
             break
         entry = {'path': path, 'filename': os.path.basename(path), 'object': '',
-                 'exptime': None, 'type': '', 'comment': '', 'readmode': ''}
+                 'exptime': None, 'type': '', 'comment': '', 'readmode': '',
+                 'standard': None}
         try:
             hdr = fits.getheader(path, 0)
             entry['object'] = str(hdr.get('OBJECT', '') or '')
@@ -121,11 +126,31 @@ def scan_directory(data_dir, progress_callback=None):
             comment = hdr.get('OBS-CMNT')
             entry['comment'] = '' if comment is None else str(comment)
             entry['readmode'] = str(hdr.get('READ-MDE', '') or '')
+            # A science pointing sitting on a catalogue standard is very probably an
+            # exposure of that standard -- headers cannot tell them apart, so this is
+            # the only signal. Only SCIENCE frames are checked; calibrations never are.
+            if str(hdr.get('OBS TYPE', '')).upper().startswith('SCI'):
+                entry['standard'] = _match_standard(hdr)
         except Exception as err:
             entry['type'] = 'ERR'
             entry['comment'] = f'header read failed: {err}'
         entries.append(entry)
     return entries
+
+
+def _match_standard(header):
+    """Crossmatch a header's pointing against the standards catalogue.
+
+    Returns a ``(name, separation_arcsec)`` tuple, or None on no match or if the bundled
+    catalogue is unavailable -- a missing catalogue must not break directory scanning.
+    """
+    try:
+        from llamas_pyjamas.Flux.fluxStandards import load_catalog
+        match = load_catalog().match_header(header)
+    except Exception as err:                            # noqa: BLE001
+        logger.debug('standard crossmatch skipped: %s', err)
+        return None
+    return (match.name, match.separation_arcsec) if match else None
 
 
 def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
@@ -144,6 +169,7 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         # comment it out and let each colour fall back per the template rules
         'twilight_flat': None,
         'science_files': ', '.join(assignments.get('science', [])) or None,
+        'flux_standard_files': ', '.join(assignments.get('flux_standard', [])) or None,
         'trace_output_dir': os.path.join(output_dir, 'traces'),
         'extraction_output_dir': os.path.join(output_dir, 'extractions'),
         'cube_output_dir': os.path.join(output_dir, 'cubes'),
@@ -334,7 +360,8 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
         miscGrid = QtWidgets.QGridLayout()
         miscGrid.addWidget(role_button('science', 'Science'), 0, 0)
-        miscGrid.addWidget(role_button('bias', 'Bias'), 1, 0)
+        miscGrid.addWidget(role_button('flux_standard', 'Flux Standard'), 1, 0)
+        miscGrid.addWidget(role_button('bias', 'Bias'), 2, 0)
         miscGrid.addWidget(role_button('bad', 'Flag Bad'), 0, 1)
         clearBtn = QtWidgets.QPushButton('Clear Role')
         clearBtn.clicked.connect(self.clear_role)
@@ -423,6 +450,9 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         config_path = self.configEdit.text().strip()
         if os.path.isfile(config_path):
             self.load_config(config_path)
+        # Recommend standards last, filling only frames the config left unassigned, so a prior
+        # session's explicit choices always win over the automatic suggestion.
+        self.apply_standard_recommendations()
 
     def load_notes(self, data_dir):
         notes_path = os.path.join(data_dir, NOTES_FILENAME)
@@ -452,7 +482,34 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             self.table.setItem(row, self.COL_READ, QtWidgets.QTableWidgetItem(e['readmode']))
             self.table.setItem(row, self.COL_CMNT, QtWidgets.QTableWidgetItem(e['comment']))
             self.table.setItem(row, self.COL_ROLE, QtWidgets.QTableWidgetItem(''))
+            if e.get('standard'):
+                name, sep = e['standard']
+                tip = f'Matches flux standard {name} ({sep:.1f}" away)'
+                for col in (self.COL_OBJ, self.COL_TYPE):
+                    self.table.item(row, col).setToolTip(tip)
         self.table.setSortingEnabled(True)
+
+    def apply_standard_recommendations(self):
+        """Pre-assign the flux-standard role to crossmatched frames.
+
+        A recommendation, not a decision: it seeds the role so the standards are visible and
+        extracted, but the user overrides it with the role buttons or Clear Role like any other
+        assignment. Only frames with no role yet are touched, so re-scanning never clobbers a
+        choice the user already made.
+        """
+        recommended = 0
+        for e in self.entries:
+            if e.get('standard') and not self.roles.get(e['path']):
+                self.roles.setdefault(e['path'], set()).add('flux_standard')
+                recommended += 1
+        if recommended:
+            self.refresh_role_column()
+            self.update_summary()
+            names = ', '.join(sorted({e['standard'][0] for e in self.entries
+                                      if e.get('standard')}))
+            self.statusBar().showMessage(
+                f'Recommended {recommended} exposure(s) as flux standards ({names}) '
+                f'— override in the Role column if wrong')
 
     # ----------------------------------------------------------- ds9 link
     def table_context_menu(self, pos):
@@ -558,7 +615,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
     def current_assignments(self):
         """Return dict role -> path (single roles) or list of paths (multi)."""
-        assignments = {'science': [], 'bias': [], 'bad': []}
+        assignments = {'flux_standard': [], 'science': [], 'bias': [], 'bad': []}
         for path in sorted(self.roles):
             for role in self.roles[path]:
                 if ROLES[role][1]:
@@ -620,6 +677,13 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
                 self.roles.setdefault(rp, set()).add('science')
             else:
                 unmatched.append(f'Science: {p.strip()}')
+        standards = config.get('flux_standard_files', '')
+        for p in (x for x in standards.split(',') if x.strip()):
+            rp = resolve(p)
+            if rp:
+                self.roles.setdefault(rp, set()).add('flux_standard')
+            else:
+                unmatched.append(f'Flux Standard: {p.strip()}')
         for p in bad_paths:
             rp = resolve(p)
             if rp:
@@ -659,6 +723,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         self.summaryLabel.setText(
             f"Assigned — Flats: {rgb('flat')}   Twilights: {rgb('twilight')}   "
             f"Arcs: {rgb('arc')}   Science: {len(a['science'])}   "
+            f"Flux std: {len(a['flux_standard'])}   "
             f"Bias: {len(a['bias'])} ({n_slow} slow / {n_fast} fast)   Bad: {len(a['bad'])}")
 
     # --------------------------------------------------------- config write

@@ -1709,8 +1709,25 @@ def main(config_path):
                     value = value.lower() == 'true'
                     
                 config[key] = value
-        
-        
+
+
+    # Spectrophotometric standards are extracted exactly like science frames, so fold
+    # flux_standard_files into the science list here, before any stage runs. Every
+    # downstream stage (bias-first, flat correction, extraction) then processes them
+    # uniformly with no standard-specific code path. flux_standard_files is kept as its
+    # own key purely as a record of which exposures are standards; the flux-calibration
+    # step re-identifies each one from its header coordinates, so nothing downstream needs
+    # to track the star name or thread a separate path through the pipeline.
+    _std = config.get('flux_standard_files')
+    if _std:
+        _std_list = [s for s in ([_std] if isinstance(_std, str) else _std) if str(s).strip()]
+        config['flux_standard_files'] = _std_list
+        _sci = config.get('science_files', [])
+        _sci_list = [_sci] if isinstance(_sci, str) else list(_sci or [])
+        config['science_files'] = _sci_list + [s for s in _std_list if s not in _sci_list]
+        logger.info("Folded %d flux-standard exposure(s) into the science extraction list",
+                    len(_std_list))
+
     # (full configuration is logged to the file once logging is set up, below)
 
     # Resume control: by default the pipeline reuses any intermediate products
