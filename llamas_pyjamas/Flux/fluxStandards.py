@@ -59,6 +59,27 @@ class Standard:
     def has_spectrum(self) -> bool:
         return self.flux_file is not None
 
+    def load_spectrum(self):
+        """Load the reference flux spectrum.
+
+        Returns
+        -------
+        (wave, flux) : tuple of ndarray
+            Wavelength in Angstrom, flux in erg/s/cm^2/A.
+
+        The bundled Oke files list wavelength (A), flux (in 1e-16 erg/s/cm^2/A), flux (mJy)
+        and bin width; the first two columns are returned with the 1e-16 scale applied.
+
+        Raises
+        ------
+        ValueError
+            If this standard has no bundled reference spectrum.
+        """
+        if self.flux_file is None:
+            raise ValueError(f'{self.name} has no bundled reference spectrum')
+        data = np.loadtxt(self.flux_file)
+        return data[:, 0], data[:, 1] * 1e-16
+
 
 @dataclass(frozen=True)
 class StandardMatch:
