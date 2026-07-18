@@ -12,10 +12,16 @@ Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_reduce
 import os
 import tempfile
 
-from llamas_pyjamas.reduce import cleanup_extraction_pkls, consolidate_rss_files
+from llamas_pyjamas.reduce import (
+    _exposure_id,
+    _science_stem,
+    cleanup_extraction_pkls,
+    consolidate_rss_files,
+)
 
 
 _BASE = 'LLAMAS_2026-05-17_02-49-56.7_SCI22_mef_bias_corrected_flat_corrected_extract'
+_ID = 'LLAMAS_2026-05-17_02-49-56.7'      # the simplified exposure id (no _SCI22_mef_...)
 
 
 def _touch(path, text='x'):
@@ -23,7 +29,17 @@ def _touch(path, text='x'):
         fh.write(text)
 
 
-def test_consolidate_collapses_stages_keeping_most_corrected():
+def test_exposure_id_strips_type_and_processing_chain():
+    assert _exposure_id(_BASE) == _ID
+    assert _exposure_id('LLAMAS_2026-05-16_23-17-22.7_SCI22_mef.fits') == \
+        'LLAMAS_2026-05-16_23-17-22.7'
+    assert _exposure_id('/path/LLAMAS_2026-05-16_19-39-47.5_CAL22_mef_bias_corrected.fits') == \
+        'LLAMAS_2026-05-16_19-39-47.5'
+    # resume keys on the same id, so it is a substring of every product name
+    assert _science_stem(_BASE + '_RSS_green.fits') == _ID
+
+
+def test_consolidate_collapses_stages_to_clean_id_name():
     with tempfile.TemporaryDirectory() as d:
         for color in ('blue', 'green', 'red'):
             _touch(os.path.join(d, f'{_BASE}_RSS_{color}.fits'), 'extract')
@@ -31,9 +47,9 @@ def test_consolidate_collapses_stages_keeping_most_corrected():
             _touch(os.path.join(d, f'{_BASE}_RSS_{color}_FF_SKYSUB.fits'), 'skysub')
         consolidate_rss_files(d, keep_intermediate=False)
         survivors = sorted(f for f in os.listdir(d) if f.endswith('.fits'))
-        assert survivors == [f'{_BASE}_RSS_{c}.fits' for c in ('blue', 'green', 'red')]
-        # the survivor must carry the most-corrected (_FF_SKYSUB) content, under the clean name
-        with open(os.path.join(d, f'{_BASE}_RSS_green.fits')) as fh:
+        assert survivors == [f'{_ID}_RSS_{c}.fits' for c in ('blue', 'green', 'red')]
+        # the survivor carries the most-corrected (_FF_SKYSUB) content under the clean id name
+        with open(os.path.join(d, f'{_ID}_RSS_green.fits')) as fh:
             assert fh.read() == 'skysub'
 
 
@@ -43,16 +59,16 @@ def test_consolidate_keeps_ff_when_no_skysub():
         _touch(os.path.join(d, f'{_BASE}_RSS_green_FF.fits'), 'ff')
         consolidate_rss_files(d, keep_intermediate=False)
         survivors = [f for f in os.listdir(d) if f.endswith('.fits')]
-        assert survivors == [f'{_BASE}_RSS_green.fits']
+        assert survivors == [f'{_ID}_RSS_green.fits']
         with open(os.path.join(d, survivors[0])) as fh:
             assert fh.read() == 'ff'
 
 
-def test_consolidate_noop_for_single_stage():
+def test_consolidate_renames_single_stage_to_clean_id():
     with tempfile.TemporaryDirectory() as d:
         _touch(os.path.join(d, f'{_BASE}_RSS_green.fits'), 'extract')
         consolidate_rss_files(d, keep_intermediate=False)
-        assert os.listdir(d) == [f'{_BASE}_RSS_green.fits']
+        assert os.listdir(d) == [f'{_ID}_RSS_green.fits']
 
 
 def test_consolidate_leaves_subdirs_alone():

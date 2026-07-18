@@ -1622,18 +1622,31 @@ def _frame_label(science_file):
     return os.path.splitext(base)[0][:24]
 
 
-def _science_stem(science_file):
-    """Return a stable identifier for a science exposure.
+def _exposure_id(name):
+    """The bare exposure identifier ``LLAMAS_<date>_<time>`` for a frame.
 
-    The stem is preserved as a substring through the whole per-file product
-    naming chain (``{stem}_mef_flat_corrected_extract_RSS_{color}[...]_FF.fits``),
-    so it can be used to detect on disk whether a given science file has already
-    been reduced. Strips the extension and a trailing ``_mef``.
+    Everything from the exposure-type marker (``_SCI##`` / ``_CAL##``) onward — including the
+    whole processing chain (``_mef_bias_corrected_flat_corrected_extract`` …) — is dropped, so
+    the same id is recovered from a raw file, any intermediate product, or the consolidated
+    RSS. This is what the consolidated RSS is named after and what resume detection keys on;
+    the exposure timestamp is unique, so it identifies the frame on its own. Falls back to the
+    old stem (extension + trailing ``_mef`` stripped) when no type marker is present.
     """
-    base = os.path.splitext(os.path.basename(science_file))[0]
-    if base.endswith('_mef'):
-        base = base[:-len('_mef')]
-    return base
+    stem = os.path.basename(str(name))
+    m = re.match(r'^(.*?)_(?:SCI|CAL)\d', stem)
+    if m:
+        return m.group(1)
+    stem = os.path.splitext(stem)[0]
+    if stem.endswith('_mef'):
+        stem = stem[:-len('_mef')]
+    return stem
+
+
+def _science_stem(science_file):
+    """Stable identifier for a science exposure, preserved as a substring through every product
+    name (raw, intermediate, and the consolidated ``{id}_RSS_{color}.fits``), so resume can
+    detect on disk whether a frame is already reduced. See :func:`_exposure_id`."""
+    return _exposure_id(science_file)
 
 
 def _has_rss_product(extraction_dir, stem):
@@ -1689,7 +1702,10 @@ def consolidate_rss_files(extraction_dir, keep_intermediate=False):
     for (base, color), files in groups.items():
         files.sort()                                  # by stage rank, ascending
         survivor = files[-1][1]
-        target = f'{base}_RSS_{color}.fits'
+        # Name the survivor after the bare exposure id, dropping the _SCI##_mef_bias_corrected_
+        # flat_corrected_extract chain: LLAMAS_<date>_<time>_RSS_<color>.fits. The correction
+        # provenance lives in the header, not the filename.
+        target = f'{_exposure_id(base)}_RSS_{color}.fits'
         for _rank, fname in files[:-1]:               # drop earlier stages first
             try:
                 os.remove(os.path.join(extraction_dir, fname))
