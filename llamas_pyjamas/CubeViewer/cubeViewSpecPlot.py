@@ -31,6 +31,7 @@ from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -45,6 +46,24 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Speed of light in Angstrom/s, for F_lambda -> F_nu.
+_C_AA_PER_S = 2.99792458e18
+
+# Y-axis display modes: (label, quantity, log). 'counts' = sky-subtracted instrumental;
+# 'flam'/'fnu' = flux-calibrated (need a FLAM plane). F_nu is shown in Jy.
+_Y_MODES = [
+    ('Counts (sky-sub)', 'counts', False),
+    ('Fλ (linear)', 'flam', False),
+    ('Fλ (log)', 'flam', True),
+    ('Fν (linear)', 'fnu', False),
+    ('Fν (log)', 'fnu', True),
+]
+_Y_LABELS = {
+    'counts': 'Counts (sky-subtracted)',
+    'flam': r'F$_\lambda$ (erg s$^{-1}$ cm$^{-2}$ Å$^{-1}$)',
+    'fnu': r'F$_\nu$ (Jy)',
+}
 
 
 class SpectrumPanel(QWidget):
@@ -85,15 +104,18 @@ class SpectrumPanel(QWidget):
         )
         controls.addWidget(self.hold_box)
 
-        # Show the flux-calibrated FLAM plane instead of sky-subtracted counts. Enabled only
-        # when the selection actually carries calibration (the RSS has a FLAM extension).
-        self.flam_box = QCheckBox('Flux-cal')
-        self.flam_box.setToolTip('Plot the flux-calibrated spectrum (FLAM, erg/s/cm²/Å) '
-                                 'instead of sky-subtracted counts. Available once the RSS '
-                                 'has been flux-calibrated.')
-        self.flam_box.setEnabled(False)
-        self.flam_box.stateChanged.connect(self._replot)
-        controls.addWidget(self.flam_box)
+        # Y-axis display mode: sky-subtracted counts, or flux-calibrated Fλ/Fν in linear/log.
+        # The flux modes need a FLAM plane and are disabled until the selection carries one.
+        controls.addWidget(QLabel('y:'))
+        self.mode_combo = QComboBox()
+        for label, _q, _log in _Y_MODES:
+            self.mode_combo.addItem(label)
+        self.mode_combo.setToolTip('Counts (sky-subtracted), or flux-calibrated Fλ / Fν on a '
+                                   'linear or log scale. Flux modes need a calibrated (FLAM) '
+                                   'spectrum.')
+        self.mode_combo.currentIndexChanged.connect(self._replot)
+        self._set_flux_modes_enabled(False)
+        controls.addWidget(self.mode_combo)
         controls.addStretch(1)
 
         self.title = QLabel('No selection')
@@ -137,33 +159,58 @@ class SpectrumPanel(QWidget):
     def set_spectra(self, spectra: Sequence[Spectrum]) -> None:
         """Show a new selection. An empty sequence clears the plot."""
         self._spectra = list(spectra)
-        # Offer the flux-cal view only when the selection carries a FLAM plane.
-        have_flam = bool(spectra) and all(s.has_flam for s in spectra)
-        self.flam_box.setEnabled(have_flam)
-        if not have_flam:
-            self.flam_box.setChecked(False)
+        # Offer the flux modes only when the selection carries a FLAM plane; if a flux mode was
+        # selected and the new selection is uncalibrated, fall back to Counts.
+        have_flam = self._have_flam()
+        self._set_flux_modes_enabled(have_flam)
+        if not have_flam and self.mode_combo.currentIndex() != 0:
+            self.mode_combo.setCurrentIndex(0)      # triggers a replot via currentIndexChanged
         self._replot()
 
     def set_calibrated_default(self, calibrated: bool) -> None:
-        """Set the default state of the Flux-cal toggle when a file is loaded.
+        """Set the default y-mode when a file is loaded: Fλ (linear) if it carries FLAM, else
+        Counts. The user can change it during the session and the choice persists."""
+        self.mode_combo.setCurrentIndex(1 if calibrated else 0)
 
-        Called on load so a flux-calibrated file shows FLAM by default; the checkbox only
-        takes visible effect once a selection with a FLAM plane is made. The user can still
-        toggle it during the session, and that choice is preserved across selections.
-        """
-        self.flam_box.setChecked(bool(calibrated))
+    def _set_flux_modes_enabled(self, enabled: bool) -> None:
+        """Enable/disable the flux-calibrated combobox entries (indices 1-4)."""
+        model = self.mode_combo.model()
+        for i in range(1, len(_Y_MODES)):
+            item = model.item(i)
+            if item is not None:
+                item.setEnabled(enabled)
 
-    def _show_calibrated(self) -> bool:
-        return self.flam_box.isEnabled() and self.flam_box.isChecked()
+    def _current_mode(self):
+        """(quantity, log) for the selected y-mode, falling back to counts if flux is picked
+        without a FLAM plane available."""
+        _label, quantity, log = _Y_MODES[self.mode_combo.currentIndex()]
+        if quantity in ('flam', 'fnu') and not self._have_flam():
+            return 'counts', False
+        return quantity, log
+
+    def _have_flam(self) -> bool:
+        return bool(self._spectra) and all(s.has_flam for s in self._spectra)
+
+    @staticmethod
+    def _quantity_values(spectrum: Spectrum, quantity: str):
+        """(wave, y) for a spectrum in the requested quantity, masked/finite."""
+        if quantity == 'counts':
+            return spectrum.good(calibrated=False)
+        wave, flam = spectrum.good(calibrated=True)
+        if quantity == 'fnu':
+            # F_nu[Jy] = F_lambda * lambda^2 / c  (cgs, erg/s/cm2/Hz) then * 1e23 to Jy
+            return wave, flam * wave ** 2 / _C_AA_PER_S * 1e23
+        return wave, flam
 
     def _replot(self) -> None:
         limits = (self.axes.get_xlim(), self.axes.get_ylim())
         had_data = bool(self.axes.lines)
-        calibrated = self._show_calibrated()
+        quantity, log = self._current_mode()
 
         self.axes.clear()
         self._decorate()
-        self.axes.set_ylabel('Flux (erg/s/cm²/Å)' if calibrated else 'Counts (sky-subtracted)')
+        self.axes.set_ylabel(_Y_LABELS[quantity])
+        self.axes.set_yscale('log' if log else 'linear')
 
         if not self._spectra:
             self.title.setText('No selection')
@@ -177,7 +224,10 @@ class SpectrumPanel(QWidget):
             box = self._visible.get(spectrum.channel)
             if box is not None and not box.isChecked():
                 continue
-            wave, flux = spectrum.good(calibrated=calibrated)
+            wave, flux = self._quantity_values(spectrum, quantity)
+            if log:
+                positive = flux > 0                # log axis drops non-positive samples
+                wave, flux = wave[positive], flux[positive]
             if wave.size == 0:
                 continue
             self.axes.plot(wave, flux, linewidth=0.8,
@@ -185,7 +235,7 @@ class SpectrumPanel(QWidget):
                            label=spectrum.channel)
             plotted += 1
 
-        suffix = '  [flux-calibrated]' if calibrated else ''
+        suffix = '' if quantity == 'counts' else '  [flux-calibrated]'
         self.title.setText(self._spectra[0].label + suffix)
         if plotted:
             self.axes.legend(loc='upper right', fontsize='small', framealpha=0.8)
@@ -204,16 +254,19 @@ class SpectrumPanel(QWidget):
         continuum; a plain autoscale on those flattens the spectrum into a line at zero. A
         high percentile keeps the continuum legible while still showing real lines.
         """
-        calibrated = self._show_calibrated()
+        quantity, log = self._current_mode()
         values, waves = [], []
         for spectrum in self._spectra:
             box = self._visible.get(spectrum.channel)
             if box is not None and not box.isChecked():
                 continue
-            wave, flux = spectrum.good(calibrated=calibrated)
+            wave, flux = self._quantity_values(spectrum, quantity)
             if self._wave_range is not None:
                 inside = (wave >= self._wave_range[0]) & (wave <= self._wave_range[1])
                 wave, flux = wave[inside], flux[inside]
+            if log:
+                positive = flux > 0
+                wave, flux = wave[positive], flux[positive]
             if wave.size:
                 values.append(flux)
                 waves.append(wave)
@@ -232,6 +285,12 @@ class SpectrumPanel(QWidget):
 
         low, high = np.percentile(flux, [1.0, 99.5])
         if not np.isfinite(low) or not np.isfinite(high):
+            return
+        if log:
+            # On a log axis both limits must be positive; percentiles of positive data are.
+            if low <= 0 or high <= low:
+                return
+            self.axes.set_ylim(low / 1.5, high * 1.5)
             return
         if high <= low:
             # Flat within the percentile range — a near-dead fibre, possibly with a cosmic

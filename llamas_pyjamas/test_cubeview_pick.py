@@ -247,30 +247,43 @@ def test_panel_wavelength_range_survives_empty_window():
                                                       'emptiness is visible'
 
 
-def test_panel_flam_toggle_enables_only_with_calibration():
+def _flux_mode_enabled(panel, index):
+    return panel.mode_combo.model().item(index).isEnabled()
+
+
+def test_panel_flux_modes_enabled_only_with_calibration():
     panel = SpectrumPanel()
-    # uncalibrated selection: toggle disabled
+    # uncalibrated: the flux modes (indices 1-4) are disabled, Counts (0) stays
     panel.set_spectra([Spectrum(np.linspace(5000, 6000, 20), np.ones(20),
                                 channel='green', label='f')])
-    assert not panel.flam_box.isEnabled()
-    # calibrated selection: toggle enabled
+    assert not any(_flux_mode_enabled(panel, i) for i in (1, 2, 3, 4))
+    # calibrated: flux modes enabled
     panel.set_spectra([Spectrum(np.linspace(5000, 6000, 20), np.ones(20),
                                 channel='green', label='f', flam=np.full(20, 2e-16))])
-    assert panel.flam_box.isEnabled()
+    assert all(_flux_mode_enabled(panel, i) for i in (1, 2, 3, 4))
 
 
-def test_panel_flam_toggle_switches_plane_and_label():
+def test_panel_ymode_switches_quantity_and_label():
     wave = np.linspace(5000, 6000, 20)
     panel = SpectrumPanel()
     panel.set_spectra([Spectrum(wave, np.full(20, 100.0), channel='green', label='f',
                                 flam=np.full(20, 2e-16))])
+    panel.mode_combo.setCurrentIndex(0)   # Counts
     assert 'Counts' in panel.axes.get_ylabel()
-    panel.flam_box.setChecked(True)
-    panel._replot()
-    assert 'Flux' in panel.axes.get_ylabel()
-    # the plotted y-data should now be the FLAM values, not the counts
-    ydata = panel.axes.lines[0].get_ydata()
-    assert np.allclose(ydata, 2e-16)
+    assert np.allclose(panel.axes.lines[0].get_ydata(), 100.0)
+
+    panel.mode_combo.setCurrentIndex(1)   # Fλ linear
+    assert 'F' in panel.axes.get_ylabel() and panel.axes.get_yscale() == 'linear'
+    assert np.allclose(panel.axes.lines[0].get_ydata(), 2e-16)
+
+    panel.mode_combo.setCurrentIndex(2)   # Fλ log
+    assert panel.axes.get_yscale() == 'log'
+
+    panel.mode_combo.setCurrentIndex(3)   # Fν linear (Jy)
+    assert panel.axes.get_yscale() == 'linear'
+    # F_nu[Jy] = F_lambda * lambda^2 / c * 1e23
+    expected = 2e-16 * wave ** 2 / 2.99792458e18 * 1e23
+    assert np.allclose(panel.axes.lines[0].get_ydata(), expected)
 
 
 def test_combine_sums_flam_when_all_present():
