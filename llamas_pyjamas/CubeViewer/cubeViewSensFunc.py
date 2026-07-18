@@ -50,10 +50,11 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_COLOURS, CHANNEL_ORD
 from llamas_pyjamas.Flux.sensFunc import (
     DEFAULT_NORD,
     DEFAULT_SIGMA,
+    DEFAULT_THROUGHPUT_FLOOR,
+    TELLURIC_BANDS,
     SensFunc,
-    build_good_mask,
     default_masks,
-    fit_sensitivity,
+    fit_channel_sens,
     sensitivity_ratio,
 )
 
@@ -75,15 +76,20 @@ class SensFuncModel:
     ref_flux: np.ndarray
     standard_name: str = ''
     airmass: Optional[float] = None
-    use_default_masks: bool = True
+    use_default_masks: bool = True             # stellar (Balmer/He) hard masks
+    mask_tellurics: bool = False               # hard-mask telluric bands (off: handled by S/N)
     added_regions: List[Tuple[float, float]] = field(default_factory=list)
     bkspace: Optional[float] = None
     nord: int = DEFAULT_NORD
     sigma: float = DEFAULT_SIGMA
+    throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR
+    weighted: bool = True
 
     def regions(self) -> List[Tuple[float, float]]:
-        """Effective exclusion regions: defaults (if enabled) plus user-added spans."""
-        base = list(default_masks()) if self.use_default_masks else []
+        """Effective hard-exclusion regions: stellar defaults, optional tellurics, user spans."""
+        base = list(default_masks(include_telluric=False)) if self.use_default_masks else []
+        if self.mask_tellurics:
+            base += list(TELLURIC_BANDS)
         return base + list(self.added_regions)
 
     def raw(self, channel: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -93,17 +99,11 @@ class SensFuncModel:
 
     def fit_channel(self, channel: str):
         """Fit one channel with the current controls. Returns (wave, raw, fit, good) or None."""
-        wave, sens, valid = self.raw(channel)
-        good_in = valid & build_good_mask(wave, self.regions())
-        if good_in.sum() < max(2 * self.nord, 10):
-            return None
-        try:
-            fit, used = fit_sensitivity(wave, sens, good_in, bkspace=self.bkspace,
-                                        nord=self.nord, sigma=self.sigma)
-        except ValueError as exc:
-            logger.warning('fit failed for %s: %s', channel, exc)
-            return None
-        return wave, sens, fit, used
+        wave, flux = self.spectra[channel]
+        return fit_channel_sens(wave, flux, self.exptime, self.ref_wave, self.ref_flux,
+                                self.regions(), bkspace=self.bkspace, nord=self.nord,
+                                sigma=self.sigma, throughput_floor=self.throughput_floor,
+                                weighted=self.weighted)
 
     def build(self, meta: Optional[Dict] = None) -> SensFunc:
         """Produce a SensFunc from the current state (same core as the auto path)."""
@@ -113,6 +113,7 @@ class SensFuncModel:
         return build_sensfunc(self.spectra, self.exptime, self.ref_wave, self.ref_flux,
                               regions=self.regions(), bkspace=self.bkspace,
                               nord=self.nord, sigma=self.sigma, airmass=self.airmass,
+                              throughput_floor=self.throughput_floor, weighted=self.weighted,
                               meta=full_meta)
 
 
@@ -148,12 +149,39 @@ class SensFuncDialog(QDialog):
 
     def _build_controls(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self.default_masks_box = QCheckBox('Default masks')
+        self.default_masks_box = QCheckBox('Mask stellar lines')
         self.default_masks_box.setChecked(self.model.use_default_masks)
-        self.default_masks_box.setToolTip('Exclude telluric bands and the broad Balmer/He '
-                                          'lines of the standard from the fit')
-        self.default_masks_box.toggled.connect(self._on_default_masks)
+        self.default_masks_box.setToolTip("Hard-mask the standard's broad Balmer/He lines "
+                                          '(deep dips S/N weighting cannot down-weight)')
+        self.default_masks_box.toggled.connect(self._on_masks_changed)
         row.addWidget(self.default_masks_box)
+
+        self.telluric_box = QCheckBox('Mask tellurics')
+        self.telluric_box.setChecked(self.model.mask_tellurics)
+        self.telluric_box.setToolTip('Hard-mask telluric bands. Off by default: the S/N '
+                                     'weighting already down-weights them, and hard-masking '
+                                     'the red band truncates coverage there.')
+        self.telluric_box.toggled.connect(self._on_masks_changed)
+        row.addWidget(self.telluric_box)
+
+        self.weight_box = QCheckBox('S/N weight')
+        self.weight_box.setChecked(self.model.weighted)
+        self.weight_box.setToolTip('Weight the fit by counts so the well-exposed middle of '
+                                   'each channel drives the shape and the noisy edges follow')
+        self.weight_box.toggled.connect(self._on_params)
+        row.addWidget(self.weight_box)
+
+        row.addSpacing(12)
+        row.addWidget(QLabel('Floor %'))
+        self.floor_spin = QDoubleSpinBox()
+        self.floor_spin.setRange(0.0, 50.0)
+        self.floor_spin.setSingleStep(1.0)
+        self.floor_spin.setDecimals(0)
+        self.floor_spin.setValue(self.model.throughput_floor * 100.0)
+        self.floor_spin.setToolTip('Drop points below this fraction of each channel peak '
+                                   '(the dichroic-rolloff edges). 0 keeps everything.')
+        self.floor_spin.valueChanged.connect(self._on_params)
+        row.addWidget(self.floor_spin)
 
         row.addSpacing(12)
         row.addWidget(QLabel('Breakpoint (Å)'))
@@ -199,14 +227,17 @@ class SensFuncDialog(QDialog):
         self.model.added_regions.append((float(xmin), float(xmax)))
         self._refit_and_draw()
 
-    def _on_default_masks(self, checked: bool) -> None:
-        self.model.use_default_masks = checked
+    def _on_masks_changed(self) -> None:
+        self.model.use_default_masks = self.default_masks_box.isChecked()
+        self.model.mask_tellurics = self.telluric_box.isChecked()
         self._refit_and_draw()
 
     def _on_params(self) -> None:
         v = self.bkspace_spin.value()
         self.model.bkspace = None if v <= self.bkspace_spin.minimum() else v
         self.model.nord = self.nord_spin.value()
+        self.model.weighted = self.weight_box.isChecked()
+        self.model.throughput_floor = self.floor_spin.value() / 100.0
         self._refit_and_draw()
 
     def _clear_added(self) -> None:

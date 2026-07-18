@@ -76,13 +76,16 @@ DEFAULT_NORD = 3          # cubic b-spline
 DEFAULT_SIGMA = 3.0       # rejection threshold (both sides) in the iterative fit
 
 
-def default_masks(include_telluric: bool = True,
+def default_masks(include_telluric: bool = False,
                   include_stellar: bool = True) -> List[Tuple[float, float]]:
-    """Default wavelength regions to exclude from a sensitivity fit.
+    """Default wavelength regions to hard-exclude from a sensitivity fit.
 
-    Returns a list of ``(low, high)`` bands combining telluric absorption and the broad lines
-    of hot standards. Either family can be dropped; the interactive fitter adds or removes
-    regions on top of this.
+    Returns a list of ``(low, high)`` bands. Stellar lines (broad Balmer/He of the hot
+    standards) are included by default — they are deep dips on a bright continuum, so S/N
+    weighting will not down-weight them and they must be hard-masked. Tellurics are **off** by
+    default: hard-masking a terminal telluric band truncates the sensfunc's red coverage, and
+    the S/N weighting already down-weights absorbed (low-count) regions, so they are handled
+    without a hard mask. Pass ``include_telluric=True`` to hard-mask them anyway.
     """
     regions: List[Tuple[float, float]] = []
     if include_telluric:
@@ -140,18 +143,22 @@ def _auto_bkspace(wave: np.ndarray) -> float:
 
 
 def fit_sensitivity(wave: np.ndarray, sens: np.ndarray, good: np.ndarray,
-                    bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
-                    sigma: float = DEFAULT_SIGMA, maxiter: int = 5
+                    weight: Optional[np.ndarray] = None, bkspace: Optional[float] = None,
+                    nord: int = DEFAULT_NORD, sigma: float = DEFAULT_SIGMA, maxiter: int = 5
                     ) -> Tuple[np.ndarray, np.ndarray]:
-    """Robust b-spline fit of a raw sensitivity ratio, in log space.
+    """Robust, S/N-weighted b-spline fit of a raw sensitivity ratio, in log space.
 
     Parameters
     ----------
     wave, sens : ndarray
         The raw ratio from :func:`sensitivity_ratio`.
     good : ndarray of bool
-        Points to fit — typically ``valid & build_good_mask(...)`` so masked bands and invalid
-        points are excluded.
+        Points to fit — typically ``valid & build_good_mask(...) & above throughput floor``.
+    weight : ndarray, optional
+        Per-point weight (inverse variance) for the fit. Passing the observed counts here
+        down-weights the low-throughput channel edges — the dominant source of edge
+        instability, since there ``S = F_ref/(counts/s)`` blows up on almost no signal. Equal
+        weights if None.
     bkspace : float, optional
         Breakpoint spacing (A); a span-derived default is used if None.
     nord, sigma, maxiter :
@@ -160,14 +167,16 @@ def fit_sensitivity(wave: np.ndarray, sens: np.ndarray, good: np.ndarray,
     Returns
     -------
     fit, used : ndarray
-        `fit` is S evaluated on the full `wave` grid (finite everywhere within the fit domain,
-        NaN outside). `used` is the boolean mask of points that survived rejection.
+        `fit` is S evaluated across the full span of the fit points on the `wave` grid (NaN
+        outside that span). `used` is the boolean mask of points that survived rejection.
 
     Notes
     -----
     Fitting log10(S) keeps the huge dynamic range from dominating the least-squares and matches
-    how sensitivity/zeropoint curves behave physically (smooth in magnitude). Uses pypeit's
-    `iterfit`, the same solver the flat and sky steps use.
+    how sensitivity/zeropoint curves behave physically (smooth in magnitude). The counts-based
+    weighting means the well-exposed middle of each channel drives the shape and the noisy
+    dichroic-rolloff edges follow rather than lead. Uses pypeit's `iterfit`, the same solver the
+    flat and sky steps use.
     """
     from pypeit.core.fitting import iterfit
 
@@ -180,12 +189,21 @@ def fit_sensitivity(wave: np.ndarray, sens: np.ndarray, good: np.ndarray,
     order = np.argsort(x)
     x, y = x[order], y[order]
 
+    invvar = None
+    if weight is not None:
+        w = np.asarray(weight, dtype=float)[fit_pts][order]
+        invvar = np.clip(w, 0.0, None)
+        if not np.any(invvar > 0):
+            invvar = None
+
     if bkspace is None:
         bkspace = _auto_bkspace(x)
 
-    sset, outmask = iterfit(x, y, maxiter=maxiter, nord=nord,
-                            kwargs_bspline={'bkspace': bkspace},
-                            upper=sigma, lower=sigma)
+    kwargs = dict(maxiter=maxiter, nord=nord, kwargs_bspline={'bkspace': bkspace},
+                  upper=sigma, lower=sigma)
+    if invvar is not None:
+        kwargs['invvar'] = invvar
+    sset, outmask = iterfit(x, y, **kwargs)
 
     fit = np.full(np.shape(wave), np.nan, dtype=float)
     domain = (wave >= x.min()) & (wave <= x.max())
@@ -296,12 +314,47 @@ class SensFunc:
         return cls(channels=channels, meta=meta)
 
 
+#: Points fainter than this fraction of a channel's peak counts are the dichroic-rolloff
+#: edges where S = F_ref/(counts/s) is dominated by noise. Dropped from the fit by default.
+DEFAULT_THROUGHPUT_FLOOR = 0.05
+
+
+def fit_channel_sens(obs_wave: np.ndarray, obs_flux: np.ndarray, exptime: float,
+                     ref_wave: np.ndarray, ref_flux: np.ndarray,
+                     regions: Sequence[Tuple[float, float]],
+                     bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
+                     sigma: float = DEFAULT_SIGMA,
+                     throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR,
+                     weighted: bool = True):
+    """One channel's sensitivity: raw ratio, throughput floor, S/N-weighted b-spline fit.
+
+    Shared by :func:`build_sensfunc` and the interactive fitter so the auto and live paths
+    are identical. Returns ``(wave, raw, fit, used)`` or None if too few usable points.
+    """
+    wave, sens, valid = sensitivity_ratio(obs_wave, obs_flux, exptime, ref_wave, ref_flux)
+    counts = np.asarray(obs_flux, dtype=float)
+
+    good_in = valid & build_good_mask(wave, regions)
+    if throughput_floor > 0:
+        finite = counts[np.isfinite(counts)]
+        if finite.size:
+            good_in = good_in & (counts >= throughput_floor * np.nanmax(finite))
+    if good_in.sum() < max(2 * nord, 10):
+        return None
+
+    fit, used = fit_sensitivity(wave, sens, good_in,
+                                weight=(counts if weighted else None),
+                                bkspace=bkspace, nord=nord, sigma=sigma)
+    return wave, sens, fit, used
+
+
 def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
                    exptime: float, ref_wave: np.ndarray, ref_flux: np.ndarray,
                    regions: Optional[Sequence[Tuple[float, float]]] = None,
                    bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
                    sigma: float = DEFAULT_SIGMA, airmass: Optional[float] = None,
-                   meta: Optional[Dict] = None) -> SensFunc:
+                   throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR,
+                   weighted: bool = True, meta: Optional[Dict] = None) -> SensFunc:
     """Build a :class:`SensFunc` from a standard's aperture spectra and reference flux.
 
     Parameters
@@ -313,9 +366,16 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
     ref_wave, ref_flux : ndarray
         Reference spectrum (erg/s/cm^2/A), e.g. from ``Standard.load_spectrum()``.
     regions : sequence of (low, high), optional
-        Wavelength bands to exclude; :func:`default_masks` if None.
+        Wavelength bands to exclude; :func:`default_masks` (stellar lines) if None. Tellurics
+        are handled by the S/N weighting rather than hard-masked, so the fit keeps its red
+        coverage instead of truncating at the first telluric band.
     bkspace, nord, sigma :
         Fit controls (see :func:`fit_sensitivity`).
+    throughput_floor : float
+        Fraction of a channel's peak counts below which points are dropped — the low-signal
+        dichroic-rolloff edges. 0 disables.
+    weighted : bool
+        S/N-weight the fit by the observed counts (recommended; stabilises the edges).
     meta : dict, optional
         Provenance recorded in the output.
 
@@ -327,13 +387,13 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
 
     channels: Dict[str, SensChannel] = {}
     for name, (obs_wave, obs_flux) in spectra_by_channel.items():
-        wave, sens, valid = sensitivity_ratio(obs_wave, obs_flux, exptime, ref_wave, ref_flux)
-        good_in = valid & build_good_mask(wave, regions)
-        if good_in.sum() < max(2 * nord, 10):
-            logger.warning('channel %s: too few usable points (%d), skipped',
-                           name, int(good_in.sum()))
+        result = fit_channel_sens(obs_wave, obs_flux, exptime, ref_wave, ref_flux, regions,
+                                  bkspace=bkspace, nord=nord, sigma=sigma,
+                                  throughput_floor=throughput_floor, weighted=weighted)
+        if result is None:
+            logger.warning('channel %s: too few usable points, skipped', name)
             continue
-        fit, used = fit_sensitivity(wave, sens, good_in, bkspace=bkspace, nord=nord, sigma=sigma)
+        wave, sens, fit, used = result
         channels[name] = SensChannel(channel=name, wave=wave, sens=fit, raw=sens, good=used)
 
     if not channels:

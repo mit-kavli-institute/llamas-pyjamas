@@ -23,14 +23,20 @@ from llamas_pyjamas.Flux.sensFunc import (
 )
 
 
-def test_default_masks_cover_balmer_and_tellurics():
+def test_default_masks_are_stellar_only():
+    # Stellar lines are hard-masked by default; tellurics are handled by S/N weighting so they
+    # are NOT hard-masked unless explicitly requested (hard-masking the red band truncates
+    # coverage).
     regions = default_masks()
-    def masked(w):
-        return any(lo <= w <= hi for lo, hi in regions)
+    def masked(w, regs=regions):
+        return any(lo <= w <= hi for lo, hi in regs)
     assert masked(6562.8), 'H-alpha must be masked'
     assert masked(4861.3), 'H-beta must be masked'
-    assert masked(7620.0), 'O2 A-band must be masked'
+    assert not masked(7620.0), 'O2 A-band must NOT be masked by default'
     assert not masked(5500.0), 'clean continuum must not be masked'
+    # opt-in tellurics
+    with_tell = default_masks(include_telluric=True)
+    assert masked(7620.0, with_tell), 'A-band masked when include_telluric=True'
 
 
 def test_build_good_mask_excludes_regions():
@@ -100,6 +106,46 @@ def test_fit_without_mask_is_dragged_by_line():
     fit, _ = fit_sensitivity(wave, sens, good, bkspace=200.0)
     at_line = np.argmin(np.abs(wave - 5050.0))
     assert fit[at_line] < true[at_line] * 0.95, 'unmasked fit should be dragged below continuum'
+
+
+def test_throughput_floor_drops_faint_edges():
+    # Counts high in the middle, collapsing to ~1% at both ends (dichroic rolloff). The floor
+    # should drop those ends so the fit is not defined out in the noise.
+    from llamas_pyjamas.Flux.sensFunc import build_sensfunc
+    wave = np.linspace(4600.0, 7000.0, 400)
+    peak = 5000.0
+    counts = peak * np.exp(-0.5 * ((wave - 5800.0) / 350.0) ** 2)   # bell; ~0 at the ends
+    ref_wave = np.linspace(4000.0, 7500.0, 400)
+    ref_flux = np.full_like(ref_wave, 1e-15)
+    sf = build_sensfunc({'green': (wave, counts)}, exptime=10.0,
+                        ref_wave=ref_wave, ref_flux=ref_flux, regions=[],
+                        throughput_floor=0.05, meta={'standard': 'T'})
+    ch = sf.channels['green']
+    defined = np.isfinite(ch.sens)
+    # the faint ends (well below 5% of peak) must be undefined; the bright middle defined
+    assert defined[np.argmin(np.abs(wave - 5800.0))]
+    assert not defined[0] and not defined[-1]
+
+
+def test_weighting_mitigates_low_count_spike():
+    # A low-count dip makes S spike up. With S/N weighting the unmasked fit should follow the
+    # continuum more closely than without it — the mechanism that stabilises real edges.
+    from llamas_pyjamas.Flux.sensFunc import fit_channel_sens
+    wave = np.linspace(4600.0, 7000.0, 400)
+    counts = np.full_like(wave, 400.0)
+    dip = (wave >= 5500) & (wave <= 5600)
+    counts[dip] = 40.0
+    ref_wave = np.linspace(4000.0, 7500.0, 400)
+    ref_flux = np.full_like(ref_wave, 1e-15)
+    at = np.argmin(np.abs(wave - 5550.0))
+
+    _, _, fit_w, _ = fit_channel_sens(wave, counts, 10.0, ref_wave, ref_flux, regions=[],
+                                      bkspace=150.0, throughput_floor=0.0, weighted=True)
+    _, _, fit_u, _ = fit_channel_sens(wave, counts, 10.0, ref_wave, ref_flux, regions=[],
+                                      bkspace=150.0, throughput_floor=0.0, weighted=False)
+    continuum = 1e-15 / (400.0 / 10.0)      # true S off the dip
+    assert abs(fit_w[at] - continuum) < abs(fit_u[at] - continuum), \
+        'S/N weighting should pull the fit at the spike closer to the continuum'
 
 
 def test_build_and_roundtrip(tmp_path):

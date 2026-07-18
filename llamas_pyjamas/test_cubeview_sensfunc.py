@@ -64,9 +64,13 @@ def test_added_mask_changes_the_fit():
     flux[dip] *= 0.3
     ref_wave = np.linspace(4000.0, 7500.0, 400)
     ref_flux = np.full_like(ref_wave, 1e-15)
+    # Weighting off so the low-count spike genuinely drags the unmasked fit — this test is
+    # about the mask mechanism, not the (separately tested) S/N weighting that would otherwise
+    # down-weight the spike.
     m = SensFuncModel(spectra={'green': (wave, flux)}, exptime=30.0,
                       ref_wave=ref_wave, ref_flux=ref_flux, standard_name='T',
-                      use_default_masks=False, bkspace=150.0)
+                      use_default_masks=False, bkspace=150.0, weighted=False,
+                      throughput_floor=0.0)
 
     unmasked = m.build().value(np.array([5550.0]), 'green')[0]
     m.added_regions.append((5480.0, 5620.0))

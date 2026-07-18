@@ -54,6 +54,7 @@ class Standard:
     vmag: Optional[float]
     sptype: str
     flux_file: Optional[str]        # absolute path to the reference spectrum, or None
+    flux_scale: float = 1e-16       # column-2 multiplier to reach erg/s/cm^2/A
 
     @property
     def has_spectrum(self) -> bool:
@@ -67,8 +68,9 @@ class Standard:
         (wave, flux) : tuple of ndarray
             Wavelength in Angstrom, flux in erg/s/cm^2/A.
 
-        The bundled Oke files list wavelength (A), flux (in 1e-16 erg/s/cm^2/A), flux (mJy)
-        and bin width; the first two columns are returned with the 1e-16 scale applied.
+        Column 1 is wavelength and column 2 is flux; the format's :attr:`flux_scale` is applied
+        (1e-16 for the Oke files, 1.0 for the XShooter files, which are already in physical
+        units). Extra columns (Oke also lists mJy and bin width) are ignored.
 
         Raises
         ------
@@ -78,7 +80,7 @@ class Standard:
         if self.flux_file is None:
             raise ValueError(f'{self.name} has no bundled reference spectrum')
         data = np.loadtxt(self.flux_file)
-        return data[:, 0], data[:, 1] * 1e-16
+        return data[:, 0], data[:, 1] * self.flux_scale
 
 
 @dataclass(frozen=True)
@@ -164,9 +166,9 @@ def _parse_index(path: str) -> List[Standard]:
             if not line or line.startswith('#'):
                 continue
             parts = line.split()
-            if len(parts) < 6:
+            if len(parts) < 7:
                 continue
-            name, ra, dec, vmag, sptype, flux = parts[:6]
+            name, ra, dec, vmag, sptype, flux_scale, flux = parts[:7]
             flux_path = None
             if flux and flux != '-':
                 candidate = os.path.join(flux_dir, flux)
@@ -178,6 +180,7 @@ def _parse_index(path: str) -> List[Standard]:
                 vmag=(None if vmag == '-' else float(vmag)),
                 sptype=('' if sptype == '-' else sptype),
                 flux_file=flux_path,
+                flux_scale=(1e-16 if flux_scale in ('-', '') else float(flux_scale)),
             ))
     return standards
 
