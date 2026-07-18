@@ -20,6 +20,18 @@
 # Set clobber = true to force EVERY stage (including trace regeneration) to run
 # from scratch, ignoring any existing products. Default: false.
 # clobber = false
+#
+# Extraction pkls are large (~GB each) intermediate products; the RSS carries
+# everything downstream needs. By default they are removed once the RSS is written.
+# Set save_extraction_pkl = true to keep them at full size for deep inspection
+# (most users never need them). The RSS, not the pkl, is the resume anchor.
+# save_extraction_pkl = false
+#
+# The extract / fibre-flat (_FF) / sky-subtracted (_FF_SKYSUB) stages each leave an RSS file
+# per channel (up to three). By default, after cubes are built, these are consolidated to one
+# per channel -- the most-corrected, renamed to a clean {base}_RSS_{color}.fits with all
+# planes as extensions. Set keep_intermediate_rss = true to keep every stage's file.
+# keep_intermediate_rss = false
 
 #==============================================================================
 # BIAS CALIBRATION
@@ -342,8 +354,10 @@ sky_framework = False
 #==============================================================================
 # CUBE CONSTRUCTION PARAMETERS
 #==============================================================================
-# Enable/disable cube generation (set to False if only 2D RSS products needed)
-generate_cubes = True
+# Enable/disable cube generation. Default off: the 2D RSS products carry the science, and
+# cubes (large, ~366 MB each) can be built on demand in CubeViewer. Set true to have the
+# pipeline write cube_{color}(_skysub).fits for every science frame.
+generate_cubes = False
 
 # Two independent cube sets are built by default (both require generate_cubes = True):
 #   generate_standard_cubes -> cubes from the fibre-flat RSS  -> ..._cube_{color}.fits

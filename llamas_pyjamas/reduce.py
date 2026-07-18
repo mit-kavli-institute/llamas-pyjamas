@@ -1653,6 +1653,90 @@ def _has_rss_product(extraction_dir, stem):
     return False
 
 
+#: RSS correction-stage suffixes, least to most corrected. The consolidator keeps the most
+#: corrected file per (frame, channel) and drops the earlier stages.
+_RSS_STAGE_RANK = {'': 0, '_FF': 1, '_FF_SKYSUB': 2}
+_RSS_STAGE_RE = re.compile(r'^(.*)_RSS_(blue|green|red)(_FF(?:_SKYSUB)?)?\.fits$')
+
+
+def consolidate_rss_files(extraction_dir, keep_intermediate=False):
+    """Collapse the per-stage RSS files to one per (frame, channel).
+
+    The extract / fibre-flat (_FF) / sky-subtracted (_FF_SKYSUB) stages each write a
+    progressively-corrected RSS with the same HDU layout, so on disk there are up to three
+    files per channel. This keeps the most-corrected one, deletes the earlier stages, and
+    renames the survivor to the clean ``{base}_RSS_{color}.fits`` (dropping the stage suffix).
+
+    Must run AFTER cube construction, which reads the _FF / _FF_SKYSUB files. With
+    `keep_intermediate` (config ``keep_intermediate_rss``) nothing is touched.
+
+    Returns a list of ``(action, filename)`` for logging: ``('removed', f)`` / ``('renamed',
+    'old -> new')``.
+    """
+    if keep_intermediate or not os.path.isdir(extraction_dir):
+        return []
+
+    groups = {}
+    for fname in os.listdir(extraction_dir):
+        m = _RSS_STAGE_RE.match(fname)
+        if not m:
+            continue
+        base, color, suffix = m.group(1), m.group(2), m.group(3) or ''
+        groups.setdefault((base, color), []).append(
+            (_RSS_STAGE_RANK.get(suffix, 0), fname))
+
+    actions = []
+    for (base, color), files in groups.items():
+        files.sort()                                  # by stage rank, ascending
+        survivor = files[-1][1]
+        target = f'{base}_RSS_{color}.fits'
+        for _rank, fname in files[:-1]:               # drop earlier stages first
+            try:
+                os.remove(os.path.join(extraction_dir, fname))
+                actions.append(('removed', fname))
+            except OSError:
+                pass
+        if survivor != target:                        # give the survivor the clean name
+            try:
+                os.replace(os.path.join(extraction_dir, survivor),
+                           os.path.join(extraction_dir, target))
+                actions.append(('renamed', f'{survivor} -> {target}'))
+            except OSError:
+                pass
+    return actions
+
+
+def cleanup_extraction_pkls(paths, save_pkl):
+    """Remove intermediate extraction pkls once the RSS is written, unless keeping them.
+
+    Parameters
+    ----------
+    paths : iterable of str or None
+        Candidate pkl paths (raw extract + final sky1d for a frame). None/blank entries and
+        already-absent files are ignored; the set is de-duplicated so the same path is not
+        removed twice.
+    save_pkl : bool
+        When True (``save_extraction_pkl`` in the config) nothing is removed and the pkls are
+        kept at full size for inspection.
+
+    Returns
+    -------
+    list of str
+        The paths actually removed (for logging).
+    """
+    if save_pkl:
+        return []
+    removed = []
+    for path in {p for p in paths if p}:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                removed.append(path)
+        except OSError:
+            pass
+    return removed
+
+
 def main(config_path):
     """
     Main entry point for the data reduction pipeline.
@@ -1873,7 +1957,7 @@ def main(config_path):
     if isinstance(use_crr_cube, str):
         use_crr_cube = use_crr_cube.lower() == 'true'
         
-    _gen_cubes = config.get('generate_cubes', True)  # Default to True
+    _gen_cubes = config.get('generate_cubes', False)  # Default off; build on demand (CubeViewer)
 
     print(f"CRR cube reconstruction: {'enabled' if use_crr_cube else 'disabled'}")
 
@@ -2908,6 +2992,16 @@ def main(config_path):
             del corr_extractions, corr_extraction_list
             gc.collect()
 
+            # Extraction pkls are intermediate products: the RSS carries everything the
+            # downstream steps need, and each pkl is large (~GB). By default they are removed
+            # once the RSS is written; set save_extraction_pkl = true to keep them at full
+            # size for deep inspection (most users never look at them). The RSS, not the pkl,
+            # is the resume anchor, so removal does not affect resume.
+            for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file],
+                                                config.get('save_extraction_pkl', False)):
+                print(f"Removed extraction pkl (save_extraction_pkl=false): "
+                      f"{os.path.basename(_pkl)}")
+
         # ── Fibre-to-fibre flat correction on RSS files ──
         if were_flat_corrected and config.get('apply_fibre_flat', True):
             flat_field_dir = config.get('flat_field_output_dir',
@@ -3164,9 +3258,16 @@ def main(config_path):
                 print("No cubes constructed (no matching RSS files or both sets disabled)")
         else:
             print("Cube generation disabled (generate_cubes=False)")
-                
-        
-        
+
+        # ── Consolidate per-stage RSS files to one per (frame, channel) ──
+        # The extract / _FF / _FF_SKYSUB stages leave up to three RSS per channel; keep only
+        # the most-corrected, renamed to a clean {base}_RSS_{color}.fits. Runs here, after cube
+        # construction (which consumes the _FF / _FF_SKYSUB files). Set keep_intermediate_rss =
+        # true to keep every stage.
+        for _action, _detail in consolidate_rss_files(
+                extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
+            print(f"RSS consolidation: {_action} {_detail}")
+
     except Exception as e:
         traceback.print_exc()
         print(f"An error occurred: {e}")
