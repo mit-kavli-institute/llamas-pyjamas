@@ -311,6 +311,16 @@ wavelength_qa = true
 # observed frame (e.g. for telluric correction, whose bands must stay topocentric).
 # One of: heliocentric (default), barycentric, none.
 wave_frame = heliocentric
+#
+# Celestial-WCS calibration (TEMPORARY telescope-rotator workaround). The white-light images and
+# cubes get an RA/DEC WCS from the header pointing + rotator angle. Calibrated against Gaia/
+# PanSTARRS on the J1613 field: the LLAMAS field is mirror-imaged (det>0) and the fibre +x axis
+# points at sky PA = TEL_ROT + wcs_pa_offset. These are PROVISIONAL (one rotator angle; sign of
+# the TEL_ROT dependence unconfirmed) and are the hook for the eventual telescope-side fix:
+# set wcs_pa_offset = 0 (and adjust wcs_mirrored) once the TCS reports a correct sky PA.
+# Defaults: wcs_pa_offset = 23.05, wcs_mirrored = true.
+# wcs_pa_offset = 23.05
+# wcs_mirrored = true
 # Output directory for QA reports (default: {output_dir}/QA).
 # qa_output_dir = /path/to/QA
 #

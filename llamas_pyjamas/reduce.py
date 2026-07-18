@@ -1895,6 +1895,15 @@ def main(config_path):
     resume = not clobber
     # (clobber/resume status is logged to the file below, after logging setup)
 
+    # WCS calibration override (temporary TCS-convention workaround). Rebinding the module
+    # constants here means every celestial_wcs / cube create_wcs call picks them up. Set
+    # wcs_pa_offset = 0 (and wcs_mirrored) once the telescope reports a correct sky PA.
+    import llamas_pyjamas.Utils.wcsLlamas as _wcsL
+    if config.get('wcs_pa_offset') is not None:
+        _wcsL.IFU_PA_OFFSET = float(config['wcs_pa_offset'])
+    if config.get('wcs_mirrored') is not None:
+        _wcsL.IFU_MIRRORED = bool(config['wcs_mirrored'])
+
     # Configure pipeline logging — log file goes next to the config file
     if 'log_output_dir' in config:
         log_dir = config['log_output_dir']
