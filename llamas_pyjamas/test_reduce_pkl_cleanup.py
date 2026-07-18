@@ -90,30 +90,35 @@ def test_consolidate_keep_intermediate_is_noop():
         assert len([f for f in os.listdir(d) if f.endswith('.fits')]) == 3
 
 
-def test_consolidate_whitelight_renames_to_clean_id():
+def test_consolidate_whitelight_renames_to_fullpipeline():
     with tempfile.TemporaryDirectory() as d:
         # two stages of the same exposure's white light; keep the most-processed
         _touch(os.path.join(d, f'{_BASE}_whitelight.fits'), 'full')
         _touch(os.path.join(d, f'{_ID}_SCI22_mef_flat_corrected_whitelight.fits'), 'partial')
         actions = consolidate_whitelight_files(d)
         survivors = [f for f in os.listdir(d) if f.endswith('.fits')]
-        assert survivors == [f'{_ID}_whitelight.fits']
+        assert survivors == [f'{_ID}_whitelight_fullpipeline.fits']
         with open(os.path.join(d, survivors[0])) as fh:
             assert fh.read() == 'full', 'the bias+flat-corrected stage is kept'
         assert any(a == 'renamed' for a, _ in actions)
 
 
-def test_consolidate_whitelight_leaves_subdirs_and_respects_keep():
+def test_consolidate_whitelight_skips_quicklook_and_subdirs():
     with tempfile.TemporaryDirectory() as d:
-        _touch(os.path.join(d, f'{_BASE}_whitelight.fits'))
+        _touch(os.path.join(d, f'{_BASE}_whitelight.fits'), 'pipe')          # pipeline (has _SCI)
+        # telescope quicklook: markerless {timestamp}_whitelight.fits -- must be left untouched
+        ql = os.path.join(d, 'LLAMAS_2026-05-17_02-49-56_whitelight.fits')
+        _touch(ql, 'quicklook')
         os.makedirs(os.path.join(d, 'twilight'))
         _touch(os.path.join(d, 'twilight', 'cal_whitelight.fits'))
         # keep_intermediate is a no-op
         assert consolidate_whitelight_files(d, keep_intermediate=True) == []
-        assert os.path.exists(os.path.join(d, f'{_BASE}_whitelight.fits'))
-        # normal run renames top-level but never touches the subdir
+        # normal run: pipeline -> _fullpipeline; quicklook + subdir untouched
         consolidate_whitelight_files(d)
-        assert os.path.exists(os.path.join(d, f'{_ID}_whitelight.fits'))
+        assert os.path.exists(os.path.join(d, f'{_ID}_whitelight_fullpipeline.fits'))
+        assert os.path.exists(ql), 'quicklook white light must not be renamed'
+        with open(ql) as fh:
+            assert fh.read() == 'quicklook'
         assert os.path.exists(os.path.join(d, 'twilight', 'cal_whitelight.fits'))
 
 

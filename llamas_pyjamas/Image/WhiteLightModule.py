@@ -284,14 +284,22 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         logger.error('No blue, green, or red extractions found. Exiting...')
         return
     
+    # Object name for the frame (from the science header) — set on the primary and every image
+    # HDU so DS9 shows it whichever extension is opened.
+    obj_name = str(primary_header.get('OBJECT', '')) if primary_header is not None else ''
+
     # Create HDU list
     hdul = fits.HDUList()
     primary_hdu = fits.PrimaryHDU()
-    
-    
     fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
     primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-    hdul.append(fits.PrimaryHDU())
+    # Carry object + pointing from the science header so the frame is self-describing. (This
+    # PrimaryHDU used to be discarded — a fresh empty one was appended — losing all of it.)
+    if primary_header is not None:
+        for _k in ('OBJECT', 'RA', 'DEC', 'TEL RA', 'TEL DEC', 'TEL ROT', 'TEL PA'):
+            if _k in primary_header:
+                primary_hdu.header[_k] = primary_header[_k]
+    hdul.append(primary_hdu)
 
     # Process blue data if exists
     if blue:
@@ -304,6 +312,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         _wcs = _whitelight_wcs_header(blue_x, blue_y, primary_header, hex_tiles, pix_per_unit)
         if _wcs is not None:
             blue_hdu.header.update(_wcs)
+        blue_hdu.header['OBJECT'] = obj_name
         hdul.append(blue_hdu)
         
         blue_tab = fits.BinTableHDU.from_columns([
@@ -324,6 +333,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         _wcs = _whitelight_wcs_header(green_x, green_y, primary_header, hex_tiles, pix_per_unit)
         if _wcs is not None:
             green_hdu.header.update(_wcs)
+        green_hdu.header['OBJECT'] = obj_name
         hdul.append(green_hdu)
         
         green_tab = fits.BinTableHDU.from_columns([
@@ -343,6 +353,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         _wcs = _whitelight_wcs_header(red_x, red_y, primary_header, hex_tiles, pix_per_unit)
         if _wcs is not None:
             red_hdu.header.update(_wcs)
+        red_hdu.header['OBJECT'] = obj_name
         hdul.append(red_hdu)
         
         red_tab = fits.BinTableHDU.from_columns([

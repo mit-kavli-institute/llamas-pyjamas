@@ -375,7 +375,8 @@ sky_framework = False
 # renders each fibre as a flat hexagonal tile of its raw flux -- no interpolation, dead fibres
 # left as holes; false resamples onto a rectangular grid. Either way the image now carries a
 # celestial (RA/DEC) WCS from the header pointing, and the file is named
-# {exposure_id}_whitelight.fits to match the RSS.
+# {exposure_id}_whitelight_fullpipeline.fits (the _fullpipeline marker keeps it distinct from the
+# telescope quicklook's {timestamp}_whitelight.fits, which is left untouched).
 whitelight_hex = true
 
 #==============================================================================

@@ -1729,15 +1729,19 @@ _WHITELIGHT_RE = re.compile(r'^(.*)_whitelight\.fits$')
 
 
 def consolidate_whitelight_files(extraction_dir, keep_intermediate=False):
-    """Rename the per-exposure white-light images to the clean RSS-style name.
+    """Rename the per-exposure pipeline white-light images to a clean, distinct name.
 
     The extractor writes one multi-extension white light per exposure named after the long
     extraction stem (``..._SCI##_mef_bias_corrected_flat_corrected_whitelight.fits``). This
-    renames it to ``{exposure_id}_whitelight.fits`` to match the ``{exposure_id}_RSS_{color}``
-    convention, keeping the most-processed one per exposure if several stages linger.
+    renames it to ``{exposure_id}_whitelight_fullpipeline.fits`` -- the ``_fullpipeline`` marker
+    keeps it distinct from the telescope quicklook's ``{timestamp}_whitelight.fits`` (which other
+    software depends on and must not be touched).
 
-    Top-level only (subdir twilight/flat white lights are left alone), and a no-op under
-    `keep_intermediate`. Returns ``(action, detail)`` tuples for logging.
+    Only pipeline products are handled: a file is one iff ``_exposure_id`` strips a ``_SCI##`` /
+    ``_CAL##`` marker from its name (``_exposure_id(base) != base``). The quicklook white light
+    (no such marker) is skipped, as are already-renamed ``*_whitelight_fullpipeline.fits`` (they
+    do not match ``*_whitelight.fits``). Top-level only; no-op under `keep_intermediate`.
+    Returns ``(action, detail)`` tuples for logging.
     """
     if keep_intermediate or not os.path.isdir(extraction_dir):
         return []
@@ -1748,16 +1752,19 @@ def consolidate_whitelight_files(extraction_dir, keep_intermediate=False):
         if not m:
             continue
         base = m.group(1)
+        exp_id = _exposure_id(base)
+        if exp_id == base:
+            continue                                  # no _SCI/_CAL marker => not a pipeline WL
         # More '_corrected' stages = more processed; the clean target (no chain) ranks lowest so
         # a freshly-written long name always wins over a stale short one.
         rank = base.count('_corrected')
-        groups.setdefault(_exposure_id(base), []).append((rank, len(fname), fname))
+        groups.setdefault(exp_id, []).append((rank, len(fname), fname))
 
     actions = []
     for exp_id, files in groups.items():
         files.sort()
         survivor = files[-1][2]
-        target = f'{exp_id}_whitelight.fits'
+        target = f'{exp_id}_whitelight_fullpipeline.fits'
         for _r, _l, fname in files[:-1]:
             try:
                 os.remove(os.path.join(extraction_dir, fname))
@@ -3349,8 +3356,8 @@ def main(config_path):
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"RSS consolidation: {_action} {_detail}")
 
-        # Shorten the per-exposure white-light images to the same clean name scheme
-        # ({exposure_id}_whitelight.fits), matching the RSS files.
+        # Rename the per-exposure pipeline white-light to {exposure_id}_whitelight_fullpipeline.fits
+        # -- distinct from the telescope quicklook's {timestamp}_whitelight.fits (left untouched).
         for _action, _detail in consolidate_whitelight_files(
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"White-light consolidation: {_action} {_detail}")
