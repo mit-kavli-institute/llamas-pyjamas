@@ -37,11 +37,14 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
+
+from llamas_pyjamas.Flux.sensFunc import is_sensfunc_file
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,29 @@ def scan_rss_exposures(directory: str) -> List[Dict]:
     return entries
 
 
+def find_sensfuncs(*directories: str) -> List[str]:
+    """Sensitivity-function FITS found in `directories` (deduped, in the order given).
+
+    Identified by structure via :func:`is_sensfunc_file`, so a renamed sensfunc is still found
+    and a same-named RSS is not. ``_RSS_`` files are skipped by name so the (large) RSS planes
+    are never opened just to reject them.
+    """
+    found: List[str] = []
+    seen = set()
+    for directory in directories:
+        if not directory or not os.path.isdir(directory):
+            continue
+        for name in sorted(os.listdir(directory)):
+            low = name.lower()
+            if not low.endswith('.fits') or '_rss_' in low:
+                continue
+            path = os.path.join(directory, name)
+            if path not in seen and is_sensfunc_file(path):
+                seen.add(path)
+                found.append(path)
+    return found
+
+
 class ObslogDialog(QDialog):
     """Table picker over the RSS exposures in a directory.
 
@@ -125,6 +151,7 @@ class ObslogDialog(QDialog):
         self.chosen_path = ''            # single-select result (representative file)
         self.chosen_files: List[str] = []   # multi-select result (all planes, flattened)
         self._entries: List[Dict] = []
+        self._sensfunc_candidates: List[str] = []
 
         layout = QVBoxLayout(self)
 
@@ -206,6 +233,34 @@ class ObslogDialog(QDialog):
             self.table.setItem(row, self.COL_EXP, exp_item)
             self.table.setItem(row, self.COL_NOTES, QTableWidgetItem(entry['notes']))
         self.table.setSortingEnabled(True)
+        if self.with_sensfunc:
+            self._auto_fill_sensfunc()
+        self._update_accept()
+
+    def _auto_fill_sensfunc(self) -> None:
+        """Discover sensfuncs in the RSS directory and its parent (where they usually live).
+
+        The sensfunc is a night-level product often kept a level up from the per-exposure RSS,
+        so a plain browse starting in the RSS folder misses it. If exactly one is found it is
+        pre-filled; otherwise the count is shown and Browse starts where they were found. A
+        manual choice is never clobbered.
+        """
+        parent = os.path.dirname(self.directory.rstrip(os.sep))
+        self._sensfunc_candidates = find_sensfuncs(self.directory, parent)
+        if self.sensfunc_path:
+            return
+        n = len(self._sensfunc_candidates)
+        if n == 1:
+            self._set_sensfunc(self._sensfunc_candidates[0])
+        else:
+            self.sens_edit.setPlaceholderText(
+                '(none found nearby — Browse…)' if n == 0
+                else f'({n} found nearby — Browse…)')
+
+    def _set_sensfunc(self, path: str) -> None:
+        self.sensfunc_path = path
+        self.sens_edit.setText(os.path.basename(path))
+        self.sens_edit.setToolTip(path)
         self._update_accept()
 
     def _change_directory(self) -> None:
@@ -215,13 +270,25 @@ class ObslogDialog(QDialog):
             self._rescan()
 
     def _choose_sensfunc(self) -> None:
+        # Start where sensfuncs were discovered (often the parent), and default the filter to
+        # the *sensfunc* naming so the RSS files do not clutter the list.
+        start = (os.path.dirname(self._sensfunc_candidates[0])
+                 if self._sensfunc_candidates else self.directory)
         path, _ = QFileDialog.getOpenFileName(
-            self, 'Select sensitivity function', self.directory,
-            'Sensitivity FITS (*.fits);;All files (*)')
-        if path:
-            self.sensfunc_path = path
-            self.sens_edit.setText(os.path.basename(path))
-            self._update_accept()
+            self, 'Select sensitivity function', start,
+            'Sensitivity function (*sensfunc*.fits);;FITS files (*.fits *.fit);;All files (*)')
+        if not path:
+            return
+        # Property check, so a mis-named or wrong file is rejected with a clear reason rather
+        # than failing later during apply.
+        if not is_sensfunc_file(path):
+            QMessageBox.warning(
+                self, 'Not a sensitivity function',
+                f'{os.path.basename(path)} is not a LLAMAS sensitivity function '
+                '(it has no SENS_<channel> table).\n\nBuild one from a standard star first: '
+                'Sensitivity ▸ Build Sensitivity Function.')
+            return
+        self._set_sensfunc(path)
 
     # ------------------------------------------------------------------ selection
 

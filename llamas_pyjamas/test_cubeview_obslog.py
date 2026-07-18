@@ -19,9 +19,23 @@ from astropy.io import fits
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog, scan_rss_exposures
+from llamas_pyjamas.CubeViewer.cubeViewObslog import (
+    ObslogDialog,
+    find_sensfuncs,
+    scan_rss_exposures,
+)
+from llamas_pyjamas.Flux.sensFunc import is_sensfunc_file
 
 _app = QApplication.instance() or QApplication([])
+
+
+def _write_sensfunc(directory, name='feige110_sensfunc.fits'):
+    """A minimal file with a SENS_<channel> table -- the sensfunc signature."""
+    col = fits.Column(name='WAVE', format='D', array=np.array([5000.0, 6000.0]))
+    hdu = fits.BinTableHDU.from_columns([col], name='SENS_GREEN')
+    path = os.path.join(directory, name)
+    fits.HDUList([fits.PrimaryHDU(), hdu]).writeto(path, overwrite=True)
+    return path
 
 
 def _write_rss(directory, base, colour, obj='TARGET', exptime=120.0, notes='a note'):
@@ -108,6 +122,37 @@ def test_apply_dialog_needs_sensfunc_and_flattens_planes():
         # both exposures, all three planes each
         assert len(dialog.chosen_files) == 6
         assert all(p.endswith('.fits') for p in dialog.chosen_files)
+
+
+def test_is_sensfunc_distinguishes_from_rss():
+    with tempfile.TemporaryDirectory() as d:
+        sens = _write_sensfunc(d)
+        rss = _write_rss(d, 'EXP_A', 'green')
+        assert is_sensfunc_file(sens) is True
+        assert is_sensfunc_file(rss) is False
+        assert is_sensfunc_file(os.path.join(d, 'missing.fits')) is False
+
+
+def test_find_sensfuncs_by_property_ignores_rss_and_name():
+    with tempfile.TemporaryDirectory() as d:
+        _populate(d)                                     # six RSS planes, no sensfunc
+        assert find_sensfuncs(d) == []
+        # a sensfunc with a NON-standard name is still found (property, not filename)
+        odd = _write_sensfunc(d, name='calib_response.fits')
+        assert find_sensfuncs(d) == [odd]
+
+
+def test_apply_dialog_autofills_sensfunc_from_parent():
+    # RSS in a subdir, sensfunc in the parent -- the real layout that hid the file before.
+    with tempfile.TemporaryDirectory() as parent:
+        sens = _write_sensfunc(parent)
+        sub = os.path.join(parent, 'extractions')
+        os.makedirs(sub)
+        _populate(sub)
+        dialog = ObslogDialog(sub, multi=True, with_sensfunc=True, title='Apply')
+        assert dialog.sensfunc_path == sens, 'single nearby sensfunc is pre-filled'
+        dialog.table.selectRow(0)
+        assert dialog.accept_button.isEnabled()
 
 
 if __name__ == '__main__':

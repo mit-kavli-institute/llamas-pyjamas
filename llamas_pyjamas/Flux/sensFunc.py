@@ -399,6 +399,20 @@ class SensFunc:
         return cls(channels=channels, meta=meta)
 
 
+def is_sensfunc_file(path: str) -> bool:
+    """True if `path` is a LLAMAS sensitivity-function FITS.
+
+    Identified by structure, not name: :meth:`SensFunc.save` writes one ``SENS_<channel>``
+    binary-table extension per channel, which an RSS or any other product never has. Header
+    reads only (no data), and any open error is simply "not one".
+    """
+    try:
+        with fits.open(path) as hdul:
+            return any(str(hdu.name).upper().startswith('SENS_') for hdu in hdul[1:])
+    except Exception:                                   # noqa: BLE001 - unreadable => not one
+        return False
+
+
 #: Points fainter than this fraction of a channel's peak counts are the dichroic-rolloff
 #: edges where S = F_ref/(counts/s) is dominated by noise. Dropped from the fit by default.
 DEFAULT_THROUGHPUT_FLOOR = 0.05
