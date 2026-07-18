@@ -2996,7 +2996,9 @@ def main(config_path):
             print(f"Calling generate_rss: noflat_file={noflat_rss_file!r}")
             new_rss_outputs = rss_gen.generate_rss(rss_input_file, rss_output_file,
                                                     subtract_sky=sky_subtract,
-                                                    noflat_file=noflat_rss_file)
+                                                    noflat_file=noflat_rss_file,
+                                                    wave_frame=config.get('wave_frame',
+                                                                          'heliocentric'))
             rss_logger.info(f"RSS file generated: {new_rss_outputs}")
             print(f"RSS file generated: {new_rss_outputs}")
 

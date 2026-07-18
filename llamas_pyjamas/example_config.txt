@@ -301,6 +301,16 @@ ray_num_cpus = 8
 #
 # Enable/disable (default: true). QA failures never abort a reduction.
 wavelength_qa = true
+#
+# Wavelength reference frame for science and standard-star spectra. The arc solution is a
+# vacuum scale in the observed (topocentric) frame; this shifts the RSS WAVE into the
+# heliocentric (or barycentric) rest frame by WAVE *= sqrt((1+v/c)/(1-v/c)). Applied per
+# exposure at RSS assembly (after sky subtraction, so OH sky lines are unaffected) and only to
+# OBS TYPE science frames. The applied velocity is recorded in the header (VELFRAME, HELIOVEL
+# in km/s, VELCORR the factor) and is reversible -- divide WAVE by VELCORR to recover the
+# observed frame (e.g. for telluric correction, whose bands must stay topocentric).
+# One of: heliocentric (default), barycentric, none.
+wave_frame = heliocentric
 # Output directory for QA reports (default: {output_dir}/QA).
 # qa_output_dir = /path/to/QA
 #

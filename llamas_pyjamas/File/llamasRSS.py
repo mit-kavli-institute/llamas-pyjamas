@@ -45,7 +45,8 @@ class RSSgeneration:
         return
 
 
-    def generate_rss(self, extraction_file, output_file, subtract_sky=True, noflat_file=None):
+    def generate_rss(self, extraction_file, output_file, subtract_sky=True, noflat_file=None,
+                     wave_frame='heliocentric'):
         """
         Generate a row-stacked spectra (RSS) FITS file with the following structure:
         Extension 0 - PRIMARY: primary header only, no data
@@ -105,6 +106,16 @@ class RSSgeneration:
             _metadata = _data['metadata']
 
             self.logger.info(f"Loaded extraction file with {len(extraction_objects)} extraction objects")
+
+            # Heliocentric/barycentric wavelength-frame correction, applied here (after sky
+            # subtraction) so OH sky lines stay in the observed frame. Per-exposure and uniform
+            # across all fibres/channels; stamps VELFRAME/HELIOVEL/VELCORR into the primary
+            # header once. Returns 1.0 for calibrations or when disabled -> WAVE untouched.
+            from llamas_pyjamas.Utils.waveFrame import stamp_and_factor
+            _helio_vel, _helio_factor = stamp_and_factor(primary_hdr, wave_frame)
+            if _helio_factor != 1.0:
+                self.logger.info(f"Wavelength frame: {primary_hdr.get('VELFRAME')} "
+                                 f"v={_helio_vel:.4f} km/s, WAVE *= {_helio_factor:.8f}")
 
             # Group by channel
             channel_groups = {}
@@ -366,6 +377,8 @@ class RSSgeneration:
                 counts_stack = np.vstack(all_flux)   # raw counts, always preserved
                 error_stack = np.vstack(all_errors)
                 wave_stack = np.vstack(all_waves)
+                if _helio_factor != 1.0:               # shift into the heliocentric/bary frame
+                    wave_stack = wave_stack * _helio_factor
                 dq_stack = np.vstack(all_dq)
                 fwhm_stack = np.vstack(all_fwhm)
                 sky_stack = np.vstack(all_sky)
