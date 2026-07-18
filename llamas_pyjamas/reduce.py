@@ -1639,7 +1639,13 @@ def _exposure_id(name):
     m = re.match(r'^(.*?)_(?:SCI|CAL)\d', stem)
     if m:
         return m.group(1)
-    stem = os.path.splitext(stem)[0]
+    # Strip only a real FITS extension -- NOT os.path.splitext, which would eat the fractional
+    # second of a timestamp (e.g. '..._23-21-07.7' -> '..._23-21-07'). That decimal must be kept
+    # so it matches the raw frames and the consolidated name is stable across re-runs.
+    for _ext in ('.fits.gz', '.fits', '.fit'):
+        if stem.lower().endswith(_ext):
+            stem = stem[:-len(_ext)]
+            break
     if stem.endswith('_mef'):
         stem = stem[:-len('_mef')]
     return stem

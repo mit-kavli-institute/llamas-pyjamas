@@ -38,6 +38,10 @@ def test_exposure_id_strips_type_and_processing_chain():
         'LLAMAS_2026-05-16_19-39-47.5'
     # resume keys on the same id, so it is a substring of every product name
     assert _science_stem(_BASE + '_RSS_green.fits') == _ID
+    # markerless fallback (e.g. an already-consolidated RSS base) must KEEP the fractional second
+    # -- os.path.splitext would wrongly eat '.7' as an extension and create whole-second dupes.
+    assert _exposure_id('LLAMAS_2026-05-16_23-21-07.7') == 'LLAMAS_2026-05-16_23-21-07.7'
+    assert _exposure_id('LLAMAS_2026-05-16_23-21-07.7_mef.fits') == 'LLAMAS_2026-05-16_23-21-07.7'
 
 
 def test_consolidate_collapses_stages_to_clean_id_name():
