@@ -34,6 +34,7 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
@@ -55,6 +56,8 @@ from llamas_pyjamas.Flux.sensFunc import (
     SensFunc,
     default_masks,
     fit_channel_sens,
+    load_refine_regions,
+    save_refine_regions,
     sensitivity_ratio,
 )
 
@@ -79,6 +82,9 @@ class SensFuncModel:
     use_default_masks: bool = True             # stellar (Balmer/He) hard masks
     mask_tellurics: bool = False               # hard-mask telluric bands (off: handled by S/N)
     added_regions: List[Tuple[float, float]] = field(default_factory=list)
+    # b-spline refine regions (finer knots for the fixed blaze features). Seeded from the
+    # bundled instrument set; edits here can be saved back as the new instrument default.
+    refine_regions: List[Tuple[float, float]] = field(default_factory=load_refine_regions)
     bkspace: Optional[float] = None
     nord: int = DEFAULT_NORD
     sigma: float = DEFAULT_SIGMA
@@ -103,7 +109,7 @@ class SensFuncModel:
         return fit_channel_sens(wave, flux, self.exptime, self.ref_wave, self.ref_flux,
                                 self.regions(), bkspace=self.bkspace, nord=self.nord,
                                 sigma=self.sigma, throughput_floor=self.throughput_floor,
-                                weighted=self.weighted)
+                                weighted=self.weighted, refine_regions=self.refine_regions)
 
     def build(self, meta: Optional[Dict] = None) -> SensFunc:
         """Produce a SensFunc from the current state (same core as the auto path)."""
@@ -114,7 +120,11 @@ class SensFuncModel:
                               regions=self.regions(), bkspace=self.bkspace,
                               nord=self.nord, sigma=self.sigma, airmass=self.airmass,
                               throughput_floor=self.throughput_floor, weighted=self.weighted,
-                              meta=full_meta)
+                              refine_regions=self.refine_regions, meta=full_meta)
+
+    def save_breakpoints(self) -> str:
+        """Persist the current refine regions as the bundled instrument default."""
+        return save_refine_regions(self.refine_regions)
 
 
 class SensFuncDialog(QDialog):
@@ -202,7 +212,16 @@ class SensFuncDialog(QDialog):
         self.nord_spin.valueChanged.connect(self._on_params)
         row.addWidget(self.nord_spin)
 
-        self.clear_button = QPushButton('Clear added masks')
+        row.addSpacing(12)
+        row.addWidget(QLabel('Drag adds:'))
+        self.drag_combo = QComboBox()
+        self.drag_combo.addItems(['Mask', 'Breakpoints'])
+        self.drag_combo.setToolTip('What a drag on the plot does: add a fit mask, or add a '
+                                   'refine region (denser knots for the blaze).')
+        row.addWidget(self.drag_combo)
+
+        self.clear_button = QPushButton('Clear added')
+        self.clear_button.setToolTip('Clear the masks and refine regions added this session')
         self.clear_button.clicked.connect(self._clear_added)
         row.addWidget(self.clear_button)
         row.addStretch(1)
@@ -212,7 +231,14 @@ class SensFuncDialog(QDialog):
         row = QHBoxLayout()
         self.status = QLabel('')
         row.addWidget(self.status, stretch=1)
-        save = QPushButton('Save…')
+        # The blaze knots are an instrument property: save them once as the shipped default so
+        # every night's fit uses them without the user having to redo anything.
+        save_bk = QPushButton('Save breakpoints as default')
+        save_bk.setToolTip('Persist the current refine regions as the instrument default '
+                           '(used automatically for all future fits)')
+        save_bk.clicked.connect(self._save_breakpoints)
+        row.addWidget(save_bk)
+        save = QPushButton('Save sensfunc…')
         save.clicked.connect(self._save)
         cancel = QPushButton('Cancel')
         cancel.clicked.connect(self.reject)
@@ -224,7 +250,9 @@ class SensFuncDialog(QDialog):
     def _on_span(self, xmin: float, xmax: float) -> None:
         if xmax - xmin < 1.0:            # ignore stray clicks
             return
-        self.model.added_regions.append((float(xmin), float(xmax)))
+        target = (self.model.refine_regions if self.drag_combo.currentText() == 'Breakpoints'
+                  else self.model.added_regions)
+        target.append((float(xmin), float(xmax)))
         self._refit_and_draw()
 
     def _on_masks_changed(self) -> None:
@@ -241,8 +269,24 @@ class SensFuncDialog(QDialog):
         self._refit_and_draw()
 
     def _clear_added(self) -> None:
+        # Clears both masks and refine regions for the current session. The saved instrument
+        # defaults are untouched on disk; reopen the dialog to restore them.
         self.model.added_regions.clear()
+        self.model.refine_regions.clear()
         self._refit_and_draw()
+
+    def _save_breakpoints(self) -> None:
+        reply = QMessageBox.question(
+            self, 'Save breakpoints',
+            f'Save the {len(self.model.refine_regions)} refine region(s) as the instrument '
+            'default?\n\nThey will be used automatically for all future sensitivity fits '
+            '(the blaze is fixed, so this is normally done once).',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        path = self.model.save_breakpoints()
+        self.status.setText(f'Saved {len(self.model.refine_regions)} refine region(s) to '
+                            f'{os.path.basename(path)}')
 
     # ---- draw ----
     def _refit_and_draw(self) -> None:
@@ -264,8 +308,11 @@ class SensFuncDialog(QDialog):
             self.ax_resid.plot(wave[good], resid[good], '.', ms=2, color=colour, alpha=0.4)
             fitted += 1
 
-        for low, high in self.model.regions():
+        for low, high in self.model.regions():          # fit masks (grey)
             self.ax_sens.axvspan(low, high, color='grey', alpha=0.12)
+        for low, high in self.model.refine_regions:      # refine regions (blue)
+            for ax in (self.ax_sens, self.ax_resid):
+                ax.axvspan(low, high, color='tab:blue', alpha=0.10)
 
         self.ax_sens.set_ylabel('S = F$_{ref}$ / (counts/s)')
         self.ax_sens.set_yscale('log')
@@ -276,7 +323,8 @@ class SensFuncDialog(QDialog):
         self.ax_resid.set_ylabel('(raw − fit)/fit')
         self.ax_resid.set_xlabel('Wavelength (Å)')
         self.status.setText(
-            f'{fitted} channel(s) fitted | {len(self.model.added_regions)} added mask(s)'
+            f'{fitted} channel(s) fitted | {len(self.model.added_regions)} mask(s) | '
+            f'{len(self.model.refine_regions)} refine region(s)'
             if fitted else 'No channel could be fitted — check the aperture / masks')
         self.canvas.draw_idle()
 

@@ -36,13 +36,89 @@ fit_sensitivity     Robust log-space b-spline fit of a raw ratio
 """
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from astropy.io import fits
 
+from llamas_pyjamas.config import LUT_DIR
+
 logger = logging.getLogger(__name__)
+
+#: Bundled b-spline refine regions. The VPH grating blaze features are a fixed instrument
+#: property (no moving parts), so the extra knots that capture them are established once and
+#: shipped here; each night only re-solves the throughput on this fixed knot structure.
+BREAKPOINTS_PATH = os.path.join(LUT_DIR, 'sensfunc_breakpoints.dat')
+
+#: Inside a refine region, knots are placed this many times denser than the base spacing.
+DEFAULT_REFINE_FACTOR = 4
+
+_REFINE_CACHE = None
+
+
+def load_refine_regions(path: str = BREAKPOINTS_PATH, use_cache: bool = True):
+    """Bundled refine regions as a list of ``(low, high)`` wavelength bands (empty if none).
+
+    These are instrument-level (the blaze never moves), so the same set is used for every
+    night. Missing file is not an error — it just means no localised refinement.
+    """
+    global _REFINE_CACHE
+    if use_cache and _REFINE_CACHE is not None and path == BREAKPOINTS_PATH:
+        return list(_REFINE_CACHE)
+    regions: List[Tuple[float, float]] = []
+    if os.path.exists(path):
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    regions.append((float(parts[0]), float(parts[1])))
+    if path == BREAKPOINTS_PATH:
+        _REFINE_CACHE = list(regions)
+    return regions
+
+
+def save_refine_regions(regions: Sequence[Tuple[float, float]],
+                        path: str = BREAKPOINTS_PATH) -> str:
+    """Write refine regions to disk (default: the bundled instrument file) and refresh cache."""
+    global _REFINE_CACHE
+    with open(path, 'w') as fh:
+        fh.write('# Sensitivity-function b-spline refine regions.\n')
+        fh.write('# Finer knots for the fixed VPH-grating blaze features -- an instrument\n')
+        fh.write('# property (no moving parts): establish once, reuse every night.\n')
+        fh.write(f'# refine_factor = {DEFAULT_REFINE_FACTOR}\n')
+        fh.write('# {:>9s} {:>9s}\n'.format('lo_wave', 'hi_wave'))
+        for lo, hi in sorted(regions):
+            fh.write(f'{lo:11.3f} {hi:11.3f}\n')
+    if path == BREAKPOINTS_PATH:
+        _REFINE_CACHE = [tuple(r) for r in regions]
+    logger.info('Wrote %d refine region(s) to %s', len(regions), path)
+    return path
+
+
+def build_breakpoints(wmin: float, wmax: float, base_bkspace: float,
+                      refine_regions: Sequence[Tuple[float, float]],
+                      refine_factor: int = DEFAULT_REFINE_FACTOR) -> Optional[np.ndarray]:
+    """Interior b-spline knots: uniform at `base_bkspace`, denser inside `refine_regions`.
+
+    Returns the sorted interior knot vector for pypeit's ``iterfit(bkpt=...)``, or None if no
+    refinement is requested (caller then falls back to uniform ``bkspace``).
+    """
+    if not refine_regions:
+        return None
+    knots = list(np.arange(wmin + base_bkspace, wmax, base_bkspace))
+    fine = base_bkspace / max(1, refine_factor)
+    for lo, hi in refine_regions:
+        lo2, hi2 = max(lo, wmin), min(hi, wmax)
+        if hi2 > lo2:
+            knots.extend(np.arange(lo2, hi2, fine))
+    if not knots:
+        return None
+    return np.unique(np.round(np.sort(np.asarray(knots, dtype=float)), 3))
 
 #: Telluric absorption bands (Angstrom) — atmosphere, not instrument, so excluded from the fit.
 #: The A and B O2 bands and the main H2O complexes across the optical/near-IR.
@@ -144,7 +220,9 @@ def _auto_bkspace(wave: np.ndarray) -> float:
 
 def fit_sensitivity(wave: np.ndarray, sens: np.ndarray, good: np.ndarray,
                     weight: Optional[np.ndarray] = None, bkspace: Optional[float] = None,
-                    nord: int = DEFAULT_NORD, sigma: float = DEFAULT_SIGMA, maxiter: int = 5
+                    nord: int = DEFAULT_NORD, sigma: float = DEFAULT_SIGMA, maxiter: int = 5,
+                    refine_regions: Optional[Sequence[Tuple[float, float]]] = None,
+                    refine_factor: int = DEFAULT_REFINE_FACTOR
                     ) -> Tuple[np.ndarray, np.ndarray]:
     """Robust, S/N-weighted b-spline fit of a raw sensitivity ratio, in log space.
 
@@ -199,10 +277,17 @@ def fit_sensitivity(wave: np.ndarray, sens: np.ndarray, good: np.ndarray,
     if bkspace is None:
         bkspace = _auto_bkspace(x)
 
-    kwargs = dict(maxiter=maxiter, nord=nord, kwargs_bspline={'bkspace': bkspace},
-                  upper=sigma, lower=sigma)
+    kwargs = dict(maxiter=maxiter, nord=nord, upper=sigma, lower=sigma)
     if invvar is not None:
         kwargs['invvar'] = invvar
+    # Localised refinement: explicit non-uniform interior knots (base spacing + denser inside
+    # the fixed blaze regions). Otherwise uniform spacing.
+    bkpt = build_breakpoints(float(x.min()), float(x.max()), bkspace,
+                             refine_regions or [], refine_factor)
+    if bkpt is not None and bkpt.size:
+        kwargs['bkpt'] = bkpt
+    else:
+        kwargs['kwargs_bspline'] = {'bkspace': bkspace}
     sset, outmask = iterfit(x, y, **kwargs)
 
     fit = np.full(np.shape(wave), np.nan, dtype=float)
@@ -325,11 +410,13 @@ def fit_channel_sens(obs_wave: np.ndarray, obs_flux: np.ndarray, exptime: float,
                      bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
                      sigma: float = DEFAULT_SIGMA,
                      throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR,
-                     weighted: bool = True):
+                     weighted: bool = True,
+                     refine_regions: Optional[Sequence[Tuple[float, float]]] = None):
     """One channel's sensitivity: raw ratio, throughput floor, S/N-weighted b-spline fit.
 
     Shared by :func:`build_sensfunc` and the interactive fitter so the auto and live paths
-    are identical. Returns ``(wave, raw, fit, used)`` or None if too few usable points.
+    are identical. `refine_regions` add denser knots for the fixed blaze features. Returns
+    ``(wave, raw, fit, used)`` or None if too few usable points.
     """
     wave, sens, valid = sensitivity_ratio(obs_wave, obs_flux, exptime, ref_wave, ref_flux)
     counts = np.asarray(obs_flux, dtype=float)
@@ -344,7 +431,8 @@ def fit_channel_sens(obs_wave: np.ndarray, obs_flux: np.ndarray, exptime: float,
 
     fit, used = fit_sensitivity(wave, sens, good_in,
                                 weight=(counts if weighted else None),
-                                bkspace=bkspace, nord=nord, sigma=sigma)
+                                bkspace=bkspace, nord=nord, sigma=sigma,
+                                refine_regions=refine_regions)
     return wave, sens, fit, used
 
 
@@ -354,7 +442,9 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
                    bkspace: Optional[float] = None, nord: int = DEFAULT_NORD,
                    sigma: float = DEFAULT_SIGMA, airmass: Optional[float] = None,
                    throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR,
-                   weighted: bool = True, meta: Optional[Dict] = None) -> SensFunc:
+                   weighted: bool = True,
+                   refine_regions: Optional[Sequence[Tuple[float, float]]] = None,
+                   meta: Optional[Dict] = None) -> SensFunc:
     """Build a :class:`SensFunc` from a standard's aperture spectra and reference flux.
 
     Parameters
@@ -384,12 +474,15 @@ def build_sensfunc(spectra_by_channel: Dict[str, Tuple[np.ndarray, np.ndarray]],
     """
     if regions is None:
         regions = default_masks()
+    if refine_regions is None:
+        refine_regions = load_refine_regions()      # bundled instrument blaze knots
 
     channels: Dict[str, SensChannel] = {}
     for name, (obs_wave, obs_flux) in spectra_by_channel.items():
         result = fit_channel_sens(obs_wave, obs_flux, exptime, ref_wave, ref_flux, regions,
                                   bkspace=bkspace, nord=nord, sigma=sigma,
-                                  throughput_floor=throughput_floor, weighted=weighted)
+                                  throughput_floor=throughput_floor, weighted=weighted,
+                                  refine_regions=refine_regions)
         if result is None:
             logger.warning('channel %s: too few usable points, skipped', name)
             continue

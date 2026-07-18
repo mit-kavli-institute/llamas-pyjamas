@@ -1,0 +1,6 @@
+# Sensitivity-function b-spline refine regions.
+# Finer knots for the fixed VPH-grating blaze features -- an instrument
+# property (no moving parts): establish once, reuse every night.
+# refine_factor = 4
+#   lo_wave   hi_wave
+   4250.000    4650.000

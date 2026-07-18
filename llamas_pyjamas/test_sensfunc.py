@@ -148,6 +148,45 @@ def test_weighting_mitigates_low_count_spike():
         'S/N weighting should pull the fit at the spike closer to the continuum'
 
 
+def test_build_breakpoints_densifies_refine_region():
+    from llamas_pyjamas.Flux.sensFunc import build_breakpoints
+    assert build_breakpoints(4000, 5000, 100.0, []) is None      # no refine -> uniform bkspace
+    bk = build_breakpoints(4000.0, 5000.0, 100.0, [(4400.0, 4600.0)], refine_factor=4)
+    in_band = np.diff(bk[(bk >= 4400) & (bk <= 4600)])
+    out_band = np.diff(bk[(bk < 4400) | (bk > 4600)])
+    assert np.median(in_band) < 40.0, 'knots inside the refine region are ~base/4'
+    assert np.median(out_band) > 80.0, 'knots outside stay at the base spacing'
+
+
+def test_refine_regions_roundtrip(tmp_path):
+    from llamas_pyjamas.Flux.sensFunc import save_refine_regions, load_refine_regions
+    path = os.path.join(str(tmp_path), 'bk.dat')
+    save_refine_regions([(4250.0, 4650.0), (7000.0, 7100.0)], path=path)
+    assert load_refine_regions(path, use_cache=False) == [(4250.0, 4650.0), (7000.0, 7100.0)]
+    assert load_refine_regions(os.path.join(str(tmp_path), 'absent.dat'), use_cache=False) == []
+
+
+def test_refine_region_changes_the_fit():
+    # A localised wiggle the base spacing smooths over; a refine region there should let the
+    # fit follow it, changing the fitted value at the feature.
+    from llamas_pyjamas.Flux.sensFunc import fit_channel_sens
+    wave = np.linspace(4000.0, 5600.0, 800)
+    counts = np.full_like(wave, 400.0)
+    bump = np.exp(-0.5 * ((wave - 4450.0) / 25.0) ** 2)     # narrow throughput bump
+    counts *= (1 + 0.4 * bump)
+    ref_wave = np.linspace(3500.0, 6000.0, 400)
+    ref_flux = np.full_like(ref_wave, 1e-15)
+    at = np.argmin(np.abs(wave - 4450.0))
+    _, _, coarse, _ = fit_channel_sens(wave, counts, 10.0, ref_wave, ref_flux, regions=[],
+                                       bkspace=200.0, throughput_floor=0.0, refine_regions=[])
+    _, _, fine, _ = fit_channel_sens(wave, counts, 10.0, ref_wave, ref_flux, regions=[],
+                                     bkspace=200.0, throughput_floor=0.0,
+                                     refine_regions=[(4350.0, 4550.0)])
+    true = 1e-15 / (400.0 * (1 + 0.4) / 10.0)               # S at the bump peak
+    assert abs(fine[at] - true) < abs(coarse[at] - true), \
+        'a refine region should track the local feature better than base spacing'
+
+
 def test_build_and_roundtrip(tmp_path):
     wave = np.arange(4000.0, 7000.0, 2.0)
     obs_flux = np.full_like(wave, 500.0)

@@ -1,8 +1,9 @@
-"""Tests for the interactive sensfunc panel's headless model (SensFuncModel).
+"""Tests for the interactive sensfunc fitter (SensFuncModel + SensFuncDialog).
 
-The dialog is a thin Qt wrapper; the logic worth testing lives in the model — region
-composition, per-channel fitting, and that user edits actually change the result. Qt runs
-under the offscreen platform because importing the module pulls in the matplotlib Qt backend.
+Most logic lives in the model — region composition, per-channel fitting, refine regions, and
+that user edits change the result — but the dialog is also constructed to catch import/wiring
+regressions (a missing QComboBox import once stopped the Build window opening). Qt runs under
+the offscreen platform.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_sensfunc`).
 """
@@ -12,9 +13,12 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import numpy as np
+from PyQt6.QtWidgets import QApplication
 
-from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncModel
+from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncDialog, SensFuncModel
 from llamas_pyjamas.Flux.sensFunc import SensFunc
+
+_app = QApplication.instance() or QApplication([])   # dialog tests need a QApplication
 
 
 def _model(**kw):
@@ -46,6 +50,19 @@ def test_fit_channel_ok_and_too_few():
     # a channel with almost no valid points cannot be fit
     m.spectra['green'] = (np.linspace(4600, 4610, 5), np.full(5, 400.0))
     assert m.fit_channel('green') is None
+
+
+def test_dialog_constructs_and_fits():
+    # Guards against import/wiring regressions in the dialog itself (a missing QComboBox import
+    # once stopped the Build window from opening). Constructing it exercises every control and
+    # the initial fit+draw.
+    dialog = SensFuncDialog(_model(), default_path='')
+    assert dialog.drag_combo.count() == 2                       # Mask / Breakpoints
+    # the fit controls all exist and the model was seeded with (list-typed) refine regions
+    for attr in ('default_masks_box', 'telluric_box', 'weight_box', 'floor_spin',
+                 'bkspace_spin', 'nord_spin'):
+        assert hasattr(dialog, attr), f'dialog missing {attr}'
+    assert isinstance(dialog.model.refine_regions, list)
 
 
 def test_build_returns_sensfunc():
