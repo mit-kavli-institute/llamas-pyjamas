@@ -236,6 +236,12 @@ class CubeViewerWindow(QMainWindow):
         self.sensfunc_action.triggered.connect(self.build_sensfunc)
         self.sensfunc_action.setEnabled(False)
         sens_menu.addAction(self.sensfunc_action)
+        # Applying does not need a standard loaded, so this stays enabled.
+        apply_action = QAction('&Apply Sensitivity Function to files…', self)
+        apply_action.setToolTip('Flux-calibrate science RSS files with a saved sensitivity '
+                                'function (adds FLAM/FLAM_ERR)')
+        apply_action.triggered.connect(self.apply_sensfunc_to_files)
+        sens_menu.addAction(apply_action)
 
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
@@ -493,6 +499,57 @@ class CubeViewerWindow(QMainWindow):
         dialog = SensFuncDialog(model, default_path=default_path, parent=self)
         if dialog.exec() and dialog.saved_path:
             self.statusBar().showMessage(f'Saved sensitivity function: {dialog.saved_path}')
+
+    def apply_sensfunc_to_files(self) -> None:
+        """Flux-calibrate one or more science RSS files with a saved sensitivity function.
+
+        Adds FLAM/FLAM_ERR in place (the GUI equivalent of the apply_fluxcal CLI). Independent
+        of the currently-loaded file, so it works whether or not a standard is open.
+        """
+        start_dir = os.path.dirname(self._path) if self._path else ''
+        sens_path, _ = QFileDialog.getOpenFileName(
+            self, 'Select sensitivity function', start_dir,
+            'Sensitivity FITS (*.fits);;All files (*)')
+        if not sens_path:
+            return
+        rss_paths, _ = QFileDialog.getOpenFileNames(
+            self, 'Select science RSS file(s) to flux-calibrate', start_dir,
+            'RSS FITS (*.fits);;All files (*)')
+        if not rss_paths:
+            return
+
+        reply = QMessageBox.question(
+            self, 'Apply sensitivity function',
+            f'Add FLAM / FLAM_ERR to {len(rss_paths)} file(s) in place, using\n'
+            f'{os.path.basename(sens_path)}?\n\n'
+            'Differential atmospheric extinction is applied. The instrumental planes are '
+            'left unchanged.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        from llamas_pyjamas.Flux.fluxCalibrate import flux_calibrate_file
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        n_ok, failures = 0, []
+        try:
+            for path in rss_paths:
+                try:
+                    flux_calibrate_file(path, sens_path, apply_extinction=True)
+                    n_ok += 1
+                except Exception as exc:               # noqa: BLE001
+                    failures.append(f'{os.path.basename(path)}: {exc}')
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        # If the open file was among those calibrated, reload so its FLAM shows now.
+        if self._path in rss_paths:
+            self.load(self._path)
+
+        message = f'Flux-calibrated {n_ok}/{len(rss_paths)} file(s).'
+        if failures:
+            message += '\n\nFailed:\n' + '\n'.join(failures)
+        self.statusBar().showMessage(message.splitlines()[0])
+        QMessageBox.information(self, 'Apply sensitivity function', message)
 
     def _report_ds9(self, exc: Exception) -> None:
         QMessageBox.warning(
