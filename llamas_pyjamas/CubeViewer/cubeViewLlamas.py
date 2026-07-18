@@ -389,9 +389,16 @@ class CubeViewerWindow(QMainWindow):
             return
 
         header = fits.Header()
+        # Provenance/meta keys, minus WCS cards -- the authoritative WCS is the returned `wcs`
+        # object (previously it was discarded and DS9 only saw meta's linear map).
+        _wcs_prefixes = ('CRPIX', 'CRVAL', 'CDELT', 'CTYPE', 'CUNIT', 'CD', 'PC',
+                         'CROTA', 'LONPOLE', 'LATPOLE', 'RADESYS', 'WCSAXES', 'EQUINOX')
         for key, value in meta.items():
-            if key != 'contributions':
-                header[key] = value
+            if key == 'contributions' or key.upper().startswith(_wcs_prefixes):
+                continue
+            header[key] = value
+        if wcs is not None:
+            header.update(wcs.to_header())
         hdul = fits.HDUList([fits.PrimaryHDU(np.asarray(image, dtype=np.float32),
                                              header=header)])
         try:

@@ -48,6 +48,11 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import (
     linear_wcs,
 )
 from llamas_pyjamas.File.llamasRSS import skysub_extname
+from llamas_pyjamas.Utils.wcsLlamas import (
+    ARCSEC_PER_FIBRE,
+    celestial_wcs,
+    pointing_from_header,
+)
 from llamas_pyjamas.Image.WhiteLightModule import (
     HEX_PITCH,
     FiberMap_LUT,
@@ -138,6 +143,8 @@ class RSSChannel:
             if self.channel not in CHANNEL_ORDER:
                 raise ValueError(f"{path}: primary CHANNEL={self.channel!r} is not one of "
                                  f"{CHANNEL_ORDER}")
+            # Kept for the celestial WCS (header pointing); the hdul is closed on exit.
+            self.primary_header = header.copy()
             self.flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
             self.wave = np.asarray(hdul['WAVE'].data, dtype=float)
             self.mask = (np.asarray(hdul['MASK'].data) if 'MASK' in hdul else None)
@@ -262,6 +269,13 @@ class RSSScene(SpectralScene):
         self._tree = cKDTree(self.positions)
         #: True if any channel carries a flux-calibrated (FLAM) plane.
         self.has_flam = any(c.flam is not None for c in self._channels.values())
+
+        # Header pointing for the celestial WCS (same across channels; take the first).
+        first = next(iter(self._channels.values()))
+        self.ra, self.dec, self.pa = pointing_from_header(
+            getattr(first, 'primary_header', None))
+        logger.info('RSSScene pointing: RA=%s DEC=%s PA=%s',
+                    self.ra, self.dec, self.pa)
         logger.info('RSSScene: channels=%s, %d placed fibres, flux-calibrated=%s',
                     ','.join(self.channels), len(self.keys), self.has_flam)
 
@@ -332,6 +346,20 @@ class RSSScene(SpectralScene):
             step = float(grid_x[0, 1] - grid_x[0, 0])
             meta = {'HEXTILE': (False, 'Interpolated white light')}
             wcs = linear_wcs(crpix=[1.0, 1.0], crval=[0.0, 0.0], cdelt=[step, step])
+
+        # When the header pointing is known, replace the linear fibre-map WCS with a celestial
+        # (RA/DEC) one: CRVAL at the field centre, CRPIX the image pixel that maps to it. Both
+        # render paths map pixel p -> fibre-map (p-1)*step (CRPIX=1 at fibre-map 0), so the
+        # field centre (midpoint of the fibre extent) is at pixel centre/step + 1.
+        if self.ra is not None and self.dec is not None:
+            cx = 0.5 * (x.min() + x.max())
+            cy = 0.5 * (y.min() + y.max())
+            crpix = (cx / step + 1.0, cy / step + 1.0)
+            wcs = celestial_wcs(self.ra, self.dec, crpix,
+                                arcsec_per_pixel=ARCSEC_PER_FIBRE * step, pa_deg=self.pa)
+            meta['WCSFRAME'] = ('sky', 'Celestial WCS from header pointing (initial guess)')
+        else:
+            meta['WCSFRAME'] = ('fibremap', 'No header pointing; linear fibre-map WCS')
 
         meta['contributions'] = contributions
         meta['WAVEMIN'] = (float(wave_min), 'Collapse window start (Angstrom)')
