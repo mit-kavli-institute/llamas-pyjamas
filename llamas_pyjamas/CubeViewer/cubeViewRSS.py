@@ -260,8 +260,10 @@ class RSSScene(SpectralScene):
         if len(self.positions) == 0:
             raise ValueError('No fibres could be placed on the fibre map')
         self._tree = cKDTree(self.positions)
-        logger.info('RSSScene: channels=%s, %d placed fibres',
-                    ','.join(self.channels), len(self.keys))
+        #: True if any channel carries a flux-calibrated (FLAM) plane.
+        self.has_flam = any(c.flam is not None for c in self._channels.values())
+        logger.info('RSSScene: channels=%s, %d placed fibres, flux-calibrated=%s',
+                    ','.join(self.channels), len(self.keys), self.has_flam)
 
     @classmethod
     def open(cls, path: str, **kwargs) -> 'RSSScene':

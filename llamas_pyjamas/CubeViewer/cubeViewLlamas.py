@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -81,10 +82,22 @@ class CubeViewerWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addLayout(self._build_file_row())
-        layout.addLayout(self._build_wave_row())
+
+        # Wavelength window and aperture selection share the top row, each in its own box.
+        top_row = QHBoxLayout()
+        top_row.addWidget(self._build_wave_box())
+        top_row.addWidget(self._build_aperture_box())
+        top_row.addStretch(1)
+        layout.addLayout(top_row)
+
+        layout.addWidget(self._build_image_display_box())
 
         self.panel = SpectrumPanel()
-        layout.addWidget(self.panel, stretch=1)
+        spectrum_box = QGroupBox('IFU spectrum')
+        spectrum_layout = QVBoxLayout(spectrum_box)
+        spectrum_layout.setContentsMargins(6, 6, 6, 6)
+        spectrum_layout.addWidget(self.panel)
+        layout.addWidget(spectrum_box, stretch=1)
         self.setCentralWidget(central)
 
         self._build_menu()
@@ -97,47 +110,50 @@ class CubeViewerWindow(QMainWindow):
     # ------------------------------------------------------------------ construction
 
     def _build_file_row(self) -> QHBoxLayout:
+        # Opening is on the File menu (Ctrl+O); this row just shows the current file.
         row = QHBoxLayout()
-        self.open_button = QPushButton('Open RSS…')
-        self.open_button.clicked.connect(self.choose_file)
-        row.addWidget(self.open_button)
-
-        self.file_label = QLabel('(no file)')
+        self.file_label = QLabel('(no file — File ▸ Open RSS…)')
         self.file_label.setStyleSheet('color: grey;')
         row.addWidget(self.file_label, stretch=1)
         return row
 
-    def _build_wave_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.addWidget(QLabel('Wavelength'))
+    def _build_wave_box(self) -> QGroupBox:
+        """Wavelength window that drives the white-light collapse."""
+        box = QGroupBox('Wavelength')
+        row = QHBoxLayout(box)
 
         self.wave_min = QLineEdit()
         self.wave_max = QLineEdit()
-        for box, tip in ((self.wave_min, 'Minimum wavelength (A)'),
-                         (self.wave_max, 'Maximum wavelength (A)')):
-            box.setValidator(QDoubleValidator(0.0, 1e6, 2))
-            box.setMaximumWidth(90)
-            box.setToolTip(tip)
-            box.returnPressed.connect(self.display)
-        row.addWidget(self.wave_min)
-        row.addWidget(QLabel('to'))
-        row.addWidget(self.wave_max)
+        for label, edit, tip in (('min', self.wave_min, 'Minimum wavelength (Å)'),
+                                 ('max', self.wave_max, 'Maximum wavelength (Å)')):
+            edit.setValidator(QDoubleValidator(0.0, 1e6, 2))
+            edit.setMinimumWidth(90)         # show the full number, e.g. 10051.4
+            edit.setMaximumWidth(110)
+            edit.setToolTip(tip)
+            edit.returnPressed.connect(self.display)
+            row.addWidget(QLabel(label))
+            row.addWidget(edit)
         row.addWidget(QLabel('Å'))
 
         self.full_button = QPushButton('Full range')
         self.full_button.clicked.connect(self._reset_wave_range)
         row.addWidget(self.full_button)
+        return box
 
-        row.addSpacing(16)
-        row.addWidget(QLabel('Collapse:'))
+    def _build_image_display_box(self) -> QGroupBox:
+        """What goes into the DS9 white-light image: channels, hex tiles, and Send."""
+        box = QGroupBox('Image Display')
+        row = QHBoxLayout(box)
+
         self.collapse_boxes = {}
         for channel in CHANNEL_ORDER:
-            box = QCheckBox(channel.capitalize())
-            box.setChecked(True)
-            box.setToolTip(f'Include {channel} in the white-light image')
-            self.collapse_boxes[channel] = box
-            row.addWidget(box)
+            check = QCheckBox(channel.capitalize())
+            check.setChecked(True)
+            check.setToolTip(f'Include {channel} in the white-light image')
+            self.collapse_boxes[channel] = check
+            row.addWidget(check)
 
+        row.addSpacing(16)
         self.hex_box = QCheckBox('Hex tiles')
         self.hex_box.setChecked(True)
         self.hex_box.setToolTip(
@@ -149,22 +165,32 @@ class CubeViewerWindow(QMainWindow):
 
         row.addSpacing(16)
         self.display_button = QPushButton('Send to DS9')
+        self.display_button.setToolTip('Build the white-light image over the wavelength window '
+                                       'and display it in DS9')
         self.display_button.clicked.connect(self.display)
         row.addWidget(self.display_button)
+
+        row.addStretch(1)
+        return box
+
+    def _build_aperture_box(self) -> QGroupBox:
+        """The aperture-selection controls, boxed so they read as one section."""
+        box = QGroupBox('Aperture')
+        row = QHBoxLayout(box)
 
         self.pick_box = QCheckBox('Pick')
         self.pick_box.setToolTip('Track the DS9 crosshair and plot the fibre under it')
         self.pick_box.toggled.connect(self._toggle_picking)
         row.addWidget(self.pick_box)
 
-        row.addWidget(QLabel('Aperture'))
+        row.addWidget(QLabel('Radius'))
         self.radius_spin = QDoubleSpinBox()
         self.radius_spin.setRange(0.0, 20.0)
         self.radius_spin.setSingleStep(0.5)
         self.radius_spin.setDecimals(1)
         self.radius_spin.setValue(0.0)
         self.radius_spin.setSuffix(' fib')
-        self.radius_spin.setMaximumWidth(80)
+        self.radius_spin.setMaximumWidth(90)
         self.radius_spin.setToolTip(
             'Aperture radius in fibre spacings. 0 selects the single fibre under the '
             'crosshair; larger sums every fibre whose centre falls inside.')
@@ -186,15 +212,9 @@ class CubeViewerWindow(QMainWindow):
         self.clear_button.setEnabled(False)
         row.addWidget(self.clear_button)
 
-        self.sensfunc_button = QPushButton('Sensitivity Fn…')
-        self.sensfunc_button.setToolTip('Build a sensitivity function from the aperture '
-                                        '(enabled when the loaded file is a flux standard)')
-        self.sensfunc_button.clicked.connect(self.build_sensfunc)
-        self.sensfunc_button.setEnabled(False)
-        row.addWidget(self.sensfunc_button)
-
         row.addStretch(1)
-        return row
+        self.aperture_box = box
+        return box
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu('&File')
@@ -207,6 +227,15 @@ class CubeViewerWindow(QMainWindow):
         quit_action.setShortcut('Ctrl+Q')
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        # Sensitivity-function tasks live in a menu; the action greys out unless the loaded
+        # file is a flux standard with a bundled reference spectrum.
+        sens_menu = self.menuBar().addMenu('&Sensitivity')
+        sens_menu.setToolTipsVisible(True)
+        self.sensfunc_action = QAction('&Build Sensitivity Function…', self)
+        self.sensfunc_action.triggered.connect(self.build_sensfunc)
+        self.sensfunc_action.setEnabled(False)
+        sens_menu.addAction(self.sensfunc_action)
 
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
@@ -241,6 +270,8 @@ class CubeViewerWindow(QMainWindow):
         self.picker.set_scene(scene)
         self.panel.set_spectra([])
         self._current_spectra = []
+        # Default to the flux-calibrated view when the file carries a FLAM plane.
+        self.panel.set_calibrated_default(getattr(scene, 'has_flam', False))
 
         for channel, box in self.collapse_boxes.items():
             present = channel in scene.channels
@@ -260,7 +291,7 @@ class CubeViewerWindow(QMainWindow):
         std_note = ''
         if self._standard is not None:
             std_note = f" | STANDARD: {self._standard.name} ({self._standard.separation_arcsec:.1f}\")"
-        self._update_sensfunc_button()
+        self._update_sensfunc_action()
         self.statusBar().showMessage(
             f"{len(scene.keys)} fibres | channels: {', '.join(scene.channels)} | "
             f"{low:.0f}-{high:.0f} A{std_note}")
@@ -278,17 +309,17 @@ class CubeViewerWindow(QMainWindow):
             logger.debug('standard identification skipped: %s', exc)
             return None, None
 
-    def _update_sensfunc_button(self) -> None:
+    def _update_sensfunc_action(self) -> None:
         is_std = self._standard is not None and self._standard.standard.has_spectrum
-        self.sensfunc_button.setEnabled(is_std)
+        self.sensfunc_action.setEnabled(is_std)
         if self._standard is not None and not self._standard.standard.has_spectrum:
-            self.sensfunc_button.setToolTip(
-                f'{self._standard.name} has no bundled reference spectrum')
+            tip = f'{self._standard.name} has no bundled reference spectrum'
         elif is_std:
-            self.sensfunc_button.setToolTip(
-                f'Build a sensitivity function from the aperture on {self._standard.name}')
+            tip = f'Build a sensitivity function from the aperture on {self._standard.name}'
         else:
-            self.sensfunc_button.setToolTip('Loaded file is not a recognised flux standard')
+            tip = 'Enabled only when the loaded file is a recognised flux standard'
+        self.sensfunc_action.setToolTip(tip)
+        self.sensfunc_action.setStatusTip(tip)
 
     def _reset_wave_range(self) -> None:
         if self.scene is None:

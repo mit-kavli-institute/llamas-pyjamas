@@ -144,6 +144,15 @@ class SpectrumPanel(QWidget):
             self.flam_box.setChecked(False)
         self._replot()
 
+    def set_calibrated_default(self, calibrated: bool) -> None:
+        """Set the default state of the Flux-cal toggle when a file is loaded.
+
+        Called on load so a flux-calibrated file shows FLAM by default; the checkbox only
+        takes visible effect once a selection with a FLAM plane is made. The user can still
+        toggle it during the session, and that choice is preserved across selections.
+        """
+        self.flam_box.setChecked(bool(calibrated))
+
     def _show_calibrated(self) -> bool:
         return self.flam_box.isEnabled() and self.flam_box.isChecked()
 
