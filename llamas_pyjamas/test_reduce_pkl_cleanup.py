@@ -17,6 +17,7 @@ from llamas_pyjamas.reduce import (
     _science_stem,
     cleanup_extraction_pkls,
     consolidate_rss_files,
+    consolidate_whitelight_files,
 )
 
 
@@ -87,6 +88,33 @@ def test_consolidate_keep_intermediate_is_noop():
             _touch(os.path.join(d, f'{_BASE}_RSS_green{suf}.fits'))
         assert consolidate_rss_files(d, keep_intermediate=True) == []
         assert len([f for f in os.listdir(d) if f.endswith('.fits')]) == 3
+
+
+def test_consolidate_whitelight_renames_to_clean_id():
+    with tempfile.TemporaryDirectory() as d:
+        # two stages of the same exposure's white light; keep the most-processed
+        _touch(os.path.join(d, f'{_BASE}_whitelight.fits'), 'full')
+        _touch(os.path.join(d, f'{_ID}_SCI22_mef_flat_corrected_whitelight.fits'), 'partial')
+        actions = consolidate_whitelight_files(d)
+        survivors = [f for f in os.listdir(d) if f.endswith('.fits')]
+        assert survivors == [f'{_ID}_whitelight.fits']
+        with open(os.path.join(d, survivors[0])) as fh:
+            assert fh.read() == 'full', 'the bias+flat-corrected stage is kept'
+        assert any(a == 'renamed' for a, _ in actions)
+
+
+def test_consolidate_whitelight_leaves_subdirs_and_respects_keep():
+    with tempfile.TemporaryDirectory() as d:
+        _touch(os.path.join(d, f'{_BASE}_whitelight.fits'))
+        os.makedirs(os.path.join(d, 'twilight'))
+        _touch(os.path.join(d, 'twilight', 'cal_whitelight.fits'))
+        # keep_intermediate is a no-op
+        assert consolidate_whitelight_files(d, keep_intermediate=True) == []
+        assert os.path.exists(os.path.join(d, f'{_BASE}_whitelight.fits'))
+        # normal run renames top-level but never touches the subdir
+        consolidate_whitelight_files(d)
+        assert os.path.exists(os.path.join(d, f'{_ID}_whitelight.fits'))
+        assert os.path.exists(os.path.join(d, 'twilight', 'cal_whitelight.fits'))
 
 
 def _make(paths):

@@ -413,7 +413,8 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
 
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                    trace_dir=None, mastercalib_trace_dir=None,
-                   remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None):
+                   remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None,
+                   whitelight_hex=True):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -453,7 +454,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 mastercalib_trace_dir=mastercalib_trace_dir,
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
-                edge_bias=edge_bias
+                edge_bias=edge_bias,
+                whitelight_hex=whitelight_hex
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -466,7 +468,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             mastercalib_trace_dir=mastercalib_trace_dir,
             remove_cosmic_rays=remove_cosmic_rays,
             mask_output_dir=mask_output_dir,
-            edge_bias=edge_bias
+            edge_bias=edge_bias,
+            whitelight_hex=whitelight_hex
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -1722,6 +1725,55 @@ def consolidate_rss_files(extraction_dir, keep_intermediate=False):
     return actions
 
 
+_WHITELIGHT_RE = re.compile(r'^(.*)_whitelight\.fits$')
+
+
+def consolidate_whitelight_files(extraction_dir, keep_intermediate=False):
+    """Rename the per-exposure white-light images to the clean RSS-style name.
+
+    The extractor writes one multi-extension white light per exposure named after the long
+    extraction stem (``..._SCI##_mef_bias_corrected_flat_corrected_whitelight.fits``). This
+    renames it to ``{exposure_id}_whitelight.fits`` to match the ``{exposure_id}_RSS_{color}``
+    convention, keeping the most-processed one per exposure if several stages linger.
+
+    Top-level only (subdir twilight/flat white lights are left alone), and a no-op under
+    `keep_intermediate`. Returns ``(action, detail)`` tuples for logging.
+    """
+    if keep_intermediate or not os.path.isdir(extraction_dir):
+        return []
+
+    groups = {}
+    for fname in os.listdir(extraction_dir):
+        m = _WHITELIGHT_RE.match(fname)
+        if not m:
+            continue
+        base = m.group(1)
+        # More '_corrected' stages = more processed; the clean target (no chain) ranks lowest so
+        # a freshly-written long name always wins over a stale short one.
+        rank = base.count('_corrected')
+        groups.setdefault(_exposure_id(base), []).append((rank, len(fname), fname))
+
+    actions = []
+    for exp_id, files in groups.items():
+        files.sort()
+        survivor = files[-1][2]
+        target = f'{exp_id}_whitelight.fits'
+        for _r, _l, fname in files[:-1]:
+            try:
+                os.remove(os.path.join(extraction_dir, fname))
+                actions.append(('removed', fname))
+            except OSError:
+                pass
+        if survivor != target:
+            try:
+                os.replace(os.path.join(extraction_dir, survivor),
+                           os.path.join(extraction_dir, target))
+                actions.append(('renamed', f'{survivor} -> {target}'))
+            except OSError:
+                pass
+    return actions
+
+
 def cleanup_extraction_pkls(paths, save_pkl):
     """Remove intermediate extraction pkls once the RSS is written, unless keeping them.
 
@@ -2756,7 +2808,8 @@ def main(config_path):
                     mastercalib_trace_dir=CALIB_DIR,        # Mastercalib fallback
                     remove_cosmic_rays=remove_cosmic_rays,
                     mask_output_dir=mask_output_dir,
-                    edge_bias=edge_bias_cfg
+                    edge_bias=edge_bias_cfg,
+                    whitelight_hex=config.get('whitelight_hex', True)
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -2776,7 +2829,8 @@ def main(config_path):
                 mastercalib_trace_dir=CALIB_DIR,            # Mastercalib fallback
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
-                edge_bias=edge_bias_cfg
+                edge_bias=edge_bias_cfg,
+                whitelight_hex=config.get('whitelight_hex', True)
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
@@ -3285,6 +3339,12 @@ def main(config_path):
         for _action, _detail in consolidate_rss_files(
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"RSS consolidation: {_action} {_detail}")
+
+        # Shorten the per-exposure white-light images to the same clean name scheme
+        # ({exposure_id}_whitelight.fits), matching the RSS files.
+        for _action, _detail in consolidate_whitelight_files(
+                extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
+            print(f"White-light consolidation: {_action} {_detail}")
 
     except Exception as e:
         traceback.print_exc()

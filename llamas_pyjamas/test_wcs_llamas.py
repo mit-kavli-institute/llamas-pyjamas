@@ -92,6 +92,23 @@ def test_pointing_from_header_absent_is_none_not_zero():
     assert pointing_from_header(None) == (None, None, 0.0)
 
 
+def test_whitelight_wcs_header_hex_and_none():
+    from llamas_pyjamas.Image.WhiteLightModule import _whitelight_wcs_header
+    x = np.array([0.0, 46.0, 23.0])           # fibre-map units spanning the field
+    y = np.array([0.0, 44.0, 22.0])
+    h = fits.Header()
+    h['RA'] = 100.0
+    h['DEC'] = -20.0
+    # hex render: step = 1/pix_per_unit = 0.1
+    cards = _whitelight_wcs_header(x, y, h, hex_tiles=True, pix_per_unit=10)
+    assert cards['CTYPE1'] == 'RA---TAN' and cards['CTYPE2'] == 'DEC--TAN'
+    assert np.isclose(cards['CRVAL1'], 100.0) and np.isclose(cards['CRVAL2'], -20.0)
+    # field-centre midpoint (23,22) at step 0.1 -> pixel 231, 221 (1-indexed)
+    assert np.isclose(cards['CRPIX1'], 23.0 / 0.1 + 1.0)
+    # no pointing -> no WCS (caller keeps the linear/none map)
+    assert _whitelight_wcs_header(x, y, fits.Header(), hex_tiles=True, pix_per_unit=10) is None
+
+
 if __name__ == '__main__':
     import sys
     fns = [(k, v) for k, v in sorted(globals().items())

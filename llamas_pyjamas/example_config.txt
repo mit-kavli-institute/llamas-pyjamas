@@ -361,6 +361,13 @@ sky_framework = False
 # sky_mask_method = whitelight
 # sky_qa_plots = False        # write *_skyQA.png before/after OH-residual diagnostics
 
+# White-light image render (auto-generated per exposure alongside the RSS). true (default)
+# renders each fibre as a flat hexagonal tile of its raw flux -- no interpolation, dead fibres
+# left as holes; false resamples onto a rectangular grid. Either way the image now carries a
+# celestial (RA/DEC) WCS from the header pointing, and the file is named
+# {exposure_id}_whitelight.fits to match the RSS.
+whitelight_hex = true
+
 #==============================================================================
 # CUBE CONSTRUCTION PARAMETERS
 #==============================================================================

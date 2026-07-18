@@ -224,8 +224,30 @@ def color_isolation(extractions: list, metadata: dict)-> Tuple[list, list, list]
     return blue_extractions, green_extractions, red_extractions, blue_meta, green_meta, red_meta
 
 
+def _whitelight_wcs_header(x, y, primary_header, hex_tiles, pix_per_unit):
+    """Celestial WCS cards for a white-light colour image, or None if no header pointing.
+
+    Mirrors ``RSSScene.collapse``: CRVAL at the field centre (header RA/DEC), CRPIX the image
+    pixel that maps there. Both render grids map pixel p -> fibre-map (p-1)*step, so the field
+    centre (midpoint of the fibre extent) is at centre/step + 1. Interpolated grid step is
+    1/WHITELIGHT_SUBSAMPLE; hex-tile step is 1/pix_per_unit.
+    """
+    from llamas_pyjamas.Utils.wcsLlamas import (ARCSEC_PER_FIBRE, celestial_wcs,
+                                                pointing_from_header)
+    ra, dec, pa = pointing_from_header(primary_header)
+    if ra is None or dec is None or len(x) == 0:
+        return None
+    step = (1.0 / float(pix_per_unit)) if hex_tiles else (1.0 / float(WHITELIGHT_SUBSAMPLE))
+    cx = 0.5 * (float(np.nanmin(x)) + float(np.nanmax(x)))
+    cy = 0.5 * (float(np.nanmin(y)) + float(np.nanmax(y)))
+    wcs = celestial_wcs(ra, dec, crpix=(cx / step + 1.0, cy / step + 1.0),
+                        arcsec_per_pixel=ARCSEC_PER_FIBRE * step, pa_deg=pa)
+    return wcs.to_header()
+
+
 def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
-                   hex_tiles: bool = False, pix_per_unit: int = 10)-> str:
+                   hex_tiles: bool = False, pix_per_unit: int = 10,
+                   primary_header=None)-> str:
     """Process extraction data to create a white light FITS file.
 
     Set ``hex_tiles=True`` to render each fibre as a flat hexagonal tile of its
@@ -279,6 +301,9 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         if hex_tiles:
             for _k, _v in hex_header_keys(pix_per_unit).items():
                 blue_hdu.header[_k] = _v
+        _wcs = _whitelight_wcs_header(blue_x, blue_y, primary_header, hex_tiles, pix_per_unit)
+        if _wcs is not None:
+            blue_hdu.header.update(_wcs)
         hdul.append(blue_hdu)
         
         blue_tab = fits.BinTableHDU.from_columns([
@@ -296,6 +321,9 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         if hex_tiles:
             for _k, _v in hex_header_keys(pix_per_unit).items():
                 green_hdu.header[_k] = _v
+        _wcs = _whitelight_wcs_header(green_x, green_y, primary_header, hex_tiles, pix_per_unit)
+        if _wcs is not None:
+            green_hdu.header.update(_wcs)
         hdul.append(green_hdu)
         
         green_tab = fits.BinTableHDU.from_columns([
@@ -312,6 +340,9 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
         if hex_tiles:
             for _k, _v in hex_header_keys(pix_per_unit).items():
                 red_hdu.header[_k] = _v
+        _wcs = _whitelight_wcs_header(red_x, red_y, primary_header, hex_tiles, pix_per_unit)
+        if _wcs is not None:
+            red_hdu.header.update(_wcs)
         hdul.append(red_hdu)
         
         red_tab = fits.BinTableHDU.from_columns([

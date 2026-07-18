@@ -601,7 +601,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 slow_bias: str = None, fast_bias: str = None,
                 method=None, trace_dir=None, mastercalib_trace_dir=None,
                 remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False,
-                edge_bias=None) -> None:
+                edge_bias=None, whitelight_hex=True) -> None:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -875,7 +875,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         else:
             outfile = os.path.join(OUTPUT_DIR, outfile)
                 
-        white_light_file = WhiteLightFits(obj, metadata, outfile=outfile)
+        white_light_file = WhiteLightFits(obj, metadata, outfile=outfile,
+                                          hex_tiles=whitelight_hex,
+                                          primary_header=primary_hdr)
         print(f'white_light_file = {white_light_file}')
 
         # Summary statistics
