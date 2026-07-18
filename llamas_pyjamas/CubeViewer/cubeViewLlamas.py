@@ -222,6 +222,11 @@ class CubeViewerWindow(QMainWindow):
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.choose_file)
         file_menu.addAction(open_action)
+        obslog_action = QAction('Open from o&bslog…', self)
+        obslog_action.setShortcut('Ctrl+B')
+        obslog_action.setToolTip('Pick an exposure by object name / notes instead of filename')
+        obslog_action.triggered.connect(self.open_from_obslog)
+        file_menu.addAction(obslog_action)
         file_menu.addSeparator()
         quit_action = QAction('&Quit', self)
         quit_action.setShortcut('Ctrl+Q')
@@ -258,6 +263,17 @@ class CubeViewerWindow(QMainWindow):
             self, 'Open reduced RSS', '', 'FITS files (*.fits *.fit *.fits.gz);;All files (*)')
         if path:
             self.load(path)
+
+    def _start_dir(self) -> str:
+        """Directory to seed the obslog/apply pickers -- the open file's, else the cwd."""
+        return os.path.dirname(self._path) if self._path else os.getcwd()
+
+    def open_from_obslog(self) -> None:
+        """Pick an exposure from a header-driven table instead of by filename."""
+        from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
+        dialog = ObslogDialog(self._start_dir(), title='Open from obslog', parent=self)
+        if dialog.exec() and dialog.chosen_path:
+            self.load(dialog.chosen_path)
 
     def load(self, path: str) -> None:
         """Open an RSS and every channel sibling beside it."""
@@ -506,21 +522,20 @@ class CubeViewerWindow(QMainWindow):
         Adds FLAM/FLAM_ERR in place (the GUI equivalent of the apply_fluxcal CLI). Independent
         of the currently-loaded file, so it works whether or not a standard is open.
         """
-        start_dir = os.path.dirname(self._path) if self._path else ''
-        sens_path, _ = QFileDialog.getOpenFileName(
-            self, 'Select sensitivity function', start_dir,
-            'Sensitivity FITS (*.fits);;All files (*)')
-        if not sens_path:
+        from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
+        dialog = ObslogDialog(self._start_dir(), multi=True, with_sensfunc=True,
+                              title='Apply sensitivity function to files', parent=self)
+        if not dialog.exec():
             return
-        rss_paths, _ = QFileDialog.getOpenFileNames(
-            self, 'Select science RSS file(s) to flux-calibrate', start_dir,
-            'RSS FITS (*.fits);;All files (*)')
-        if not rss_paths:
+        sens_path = dialog.sensfunc_path
+        rss_paths = dialog.chosen_files
+        if not sens_path or not rss_paths:
             return
 
         reply = QMessageBox.question(
             self, 'Apply sensitivity function',
-            f'Add FLAM / FLAM_ERR to {len(rss_paths)} file(s) in place, using\n'
+            f'Add FLAM / FLAM_ERR to {len(rss_paths)} plane(s) '
+            f'(all channels of the selected exposures) in place, using\n'
             f'{os.path.basename(sens_path)}?\n\n'
             'Differential atmospheric extinction is applied. The instrumental planes are '
             'left unchanged.',
