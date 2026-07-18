@@ -74,6 +74,10 @@ def pointing_from_header(header) -> Tuple[Optional[float], Optional[float], floa
     """
     if header is None:
         return None, None, 0.0
+    # TEL PA / TEL ROT is the field position angle, degrees east of North -- the angle this WCS
+    # applies as a rotation. NOTE (per RS): the telescope control software has had bugs writing
+    # this correctly; it *should* be right but the value is not yet trusted. Phase 2 (star
+    # centroids -> fit the WCS) must verify both the header value and our applied sign/parity.
     pa = header.get('TEL PA', header.get('TEL ROT', 0.0))
     try:
         pa = float(pa)
