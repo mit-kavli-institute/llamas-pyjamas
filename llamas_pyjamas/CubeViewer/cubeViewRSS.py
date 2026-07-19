@@ -272,8 +272,10 @@ class RSSScene(SpectralScene):
 
         # Header pointing for the celestial WCS (same across channels; take the first).
         first = next(iter(self._channels.values()))
-        self.ra, self.dec, self.pa = pointing_from_header(
-            getattr(first, 'primary_header', None))
+        _hdr = getattr(first, 'primary_header', None)
+        self.ra, self.dec, self.pa = pointing_from_header(_hdr)
+        #: Object name from the header, for the DS9 frame / display.
+        self.object = str(_hdr.get('OBJECT', '')) if _hdr is not None else ''
         logger.info('RSSScene pointing: RA=%s DEC=%s PA=%s',
                     self.ra, self.dec, self.pa)
         logger.info('RSSScene: channels=%s, %d placed fibres, flux-calibrated=%s',

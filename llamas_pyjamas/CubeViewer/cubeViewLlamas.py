@@ -399,6 +399,9 @@ class CubeViewerWindow(QMainWindow):
             header[key] = value
         if wcs is not None:
             header.update(wcs.to_header())
+        obj = getattr(self.scene, 'object', '')
+        if obj:
+            header['OBJECT'] = obj                      # so DS9 shows the object name
         hdul = fits.HDUList([fits.PrimaryHDU(np.asarray(image, dtype=np.float32),
                                              header=header)])
         try:
