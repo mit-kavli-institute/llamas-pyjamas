@@ -9,6 +9,51 @@ import logging
 from datetime import datetime
 
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+from llamas_pyjamas.Utils.wcsLlamas import FIBRE_AREA_ARCSEC2
+
+logger = logging.getLogger(__name__)
+
+
+def _fibre_sky_table(fiber_ids, benchsides, primary_hdr):
+    """Plate-solved per-fibre sky coords from the (rough header) WCS.
+
+    Returns ``(ras, decs, xs, ys, prov)`` (all arrays length len(fiber_ids); prov a dict). Fibre-
+    map (x,y) come from ``FiberMap_LUT`` (NaN on a LUT miss / dead fibre); RA/DEC from a fibre-map
+    celestial WCS (``celestial_wcs`` at 0.75"/fibre-unit, CRPIX at the fibre-field centre,
+    rotation from the header). If the header has no pointing, RA/DEC are all NaN and prov.method
+    is 'none' -- x/y are still returned so a later step can re-solve. This is the ROUGH solution;
+    Phase 3 registration overwrites RA/DEC and bumps the provenance in place.
+    """
+    from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT, FIELD_XMAX, FIELD_YMAX
+    from llamas_pyjamas.Utils.wcsLlamas import (celestial_wcs, pointing_from_header,
+                                                ARCSEC_PER_FIBRE, IFU_PA_OFFSET)
+
+    n = len(fiber_ids)
+    xs = np.full(n, np.nan)
+    ys = np.full(n, np.nan)
+    for i, (bench, fid) in enumerate(zip(benchsides, fiber_ids)):
+        x, y = FiberMap_LUT(str(bench).strip(), int(fid))
+        if not (x < 0 and y < 0):                       # (-1,-1) is the LUT miss sentinel
+            xs[i], ys[i] = float(x), float(y)
+
+    ras = np.full(n, np.nan)
+    decs = np.full(n, np.nan)
+    prov = {'method': 'none', 'tier': 'none', 'refined': False,
+            'pa_offset': float('nan'), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+
+    ra, dec, pa = pointing_from_header(primary_hdr)
+    if ra is not None and dec is not None:
+        cx, cy = FIELD_XMAX / 2.0, FIELD_YMAX / 2.0     # fibre-field centre = boresight (rough)
+        wcs = celestial_wcs(ra, dec, crpix=(cx + 1.0, cy + 1.0),
+                            arcsec_per_pixel=ARCSEC_PER_FIBRE, pa_deg=pa)
+        finite = np.isfinite(xs) & np.isfinite(ys)
+        if finite.any():
+            sky = wcs.pixel_to_world(xs[finite], ys[finite])  # fibre-map (x,y) as pixel coords
+            ras[finite] = sky.ra.deg
+            decs[finite] = sky.dec.deg
+        prov = {'method': 'rough-header', 'tier': 'header', 'refined': False,
+                'pa_offset': float(IFU_PA_OFFSET), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+    return ras, decs, xs, ys, prov
 
 
 def skysub_extname(hdul):
@@ -156,6 +201,8 @@ class RSSgeneration:
                 hdul = fits.HDUList()
                 primary_hdu = fits.PrimaryHDU(header=primary_hdr)
                 primary_hdu.header['CHANNEL'] = channel
+                primary_hdu.header['FIBAREA'] = (FIBRE_AREA_ARCSEC2,
+                                                 'Lenslet solid angle [arcsec2] (flux<->SB)')
                 hdul.append(primary_hdu)
                 
                 # Collect data for all fibers in this channel
@@ -552,6 +599,12 @@ class RSSgeneration:
                 hdul.append(fwhm_hdu)
                 self.logger.info(f"Added FWHM extension with shape {fwhm_stack.shape}")
 
+                # Plate-solved per-fibre sky coordinates from the (rough header) WCS: fibre-map
+                # (x,y) via FiberMap_LUT -> RA/DEC via the fibre-map celestial WCS. Fills FIBERMAP
+                # RA/DEC (LVM/other-pipeline compat) and drives the dedicated FIBERWCS extension.
+                fiber_ras, fiber_decs, fiber_x, fiber_y, _sky_prov = _fibre_sky_table(
+                    fiber_ids, benchsides, primary_hdr)
+
                 # Extension 7 - FIBERMAP: binary table with fiber information
                 fibermap_cols = [
                     fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
@@ -560,11 +613,39 @@ class RSSgeneration:
                     fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
                     fits.Column(name='DEC', format='D', array=np.array(fiber_decs))
                 ]
-                
+
                 fibermap_hdu = fits.BinTableHDU.from_columns(fibermap_cols)
                 fibermap_hdu.header['EXTNAME'] = 'FIBERMAP'
                 hdul.append(fibermap_hdu)
                 self.logger.info(f"Added FIBERMAP binary table with {len(fiber_ids)} entries")
+
+                # Extension - FIBERWCS: fibre-map (x,y) + plate-solved RA/DEC + astrometry
+                # provenance. Kept separate from FIBERMAP so the astrometry can be re-solved and
+                # overwritten in place (Phase 3) without disturbing the base fibre map.
+                fiberwcs_hdu = fits.BinTableHDU.from_columns([
+                    fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
+                    fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
+                    fits.Column(name='X_FIBERMAP', format='D', array=np.array(fiber_x)),
+                    fits.Column(name='Y_FIBERMAP', format='D', array=np.array(fiber_y)),
+                    fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
+                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs)),
+                ])
+                # FITS headers cannot hold NaN; use -1 as the "not measured" sentinel.
+                def _num(v):
+                    return float(v) if np.isfinite(v) else -1.0
+                fh = fiberwcs_hdu.header
+                fh['EXTNAME'] = 'FIBERWCS'
+                fh['WCSMETH'] = (_sky_prov['method'], 'Astrometry method (rough-header/astrometric)')
+                fh['WCSTIER'] = (_sky_prov['tier'], 'Registration tier')
+                fh['WCSREFIN'] = (_sky_prov['refined'], 'True if refined against a catalog')
+                fh['PAOFFSET'] = (_num(_sky_prov['pa_offset']), 'PA offset applied to TEL_ROT [deg]')
+                fh['WCSCAT'] = (_sky_prov['catalog'], 'Reference catalog (blank if none)')
+                fh['WCSRMS'] = (_num(_sky_prov['rms']), 'Astrometric residual RMS [arcsec], -1=n/a')
+                fh['WCSNSTAR'] = (int(_sky_prov['nstars']), 'Stars used in the solution')
+                fh['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
+                hdul.append(fiberwcs_hdu)
+                self.logger.info(f"Added FIBERWCS ({_sky_prov['method']}, "
+                                 f"{int(np.isfinite(fiber_ras).sum())} fibres with RA/DEC)")
                 
                 # Write to file
                 hdul.writeto(channel_output_file, overwrite=True)

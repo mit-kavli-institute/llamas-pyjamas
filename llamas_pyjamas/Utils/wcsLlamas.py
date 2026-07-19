@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 #: this times sqrt(3)/2 (~0.65"), already encoded in the fibre-map y-coordinates.
 ARCSEC_PER_FIBRE = 0.75
 
+#: Solid angle collected by one lenslet (arcsec^2): round, 0.75" diameter (circles touch at the
+#: 0.75" spacing), so pi*(0.375)^2. Fill factor ~91-94% (only the small inter-circle triangles are
+#: lost); uniform across lenslets to excellent approximation. Used to convert flux <-> surface
+#: brightness (SB = FLAM / FIBRE_AREA_ARCSEC2).
+FIBRE_AREA_ARCSEC2 = np.pi * (0.75 / 2.0) ** 2
+
 #: The LLAMAS field is mirror-imaged on sky: the correct WCS has det(CD) > 0. (Confirmed vs
 #: PanSTARRS on the J1613 field.) False would give a standard N-up/E-left (det<0) frame.
 IFU_MIRRORED = True
