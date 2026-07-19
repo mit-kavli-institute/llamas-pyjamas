@@ -1,0 +1,106 @@
+"""Tests for the astrometric registration engine (Utils/register.py, Phase 3).
+
+Synthetic and network-free: source detection on a fibre lattice, the common-offset matcher
+(robust to the pointing error, rejecting decoys), and the solve with its rotation cap. The full
+register_exposure orchestrator + live Gaia is validated on real fields separately.
+
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_register`).
+"""
+
+import numpy as np
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+
+from llamas_pyjamas.Utils.register import (detect_fibre_sources, _match_common_offset, solve_wcs)
+from llamas_pyjamas.Utils.wcsLlamas import celestial_wcs
+
+
+def _hex_lattice(n=16):
+    xs, ys = [], []
+    for row in range(n):
+        yy = row * (np.sqrt(3) / 2)
+        off = 0.5 if (row % 2) else 0.0
+        for col in range(n):
+            xs.append(col + off)
+            ys.append(yy)
+    return np.array(xs), np.array(ys)
+
+
+def _two_sources(x, y):
+    def g(cx, cy, a):
+        return a * np.exp(-0.5 * ((x - cx) ** 2 + (y - cy) ** 2) / 0.9 ** 2)
+    rng = np.random.default_rng(0)
+    # pedestal + realistic noise so the MAD-based threshold behaves like on real data
+    return g(4.0, 5.0, 1000.0) + g(11.0, 9.0, 600.0) + 50.0 + rng.normal(0, 20.0, size=x.shape)
+
+
+def test_detect_finds_the_two_sources():
+    x, y = _hex_lattice()
+    f = _two_sources(x, y)
+    srcs = detect_fibre_sources(x, y, f, nsigma=5, min_sep=2.0)
+    assert len(srcs) == 2
+    found = sorted([(s.x, s.y) for s in srcs])
+    assert np.allclose(found[0], (4.0, 5.0), atol=0.1)
+    assert np.allclose(found[1], (11.0, 9.0), atol=0.1)
+
+
+def test_detect_returns_brightest_first():
+    x, y = _hex_lattice()
+    f = _two_sources(x, y)
+    srcs = detect_fibre_sources(x, y, f)
+    assert srcs[0].flux_sum >= srcs[1].flux_sum
+    assert np.allclose((srcs[0].x, srcs[0].y), (4.0, 5.0), atol=0.1)   # the amp=1000 one
+
+
+def test_match_common_offset_matches_true_and_rejects_decoy():
+    # three detected sources; two share a common ~6" offset from Gaia, one is a decoy far away
+    truth = SkyCoord([100.0, 100.003, 99.997] * u.deg, [20.0, 20.002, 19.996] * u.deg)
+    off_ra, off_dec = 6.0 / 3600.0, -3.0 / 3600.0     # common pointing error
+    det = SkyCoord((truth.ra.deg - np.array([off_ra / np.cos(np.deg2rad(20)), off_ra /
+                    np.cos(np.deg2rad(20)), off_ra / np.cos(np.deg2rad(20))])) * u.deg,
+                   (truth.dec.deg - off_dec) * u.deg)
+    det = SkyCoord(list(det.ra.deg) + [100.05], list(det.dec.deg) + [20.05], unit='deg')  # +decoy
+    gaia = truth
+    di, gi = _match_common_offset(det, gaia)
+    assert len(di) == 3                                # three real, decoy excluded
+    assert 3 not in di                                 # the decoy (index 3) is not matched
+
+
+def test_solve_one_star_is_translation_only():
+    rough = celestial_wcs(180.0, 0.0, crpix=(50.0, 50.0), arcsec_per_pixel=0.75, pa_deg=100.0)
+    xy = [(40.0, 45.0)]
+    # true position = rough prediction shifted by a small translation (5")
+    p = rough.pixel_to_world(40.0, 45.0)
+    gaia = SkyCoord((p.ra.deg + 5 / 3600.0 / np.cos(np.deg2rad(0))) * u.deg,
+                    (p.dec.deg + 2 / 3600.0) * u.deg)
+    wcs, rms, rot, refined = solve_wcs(xy, gaia, rough)
+    assert refined is False                            # one star can't solve rotation
+    assert wcs.pixel_to_world(40.0, 45.0).separation(gaia).arcsec < 0.05
+
+
+def test_solve_rotation_cap_gate():
+    rough = celestial_wcs(180.0, 0.0, crpix=(50.0, 50.0), arcsec_per_pixel=0.75, pa_deg=100.0)
+    xy = [(40.0, 45.0), (60.0, 55.0)]
+    gaia = rough.pixel_to_world(np.array([40.0, 60.0]), np.array([45.0, 55.0]))
+    # cap 0 -> even a tiny fitted rotation is rejected -> translation only
+    _, _, _, refined0 = solve_wcs(xy, gaia, rough, max_rot_deg=0.0)
+    assert refined0 is False
+    # generous cap -> a two-star rotation solve is accepted
+    _, _, _, refined1 = solve_wcs(xy, gaia, rough, max_rot_deg=30.0)
+    assert refined1 is True
+
+
+if __name__ == '__main__':
+    import sys
+    fns = [(k, v) for k, v in sorted(globals().items())
+           if k.startswith('test_') and callable(v)]
+    failed = 0
+    for name, fn in fns:
+        try:
+            fn()
+            print(f'PASS {name}')
+        except Exception as e:                       # noqa: BLE001
+            failed += 1
+            print(f'FAIL {name}: {type(e).__name__}: {e}')
+    print(f'\n{len(fns) - failed}/{len(fns)} passed')
+    sys.exit(1 if failed else 0)
