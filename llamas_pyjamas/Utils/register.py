@@ -165,8 +165,17 @@ def _match_common_offset(det_sky, gaia, coarse_tol=9.0, tight_tol=2.5):
     cosd = np.cos(np.deg2rad(det_sky.dec.deg))
     dra = (gaia[idx].ra.deg - det_sky.ra.deg) * cosd
     ddec = gaia[idx].dec.deg - det_sky.dec.deg
-    off_ra = float(np.median(dra[cand]))
-    off_dec = float(np.median(ddec[cand]))
+    # Seed the common offset from the DENSEST cluster of candidate offset vectors, not their
+    # median: when most detections are spurious (sky-residual banding) the median is dragged off
+    # the real pointing offset, and the tight refinement below then misses the true star cluster.
+    # Each candidate offset votes; keep the one the most other candidates agree with (< tight_tol).
+    cra, cdec = dra[cand], ddec[cand]
+    best_n, off_ra, off_dec = -1, float(np.median(cra)), float(np.median(cdec))
+    for k in range(len(cra)):
+        near = np.hypot(cra - cra[k], cdec - cdec[k]) * 3600.0 < tight_tol
+        if int(near.sum()) > best_n:
+            best_n = int(near.sum())
+            off_ra, off_dec = float(np.median(cra[near])), float(np.median(cdec[near]))
     shifted = SkyCoord((det_sky.ra.deg + off_ra / np.cos(np.deg2rad(det_sky.dec.deg))) * u.deg,
                        (det_sky.dec.deg + off_dec) * u.deg)
     idx2, sep2, _ = shifted.match_to_catalog_sky(gaia)
@@ -290,6 +299,64 @@ def _single_source_is_dominant(x, y, flux, sources, di, min_snr=25.0):
     return (core - med) / mad >= min_snr
 
 
+def _rough_wcs(ra, dec, pa, extra_rot=0.0):
+    """The rough header WCS at the fibre-map scale, optionally with a block rotation added to PA."""
+    from llamas_pyjamas.Image.WhiteLightModule import FIELD_XMAX, FIELD_YMAX
+    return celestial_wcs(ra, dec, crpix=(FIELD_XMAX / 2.0 + 1.0, FIELD_YMAX / 2.0 + 1.0),
+                         arcsec_per_pixel=ARCSEC_PER_FIBRE, pa_deg=pa + extra_rot)
+
+
+def _detect_and_query(det_path, band, mag_limit, radius_arcsec):
+    """Load a detection frame -> (ra, dec, pa, xs, ys, flux, sources, gaia). Fibre-space detection
+    is rotation-independent, so these can be reused across rotation hypotheses."""
+    with fits.open(det_path) as hd:
+        ra, dec, pa = pointing_from_header(hd[0].header)
+        fmap = hd['FIBERMAP'].data
+        xs, ys = _fibre_xy(list(fmap['FIBER_ID']), list(fmap['BENCHSIDE']))
+        flux = per_fibre_flux(hd, band=band)
+    sources = detect_fibre_sources(xs, ys, flux) if ra is not None else []
+    gaia = (query_gaia(ra, dec, radius_arcsec=radius_arcsec, mag_limit=mag_limit)
+            if ra is not None else SkyCoord([], [], unit='deg'))
+    return ra, dec, pa, xs, ys, flux, sources, gaia
+
+
+def _write_frame_solution(det_path, siblings, wcs, prov):
+    """Write a solved WCS into every channel's FIBERMAP/FIBERWCS and the exposure white-light image
+    (pipeline product only; the external quicklook is left alone). Returns the files written."""
+    from llamas_pyjamas.File.llamasRSS import apply_fibre_astrometry
+    written = []
+    for path in siblings.values():
+        with fits.open(path, mode='update') as hh:
+            fm = hh['FIBERMAP'].data
+            sx, sy = _fibre_xy(list(fm['FIBER_ID']), list(fm['BENCHSIDE']))
+            finite = np.isfinite(sx) & np.isfinite(sy)
+            ras = np.full(len(sx), np.nan)
+            decs = np.full(len(sx), np.nan)
+            if finite.any():
+                sky = wcs.pixel_to_world(sx[finite], sy[finite])
+                ras[finite] = sky.ra.deg
+                decs[finite] = sky.dec.deg
+            apply_fibre_astrometry(hh, ras=ras, decs=decs, xs=sx, ys=sy, prov=prov)
+            hh.flush()
+        written.append(path)
+
+    import glob as _glob
+    prefix = os.path.basename(det_path).split('_RSS_')[0]
+    for wl in _glob.glob(os.path.join(os.path.dirname(det_path),
+                                      f'{prefix}_whitelight_fullpipeline.fits')):
+        with fits.open(wl, mode='update') as wh:
+            for ext in wh:
+                if getattr(ext, 'data', None) is None or ext.name not in ('BLUE', 'GREEN', 'RED'):
+                    continue
+                step = 1.0 / float(ext.header.get('PIXUNIT', 10))
+                ext.header.update(_image_wcs_from_fibremap(wcs, step).to_header())
+                ext.header['WCSMETH'] = prov['method']
+                ext.header['WCSREFIN'] = bool(prov['refined'])
+            wh.flush()
+        written.append(wl)
+    return written
+
+
 def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
                       refine_rotation=False, max_rot_deg=3.0, max_shift_arcsec=8.0, min_stars=1):
     """Register one exposure (all channel siblings) and write refined per-fibre RA/DEC in place.
@@ -360,40 +427,124 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
         else:
             logger.info('%s: no sources or no Gaia; keeping rough (Tier 3)', rss_path)
 
-    written = []
-    if wcs is not None:
-        for path in siblings.values():
-            with fits.open(path, mode='update') as hh:
-                fm = hh['FIBERMAP'].data
-                sx, sy = _fibre_xy(list(fm['FIBER_ID']), list(fm['BENCHSIDE']))
-                finite = np.isfinite(sx) & np.isfinite(sy)
-                ras = np.full(len(sx), np.nan)
-                decs = np.full(len(sx), np.nan)
-                if finite.any():
-                    sky = wcs.pixel_to_world(sx[finite], sy[finite])
-                    ras[finite] = sky.ra.deg
-                    decs[finite] = sky.dec.deg
-                apply_fibre_astrometry(hh, ras=ras, decs=decs, xs=sx, ys=sy, prov=prov)
-                hh.flush()
-            written.append(path)
-
-        # Update the exposure's white-light image WCS (what the user inspects in DS9) to match
-        # the refined solution. Only the pipeline product; the external quicklook is left alone.
-        import glob as _glob
-        prefix = os.path.basename(det_path).split('_RSS_')[0]
-        for wl in _glob.glob(os.path.join(os.path.dirname(det_path),
-                                          f'{prefix}_whitelight_fullpipeline.fits')):
-            with fits.open(wl, mode='update') as wh:
-                for ext in wh:
-                    if getattr(ext, 'data', None) is None or ext.name not in ('BLUE', 'GREEN', 'RED'):
-                        continue
-                    step = 1.0 / float(ext.header.get('PIXUNIT', 10))
-                    ext.header.update(_image_wcs_from_fibremap(wcs, step).to_header())
-                    ext.header['WCSMETH'] = prov['method']
-                    ext.header['WCSREFIN'] = bool(prov['refined'])
-                wh.flush()
-            written.append(wl)
+    written = _write_frame_solution(det_path, siblings, wcs, prov) if wcs is not None else []
 
     return RegistrationResult(tier=prov['tier'], method=prov['method'], refined=prov['refined'],
                               n_stars=n_stars, rms_arcsec=rms, rotation_deg=rot_used,
                               rotation_refined=rot_refined, files=written)
+
+
+def _solve_frame_translation(ra, dec, pa, xs, ys, flux, sources, gaia, *, extra_rot=0.0,
+                             max_shift_arcsec=8.0):
+    """Match + translation-only solve for one frame against a rough WCS that already carries the
+    block rotation ``extra_rot``. Returns (wcs, prov, rot_used, n_stars, rms). Falls back to the
+    (block-rotated) rough WCS when there is no confident match -- so even unmatched frames inherit
+    the better block rotation."""
+    wcs = _rough_wcs(ra, dec, pa, extra_rot)
+    prov = {'method': 'rough-header', 'tier': 'header', 'refined': False,
+            'pa_offset': float(IFU_PA_OFFSET), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+    rot_used, n_stars, rms = _axis_pa(wcs), 0, float('nan')
+    if sources and len(gaia) > 0:
+        det_xy = [(s.x, s.y) for s in sources]
+        det_sky = wcs.pixel_to_world(np.array([s.x for s in sources]),
+                                     np.array([s.y for s in sources]))
+        di, gi = _match_common_offset(det_sky, gaia)
+        consensus = len(di) >= 2 or (len(di) == 1 and
+                                     _single_source_is_dominant(xs, ys, flux, sources, di))
+        solved = solve_wcs([det_xy[k] for k in di], gaia[gi], wcs, refine_rotation=False,
+                           max_shift_arcsec=max_shift_arcsec) if (di and consensus) else None
+        if solved is not None:
+            wcs, rms, rot_used, _rr, n_stars = solved
+            prov = {'method': 'astrometric', 'tier': 'gaia', 'refined': True,
+                    'pa_offset': float(IFU_PA_OFFSET), 'catalog': 'GaiaDR3',
+                    'rms': float(rms), 'nstars': int(n_stars)}
+        else:
+            wcs = _rough_wcs(ra, dec, pa, extra_rot)          # inherit the block rotation
+    return wcs, prov, rot_used, n_stars, rms
+
+
+def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
+                   max_rot_deg=3.0, max_shift_arcsec=8.0):
+    """Register a block of exposures that share ONE pointing + rotator (e.g. all dithers of one
+    OBJECT at one rotator position) and write the refined per-fibre RA/DEC in place.
+
+    Solves a SINGLE rotation for the whole block -- the median of the per-frame Gaia rotation fits,
+    clamped to +-``max_rot_deg`` of the calibrated value -- then HOLDS it and applies per-frame
+    TRANSLATION only. The rotator is fixed within a block, so one rotation is physically correct;
+    a per-frame 2-star rotation fit is noisy (~0.5 deg scatter) and would let dithers disagree,
+    whereas the block median is stable. This removes the residual rotation (~1-2 deg on these data)
+    that a translation-only solve leaves as a ~1.5" error at the field edge. Frames without a
+    confident match still inherit the block rotation (a better rough). The caller groups exposures
+    into blocks (typically by OBJECT, which encodes the rotator incl. the deliberate _180 flip).
+
+    Returns {rss_path: RegistrationResult}.
+    """
+    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+
+    # -- pass 1: per-frame detect/query + fit each frame's own rotation where 2+ stars match
+    frames, drots = [], []
+    for p in rss_paths:
+        sib = channel_siblings(p)
+        dp = sib.get('green') or next(iter(sib.values()))
+        ra, dec, pa, xs, ys, flux, sources, gaia = _detect_and_query(dp, band, mag_limit,
+                                                                      radius_arcsec)
+        drot = None
+        if ra is not None and sources and len(gaia) > 0:
+            w0 = _rough_wcs(ra, dec, pa)
+            det_sky = w0.pixel_to_world(np.array([s.x for s in sources]),
+                                        np.array([s.y for s in sources]))
+            di, gi = _match_common_offset(det_sky, gaia)
+            if len(di) >= 2:
+                ro = solve_wcs([(sources[k].x, sources[k].y) for k in di], gaia[gi], w0,
+                               refine_rotation=True, max_rot_deg=max_rot_deg,
+                               max_shift_arcsec=max_shift_arcsec)
+                if ro is not None and ro[3]:
+                    drot = ((ro[2] - _axis_pa(w0) + 180) % 360) - 180
+                    drots.append(drot)
+        frames.append(dict(path=p, sib=sib, dp=dp, ra=ra, dec=dec, pa=pa, xs=xs, ys=ys,
+                           flux=flux, sources=sources, gaia=gaia))
+    block_rot = float(np.clip(np.median(drots), -max_rot_deg, max_rot_deg)) if drots else 0.0
+    logger.info('block of %d frames: rotation %.2f deg from %d fits', len(frames), block_rot,
+                len(drots))
+
+    # -- pass 2: hold the block rotation, solve per-frame translation, write
+    results = {}
+    for f in frames:
+        if f['ra'] is None:
+            results[f['path']] = RegistrationResult('header', 'rough-header', False, 0,
+                                                    float('nan'), float('nan'), False, [])
+            continue
+        wcs, prov, rot_used, n_stars, rms = _solve_frame_translation(
+            f['ra'], f['dec'], f['pa'], f['xs'], f['ys'], f['flux'], f['sources'], f['gaia'],
+            extra_rot=block_rot, max_shift_arcsec=max_shift_arcsec)
+        written = _write_frame_solution(f['dp'], f['sib'], wcs, prov)
+        # rotation was set by the block solve (held), not by a per-frame rotation fit
+        results[f['path']] = RegistrationResult(prov['tier'], prov['method'], prov['refined'],
+                                                n_stars, rms, rot_used, bool(block_rot), written)
+    return results
+
+
+def _block_key(rss_path):
+    """Group key for a block: OBJECT + rotator. OBJECT already encodes the deliberate _180 flip,
+    and TEL ROT (rounded) separates any other rotator change under the same target name."""
+    with fits.open(rss_path) as h:
+        obj = str(h[0].header.get('OBJECT', '')).strip()
+        try:
+            rot = round(float(h[0].header.get('TEL ROT', 0.0)))
+        except (TypeError, ValueError):
+            rot = 0
+    return f'{obj}@{rot}'
+
+
+def register_exposures(rss_paths, **kwargs):
+    """Register many exposures, auto-grouped into blocks by (OBJECT, rotator) so each pointing's
+    dithers share one solved rotation (see :func:`register_block`). Returns {rss_path: result}."""
+    from collections import defaultdict
+    blocks = defaultdict(list)
+    for p in rss_paths:
+        blocks[_block_key(p)].append(p)
+    results = {}
+    for key, paths in blocks.items():
+        logger.info('registering block %s (%d frames)', key, len(paths))
+        results.update(register_block(paths, **kwargs))
+    return results

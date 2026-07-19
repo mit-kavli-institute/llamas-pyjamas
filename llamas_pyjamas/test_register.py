@@ -67,6 +67,26 @@ def test_match_common_offset_matches_true_and_rejects_decoy():
     assert 3 not in di                                 # the decoy (index 3) is not matched
 
 
+def test_match_common_offset_cluster_beats_median():
+    # 6 Gaia; 2 detections share the TRUE common offset, 4 are spurious with scattered offsets
+    # whose inclusion drags a MEDIAN-based seed off the real pair. The densest-cluster seed must
+    # still recover the 2 real matches (regression for the J1613 06-22 banding failure).
+    gra = 100.0 + np.array([0.000, 0.004, 0.008, 0.012, 0.016, 0.020])
+    gdec = 20.0 + np.array([0.000, 0.003, -0.002, 0.005, -0.004, 0.001])
+    gaia = SkyCoord(gra * u.deg, gdec * u.deg)
+    off_ra, off_dec = 2.7 / 3600.0, -5.4 / 3600.0        # true common offset (~6" pointing error)
+    cosd = np.cos(np.deg2rad(20.0))
+    dra = [gra[0] - off_ra / cosd, gra[1] - off_ra / cosd]
+    ddec = [gdec[0] - off_dec, gdec[1] - off_dec]
+    for j, (a, b) in enumerate([(3.5, 1.0), (-4.0, -1.0), (1.0, 4.5), (-2.0, 3.0)]):   # spurious
+        dra.append(gra[2 + j] - a / 3600.0 / cosd)
+        ddec.append(gdec[2 + j] - b / 3600.0)
+    det = SkyCoord(np.array(dra) * u.deg, np.array(ddec) * u.deg)
+    di, gi = _match_common_offset(det, gaia)
+    assert 0 in di and 1 in di                            # both real detections recovered
+    assert set(gi) >= {0, 1}
+
+
 def test_solve_one_star_is_translation_only():
     rough = celestial_wcs(180.0, 0.0, crpix=(50.0, 50.0), arcsec_per_pixel=0.75, pa_deg=100.0)
     xy = [(40.0, 45.0)]
