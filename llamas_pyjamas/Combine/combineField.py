@@ -104,6 +104,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--pixscale', type=float, default=0.5, help='output pixel scale, arcsec')
     p.add_argument('--min-coverage', type=int, default=1, dest='min_coverage')
     p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto')
+    p.add_argument('--scale-transparency', action='store_true',
+                   help='scale exposures to a common throughput via the in-field point source(s)')
+    p.add_argument('--scale-radius', type=float, default=2.0,
+                   help='reference aperture radius for transparency, arcsec')
+    p.add_argument('--scale-sources', type=int, default=2,
+                   help='number of reference sources to auto-find for transparency')
+    p.add_argument('--scale-source', nargs=2, type=float, action='append', metavar=('RA', 'DEC'),
+                   help='explicit reference source RA DEC (deg); repeatable, overrides auto-find')
     p.add_argument('-o', '--out', help='output FITS (default: <field>_coadd.fits)')
     p.add_argument('--png', action='store_true', help='also write a quick preview PNG')
     args = p.parse_args(argv)
@@ -118,6 +126,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     sr = build_super_rss(paths, plane=args.plane, channels=args.channels)
     logger.info(sr.summary())
+
+    if args.scale_transparency:
+        from llamas_pyjamas.Combine.transparency import transparency_scales
+        sources = None
+        if args.scale_source:
+            from astropy.coordinates import SkyCoord
+            import astropy.units as u
+            sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
+        scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
+                                     radius_arcsec=args.scale_radius, channels=args.channels)
+        sr.apply_scales(scales)
+        logger.info('after transparency scaling: %s', sr.summary())
+
     lo, hi = _band(sr, args)
     logger.info('window %.1f-%.1f A, channels=%s, units=%s, weight=%s',
                 lo, hi, args.channels or 'all', args.units, args.weight)

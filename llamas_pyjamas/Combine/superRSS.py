@@ -163,6 +163,21 @@ class SuperRSS:
             np.concatenate(vars), np.concatenate(oms), np.concatenate(exps).astype(int),
             np.concatenate(chs), np.concatenate(npix).astype(int))
 
+    def apply_scales(self, scales: Dict[str, float]) -> None:
+        """Apply per-exposure photometric scales in place: flux *= s, var *= s^2, for the scale
+        RATIO needed to reach the target (so it composes with any scale applied at build). Records
+        the new scale on each :class:`ExposureMeta`. ``scales`` maps exposure_id -> target scale;
+        exposures absent from the map are left unchanged."""
+        target = np.array([float(scales.get(e.exposure_id, e.scale)) for e in self.exposures])
+        current = np.array([e.scale for e in self.exposures])
+        factor = np.where(current > 0, target / current, 1.0)
+        for st in self.channels.values():
+            f = factor[st.exposure]
+            st.flux *= f[:, None].astype(st.flux.dtype)
+            st.var *= (f ** 2)[:, None]
+        for i, e in enumerate(self.exposures):
+            e.scale = float(target[i])
+
     def summary(self) -> str:
         chans = ', '.join(f'{c}:{self.channels[c].n_fibres}' for c in self._resolve_channels(None))
         scales = ', '.join(f'{e.scale:.3f}' for e in self.exposures)
