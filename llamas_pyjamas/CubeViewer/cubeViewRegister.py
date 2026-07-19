@@ -385,10 +385,13 @@ if _HAVE_QT:
                     lines.append(f'circle({px:.2f},{py:.2f},5) # color=green tag={{{REG_TAG}}}')
             for p in self.session.pairs:
                 px, py = self._fm_to_image(*p['xy'])
-                colour = 'magenta' if p['forced'] else 'yellow'
+                # Red centroid crosses read clearly on the white star cores and the grey
+                # background (yellow washed out on white); forced positions stay magenta so the
+                # last-resort ones remain visually distinct.
+                colour = 'magenta' if p['forced'] else 'red'
                 shape = 'x' if p['forced'] else 'cross'
-                lines.append(f'point({px:.2f},{py:.2f}) # point={shape} 14 color={colour} '
-                             f'width=2 tag={{{REG_TAG}}}')
+                lines.append(f'point({px:.2f},{py:.2f}) # point={shape} 16 color={colour} '
+                             f'width=3 tag={{{REG_TAG}}}')
             try:
                 self.ds9.delete_region_group(REG_TAG)
                 self.ds9.set_regions('\n'.join(lines))
