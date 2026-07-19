@@ -188,30 +188,71 @@ def _rms_arcsec(wcs, xy, gaia):
     return float(np.sqrt(np.mean(pred.separation(gaia).arcsec ** 2)))
 
 
-def solve_wcs(matched_xy, matched_gaia, rough_wcs, *, refine_rotation=True, max_rot_deg=5.0):
+def solve_wcs(matched_xy, matched_gaia, rough_wcs, *, refine_rotation=False, max_rot_deg=3.0,
+              max_shift_arcsec=15.0, tol_resid_arcsec=2.5):
     """Refine `rough_wcs` from matched fibre-space centroids + Gaia coords.
 
-    Translation always (register_pointing). A rotation is solved (fit_wcs_from_stars) only with
-    >=2 stars AND if it stays within `max_rot_deg` of the rough rotation; otherwise translation
-    only. Returns (wcs, rms_arcsec, rotation_deg, rotation_refined).
+    TRANSLATION ONLY by default, holding the (stable, calibrated) rotation -- the rotator does not
+    change frame-to-frame within a pointing, so re-solving rotation per frame just injects centroid
+    noise and lets dithers disagree. The translation is the robust MEDIAN offset with iterative
+    outlier rejection (`tol_resid_arcsec`), so a single mis-matched star is dropped rather than
+    dragging the solution. Returns None (-> caller falls back to rough) when no consistent set
+    survives or the shift exceeds `max_shift_arcsec` (a gross mis-match).
+
+    ``refine_rotation`` (default OFF, and meant to be solved once per BLOCK, not per frame) allows
+    a full fit within ``max_rot_deg`` of the calibrated rotation.
+
+    Returns (wcs, rms_arcsec, rotation_deg, rotation_refined, n_used) or None.
     """
-    translated = register_pointing(rough_wcs, matched_xy, matched_gaia)
-    rot0 = _axis_pa(rough_wcs)
-    if refine_rotation and len(matched_xy) >= 2:
+    xy = np.atleast_2d(np.asarray(matched_xy, dtype=float))
+    gaia = matched_gaia.reshape((1,)) if matched_gaia.isscalar else matched_gaia
+    pred = rough_wcs.pixel_to_world(xy[:, 0], xy[:, 1])
+    pred = pred.reshape((1,)) if pred.isscalar else pred
+    cosd = np.cos(np.deg2rad(np.atleast_1d(pred.dec.deg)))
+    dra = (np.atleast_1d(gaia.ra.deg) - np.atleast_1d(pred.ra.deg)) * cosd   # true-angle offset
+    ddec = np.atleast_1d(gaia.dec.deg) - np.atleast_1d(pred.dec.deg)
+    keep = np.ones(len(xy), dtype=bool)
+    for _ in range(3):                                         # iterative outlier rejection
+        mra, mdec = np.median(dra[keep]), np.median(ddec[keep])
+        resid = np.hypot(dra - mra, ddec - mdec) * 3600.0
+        nk = resid < tol_resid_arcsec
+        if nk.sum() == 0 or (nk == keep).all():
+            keep = nk if nk.sum() else keep
+            break
+        keep = nk
+    if keep.sum() == 0:
+        logger.warning('No self-consistent matched stars; falling back to rough')
+        return None
+    mra, mdec = float(np.median(dra[keep])), float(np.median(ddec[keep]))
+    shift = float(np.hypot(mra, mdec)) * 3600.0                # deg -> arcsec
+    if shift > max_shift_arcsec:
+        logger.warning('Solved shift %.1f" exceeds cap %.1f"; falling back to rough',
+                       shift, max_shift_arcsec)
+        return None
+
+    wcs = rough_wcs.deepcopy()
+    dec0 = rough_wcs.wcs.crval[1]
+    wcs.wcs.crval = [rough_wcs.wcs.crval[0] + mra / np.cos(np.deg2rad(dec0)),
+                     rough_wcs.wcs.crval[1] + mdec]
+    n_used = int(keep.sum())
+    rms = _rms_arcsec(wcs, [tuple(p) for p in xy[keep]], gaia[keep])
+
+    if refine_rotation and n_used >= 2:                       # block-level use; off per-frame
         try:
-            full = fit_wcs_from_stars(matched_xy, matched_gaia)
-            drot = ((_axis_pa(full) - rot0 + 180) % 360) - 180
+            full = fit_wcs_from_stars([tuple(p) for p in xy[keep]], gaia[keep])
+            drot = ((_axis_pa(full) - _axis_pa(rough_wcs) + 180) % 360) - 180
             if abs(drot) <= max_rot_deg:
-                return full, _rms_arcsec(full, matched_xy, matched_gaia), _axis_pa(full), True
+                return (full, _rms_arcsec(full, [tuple(p) for p in xy[keep]], gaia[keep]),
+                        _axis_pa(full), True, n_used)
             logger.warning('Rotation solve %.2f deg exceeds cap %.2f; translation only',
                            drot, max_rot_deg)
-        except Exception as exc:                        # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             logger.warning('Rotation fit failed (%s); translation only', exc)
-    return translated, _rms_arcsec(translated, matched_xy, matched_gaia), rot0, False
+    return wcs, rms, _axis_pa(wcs), False, n_used
 
 
 def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
-                      refine_rotation=True, max_rot_deg=5.0, min_stars=1):
+                      refine_rotation=False, max_rot_deg=3.0, max_shift_arcsec=15.0, min_stars=1):
     """Register one exposure (all channel siblings) and write refined per-fibre RA/DEC in place.
 
     Detection uses the green channel (or the first sibling); the solved WCS is applied to every
@@ -251,18 +292,22 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
             det_sky = wcs.pixel_to_world(np.array([s.x for s in sources]),
                                          np.array([s.y for s in sources]))
             di, gi = _match_common_offset(det_sky, gaia)
+            solved = None
             if len(di) >= min_stars:
-                m_xy = [det_xy[k] for k in di]
-                m_gaia = gaia[gi]
-                wcs, rms, rot_used, rot_refined = solve_wcs(
-                    m_xy, m_gaia, wcs, refine_rotation=refine_rotation, max_rot_deg=max_rot_deg)
-                n_stars = len(di)
+                solved = solve_wcs([det_xy[k] for k in di], gaia[gi], wcs,
+                                   refine_rotation=refine_rotation, max_rot_deg=max_rot_deg,
+                                   max_shift_arcsec=max_shift_arcsec)
+            if solved is not None:
+                wcs, rms, rot_used, rot_refined, n_stars = solved
                 prov = {'method': 'astrometric', 'tier': 'gaia', 'refined': True,
                         'pa_offset': float(IFU_PA_OFFSET), 'catalog': 'GaiaDR3',
                         'rms': float(rms), 'nstars': int(n_stars)}
-                logger.info('%s: Tier-1 Gaia solve, %d stars, RMS %.2f", rot %s',
+                logger.info('%s: Tier-1 Gaia, %d stars, RMS %.2f", rot %s',
                             rss_path, n_stars, rms, 'refined' if rot_refined else 'held')
             else:
+                # keep the rough WCS (Tier 3); do not corrupt the frame with a bad match
+                wcs = celestial_wcs(ra, dec, crpix=(cx + 1.0, cy + 1.0),
+                                    arcsec_per_pixel=ARCSEC_PER_FIBRE, pa_deg=pa)
                 logger.info('%s: no confident Gaia match; keeping rough (Tier 3)', rss_path)
         else:
             logger.info('%s: no sources or no Gaia; keeping rough (Tier 3)', rss_path)

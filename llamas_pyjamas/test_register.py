@@ -74,9 +74,27 @@ def test_solve_one_star_is_translation_only():
     p = rough.pixel_to_world(40.0, 45.0)
     gaia = SkyCoord((p.ra.deg + 5 / 3600.0 / np.cos(np.deg2rad(0))) * u.deg,
                     (p.dec.deg + 2 / 3600.0) * u.deg)
-    wcs, rms, rot, refined = solve_wcs(xy, gaia, rough)
-    assert refined is False                            # one star can't solve rotation
+    wcs, rms, rot, refined, n = solve_wcs(xy, gaia, rough)
+    assert refined is False and n == 1                 # translation only (rotation held)
     assert wcs.pixel_to_world(40.0, 45.0).separation(gaia).arcsec < 0.05
+
+
+def test_solve_rejects_gross_mismatch():
+    rough = celestial_wcs(180.0, 0.0, crpix=(50.0, 50.0), arcsec_per_pixel=0.75, pa_deg=100.0)
+    p = rough.pixel_to_world(40.0, 45.0)
+    far = SkyCoord((p.ra.deg + 40 / 3600.0) * u.deg, p.dec.deg * u.deg)   # 40" mismatch
+    assert solve_wcs([(40.0, 45.0)], far, rough, max_shift_arcsec=15.0) is None
+
+
+def test_solve_drops_outlier_star():
+    rough = celestial_wcs(180.0, 0.0, crpix=(50.0, 50.0), arcsec_per_pixel=0.75, pa_deg=100.0)
+    xy = [(40.0, 45.0), (60.0, 55.0), (50.0, 60.0)]
+    preds = rough.pixel_to_world(np.array([p[0] for p in xy]), np.array([p[1] for p in xy]))
+    # all shifted +5"; the 3rd star is a bad match (extra 20" off) -> should be dropped
+    ra = preds.ra.deg + np.array([5, 5, 25]) / 3600.0
+    dec = preds.dec.deg + np.array([0, 0, 0]) / 3600.0
+    wcs, rms, rot, refined, n = solve_wcs(xy, SkyCoord(ra * u.deg, dec * u.deg), rough)
+    assert n == 2 and rms < 0.3                         # outlier rejected, clean fit on the 2 good
 
 
 def test_solve_rotation_cap_gate():
@@ -84,10 +102,10 @@ def test_solve_rotation_cap_gate():
     xy = [(40.0, 45.0), (60.0, 55.0)]
     gaia = rough.pixel_to_world(np.array([40.0, 60.0]), np.array([45.0, 55.0]))
     # cap 0 -> even a tiny fitted rotation is rejected -> translation only
-    _, _, _, refined0 = solve_wcs(xy, gaia, rough, max_rot_deg=0.0)
+    _, _, _, refined0, _ = solve_wcs(xy, gaia, rough, refine_rotation=True, max_rot_deg=0.0)
     assert refined0 is False
     # generous cap -> a two-star rotation solve is accepted
-    _, _, _, refined1 = solve_wcs(xy, gaia, rough, max_rot_deg=30.0)
+    _, _, _, refined1, _ = solve_wcs(xy, gaia, rough, refine_rotation=True, max_rot_deg=30.0)
     assert refined1 is True
 
 
