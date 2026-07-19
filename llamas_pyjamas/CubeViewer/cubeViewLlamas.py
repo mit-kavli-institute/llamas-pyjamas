@@ -337,22 +337,26 @@ class CubeViewerWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             from llamas_pyjamas.Combine.superRSS import build_super_rss
-            from llamas_pyjamas.Combine.cube import combine_cube
+            from llamas_pyjamas.Combine.cube import combine_field_cubes
             from llamas_pyjamas.Combine.transparency import transparency_scales
-            sr = build_super_rss(paths, channels=['green'])
+            from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+            sr = build_super_rss(paths)             # all channels
             try:                                   # transparency is best-effort (needs a bright src)
-                sr.apply_scales(transparency_scales(sr, channels=['green']))
+                sr.apply_scales(transparency_scales(sr))
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
-            cube = combine_cube(sr, 'green', units='sb', weighting='ivar')
+            cubes = combine_field_cubes(sr, units='sb', weighting='ivar')
+            scene = CoaddCubeScene(cubes)
         except Exception as exc:                   # noqa: BLE001
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, 'Combine field', f'Could not build the cube:\n{exc}')
             return
         QApplication.restoreOverrideCursor()
-        self._open_cube_scene(cube, f"{cube.meta.get('FIELD', 'field')} cube (green, SB)")
+        self._path = None
+        self._open_cube_scene(scene, f"{scene.object or 'field'} combined cube (SB)")
         self.statusBar().showMessage(
-            f'Combined {len(paths)} exposures -> cube {cube.data.shape} (nw,ny,nx)')
+            f'Combined {len(paths)} exposures -> {", ".join(scene.channels)} cubes, '
+            f'{scene.cube.data.shape[2]}x{scene.cube.data.shape[1]} spaxels')
 
     def open_cube(self) -> None:
         """Open a cube FITS previously written by the combine step."""
@@ -370,14 +374,13 @@ class CubeViewerWindow(QMainWindow):
             return
         QApplication.restoreOverrideCursor()
         self._path = path
-        self._open_cube_scene(scene.cube, os.path.basename(path), scene=scene)
+        self._open_cube_scene(scene, os.path.basename(path))
 
-    def _open_cube_scene(self, cube, label, scene=None) -> None:
-        """Activate a cube scene (from a freshly-built or opened cube) and display it."""
-        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+    def _open_cube_scene(self, scene, label) -> None:
+        """Activate a cube scene and display it."""
         self._header, self._standard = None, None
         self._update_sensfunc_action()
-        self._activate_scene(scene or CoaddCubeScene(cube), label, allow_wcs=False)
+        self._activate_scene(scene, label, allow_wcs=False)
         try:
             self.display()
         except Exception:                          # noqa: BLE001

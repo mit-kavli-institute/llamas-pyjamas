@@ -122,14 +122,39 @@ def _resample_fibres(st, wl, units):
     return x, V, bad
 
 
+def field_grid(super_rss, channels=None, *, pixscale=0.5, kernel='gaussian', kernel_fwhm=0.9,
+               center=None):
+    """A common output spatial grid (wcs, ny, nx) covering all requested channels' fibres, so
+    per-channel cubes share spaxels (a spaxel is the same sky position across blue/green/red)."""
+    chans = [c for c in super_rss.channels if channels is None or c in channels]
+    ra = np.concatenate([super_rss.channels[c].ra for c in chans])
+    dec = np.concatenate([super_rss.channels[c].dec for c in chans])
+    r, _ = _kernel(kernel, kernel_fwhm, pixscale)
+    wcs, ny, nx, _, _ = make_output_grid(ra, dec, pixscale, r, center)
+    return wcs, ny, nx
+
+
+def combine_field_cubes(super_rss, *, channels=None, pixscale=0.5, kernel='gaussian',
+                        kernel_fwhm=0.9, **kwargs) -> Dict[str, 'CoaddCube']:
+    """Build a cube for every channel on ONE shared spatial grid. Returns {channel: CoaddCube},
+    so a viewer can show the full blue+green+red spectrum at each spaxel."""
+    chans = [c for c in ('blue', 'green', 'red')
+             if c in super_rss.channels and (channels is None or c in channels)]
+    grid = field_grid(super_rss, chans, pixscale=pixscale, kernel=kernel, kernel_fwhm=kernel_fwhm,
+                      center=kwargs.pop('center', None))
+    return {c: combine_cube(super_rss, c, pixscale=pixscale, kernel=kernel,
+                            kernel_fwhm=kernel_fwhm, grid=grid, **kwargs) for c in chans}
+
+
 def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pixscale=0.5,
                  kernel='gaussian', kernel_fwhm=0.9, weighting='ivar', units='sb',
-                 min_coverage=1, center=None) -> CoaddCube:
+                 min_coverage=1, center=None, grid=None) -> CoaddCube:
     """Resample one channel of a :class:`SuperRSS` into an (RA, DEC, wave) cube.
 
     ``units='sb'`` (default) is intensity-conserving surface brightness; ``'flux'`` co-adds flux.
     ``weighting``: ivar (default) | uniform | exptime. The wave grid defaults to the channel's
-    range at its median native dispersion. Spaxels below ``min_coverage`` fibres are NaN."""
+    range at its median native dispersion. Spaxels below ``min_coverage`` fibres are NaN.
+    ``grid`` (wcs, ny, nx) forces a shared spatial grid (see :func:`combine_field_cubes`)."""
     if channel not in super_rss.channels:
         raise ValueError(f'channel {channel!r} not in super-RSS ({list(super_rss.channels)})')
     st = super_rss.channels[channel]
@@ -149,7 +174,14 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
 
     # spatial kernel matrix S (n_spaxel x n_fibre), wavelength-independent
     r, kern = _kernel(kernel, kernel_fwhm, pixscale)
-    wcs2, ny, nx, px, py = make_output_grid(st.ra, st.dec, pixscale, r, center)
+    if grid is None:
+        wcs2, ny, nx, px, py = make_output_grid(st.ra, st.dec, pixscale, r, center)
+    else:                                                # shared grid: project this channel onto it
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        wcs2, ny, nx = grid
+        px, py = wcs2.world_to_pixel(SkyCoord(st.ra * u.deg, st.dec * u.deg))
+        px, py = np.asarray(px, float), np.asarray(py, float)
     r2 = r * r
     rows, cols, vals = [], [], []
     for i in range(st.n_fibres):

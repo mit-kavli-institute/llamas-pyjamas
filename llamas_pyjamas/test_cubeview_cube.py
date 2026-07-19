@@ -17,23 +17,23 @@ from llamas_pyjamas.Combine.cube import CoaddCube
 from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
 
 
-def _cube(nw=5, ny=10, nx=10):
-    wave = 5000.0 + np.arange(nw)
+def _cube(nw=5, ny=10, nx=10, channel='green', wave0=5000.0, peak=9.0):
+    wave = wave0 + np.arange(nw)
     data = np.zeros((nw, ny, nx), float)
-    data[:, 4, 4] = np.array([1, 2, 9, 2, 1], float)      # a line at spaxel (iy=4, ix=4)
+    data[:, 4, 4] = np.array([1, 2, peak, 2, 1], float)   # a line at spaxel (iy=4, ix=4)
     var = np.ones((nw, ny, nx))
     coverage = np.full((ny, nx), 3, int)
     coverage[0, 0] = 0                                     # one uncovered corner
     nexp = np.full((ny, nx), 2, int)
     w = WCS(naxis=3)
     w.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
-    w.wcs.crval = [150.0, 20.0, 5000.0]
+    w.wcs.crval = [150.0, 20.0, wave0]
     w.wcs.crpix = [5.0, 5.0, 1.0]
     w.wcs.cdelt = [-0.5 / 3600, 0.5 / 3600, 1.0]
     w.wcs.cunit = ['deg', 'deg', 'Angstrom']
     return CoaddCube(data=data, var=var, wave=wave, coverage=coverage, nexp=nexp, wcs=w,
                      bunit='erg/s/cm2/Angstrom/arcsec2',
-                     meta={'CHANNEL': 'green', 'FIELD': 'T', 'PIXSCALE': 0.5})
+                     meta={'CHANNEL': channel, 'FIELD': 'T', 'PIXSCALE': 0.5})
 
 
 def test_scene_basics_and_channels():
@@ -73,6 +73,22 @@ def test_elements_within_and_region():
     many = sc.elements_within(5, 5, 1.5)
     assert (4, 4) in many and len(many) > 1
     assert 'box(5,5' in sc.region_for([(4, 4)])
+
+
+def test_multichannel_scene_shows_all_channels():
+    # green + red cubes on the same spatial grid -> a spaxel returns both spectra (full coverage)
+    cubes = {'green': _cube(channel='green', wave0=5000.0, peak=9.0),
+             'red': _cube(channel='red', wave0=6000.0, peak=5.0)}
+    sc = CoaddCubeScene(cubes)
+    assert sc.channels == ('green', 'red')
+    sp = sc.spectra_at(5, 5)
+    assert len(sp) == 2 and {s.channel for s in sp} == {'green', 'red'}
+    assert np.isclose(max(s.flux.max() for s in sp if s.channel == 'green'), 9.0)
+    # white-light collapse over the union spans both channels' contributions
+    lo, hi = sc.wavelength_range()
+    assert lo <= 5000.0 and hi >= 6004.0
+    img, wcs, meta = sc.collapse(lo, hi)
+    assert set(meta['contributions']) == {'green', 'red'}
 
 
 def test_from_fits_roundtrip():
