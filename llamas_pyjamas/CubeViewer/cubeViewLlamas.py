@@ -284,6 +284,19 @@ class CubeViewerWindow(QMainWindow):
         for action in self.wcs_file_actions:
             action.setEnabled(False)
 
+        # Combine: stack a field's dithers into a cube and inspect it (Phase 4).
+        combine_menu = self.menuBar().addMenu('&Combine')
+        combine_menu.setToolTipsVisible(True)
+        cube_action = QAction('Combine field into &cube…', self)
+        cube_action.setToolTip('Stack a field\'s registered dithers into an (RA,DEC,wave) cube '
+                               '(green, surface brightness) and open it for spaxel picking')
+        cube_action.triggered.connect(self.combine_field_cube)
+        combine_menu.addAction(cube_action)
+        open_cube_action = QAction('&Open combined cube…', self)
+        open_cube_action.setToolTip('Open a cube FITS previously written by the combine step')
+        open_cube_action.triggered.connect(self.open_cube)
+        combine_menu.addAction(open_cube_action)
+
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
                        self.display_button, self.pick_box, self.radius_spin,
@@ -311,6 +324,88 @@ class CubeViewerWindow(QMainWindow):
         if dialog.exec() and dialog.chosen_path:
             self.load(dialog.chosen_path)
 
+    def combine_field_cube(self) -> None:
+        """Stack a field's registered dithers into a cube and open it for spaxel picking."""
+        from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
+        dialog = ObslogDialog(self._start_dir(), multi=True,
+                              title='Combine field into cube (pick the dithers)', parent=self)
+        if not dialog.exec():
+            return
+        paths = getattr(dialog, 'chosen_files', None) or []
+        if not paths:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            from llamas_pyjamas.Combine.superRSS import build_super_rss
+            from llamas_pyjamas.Combine.cube import combine_cube
+            from llamas_pyjamas.Combine.transparency import transparency_scales
+            sr = build_super_rss(paths, channels=['green'])
+            try:                                   # transparency is best-effort (needs a bright src)
+                sr.apply_scales(transparency_scales(sr, channels=['green']))
+            except Exception as exc:               # noqa: BLE001
+                logger.warning('transparency scaling skipped: %s', exc)
+            cube = combine_cube(sr, 'green', units='sb', weighting='ivar')
+        except Exception as exc:                   # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Combine field', f'Could not build the cube:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        self._open_cube_scene(cube, f"{cube.meta.get('FIELD', 'field')} cube (green, SB)")
+        self.statusBar().showMessage(
+            f'Combined {len(paths)} exposures -> cube {cube.data.shape} (nw,ny,nx)')
+
+    def open_cube(self) -> None:
+        """Open a cube FITS previously written by the combine step."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Open combined cube', self._start_dir(), 'FITS files (*.fits);;All files (*)')
+        if not path:
+            return
+        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            scene = CoaddCubeScene.from_fits(path)
+        except Exception as exc:                   # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Open cube', f'Could not open cube:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        self._path = path
+        self._open_cube_scene(scene.cube, os.path.basename(path), scene=scene)
+
+    def _open_cube_scene(self, cube, label, scene=None) -> None:
+        """Activate a cube scene (from a freshly-built or opened cube) and display it."""
+        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+        self._header, self._standard = None, None
+        self._update_sensfunc_action()
+        self._activate_scene(scene or CoaddCubeScene(cube), label, allow_wcs=False)
+        try:
+            self.display()
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _activate_scene(self, scene, label: str, *, allow_wcs: bool = True) -> None:
+        """Wire a scene (RSS or cube) into the window: picker, panel, channel boxes, wavelength
+        range and controls. Shared by :meth:`load` and the Combine menu."""
+        self.scene = scene
+        self.picker.set_scene(scene)
+        self.panel.set_spectra([])
+        self._current_spectra = []
+        # Default to the flux-calibrated view when the scene carries a FLAM/calibrated plane.
+        self.panel.set_calibrated_default(getattr(scene, 'has_flam', False))
+
+        for channel, box in self.collapse_boxes.items():
+            present = channel in scene.channels
+            box.setEnabled(present)
+            box.setChecked(present)
+
+        self.file_label.setText(label)
+        self.file_label.setStyleSheet('')
+        self._set_enabled(True)
+        for action in self.wcs_file_actions:     # registration applies to an RSS, not a cube
+            action.setEnabled(allow_wcs)
+        self._reset_wave_range()
+        self._on_radius_changed(self.radius_spin.value())
+
     def load(self, path: str) -> None:
         """Open an RSS and every channel sibling beside it."""
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -323,26 +418,8 @@ class CubeViewerWindow(QMainWindow):
             return
         QApplication.restoreOverrideCursor()
 
-        self.scene = scene
         self._path = path
-        self.picker.set_scene(scene)
-        self.panel.set_spectra([])
-        self._current_spectra = []
-        # Default to the flux-calibrated view when the file carries a FLAM plane.
-        self.panel.set_calibrated_default(getattr(scene, 'has_flam', False))
-
-        for channel, box in self.collapse_boxes.items():
-            present = channel in scene.channels
-            box.setEnabled(present)
-            box.setChecked(present)
-
-        self.file_label.setText(os.path.basename(path))
-        self.file_label.setStyleSheet('')
-        self._set_enabled(True)
-        for action in self.wcs_file_actions:
-            action.setEnabled(True)
-        self._reset_wave_range()
-        self._on_radius_changed(self.radius_spin.value())
+        self._activate_scene(scene, os.path.basename(path))
 
         # Is this a standard? Crossmatch the header so the sensfunc action knows the reference.
         self._header, self._standard = self._identify_standard(path)
