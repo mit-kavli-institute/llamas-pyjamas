@@ -56,6 +56,66 @@ def _fibre_sky_table(fiber_ids, benchsides, primary_hdr):
     return ras, decs, xs, ys, prov
 
 
+def _fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov):
+    """Build the FIBERWCS binary-table HDU (per-fibre x/y + RA/DEC + astrometry provenance)."""
+    def _num(v):                                        # FITS headers can't hold NaN
+        return float(v) if np.isfinite(v) else -1.0
+    hdu = fits.BinTableHDU.from_columns([
+        fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
+        fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
+        fits.Column(name='X_FIBERMAP', format='D', array=np.asarray(xs, dtype=float)),
+        fits.Column(name='Y_FIBERMAP', format='D', array=np.asarray(ys, dtype=float)),
+        fits.Column(name='RA', format='D', array=np.asarray(ras, dtype=float)),
+        fits.Column(name='DEC', format='D', array=np.asarray(decs, dtype=float)),
+    ])
+    h = hdu.header
+    h['EXTNAME'] = 'FIBERWCS'
+    h['WCSMETH'] = (prov['method'], 'Astrometry method (rough-header/astrometric)')
+    h['WCSTIER'] = (prov['tier'], 'Registration tier')
+    h['WCSREFIN'] = (bool(prov['refined']), 'True if refined against a catalog')
+    h['PAOFFSET'] = (_num(prov['pa_offset']), 'PA offset applied to TEL_ROT [deg]')
+    h['WCSCAT'] = (prov['catalog'], 'Reference catalog (blank if none)')
+    h['WCSRMS'] = (_num(prov['rms']), 'Astrometric residual RMS [arcsec], -1=n/a')
+    h['WCSNSTAR'] = (int(prov['nstars']), 'Stars used in the solution')
+    h['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
+    return hdu
+
+
+def apply_fibre_astrometry(hdul, ras=None, decs=None, xs=None, ys=None, prov=None):
+    """Write per-fibre astrometry onto an open RSS HDUList: fill FIBERMAP RA/DEC, (re)build the
+    FIBERWCS extension, and set FIBAREA. Reusable by generate_rss (rough, at build), the patch
+    below, and Phase-3 registration (pass a refined ras/decs/prov to overwrite in place).
+
+    If ``ras``/``decs`` are not supplied, the rough solution is computed from the primary header
+    pointing + the FIBERMAP fibre ids. Returns the provenance dict written.
+    """
+    fmap = hdul['FIBERMAP'].data
+    fiber_ids = list(fmap['FIBER_ID'])
+    benchsides = list(fmap['BENCHSIDE'])
+    if ras is None or decs is None:
+        ras, decs, xs, ys, prov = _fibre_sky_table(fiber_ids, benchsides, hdul[0].header)
+    hdul['FIBERMAP'].data['RA'][:] = np.asarray(ras, dtype=float)
+    hdul['FIBERMAP'].data['DEC'][:] = np.asarray(decs, dtype=float)
+    names = [h.name for h in hdul]
+    if 'FIBERWCS' in names:
+        del hdul[names.index('FIBERWCS')]
+    hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov))
+    hdul[0].header['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
+    return prov
+
+
+def patch_rss_astrometry(path):
+    """Patch an existing RSS file in place: fill FIBERMAP RA/DEC + (re)build FIBERWCS + FIBAREA
+    from the rough header WCS. Idempotent (re-run overwrites). Returns the provenance dict."""
+    with fits.open(path, mode='update') as hdul:
+        if 'FIBERMAP' not in [h.name for h in hdul]:
+            logger.warning('patch_rss_astrometry: %s has no FIBERMAP; skipped', path)
+            return None
+        prov = apply_fibre_astrometry(hdul)
+        hdul.flush()
+    return prov
+
+
 def skysub_extname(hdul):
     """Name of the sky-subtracted science plane in an RSS HDUList.
 
@@ -622,28 +682,8 @@ class RSSgeneration:
                 # Extension - FIBERWCS: fibre-map (x,y) + plate-solved RA/DEC + astrometry
                 # provenance. Kept separate from FIBERMAP so the astrometry can be re-solved and
                 # overwritten in place (Phase 3) without disturbing the base fibre map.
-                fiberwcs_hdu = fits.BinTableHDU.from_columns([
-                    fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
-                    fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
-                    fits.Column(name='X_FIBERMAP', format='D', array=np.array(fiber_x)),
-                    fits.Column(name='Y_FIBERMAP', format='D', array=np.array(fiber_y)),
-                    fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
-                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs)),
-                ])
-                # FITS headers cannot hold NaN; use -1 as the "not measured" sentinel.
-                def _num(v):
-                    return float(v) if np.isfinite(v) else -1.0
-                fh = fiberwcs_hdu.header
-                fh['EXTNAME'] = 'FIBERWCS'
-                fh['WCSMETH'] = (_sky_prov['method'], 'Astrometry method (rough-header/astrometric)')
-                fh['WCSTIER'] = (_sky_prov['tier'], 'Registration tier')
-                fh['WCSREFIN'] = (_sky_prov['refined'], 'True if refined against a catalog')
-                fh['PAOFFSET'] = (_num(_sky_prov['pa_offset']), 'PA offset applied to TEL_ROT [deg]')
-                fh['WCSCAT'] = (_sky_prov['catalog'], 'Reference catalog (blank if none)')
-                fh['WCSRMS'] = (_num(_sky_prov['rms']), 'Astrometric residual RMS [arcsec], -1=n/a')
-                fh['WCSNSTAR'] = (int(_sky_prov['nstars']), 'Stars used in the solution')
-                fh['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
-                hdul.append(fiberwcs_hdu)
+                hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, fiber_ras, fiber_decs,
+                                          fiber_x, fiber_y, _sky_prov))
                 self.logger.info(f"Added FIBERWCS ({_sky_prov['method']}, "
                                  f"{int(np.isfinite(fiber_ras).sum())} fibres with RA/DEC)")
                 
