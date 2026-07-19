@@ -20,6 +20,7 @@ multi-frame relative path is a follow-up increment.
 """
 
 import logging
+import os
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -168,6 +169,20 @@ def _axis_pa(wcs):
     return c0.position_angle(wcs.pixel_to_world(1.0, 0.0)).deg
 
 
+def _image_wcs_from_fibremap(fm_wcs, step):
+    """Convert a fibre-map WCS (1 unit = one fibre spacing) to a white-light *image* WCS, where
+    one image pixel = ``step`` fibre-map units (image pixel p_1idx -> fibre-map (p-1)*step). Exact:
+    CD_img = CD_fm*step, CRPIX_img = (CRPIX_fm-1)/step + 1, CRVAL unchanged."""
+    from astropy.wcs import WCS as _WCS
+    out = _WCS(naxis=2)
+    out.wcs.ctype = list(fm_wcs.wcs.ctype)
+    out.wcs.cunit = ['deg', 'deg']
+    out.wcs.crval = list(fm_wcs.wcs.crval)
+    out.wcs.crpix = [(c - 1.0) / step + 1.0 for c in fm_wcs.wcs.crpix]
+    out.wcs.cd = fm_wcs.pixel_scale_matrix * step
+    return out
+
+
 def _rms_arcsec(wcs, xy, gaia):
     pred = wcs.pixel_to_world(np.array([p[0] for p in xy]), np.array([p[1] for p in xy]))
     return float(np.sqrt(np.mean(pred.separation(gaia).arcsec ** 2)))
@@ -268,6 +283,23 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
                 apply_fibre_astrometry(hh, ras=ras, decs=decs, xs=sx, ys=sy, prov=prov)
                 hh.flush()
             written.append(path)
+
+        # Update the exposure's white-light image WCS (what the user inspects in DS9) to match
+        # the refined solution. Only the pipeline product; the external quicklook is left alone.
+        import glob as _glob
+        prefix = os.path.basename(det_path).split('_RSS_')[0]
+        for wl in _glob.glob(os.path.join(os.path.dirname(det_path),
+                                          f'{prefix}_whitelight_fullpipeline.fits')):
+            with fits.open(wl, mode='update') as wh:
+                for ext in wh:
+                    if getattr(ext, 'data', None) is None or ext.name not in ('BLUE', 'GREEN', 'RED'):
+                        continue
+                    step = 1.0 / float(ext.header.get('PIXUNIT', 10))
+                    ext.header.update(_image_wcs_from_fibremap(wcs, step).to_header())
+                    ext.header['WCSMETH'] = prov['method']
+                    ext.header['WCSREFIN'] = bool(prov['refined'])
+                wh.flush()
+            written.append(wl)
 
     return RegistrationResult(tier=prov['tier'], method=prov['method'], refined=prov['refined'],
                               n_stars=n_stars, rms_arcsec=rms, rotation_deg=rot_used,

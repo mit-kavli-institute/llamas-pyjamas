@@ -11,7 +11,8 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 
-from llamas_pyjamas.Utils.register import (detect_fibre_sources, _match_common_offset, solve_wcs)
+from llamas_pyjamas.Utils.register import (detect_fibre_sources, _match_common_offset, solve_wcs,
+                                           _image_wcs_from_fibremap)
 from llamas_pyjamas.Utils.wcsLlamas import celestial_wcs
 
 
@@ -88,6 +89,18 @@ def test_solve_rotation_cap_gate():
     # generous cap -> a two-star rotation solve is accepted
     _, _, _, refined1 = solve_wcs(xy, gaia, rough, max_rot_deg=30.0)
     assert refined1 is True
+
+
+def test_image_wcs_from_fibremap_matches():
+    # image pixel p (1-idx) -> fibre-map (p-1)*step, so the image WCS must reproduce the fibre-map
+    # WCS evaluated at that fibre-map coordinate.
+    fm = celestial_wcs(150.0, -20.0, crpix=(23.0, 22.0), arcsec_per_pixel=0.75, pa_deg=100.0)
+    step = 0.1                                          # hex render: 10 px per fibre unit
+    img = _image_wcs_from_fibremap(fm, step)
+    for px, py in [(0.0, 0.0), (231.0, 221.0), (100.0, 50.0)]:
+        c_img = img.pixel_to_world(px, py)
+        c_fm = fm.pixel_to_world(px * step, py * step)
+        assert c_img.separation(c_fm).arcsec < 1e-4, (px, py)
 
 
 if __name__ == '__main__':
