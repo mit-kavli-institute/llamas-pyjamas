@@ -75,6 +75,9 @@ class Spectrum:
     weight: float = 1.0
     mask: Optional[np.ndarray] = None
     flam: Optional[np.ndarray] = None
+    #: False when there is no instrumental (counts) plane -- e.g. a stacked cube built only from the
+    #: calibrated (FLAM) plane, where ``flux`` mirrors ``flam``. Lets the panel grey out "Counts".
+    has_counts: bool = True
 
     @property
     def has_flam(self) -> bool:

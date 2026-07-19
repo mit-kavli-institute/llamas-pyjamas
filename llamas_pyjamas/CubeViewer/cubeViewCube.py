@@ -94,8 +94,10 @@ class CoaddCubeScene(SpectralScene):
         if cube.coverage[iy, ix] <= 0:
             return None
         val = np.asarray(cube.data[:, iy, ix], dtype=float)
+        calibrated = 'erg' in cube.bunit                  # cube built from FLAM -> no counts plane
         return Spectrum(wave=cube.wave, flux=val, channel=channel, label=f'spaxel ({ix},{iy})',
-                        mask=~np.isfinite(val), flam=(val if 'erg' in cube.bunit else None))
+                        mask=~np.isfinite(val), flam=(val if calibrated else None),
+                        has_counts=not calibrated)
 
     def spectra_at(self, x_pix: float, y_pix: float) -> List[Spectrum]:
         e = self._spaxel(x_pix, y_pix)

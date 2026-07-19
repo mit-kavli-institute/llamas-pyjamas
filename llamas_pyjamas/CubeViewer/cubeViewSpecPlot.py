@@ -162,9 +162,13 @@ class SpectrumPanel(QWidget):
         # Offer the flux modes only when the selection carries a FLAM plane; if a flux mode was
         # selected and the new selection is uncalibrated, fall back to Counts.
         have_flam = self._have_flam()
+        have_counts = self._have_counts()
         self._set_flux_modes_enabled(have_flam)
-        if not have_flam and self.mode_combo.currentIndex() != 0:
-            self.mode_combo.setCurrentIndex(0)      # triggers a replot via currentIndexChanged
+        self._set_counts_mode_enabled(have_counts)
+        if not have_counts and self.mode_combo.currentIndex() == 0 and have_flam:
+            self.mode_combo.setCurrentIndex(1)      # no counts plane -> a flux mode
+        elif not have_flam and self.mode_combo.currentIndex() != 0:
+            self.mode_combo.setCurrentIndex(0)      # no flux plane -> counts
         self._replot()
 
     def set_calibrated_default(self, calibrated: bool) -> None:
@@ -180,12 +184,24 @@ class SpectrumPanel(QWidget):
             if item is not None:
                 item.setEnabled(enabled)
 
+    def _set_counts_mode_enabled(self, enabled: bool) -> None:
+        """Enable/disable the Counts entry (index 0) -- greyed out for a calibrated-only scene
+        (a stacked cube) that has no instrumental counts plane."""
+        item = self.mode_combo.model().item(0)
+        if item is not None:
+            item.setEnabled(enabled)
+
+    def _have_counts(self) -> bool:
+        return bool(self._spectra) and all(getattr(s, 'has_counts', True) for s in self._spectra)
+
     def _current_mode(self):
         """(quantity, log) for the selected y-mode, falling back to counts if flux is picked
         without a FLAM plane available."""
         _label, quantity, log = _Y_MODES[self.mode_combo.currentIndex()]
         if quantity in ('flam', 'fnu') and not self._have_flam():
             return 'counts', False
+        if quantity == 'counts' and not self._have_counts() and self._have_flam():
+            return 'flam', False                     # calibrated-only scene (cube): no counts plane
         return quantity, log
 
     def _have_flam(self) -> bool:

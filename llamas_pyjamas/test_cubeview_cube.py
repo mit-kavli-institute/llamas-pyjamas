@@ -91,6 +91,17 @@ def test_multichannel_scene_shows_all_channels():
     assert set(meta['contributions']) == {'green', 'red'}
 
 
+def test_calibrated_cube_has_no_counts_plane():
+    sc = CoaddCubeScene(_cube())                      # bunit 'erg/.../arcsec2' -> calibrated
+    sp = sc.spectra_at(5, 5)[0]
+    assert sp.has_flam and sp.has_counts is False     # panel greys out Counts for a FLAM cube
+
+    cube = _cube()
+    cube.bunit = 'counts/arcsec2'                      # instrumental cube -> counts, no flam
+    sp2 = CoaddCubeScene(cube).spectra_at(5, 5)[0]
+    assert sp2.has_counts is True and not sp2.has_flam
+
+
 def test_from_fits_roundtrip():
     cube = _cube()
     with tempfile.TemporaryDirectory() as d:
