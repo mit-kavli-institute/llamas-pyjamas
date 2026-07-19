@@ -43,11 +43,11 @@ ARCSEC_PER_FIBRE = 0.75
 #: PanSTARRS on the J1613 field.) False would give a standard N-up/E-left (det<0) frame.
 IFU_MIRRORED = True
 
-#: Degrees added to the header rotator angle (TEL_ROT/TEL_PA) to get the WCS rotation, so that
-#: the fibre +x axis lands at sky PA = TEL_ROT. Calibrated from ONE field (J1613, TEL_ROT=212) ->
-#: provisional, +-3 deg, and the sign of the TEL_ROT dependence is unconfirmed. Master knob for
-#: the eventual TCS fix (config ``wcs_pa_offset``).
-IFU_PA_OFFSET = 23.05
+#: Degrees added to the header rotator angle (TEL_ROT/TEL_PA) to get the sky PA of the fibre +x
+#: axis: PA(+x) = TEL_ROT + IFU_PA_OFFSET. Calibrated against Gaia on 3 fields (J1613/J0958/J2151,
+#: TEL_ROT 212-265): the rotator angle essentially IS the sky PA (slope +1), with a ~1 deg
+#: residual (centroid-noise level). Master knob for the eventual TCS fix (config ``wcs_pa_offset``).
+IFU_PA_OFFSET = 1.2
 
 
 def celestial_wcs(ra_deg: float, dec_deg: float, crpix: Sequence[float],
@@ -87,7 +87,12 @@ def celestial_wcs(ra_deg: float, dec_deg: float, crpix: Sequence[float],
     scale = float(arcsec_per_pixel) / 3600.0
     # mirrored field: cdelt=[+s,+s] (det>0); standard sky: cdelt=[-s,+s] (det<0, N-up/E-left).
     w.wcs.cdelt = [scale if mirrored else -scale, scale]
-    theta = np.deg2rad(float(pa_deg or 0.0) + float(pa_offset))
+    # The fibre +x axis lands at sky PA = pa_deg + pa_offset (E of N). For the mirrored (det>0)
+    # frame PA(+x) = 90 - theta, so theta = 90 - (pa_deg + pa_offset). (Calibrated against Gaia
+    # on 3 fields spanning TEL_ROT 212-265: PA(+x) tracks +TEL_ROT with slope +1; an earlier
+    # +theta form had the sign wrong -- right at TEL_ROT~212, ~90 deg off by 265.)
+    pa_x = float(pa_deg or 0.0) + float(pa_offset)
+    theta = np.deg2rad((90.0 - pa_x) if mirrored else (pa_x - 90.0))
     cos_t, sin_t = np.cos(theta), np.sin(theta)
     w.wcs.pc = np.array([[cos_t, -sin_t], [sin_t, cos_t]])
     return w

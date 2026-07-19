@@ -318,8 +318,9 @@ wave_frame = heliocentric
 # points at sky PA = TEL_ROT + wcs_pa_offset. These are PROVISIONAL (one rotator angle; sign of
 # the TEL_ROT dependence unconfirmed) and are the hook for the eventual telescope-side fix:
 # set wcs_pa_offset = 0 (and adjust wcs_mirrored) once the TCS reports a correct sky PA.
-# Defaults: wcs_pa_offset = 23.05, wcs_mirrored = true.
-# wcs_pa_offset = 23.05
+# PA(+x fibre axis) = TEL_ROT + wcs_pa_offset (calibrated against Gaia on 3 fields; the rotator
+# angle essentially IS the sky PA, slope +1). Defaults: wcs_pa_offset = 1.2, wcs_mirrored = true.
+# wcs_pa_offset = 1.2
 # wcs_mirrored = true
 # Output directory for QA reports (default: {output_dir}/QA).
 # qa_output_dir = /path/to/QA

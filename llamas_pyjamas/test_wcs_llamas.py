@@ -53,18 +53,26 @@ def test_plate_scale_isotropic_and_correct():
     assert ARCSEC_PER_FIBRE == 0.75
 
 
-def test_pa_offset_rotates_axis():
-    def axis_pa(w):
-        c0 = w.pixel_to_world(49.0, 39.0)
-        return c0.position_angle(w.pixel_to_world(50.0, 39.0)).deg
-    # increasing pa_offset by 30 deg rotates the +x axis PA by 30 deg (sign is negative because
-    # the field is mirrored -- what matters is that the offset rotates the field by that amount)
-    pa0 = axis_pa(_wcs(pa_deg=0.0, pa_offset=0.0))
-    pa30 = axis_pa(_wcs(pa_deg=0.0, pa_offset=30.0))
-    assert np.isclose(abs(((pa30 - pa0 + 180) % 360) - 180), 30.0, atol=0.5)
-    # header PA and offset are interchangeable (both feed the rotation)
-    a = axis_pa(_wcs(pa_deg=40.0, pa_offset=0.0))
-    b = axis_pa(_wcs(pa_deg=0.0, pa_offset=40.0))
+def _axis_pa(w):
+    c0 = w.pixel_to_world(49.0, 39.0)
+    return c0.position_angle(w.pixel_to_world(50.0, 39.0)).deg
+
+
+def test_pa_x_tracks_telrot_with_slope_plus_one():
+    # Calibrated: PA(+x) = TEL_ROT + IFU_PA_OFFSET (slope +1). Guards against the sign flip that
+    # made it slope -1 (right near 212 deg, ~90 deg off by 265). Check across a wide TEL_ROT span.
+    for tel_rot in (0.0, 90.0, 212.0, 265.0, 330.0):
+        got = _axis_pa(_wcs(pa_deg=tel_rot, pa_offset=0.0))
+        assert np.isclose(((got - tel_rot + 180) % 360) - 180, 0.0, atol=0.5), tel_rot
+
+
+def test_pa_offset_shifts_pa_x():
+    pa0 = _axis_pa(_wcs(pa_deg=100.0, pa_offset=0.0))
+    pa30 = _axis_pa(_wcs(pa_deg=100.0, pa_offset=30.0))
+    assert np.isclose(((pa30 - pa0 + 180) % 360) - 180, 30.0, atol=0.5)
+    # header PA and offset are interchangeable (both feed PA(+x) with slope +1)
+    a = _axis_pa(_wcs(pa_deg=40.0, pa_offset=0.0))
+    b = _axis_pa(_wcs(pa_deg=0.0, pa_offset=40.0))
     assert np.isclose(((a - b + 180) % 360) - 180, 0.0, atol=1e-6)
 
 

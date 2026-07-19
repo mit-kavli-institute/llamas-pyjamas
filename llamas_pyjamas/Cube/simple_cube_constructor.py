@@ -739,10 +739,11 @@ class SimpleCubeConstructor:
             wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
             wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
 
-        # Apply on-sky field rotation as a PC matrix in the spatial plane. The rotation is the
-        # header rotator angle plus the calibrated LLAMAS offset (fibre +x -> sky PA=TEL_ROT), so
-        # it is applied even when rotation_deg is 0.
-        theta = np.radians(rotation_deg + IFU_PA_OFFSET)
+        # PC rotation so the fibre +x axis lands at sky PA = rotation_deg + IFU_PA_OFFSET
+        # (matches Utils.wcsLlamas.celestial_wcs). For the mirrored frame PA(+x) = 90 - theta,
+        # hence theta = 90 - pa. Applied even when rotation_deg is 0.
+        pa_x = rotation_deg + IFU_PA_OFFSET
+        theta = np.radians((90.0 - pa_x) if IFU_MIRRORED else (pa_x - 90.0))
         c, s = np.cos(theta), np.sin(theta)
         wcs.wcs.pc = np.array([[c, -s, 0.0],
                                [s,  c, 0.0],
