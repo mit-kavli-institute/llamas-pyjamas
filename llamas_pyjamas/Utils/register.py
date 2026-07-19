@@ -100,12 +100,18 @@ def _fibre_xy(fiber_ids, benchsides):
     return xs, ys
 
 
-def detect_fibre_sources(x, y, flux, *, nsigma=5.0, min_sep=2.0, max_sources=30,
-                         radius=1.5, power=2.0):
-    """Greedy peak detection in fibre space -> list of ``Centroid`` (brightest first).
+def detect_fibre_sources(x, y, flux, *, nsigma=8.0, min_sep=2.0, max_sources=12,
+                         radius=1.5, power=2.0, contrast_sigma=5.0,
+                         annulus=(2.0, 4.5)):
+    """Greedy detection of compact point sources in fibre space -> list of ``Centroid``.
 
-    Background = median, noise = MAD. Claims the brightest fibre above threshold, centroids it,
-    masks fibres within ``min_sep``, and repeats. ``radius``/``power`` feed ``fibre_centroid``.
+    Stricter than a plain threshold, to reject the many spurious peaks in a banded sky-residual
+    background: a candidate is kept only if it is a *local* peak -- its core flux exceeds the
+    MEDIAN of a surrounding annulus by ``contrast_sigma`` * MAD. A broad band lights up the
+    annulus too, so its contrast is low and it is rejected; a real star sits on local background.
+
+    ``nsigma`` global threshold to seed candidates, ``max_sources`` cap, ``radius``/``power`` feed
+    ``fibre_centroid``, ``min_sep`` masks each claimed source.
     """
     x = np.asarray(x, float)
     y = np.asarray(y, float)
@@ -117,27 +123,39 @@ def detect_fibre_sources(x, y, flux, *, nsigma=5.0, min_sep=2.0, max_sources=30,
     med = float(np.median(vals))
     mad = float(np.median(np.abs(vals - med))) * 1.4826 or 1.0
     thresh = med + nsigma * mad
+    r_in, r_out = annulus
 
     remaining = f.copy()
     remaining[~good] = np.nan
     sources = []
-    for _ in range(max_sources):
-        if np.nanmax(remaining) < thresh:
+    while len(sources) < max_sources:
+        if not np.isfinite(np.nanmax(remaining)) or np.nanmax(remaining) < thresh:
             break
         i = int(np.nanargmax(remaining))
         c = fibre_centroid(x, y, f, guess=(x[i], y[i]), radius=radius, power=power,
                            background=med)
-        if c is not None:
-            sources.append(c)
-            remaining[(x - c.x) ** 2 + (y - c.y) ** 2 <= min_sep ** 2] = np.nan
-        else:
+        if c is None:
             remaining[i] = np.nan
+            continue
+        # local contrast: core peak vs the median of a surrounding annulus (banding rejection)
+        rr = np.hypot(x - c.x, y - c.y)
+        core = np.nanmax(f[rr <= 1.0]) if np.any(rr <= 1.0) else f[i]
+        ann = f[(rr > r_in) & (rr <= r_out) & good]
+        ann_med = float(np.median(ann)) if ann.size else med
+        if (core - ann_med) >= contrast_sigma * mad:
+            sources.append(c)
+        remaining[(x - c.x) ** 2 + (y - c.y) ** 2 <= min_sep ** 2] = np.nan
     return sources
 
 
-def _match_common_offset(det_sky, gaia, coarse_tol=18.0, tight_tol=2.5):
+def _match_common_offset(det_sky, gaia, coarse_tol=9.0, tight_tol=2.5):
     """Match detected sources to Gaia via a shared translation offset (robust to the pointing
-    error). Returns (det_index, gaia_index) lists. `det_sky`, `gaia` are SkyCoord arrays."""
+    error). Returns (det_index, gaia_index) lists. `det_sky`, `gaia` are SkyCoord arrays.
+
+    ``coarse_tol`` seeds the common offset and must admit the *real* TCS pointing error, which on
+    these data runs 4-6" for several fields (GD108 ~1" but J1613/J2151/Feige110 ~4-6", internally
+    consistent across stars and dithers). ``tight_tol`` is the true discriminator: after removing
+    the common offset, genuine matches agree to <2.5" while a wrong-star pairing scatters."""
     if len(det_sky) == 0 or len(gaia) == 0:
         return [], []
     idx, sep, _ = det_sky.match_to_catalog_sky(gaia)
@@ -189,7 +207,7 @@ def _rms_arcsec(wcs, xy, gaia):
 
 
 def solve_wcs(matched_xy, matched_gaia, rough_wcs, *, refine_rotation=False, max_rot_deg=3.0,
-              max_shift_arcsec=15.0, tol_resid_arcsec=2.5):
+              max_shift_arcsec=8.0, tol_resid_arcsec=2.5):
     """Refine `rough_wcs` from matched fibre-space centroids + Gaia coords.
 
     TRANSLATION ONLY by default, holding the (stable, calibrated) rotation -- the rotator does not
@@ -251,8 +269,29 @@ def solve_wcs(matched_xy, matched_gaia, rough_wcs, *, refine_rotation=False, max
     return wcs, rms, _axis_pa(wcs), False, n_used
 
 
+def _single_source_is_dominant(x, y, flux, sources, di, min_snr=25.0):
+    """True if the one matched detection is an obvious bright star (a standard on-axis): its core
+    peak stands >= ``min_snr`` * MAD above the field median. Used to trust a *single*-star solve.
+
+    A flux-RATIO test fails here: a very bright standard bleeds into a halo that fragments into
+    several near-equal-flux detections (they tie, so no one 'dominates'). Absolute peak SNR does
+    not have that problem -- a real standard is thousands of sigma over background, while a lone
+    peak in the sky-residual banding sits only ~8-15 sigma up and is (correctly) not trusted."""
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    f = np.asarray(flux, float)
+    good = np.isfinite(f)
+    med = float(np.median(f[good]))
+    mad = float(np.median(np.abs(f[good] - med))) * 1.4826 or 1.0
+    s = sources[di[0]]
+    rr = np.hypot(x - s.x, y - s.y)
+    sel = (rr <= 1.0) & good
+    core = float(np.nanmax(f[sel])) if np.any(sel) else s.flux_sum
+    return (core - med) / mad >= min_snr
+
+
 def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
-                      refine_rotation=False, max_rot_deg=3.0, max_shift_arcsec=15.0, min_stars=1):
+                      refine_rotation=False, max_rot_deg=3.0, max_shift_arcsec=8.0, min_stars=1):
     """Register one exposure (all channel siblings) and write refined per-fibre RA/DEC in place.
 
     Detection uses the green channel (or the first sibling); the solved WCS is applied to every
@@ -292,11 +331,20 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
             det_sky = wcs.pixel_to_world(np.array([s.x for s in sources]),
                                          np.array([s.y for s in sources]))
             di, gi = _match_common_offset(det_sky, gaia)
+            # Consensus guard: the real pointing error is 4-6" for several fields, so we cannot use
+            # the shift MAGNITUDE to reject bad matches. Trust a solve only when >=2 stars agree on
+            # a common offset (they already do, via _match_common_offset's tight_tol), OR a single
+            # match that is a dominant source (a standard on-axis). A lone faint match among the
+            # banding is not trusted -> fall back to rough.
+            consensus = len(di) >= 2 or (len(di) == 1 and
+                                         _single_source_is_dominant(xs, ys, flux, sources, di))
             solved = None
-            if len(di) >= min_stars:
+            if len(di) >= max(min_stars, 1) and consensus:
                 solved = solve_wcs([det_xy[k] for k in di], gaia[gi], wcs,
                                    refine_rotation=refine_rotation, max_rot_deg=max_rot_deg,
                                    max_shift_arcsec=max_shift_arcsec)
+            elif len(di) == 1:
+                logger.info('%s: single non-dominant match; not trusted, keeping rough', rss_path)
             if solved is not None:
                 wcs, rms, rot_used, rot_refined, n_stars = solved
                 prov = {'method': 'astrometric', 'tier': 'gaia', 'refined': True,

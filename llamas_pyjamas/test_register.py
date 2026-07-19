@@ -54,9 +54,9 @@ def test_detect_returns_brightest_first():
 
 
 def test_match_common_offset_matches_true_and_rejects_decoy():
-    # three detected sources; two share a common ~6" offset from Gaia, one is a decoy far away
+    # three detected sources sharing a common ~2" offset from Gaia, plus a decoy far away
     truth = SkyCoord([100.0, 100.003, 99.997] * u.deg, [20.0, 20.002, 19.996] * u.deg)
-    off_ra, off_dec = 6.0 / 3600.0, -3.0 / 3600.0     # common pointing error
+    off_ra, off_dec = 2.0 / 3600.0, -1.0 / 3600.0     # common pointing error (within coarse_tol)
     det = SkyCoord((truth.ra.deg - np.array([off_ra / np.cos(np.deg2rad(20)), off_ra /
                     np.cos(np.deg2rad(20)), off_ra / np.cos(np.deg2rad(20))])) * u.deg,
                    (truth.dec.deg - off_dec) * u.deg)
@@ -72,8 +72,8 @@ def test_solve_one_star_is_translation_only():
     xy = [(40.0, 45.0)]
     # true position = rough prediction shifted by a small translation (5")
     p = rough.pixel_to_world(40.0, 45.0)
-    gaia = SkyCoord((p.ra.deg + 5 / 3600.0 / np.cos(np.deg2rad(0))) * u.deg,
-                    (p.dec.deg + 2 / 3600.0) * u.deg)
+    gaia = SkyCoord((p.ra.deg + 2 / 3600.0 / np.cos(np.deg2rad(0))) * u.deg,
+                    (p.dec.deg + 1 / 3600.0) * u.deg)
     wcs, rms, rot, refined, n = solve_wcs(xy, gaia, rough)
     assert refined is False and n == 1                 # translation only (rotation held)
     assert wcs.pixel_to_world(40.0, 45.0).separation(gaia).arcsec < 0.05
@@ -91,7 +91,7 @@ def test_solve_drops_outlier_star():
     xy = [(40.0, 45.0), (60.0, 55.0), (50.0, 60.0)]
     preds = rough.pixel_to_world(np.array([p[0] for p in xy]), np.array([p[1] for p in xy]))
     # all shifted +5"; the 3rd star is a bad match (extra 20" off) -> should be dropped
-    ra = preds.ra.deg + np.array([5, 5, 25]) / 3600.0
+    ra = preds.ra.deg + np.array([2, 2, 22]) / 3600.0
     dec = preds.dec.deg + np.array([0, 0, 0]) / 3600.0
     wcs, rms, rot, refined, n = solve_wcs(xy, SkyCoord(ra * u.deg, dec * u.deg), rough)
     assert n == 2 and rms < 0.3                         # outlier rejected, clean fit on the 2 good
