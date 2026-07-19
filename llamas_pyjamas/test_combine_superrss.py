@@ -79,6 +79,23 @@ def test_surface_brightness_divides_by_area():
     assert sb_var[0] == 2.0 / 0.5 ** 2                 # var / area^2
 
 
+def test_mask_bad_fibres_flags_strong_negatives_as_no_data():
+    # 12 fibres (>= the routine's min); fibre 5 is a broken/over-subtracted fibre (strong negative)
+    rng = np.random.default_rng(0)
+    n = 12
+    wave = np.tile([5000, 5001, 5002], (n, 1))
+    flux = 10.0 + rng.normal(0, 0.5, (n, 3))
+    flux[5] = -500.0                                            # broken fibre
+    st = _stack('green', wave, flux, np.ones((n, 3)), np.zeros((n, 3), bool))
+    sr = _one_channel_super(st)
+    nbad = sr.mask_bad_fibres(neg_nsigma=5.0)
+    assert nbad['green'] == 1
+    assert st.mask[5].all() and np.isinf(st.var[5]).all()      # broken fibre -> no-data
+    assert not st.mask[0].any()                                # good fibres untouched
+    ft = sr.collapse_band(5000, 5002)                          # drops out; no negative hole
+    assert len(ft) == n - 1 and (ft.value > 0).all()
+
+
 def test_exposure_prefix():
     assert exposure_prefix('/x/LLAMAS_2026-05-17_02-49-56.7_RSS_green.fits') \
         == 'LLAMAS_2026-05-17_02-49-56.7'

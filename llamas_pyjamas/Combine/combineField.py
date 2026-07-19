@@ -103,7 +103,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--fwhm', type=float, default=0.9, help='kernel FWHM in arcsec')
     p.add_argument('--pixscale', type=float, default=0.5, help='output pixel scale, arcsec')
     p.add_argument('--min-coverage', type=int, default=1, dest='min_coverage')
+    p.add_argument('--cube', action='store_true',
+                   help='build an (RA,DEC,wave) cube (single channel) instead of a 2-D image')
+    p.add_argument('--dwave', type=float, help='cube wavelength step (A); default native median')
     p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto')
+    p.add_argument('--keep-bad-fibres', action='store_true',
+                   help='do NOT mask strongly-negative (broken) fibres as no-data')
     p.add_argument('--scale-transparency', action='store_true',
                    help='scale exposures to a common throughput via the in-field point source(s)')
     p.add_argument('--scale-radius', type=float, default=2.0,
@@ -124,7 +129,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.error('give RSS files, or --dir and --object')
     logger.info('combining %d exposure file(s)', len(paths))
 
-    sr = build_super_rss(paths, plane=args.plane, channels=args.channels)
+    sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
+                         reject_bad_fibres=not args.keep_bad_fibres)
     logger.info(sr.summary())
 
     if args.scale_transparency:
@@ -138,6 +144,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                                      radius_arcsec=args.scale_radius, channels=args.channels)
         sr.apply_scales(scales)
         logger.info('after transparency scaling: %s', sr.summary())
+
+    if args.cube:
+        from llamas_pyjamas.Combine.cube import combine_cube
+        chan = args.channels[0] if args.channels else 'green'
+        cube = combine_cube(sr, chan, dwave=args.dwave, units=args.units, weighting=args.weight,
+                            kernel=args.kernel, kernel_fwhm=args.fwhm, pixscale=args.pixscale,
+                            min_coverage=args.min_coverage)
+        out = args.out or f'{sr.field or "field"}_cube_{chan}.fits'
+        cube.write(out)
+        logger.info('wrote %s  (%dx%dx%d, %.1f-%.1f A, max depth %d/%d)', out, cube.data.shape[2],
+                    cube.data.shape[1], cube.data.shape[0], cube.wave[0], cube.wave[-1],
+                    int(cube.nexp.max()), cube.meta['NEXPTOT'])
+        print(f'cube: {out}')
+        return 0
 
     lo, hi = _band(sr, args)
     logger.info('window %.1f-%.1f A, channels=%s, units=%s, weight=%s',

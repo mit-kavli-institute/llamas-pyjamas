@@ -163,6 +163,32 @@ class SuperRSS:
             np.concatenate(vars), np.concatenate(oms), np.concatenate(exps).astype(int),
             np.concatenate(chs), np.concatenate(npix).astype(int))
 
+    def mask_bad_fibres(self, *, neg_nsigma=5.0) -> Dict[str, int]:
+        """Mask whole fibres that are strong NEGATIVE outliers (broken / badly over-subtracted) as
+        no-data (mask=True, var=inf), so they drop out of every view and the coverage map simply
+        goes shallower there -- other dithers cover the same sky and fill in. Sky-subtracted flux
+        is >=0 + noise, so a strongly-negative fibre is an artifact, not signal. Judged per channel
+        on each fibre's robust (median) flux vs the field. Returns {channel: n_masked}."""
+        out: Dict[str, int] = {}
+        for c, st in self.channels.items():
+            good = ~st.mask
+            with np.errstate(invalid='ignore', divide='ignore'):
+                rob = np.nanmedian(np.where(good, st.flux, np.nan), axis=1)
+            finite = np.isfinite(rob)
+            if finite.sum() < 10:
+                out[c] = 0
+                continue
+            med = float(np.median(rob[finite]))
+            mad = float(np.median(np.abs(rob[finite] - med))) * 1.4826 or 1.0
+            bad = finite & (rob < med - neg_nsigma * mad) & (rob < 0)
+            st.mask[bad, :] = True
+            st.var[bad, :] = np.inf
+            out[c] = int(bad.sum())
+        if any(out.values()):
+            logger.info('masked bad fibres (no-data): %s',
+                        ', '.join(f'{c}:{n}' for c, n in out.items() if n))
+        return out
+
     def apply_scales(self, scales: Dict[str, float]) -> None:
         """Apply per-exposure photometric scales in place: flux *= s, var *= s^2, for the scale
         RATIO needed to reach the target (so it composes with any scale applied at build). Records
@@ -250,7 +276,7 @@ def load_exposure(rss_path, *, plane='auto', channels=None):
     return meta, resolved_plane, data
 
 
-def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None):
+def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reject_bad_fibres=True):
     """Assemble a field's exposures into a :class:`SuperRSS`.
 
     ``rss_paths`` may list any channel of each exposure (siblings are found automatically) and may
@@ -258,6 +284,10 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None):
     ``scales`` is an optional ``{exposure_id: scale}`` map (variable-transparency correction);
     missing/None -> 1.0. The scale multiplies flux and scales variance by scale^2, so the substrate
     is on one photometric system and inverse-variance weighting down-weights hazy exposures.
+
+    ``reject_bad_fibres`` (default True) masks strongly-negative (broken / over-subtracted) fibres
+    as no-data via :meth:`mask_bad_fibres`, so they leave a shallower coverage rather than negative
+    holes in the co-add.
 
     Returns a SuperRSS holding native per-fibre spectra per channel.
     """
@@ -312,5 +342,7 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None):
 
     sr = SuperRSS(field=field_name, plane=plane_resolved, bunit=bunit,
                   exposures=exposures, channels=channels_out)
+    if reject_bad_fibres:
+        sr.mask_bad_fibres()
     logger.info(sr.summary())
     return sr
