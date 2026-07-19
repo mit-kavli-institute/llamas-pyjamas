@@ -1,0 +1,104 @@
+"""Tests for optimal point-source extraction and the narrowband line image (Phase 4, step 2).
+
+Synthetic: a Gaussian point source sampled by fibres over two exposures (optimal extraction should
+recover the template and beat a single fibre / uniform sum), the seeing estimate, and a cube with a
+line on one spaxel (narrowband should recover the line integral and continuum-subtract to zero
+off-line). Validated further on real may26 data.
+
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_spectrum`).
+"""
+
+import numpy as np
+from astropy.wcs import WCS
+
+from llamas_pyjamas.Combine.superRSS import ChannelStack, SuperRSS, ExposureMeta
+from llamas_pyjamas.Combine.cube import CoaddCube, narrowband_image
+from llamas_pyjamas.Combine.spectrum import optimal_spectrum, estimate_psf_fwhm
+
+RA0, DEC0 = 150.0, 20.0
+FWHM = 1.5
+
+
+def _point_source_super(nw=8, C=10.0, fwhm=FWHM, nexp=2):
+    sigma = fwhm / 2.35482
+    offs = [(dx, dy) for dx in range(-3, 4) for dy in range(-3, 4)]     # 7x7 fibres, 0.75" pitch
+    dx = np.array([o[0] * 0.75 for o in offs])
+    dy = np.array([o[1] * 0.75 for o in offs])
+    r = np.hypot(dx, dy)
+    P = np.exp(-0.5 * (r / sigma) ** 2)
+    cosd = np.cos(np.deg2rad(DEC0))
+    ra = RA0 + dx / cosd / 3600.0
+    dec = DEC0 + dy / 3600.0
+    template = np.full(nw, C)
+    flux1 = P[:, None] * template[None, :]                  # (nfib, nw): source * PSF
+    wave = np.tile(np.linspace(5000, 5000 + nw - 1, nw), (len(offs), 1))
+    ex = []
+    stacks = dict(ra=[], dec=[], wave=[], flux=[], var=[], mask=[], solid=[], exp=[])
+    for e in range(nexp):
+        stacks['ra'].append(ra); stacks['dec'].append(dec); stacks['wave'].append(wave)
+        stacks['flux'].append(flux1.copy()); stacks['var'].append(np.ones_like(flux1))
+        stacks['mask'].append(np.zeros_like(flux1, bool))
+        stacks['solid'].append(np.full(len(offs), 0.44)); stacks['exp'].append(np.full(len(offs), e))
+        ex.append(ExposureMeta(f'e{e}', f'p{e}', 1.0, 1.0, float(e)))
+    st = ChannelStack('green', np.concatenate(stacks['ra']), np.concatenate(stacks['dec']),
+                      np.concatenate(stacks['wave']), np.concatenate(stacks['flux']),
+                      np.concatenate(stacks['var']), np.concatenate(stacks['mask']),
+                      np.concatenate(stacks['solid']), np.concatenate(stacks['exp']))
+    return SuperRSS('T', 'skysub', 'counts', ex, {'green': st})
+
+
+def test_optimal_spectrum_recovers_template_shape():
+    sr = _point_source_super(C=10.0)
+    spec, fwhm = optimal_spectrum(sr, RA0, DEC0, radius_arcsec=3.0, fwhm=FWHM)
+    wl, flux, var = spec['green']
+    assert np.all(np.isfinite(flux))
+    # flat template -> flat extracted spectrum (shape recovered; absolute scale is the total flux,
+    # a normalisation convention anchored to Gaia later)
+    assert np.nanstd(flux) / np.nanmean(flux) < 0.02
+    # optimal S/N (total flux) beats a single core fibre (flux ~C=10, var 1 -> S/N ~10)
+    assert np.nanmedian(flux / np.sqrt(var)) > 15
+
+
+def test_estimate_psf_fwhm_recovers_seeing():
+    sr = _point_source_super(fwhm=1.5)
+    fw = estimate_psf_fwhm(sr, RA0, DEC0, radius_arcsec=3.0)
+    assert 1.0 < fw < 2.2                                   # ~1.5" (moment estimate, aperture-biased)
+
+
+def _line_cube(nw=41, line_k=20, ny=6, nx=6):
+    wave = 5000.0 + np.arange(nw)
+    data = np.full((nw, ny, nx), 2.0)                      # flat continuum everywhere
+    data[line_k, 3, 3] += 30.0                             # an emission line on one spaxel
+    var = np.ones((nw, ny, nx))
+    w = WCS(naxis=3)
+    w.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
+    w.wcs.crval = [150.0, 20.0, 5000.0]; w.wcs.crpix = [3, 3, 1]
+    w.wcs.cdelt = [-0.5 / 3600, 0.5 / 3600, 1.0]; w.wcs.cunit = ['deg', 'deg', 'Angstrom']
+    return CoaddCube(data, var, wave, np.full((ny, nx), 3, int), np.full((ny, nx), 2, int),
+                     w, 'erg/s/cm2/Angstrom/arcsec2', {'FIELD': 'T', 'PIXSCALE': 0.5}), wave[line_k]
+
+
+def test_narrowband_recovers_line_and_subtracts_continuum():
+    cube, line = _line_cube()
+    nb = narrowband_image(cube, line, half_width=1.5)      # 3-pixel line window
+    assert nb.bunit == 'erg/s/cm2/arcsec2'                 # integrated over lambda -> SB
+    # off-line spaxel: pure continuum -> subtracts to ~0
+    assert abs(nb.data[0, 0]) < 1e-9
+    # source spaxel: the line integral (30 * dwave=1) stands above ~0 continuum
+    assert np.isclose(nb.data[3, 3], 30.0, atol=1.0)
+
+
+if __name__ == '__main__':
+    import sys
+    fns = [(k, v) for k, v in sorted(globals().items())
+           if k.startswith('test_') and callable(v)]
+    failed = 0
+    for name, fn in fns:
+        try:
+            fn()
+            print(f'PASS {name}')
+        except Exception as e:                       # noqa: BLE001
+            failed += 1
+            print(f'FAIL {name}: {type(e).__name__}: {e}')
+    print(f'\n{len(fns) - failed}/{len(fns)} passed')
+    sys.exit(1 if failed else 0)

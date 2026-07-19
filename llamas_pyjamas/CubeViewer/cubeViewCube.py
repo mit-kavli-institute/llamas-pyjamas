@@ -31,9 +31,11 @@ class CoaddCubeScene(SpectralScene):
     Accepts a single :class:`CoaddCube` or a ``{channel: CoaddCube}`` mapping; the cubes must share
     the same spatial grid (as produced by :func:`Combine.cube.combine_field_cubes`)."""
 
-    def __init__(self, cubes) -> None:
+    def __init__(self, cubes, super_rss=None) -> None:
         if not isinstance(cubes, dict):
             cubes = {str(cubes.meta.get('CHANNEL', 'green')): cubes}
+        #: the SuperRSS the cubes were built from, if available -> enables optimal extraction
+        self.super_rss = super_rss
         self._cubes: Dict[str, object] = {c: cubes[c] for c in CHANNEL_ORDER if c in cubes}
         if not self._cubes:
             raise ValueError('CoaddCubeScene needs at least one cube')
@@ -137,6 +139,29 @@ class CoaddCubeScene(SpectralScene):
         lines = ['image'] + [f'box({ix + 1},{iy + 1},1,1,0) # color=cyan width=2'
                              for (iy, ix) in elements]
         return '\n'.join(lines) if len(lines) > 1 else ''
+
+    def narrowband(self, line_wave, half_width=8.0, **kwargs):
+        """Continuum-subtracted narrowband image at ``line_wave`` from whichever channel covers it."""
+        from llamas_pyjamas.Combine.cube import narrowband_image
+        for c in self.channels:
+            cube = self._cubes[c]
+            if cube.wave[0] <= line_wave <= cube.wave[-1]:
+                return narrowband_image(cube, line_wave, half_width=half_width, **kwargs)
+        raise ValueError(f'{line_wave} A not covered by any channel ({", ".join(self.channels)})')
+
+    def optimal_spectrum(self, ra, dec, **kwargs):
+        """PSF/ivar-weighted point-source spectrum at (ra,dec) as Spectrum objects (one per
+        channel), from the retained super-RSS. Raises if the super-RSS is not available."""
+        if self.super_rss is None:
+            raise ValueError('optimal extraction needs the super-RSS; rebuild via Combine ▸ '
+                             'Combine field into cube')
+        from llamas_pyjamas.Combine.spectrum import optimal_spectrum
+        spec, fwhm = optimal_spectrum(self.super_rss, ra, dec, **kwargs)
+        label = f'optimal ({ra:.4f},{dec:+.4f}) FWHM {fwhm:.1f}"'
+        cal = self.super_rss.plane == 'flam'
+        return [Spectrum(wave=w, flux=f, channel=c, label=label, mask=~np.isfinite(f),
+                         flam=(f if cal else None), has_counts=not cal)
+                for c, (w, f, v) in spec.items()], fwhm
 
     @classmethod
     def from_fits(cls, path: str) -> 'CoaddCubeScene':

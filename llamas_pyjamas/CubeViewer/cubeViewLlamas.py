@@ -296,6 +296,21 @@ class CubeViewerWindow(QMainWindow):
         open_cube_action.setToolTip('Open a cube FITS previously written by the combine step')
         open_cube_action.triggered.connect(self.open_cube)
         combine_menu.addAction(open_cube_action)
+        combine_menu.addSeparator()
+        self.optspec_action = QAction('Optimal &spectrum at crosshair', self)
+        self.optspec_action.setToolTip('PSF/inverse-variance-weighted point-source spectrum at the '
+                                       'DS9 crosshair (deepest QSO spectrum), from the super-RSS')
+        self.optspec_action.triggered.connect(self.optimal_spectrum_here)
+        combine_menu.addAction(self.optspec_action)
+        self.narrowband_action = QAction('&Narrowband line image…', self)
+        self.narrowband_action.setToolTip('Continuum-subtracted narrowband image at a chosen line '
+                                          'wavelength (e.g. Lya), sent to a new DS9 frame')
+        self.narrowband_action.triggered.connect(self.narrowband_image_dialog)
+        combine_menu.addAction(self.narrowband_action)
+        # Enabled only when a combined cube is loaded.
+        self.cube_actions = (self.optspec_action, self.narrowband_action)
+        for action in self.cube_actions:
+            action.setEnabled(False)
 
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
@@ -346,7 +361,7 @@ class CubeViewerWindow(QMainWindow):
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
             cubes = combine_field_cubes(sr, units='sb', weighting='ivar')
-            scene = CoaddCubeScene(cubes)
+            scene = CoaddCubeScene(cubes, super_rss=sr)     # keep super-RSS for optimal extraction
             # Save the built cubes to the standard combined/ directory so they are findable.
             from llamas_pyjamas.Combine.superRSS import combined_dir
             outdir = combined_dir(paths, create=True)
@@ -388,15 +403,86 @@ class CubeViewerWindow(QMainWindow):
         """Activate a cube scene and display it."""
         self._header, self._standard = None, None
         self._update_sensfunc_action()
-        self._activate_scene(scene, label, allow_wcs=False)
+        self._activate_scene(scene, label, allow_wcs=False, is_cube=True)
         try:
             self.display()
         except Exception:                          # noqa: BLE001
             pass
 
-    def _activate_scene(self, scene, label: str, *, allow_wcs: bool = True) -> None:
+    def optimal_spectrum_here(self) -> None:
+        """Extract the PSF/ivar-weighted point-source spectrum at the DS9 crosshair."""
+        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+        if not isinstance(self.scene, CoaddCubeScene):
+            return
+        if self.scene.super_rss is None:
+            QMessageBox.information(self, 'Optimal spectrum',
+                                   'Optimal extraction needs the super-RSS — rebuild via '
+                                   'Combine ▸ Combine field into cube (an opened cube FITS lacks it).')
+            return
+        try:
+            x, y = self.ds9.crosshair('image')
+        except DS9Error as exc:
+            self._report_ds9(exc)
+            return
+        sky = self.scene.cube.wcs.celestial.pixel_to_world(x - 1, y - 1)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            spectra, fwhm = self.scene.optimal_spectrum(float(sky.ra.deg), float(sky.dec.deg))
+        except Exception as exc:                   # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, 'Optimal spectrum', f'Could not extract:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        self._current_spectra = list(spectra)
+        self.panel.set_spectra(spectra)
+        self.statusBar().showMessage(f'Optimal spectrum at ({sky.ra.deg:.4f}, {sky.dec.deg:+.4f}), '
+                                     f'seeing FWHM {fwhm:.2f}"')
+
+    def narrowband_image_dialog(self) -> None:
+        """Build a continuum-subtracted narrowband image at a chosen line and send it to DS9."""
+        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+        if not isinstance(self.scene, CoaddCubeScene):
+            return
+        from PyQt6.QtWidgets import QInputDialog
+        lo, hi = self.scene.wavelength_range()
+        default = 0.5 * (lo + hi)
+        line, ok = QInputDialog.getDouble(self, 'Narrowband image', 'Line wavelength (Å):',
+                                          default, lo, hi, 1)
+        if not ok:
+            return
+        hw, ok2 = QInputDialog.getDouble(self, 'Narrowband image', 'Half-width (Å):', 8.0, 0.5,
+                                         500.0, 1)
+        if not ok2:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            nb = self.scene.narrowband(line, half_width=hw)
+        except Exception as exc:                   # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, 'Narrowband image', f'Could not build:\n{exc}')
+            return
+        header = nb.wcs.to_header()
+        header['BUNIT'] = nb.bunit
+        header['OBJECT'] = f"{self.scene.object} narrowband {line:.0f}A"
+        hdul = fits.HDUList([fits.PrimaryHDU(np.asarray(nb.data, dtype=np.float32), header=header)])
+        try:
+            self.ds9.set('frame new')
+            self.ds9.set_fits(hdul)
+            self.ds9.set('scale zscale')
+        except DS9Error as exc:
+            QApplication.restoreOverrideCursor()
+            self._report_ds9(exc)
+            return
+        QApplication.restoreOverrideCursor()
+        self.statusBar().showMessage(f'Narrowband {line:.0f}±{hw:.0f} Å (continuum-subtracted) '
+                                     '-> new DS9 frame')
+
+    def _activate_scene(self, scene, label: str, *, allow_wcs: bool = True,
+                        is_cube: bool = False) -> None:
         """Wire a scene (RSS or cube) into the window: picker, panel, channel boxes, wavelength
         range and controls. Shared by :meth:`load` and the Combine menu."""
+        for action in getattr(self, 'cube_actions', ()):     # cube-only tools
+            action.setEnabled(is_cube)
         self.scene = scene
         self.picker.set_scene(scene)
         self.panel.set_spectra([])

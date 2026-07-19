@@ -238,6 +238,50 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
                      nexp=nexp.reshape(ny, nx), wcs=wcs, bunit=unit, meta=meta)
 
 
+def narrowband_image(cube, line_wave, *, half_width=5.0, cont_half_width=None, cont_gap=None,
+                     min_coverage=1):
+    """Continuum-subtracted narrowband line image from a cube (e.g. Lya at the QSO redshift).
+
+    Integrates surface brightness over the line window ``|lambda-line_wave| <= half_width`` and
+    subtracts a continuum estimated from two side windows (each ``cont_half_width`` wide, offset by
+    ``cont_gap`` from the line; defaults: cont_half_width=half_width, cont_gap=2*half_width), scaled
+    to the line width. Returns a :class:`~llamas_pyjamas.Combine.coadd.CoaddImage` whose value is the
+    integrated line SB (erg/s/cm2/arcsec2). Extended line emission shows as positive residual around
+    the (continuum-subtracted) sources; full QSO PSF subtraction is a later step."""
+    from llamas_pyjamas.Combine.coadd import CoaddImage
+    wl = cube.wave
+    dw = float(np.nanmedian(np.abs(np.diff(wl))))
+    hw = half_width
+    chw = cont_half_width if cont_half_width is not None else hw
+    gap = cont_gap if cont_gap is not None else 2 * hw
+    line_sl = np.abs(wl - line_wave) <= hw
+    cont_sl = (((wl >= line_wave - gap - chw) & (wl <= line_wave - gap)) |
+               ((wl >= line_wave + gap) & (wl <= line_wave + gap + chw)))
+    if not line_sl.any():
+        raise ValueError(f'line window {line_wave}+-{hw} A outside cube {wl[0]:.0f}-{wl[-1]:.0f}')
+    line_w = int(line_sl.sum()) * dw
+    with np.errstate(invalid='ignore'):
+        line_int = np.nansum(cube.data[line_sl], axis=0) * dw
+        vline = np.nansum(cube.var[line_sl], axis=0) * dw ** 2
+        if cont_sl.any():
+            cont = np.nanmean(cube.data[cont_sl], axis=0)
+            vcont = np.nansum(cube.var[cont_sl], axis=0) / max(int(cont_sl.sum()), 1) ** 2
+        else:
+            cont = np.zeros(cube.data.shape[1:])
+            vcont = np.zeros(cube.data.shape[1:])
+    data = line_int - cont * line_w
+    var = vline + vcont * line_w ** 2
+    below = cube.coverage < min_coverage
+    data[below] = np.nan
+    var[below] = np.nan
+    bunit = cube.bunit.replace('/Angstrom', '')          # integrated over lambda -> SB, no /A
+    meta = dict(FIELD=cube.meta.get('FIELD', ''), CHANNEL=cube.meta.get('CHANNEL', ''),
+                LINEWAVE=float(line_wave), LINEHW=float(hw), CONTGAP=float(gap),
+                PIXSCALE=cube.meta.get('PIXSCALE', 0.5), NARROWBD=True)
+    return CoaddImage(data=data, var=var, coverage=cube.coverage, nexp=cube.nexp,
+                      wcs=cube.wcs.celestial, bunit=bunit, meta=meta)
+
+
 def _wcs3d(wcs2, wl0, dwave):
     """Extend a 2-D spatial WCS with a linear WAVE axis (Angstrom)."""
     w = WCS(naxis=3)
