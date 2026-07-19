@@ -37,6 +37,7 @@ import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import astropy.units as u
 from astropy.io import fits
 from astropy.wcs import WCS
 from scipy.spatial import cKDTree
@@ -276,10 +277,45 @@ class RSSScene(SpectralScene):
         self.ra, self.dec, self.pa = pointing_from_header(_hdr)
         #: Object name from the header, for the DS9 frame / display.
         self.object = str(_hdr.get('OBJECT', '')) if _hdr is not None else ''
+        #: A refined fibre-map WCS (from a prior registration, or set live by the interactive
+        #: tool). When present it supersedes the rough header pointing for the displayed image.
+        self.refined_wcs = self._load_refined_wcs(first.path)
         logger.info('RSSScene pointing: RA=%s DEC=%s PA=%s',
                     self.ra, self.dec, self.pa)
         logger.info('RSSScene: channels=%s, %d placed fibres, flux-calibrated=%s',
                     ','.join(self.channels), len(self.keys), self.has_flam)
+
+    @staticmethod
+    def _load_refined_wcs(path: str):
+        """Reconstruct the refined fibre-map WCS from a registered file's FIBERWCS table, or None.
+
+        The stored per-fibre RA/DEC were produced by the refined WCS, so re-fitting them against
+        the fibre X/Y recovers it exactly -- letting a previously-registered file display with its
+        star-tied grid instead of the rough header pointing. Best-effort: any problem -> None (fall
+        back to the header WCS), so an unregistered or odd file still opens."""
+        try:
+            with fits.open(path, memmap=False) as hdul:
+                if 'FIBERWCS' not in hdul:
+                    return None
+                hdr = hdul['FIBERWCS'].header
+                if not bool(hdr.get('WCSREFIN', False)):
+                    return None
+                tab = hdul['FIBERWCS'].data
+                x = np.asarray(tab['X_FIBERMAP'], float)
+                y = np.asarray(tab['Y_FIBERMAP'], float)
+                ra = np.asarray(tab['RA'], float)
+                dec = np.asarray(tab['DEC'], float)
+            good = np.isfinite(x) & np.isfinite(y) & np.isfinite(ra) & np.isfinite(dec) & (ra >= 0)
+            if good.sum() < 3:
+                return None
+            from astropy.coordinates import SkyCoord
+            from llamas_pyjamas.Utils.wcsLlamas import fit_wcs_from_stars
+            pixels = list(zip(x[good], y[good]))
+            sky = SkyCoord(ra[good] * u.deg, dec[good] * u.deg)
+            return fit_wcs_from_stars(pixels, sky)
+        except Exception as exc:                       # noqa: BLE001 - display fallback
+            logger.debug('No refined WCS reconstructed from %s: %s', os.path.basename(path), exc)
+            return None
 
     @classmethod
     def open(cls, path: str, **kwargs) -> 'RSSScene':
@@ -300,14 +336,14 @@ class RSSScene(SpectralScene):
             return (np.nan, np.nan)
         return min(r[0] for r in finite), max(r[1] for r in finite)
 
-    def collapse(self, wave_min: float, wave_max: float,
-                 channels: Optional[Sequence[str]] = None) -> Tuple[np.ndarray, WCS, Dict]:
-        wanted = tuple(channels) if channels else self.channels
-
+    def _fibre_totals(self, wave_min: float, wave_max: float,
+                      wanted: Sequence[str]) -> Tuple[np.ndarray, Dict[str, int]]:
+        """Per-fibre flux summed over the window, aligned to ``self.keys``/``self.positions``,
+        plus the per-channel contributing-fibre counts. Shared by :meth:`collapse` (which tiles
+        it into an image) and :meth:`fibre_flux` (which hands it to the centroider)."""
         totals = np.full(len(self.keys), np.nan, dtype=float)
         contributions: Dict[str, int] = {}
         row_of = {key: i for i, key in enumerate(self.keys)}
-
         for name in wanted:
             channel = self._channels.get(name)
             if channel is None:
@@ -317,7 +353,6 @@ class RSSScene(SpectralScene):
                 logger.debug('%s does not overlap %.1f-%.1f A; skipped',
                              name, wave_min, wave_max)
                 continue
-
             values = channel.collapse_fibres(wave_min, wave_max)
             used = 0
             for row, key in enumerate(channel.keys):
@@ -328,7 +363,22 @@ class RSSScene(SpectralScene):
                                   else totals[target] + values[row])
                 used += 1
             contributions[name] = used
+        return totals, contributions
 
+    def fibre_flux(self, wave_min: float, wave_max: float,
+                   channels: Optional[Sequence[str]] = None) -> np.ndarray:
+        """Per-fibre flux over a window, aligned to ``self.positions`` (never rendered to an
+        image). This is the flux the interactive registration tool feeds to ``fibre_centroid`` so
+        a clicked star is centroided on the real fibres, matching the automated path exactly."""
+        wanted = tuple(channels) if channels else self.channels
+        totals, _ = self._fibre_totals(wave_min, wave_max, wanted)
+        return totals
+
+    def collapse(self, wave_min: float, wave_max: float,
+                 channels: Optional[Sequence[str]] = None) -> Tuple[np.ndarray, WCS, Dict]:
+        wanted = tuple(channels) if channels else self.channels
+
+        totals, contributions = self._fibre_totals(wave_min, wave_max, wanted)
         if not contributions:
             raise ValueError(f'No channel covers {wave_min:.1f}-{wave_max:.1f} A '
                              f'(scene spans {self.wavelength_range()})')
@@ -349,11 +399,14 @@ class RSSScene(SpectralScene):
             meta = {'HEXTILE': (False, 'Interpolated white light')}
             wcs = linear_wcs(crpix=[1.0, 1.0], crval=[0.0, 0.0], cdelt=[step, step])
 
-        # When the header pointing is known, replace the linear fibre-map WCS with a celestial
-        # (RA/DEC) one: CRVAL at the field centre, CRPIX the image pixel that maps to it. Both
-        # render paths map pixel p -> fibre-map (p-1)*step (CRPIX=1 at fibre-map 0), so the
-        # field centre (midpoint of the fibre extent) is at pixel centre/step + 1.
-        if self.ra is not None and self.dec is not None:
+        # WCS priority: a refined (star-tied) solution if we have one, else the rough header
+        # pointing, else the linear fibre-map map. Both render paths map pixel p -> fibre-map
+        # (p-1)*step (CRPIX=1 at fibre-map 0), so a fibre-map WCS converts to the image with step.
+        if self.refined_wcs is not None:
+            from llamas_pyjamas.Utils.register import _image_wcs_from_fibremap
+            wcs = _image_wcs_from_fibremap(self.refined_wcs, step)
+            meta['WCSFRAME'] = ('sky', 'Refined star-tied WCS (registration)')
+        elif self.ra is not None and self.dec is not None:
             cx = 0.5 * (x.min() + x.max())
             cy = 0.5 * (y.min() + y.max())
             crpix = (cx / step + 1.0, cy / step + 1.0)

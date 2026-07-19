@@ -248,6 +248,42 @@ class CubeViewerWindow(QMainWindow):
         apply_action.triggered.connect(self.apply_sensfunc_to_files)
         sens_menu.addAction(apply_action)
 
+        # Astrometric WCS: automated Gaia registration, an interactive fallback, QA and a revert.
+        wcs_menu = self.menuBar().addMenu('&WCS')
+        wcs_menu.setToolTipsVisible(True)
+        self.wcs_auto_action = QAction('Auto-register this exposure', self)
+        self.wcs_auto_action.setToolTip('Solve the WCS from Gaia for the loaded exposure')
+        self.wcs_auto_action.triggered.connect(self.auto_register_exposure)
+        wcs_menu.addAction(self.wcs_auto_action)
+        # Block registration picks its own files, so it does not need one loaded.
+        wcs_block_action = QAction('Auto-register block…', self)
+        wcs_block_action.setToolTip('Pick a set of dithers and register them as one block '
+                                    '(one shared, held rotation)')
+        wcs_block_action.triggered.connect(self.auto_register_block)
+        wcs_menu.addAction(wcs_block_action)
+        wcs_menu.addSeparator()
+        self.wcs_refine_action = QAction('&Refine WCS interactively…', self)
+        self.wcs_refine_action.setToolTip('Click stars in DS9 to build the WCS by hand -- the '
+                                          'fallback when the automated solve does not work')
+        self.wcs_refine_action.triggered.connect(self.refine_wcs_interactive)
+        wcs_menu.addAction(self.wcs_refine_action)
+        wcs_menu.addSeparator()
+        self.wcs_qa_action = QAction('Show registration QA', self)
+        self.wcs_qa_action.setToolTip('Write a QA plot: fitted centroids + Gaia over the white '
+                                      'light image')
+        self.wcs_qa_action.triggered.connect(self.show_registration_qa)
+        wcs_menu.addAction(self.wcs_qa_action)
+        self.wcs_reset_action = QAction('Reset to rough (header) WCS', self)
+        self.wcs_reset_action.setToolTip('Discard the star-tied solution and revert to the TCS '
+                                         'header pointing')
+        self.wcs_reset_action.triggered.connect(self.reset_rough_wcs)
+        wcs_menu.addAction(self.wcs_reset_action)
+        # These need a file loaded; block registration above does not.
+        self.wcs_file_actions = (self.wcs_auto_action, self.wcs_refine_action,
+                                 self.wcs_qa_action, self.wcs_reset_action)
+        for action in self.wcs_file_actions:
+            action.setEnabled(False)
+
     def _set_enabled(self, enabled: bool) -> None:
         for widget in (self.wave_min, self.wave_max, self.full_button, self.hex_box,
                        self.display_button, self.pick_box, self.radius_spin,
@@ -303,6 +339,8 @@ class CubeViewerWindow(QMainWindow):
         self.file_label.setText(os.path.basename(path))
         self.file_label.setStyleSheet('')
         self._set_enabled(True)
+        for action in self.wcs_file_actions:
+            action.setEnabled(True)
         self._reset_wave_range()
         self._on_radius_changed(self.radius_spin.value())
 
@@ -575,6 +613,135 @@ class CubeViewerWindow(QMainWindow):
             message += '\n\nFailed:\n' + '\n'.join(failures)
         self.statusBar().showMessage(message.splitlines()[0])
         QMessageBox.information(self, 'Apply sensitivity function', message)
+
+    # ------------------------------------------------------------------ WCS / registration
+
+    def _require_file(self, title: str) -> bool:
+        if not self._path or self.scene is None:
+            QMessageBox.information(self, title, 'Open an RSS first.')
+            return False
+        return True
+
+    def _after_registration(self, message: str) -> None:
+        """Reload the current file so the freshly-written (refined or rough) WCS is picked up, then
+        re-display and report."""
+        if self._path:
+            self.load(self._path)                 # reload -> scene.refined_wcs from FIBERWCS
+            try:
+                self.display()
+            except Exception:                     # noqa: BLE001 - display is best-effort here
+                pass
+        self.statusBar().showMessage(message)
+        QMessageBox.information(self, 'WCS registration', message)
+
+    def auto_register_exposure(self) -> None:
+        """Solve the WCS from Gaia for the loaded exposure and write it in place."""
+        if not self._require_file('Auto-register'):
+            return
+        from llamas_pyjamas.Utils.register import register_exposure
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = register_exposure(self._path)
+        except Exception as exc:                  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Auto-register', f'Registration failed:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        if result.refined:
+            msg = (f'Refined ({result.tier}): {result.n_stars} star(s), '
+                   f'RMS {result.rms_arcsec:.2f}".')
+        else:
+            msg = 'No confident Gaia match; kept the rough header WCS.'
+        self._after_registration(msg)
+
+    def auto_register_block(self) -> None:
+        """Pick a set of dithers and register them as one block (one shared, held rotation)."""
+        from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
+        dialog = ObslogDialog(self._start_dir(), multi=True,
+                              title='Auto-register block (pick the dithers)', parent=self)
+        if not dialog.exec():
+            return
+        paths = getattr(dialog, 'chosen_files', None) or []
+        if not paths:
+            return
+        from llamas_pyjamas.Utils.register import register_exposures
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            results = register_exposures(paths)
+        except Exception as exc:                  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Auto-register block', f'Failed:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        n_ref = sum(1 for r in results.values() if r.refined)
+        self._after_registration(f'Registered {n_ref}/{len(paths)} frame(s) in the block.')
+
+    def refine_wcs_interactive(self) -> None:
+        """Open the interactive star-clicking WCS dialog for the loaded exposure."""
+        if not self._require_file('Refine WCS'):
+            return
+        if self.scene.ra is None:
+            QMessageBox.information(self, 'Refine WCS',
+                                   'This frame has no header pointing, so there is no initial WCS '
+                                   'to refine.')
+            return
+        # The interactive tool drives the DS9 crosshair; pause the aperture picker to avoid
+        # contention while it is open.
+        if self.pick_box.isChecked():
+            self.pick_box.setChecked(False)
+        from llamas_pyjamas.CubeViewer.cubeViewRegister import RegisterDialog
+        dialog = RegisterDialog(self.scene, self.ds9, self._path, parent=self)
+        if dialog.exec() and dialog.written:
+            try:
+                self.display()                    # scene.refined_wcs is now set -> new grid
+            except Exception:                     # noqa: BLE001
+                pass
+            self.statusBar().showMessage(f'Wrote the interactive WCS to {len(dialog.written)} '
+                                         'file(s).')
+
+    def show_registration_qa(self) -> None:
+        """Write the registration QA plot (fitted centroids + Gaia over the white light)."""
+        if not self._require_file('Registration QA'):
+            return
+        from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+        from llamas_pyjamas.QA.qa_registration import plot_registration_qa
+        siblings = channel_siblings(self._path) or {'': self._path}
+        green = siblings.get('green') or next(iter(siblings.values()))
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            out = plot_registration_qa(green)
+        except Exception as exc:                  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, 'Registration QA', f'Could not build the QA plot:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        if out:
+            QMessageBox.information(self, 'Registration QA', f'Wrote QA plot:\n{out}')
+        else:
+            QMessageBox.information(self, 'Registration QA',
+                                   'No QA plot produced (no white-light image found).')
+
+    def reset_rough_wcs(self) -> None:
+        """Discard the star-tied solution and revert every channel to the rough header WCS."""
+        if not self._require_file('Reset WCS'):
+            return
+        reply = QMessageBox.question(
+            self, 'Reset WCS',
+            'Discard the star-tied solution for this exposure and revert every channel to the '
+            'rough header (TCS) pointing?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from llamas_pyjamas.Utils.register import reset_rough
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            written = reset_rough(self._path)
+        except Exception as exc:                  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Reset WCS', f'Could not reset:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        self._after_registration(f'Reverted {len(written)} file(s) to the rough header WCS.')
 
     def _report_ds9(self, exc: Exception) -> None:
         QMessageBox.warning(

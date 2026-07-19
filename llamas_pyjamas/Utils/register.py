@@ -464,7 +464,7 @@ def _solve_frame_translation(ra, dec, pa, xs, ys, flux, sources, gaia, *, extra_
 
 
 def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
-                   max_rot_deg=3.0, max_shift_arcsec=8.0):
+                   max_rot_deg=3.0, max_shift_arcsec=8.0, fixed_rotation=None):
     """Register a block of exposures that share ONE pointing + rotator (e.g. all dithers of one
     OBJECT at one rotator position) and write the refined per-fibre RA/DEC in place.
 
@@ -477,19 +477,23 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
     confident match still inherit the block rotation (a better rough). The caller groups exposures
     into blocks (typically by OBJECT, which encodes the rotator incl. the deliberate _180 flip).
 
+    ``fixed_rotation`` (degrees, relative to the calibrated PA) skips the rotation FIT and uses the
+    given value as the block rotation. This is how the interactive tool applies a rotation the user
+    solved once by hand to the whole block, letting the auto per-frame translation do the rest.
+
     Returns {rss_path: RegistrationResult}.
     """
     from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
 
     # -- pass 1: per-frame detect/query + fit each frame's own rotation where 2+ stars match
+    # (skipped entirely when the caller supplies a fixed block rotation)
     frames, drots = [], []
     for p in rss_paths:
         sib = channel_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         ra, dec, pa, xs, ys, flux, sources, gaia = _detect_and_query(dp, band, mag_limit,
                                                                       radius_arcsec)
-        drot = None
-        if ra is not None and sources and len(gaia) > 0:
+        if fixed_rotation is None and ra is not None and sources and len(gaia) > 0:
             w0 = _rough_wcs(ra, dec, pa)
             det_sky = w0.pixel_to_world(np.array([s.x for s in sources]),
                                         np.array([s.y for s in sources]))
@@ -499,13 +503,17 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
                                refine_rotation=True, max_rot_deg=max_rot_deg,
                                max_shift_arcsec=max_shift_arcsec)
                 if ro is not None and ro[3]:
-                    drot = ((ro[2] - _axis_pa(w0) + 180) % 360) - 180
-                    drots.append(drot)
+                    drots.append(((ro[2] - _axis_pa(w0) + 180) % 360) - 180)
         frames.append(dict(path=p, sib=sib, dp=dp, ra=ra, dec=dec, pa=pa, xs=xs, ys=ys,
                            flux=flux, sources=sources, gaia=gaia))
-    block_rot = float(np.clip(np.median(drots), -max_rot_deg, max_rot_deg)) if drots else 0.0
-    logger.info('block of %d frames: rotation %.2f deg from %d fits', len(frames), block_rot,
-                len(drots))
+    if fixed_rotation is not None:
+        block_rot = float(np.clip(fixed_rotation, -max_rot_deg, max_rot_deg))
+        logger.info('block of %d frames: rotation %.2f deg (fixed by caller)', len(frames),
+                    block_rot)
+    else:
+        block_rot = float(np.clip(np.median(drots), -max_rot_deg, max_rot_deg)) if drots else 0.0
+        logger.info('block of %d frames: rotation %.2f deg from %d fits', len(frames), block_rot,
+                    len(drots))
 
     # -- pass 2: hold the block rotation, solve per-frame translation, write
     results = {}
@@ -548,3 +556,20 @@ def register_exposures(rss_paths, **kwargs):
         logger.info('registering block %s (%d frames)', key, len(paths))
         results.update(register_block(paths, **kwargs))
     return results
+
+
+def reset_rough(rss_path):
+    """Revert an exposure's stored WCS to the rough header (TCS) pointing, discarding any star-tied
+    solution -- the bail-out when a refinement is worse than the raw pointing. Rewrites FIBERMAP/
+    FIBERWCS and the white-light image for every channel. Returns the files written."""
+    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+    siblings = channel_siblings(rss_path) or {'': rss_path}
+    det = siblings.get('green') or next(iter(siblings.values()))
+    with fits.open(det) as hd:
+        ra, dec, pa = pointing_from_header(hd[0].header)
+    if ra is None:
+        return []
+    wcs = _rough_wcs(ra, dec, pa)
+    prov = {'method': 'rough-header', 'tier': 'header', 'refined': False,
+            'pa_offset': float(IFU_PA_OFFSET), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+    return _write_frame_solution(det, siblings, wcs, prov)
