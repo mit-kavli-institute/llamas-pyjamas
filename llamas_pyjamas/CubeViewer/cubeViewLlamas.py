@@ -347,16 +347,24 @@ class CubeViewerWindow(QMainWindow):
                 logger.warning('transparency scaling skipped: %s', exc)
             cubes = combine_field_cubes(sr, units='sb', weighting='ivar')
             scene = CoaddCubeScene(cubes)
+            # Save the built cubes to the standard combined/ directory so they are findable.
+            from llamas_pyjamas.Combine.superRSS import combined_dir
+            outdir = combined_dir(paths, create=True)
+            field = scene.object or 'field'
+            written = [cubes[c].write(os.path.join(outdir, f'{field}_cube_{c}.fits'))
+                       for c in scene.channels]
         except Exception as exc:                   # noqa: BLE001
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, 'Combine field', f'Could not build the cube:\n{exc}')
             return
         QApplication.restoreOverrideCursor()
-        self._path = None
+        self._path = written[0] if written else None
         self._open_cube_scene(scene, f"{scene.object or 'field'} combined cube (SB)")
         self.statusBar().showMessage(
-            f'Combined {len(paths)} exposures -> {", ".join(scene.channels)} cubes, '
-            f'{scene.cube.data.shape[2]}x{scene.cube.data.shape[1]} spaxels')
+            f'Combined {len(paths)} exposures -> {", ".join(scene.channels)} cubes in '
+            f'{outdir}')
+        QMessageBox.information(self, 'Combine field',
+                               f'Wrote {len(written)} cube(s) to:\n{outdir}')
 
     def open_cube(self) -> None:
         """Open a cube FITS previously written by the combine step."""

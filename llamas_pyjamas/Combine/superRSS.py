@@ -58,6 +58,18 @@ def exposure_prefix(path: str) -> str:
     return os.path.basename(path).split('_RSS_')[0]
 
 
+def combined_dir(rss_paths, create=False):
+    """The standard directory for combined products: ``<reduced>/combined``. Exposures live in
+    ``<reduced>/extractions``, so combined output is a sibling ``combined/`` beside it (else a
+    ``combined/`` subdir next to the inputs). ``create=True`` makes it."""
+    d = os.path.dirname(os.path.abspath(rss_paths[0]))
+    parent, base = os.path.split(d)
+    out = os.path.join(parent, 'combined') if base == 'extractions' else os.path.join(d, 'combined')
+    if create:
+        os.makedirs(out, exist_ok=True)
+    return out
+
+
 @dataclass
 class ExposureMeta:
     """Provenance for one exposure (one dither); its channel planes share this."""
@@ -211,12 +223,19 @@ class SuperRSS:
                 f'fibres per channel: {chans}; scales: {scales}')
 
 
-def _read_channel(hdul, flux_ext, err_ext):
+def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
     """Extract (wave, flux, var, mask, ra, dec, solid_angle) for one channel's fibres.
 
     RA/DEC come from FIBERWCS (the registered, plate-solved coords) when present, else FIBERMAP.
     A fibre with no valid position (ra<0 / NaN) is fully masked so it never enters a view. Bad or
-    non-finite flux/err pixels are masked; variance = err^2."""
+    non-finite flux/err pixels are masked; variance = err^2.
+
+    ``sky_penalty`` (alpha, 0 disables) inflates the variance where the sky-subtraction residual
+    exceeds the formal error: ``var *= 1 + (alpha * SKYRESID/ERROR)^2``. The formal ERROR carries
+    sky SHOT noise but not the sky-subtraction SYSTEMATIC (measured ~6x larger at red sky lines),
+    so without this an ivar co-add cannot down-weight sky-line wavelengths and their residuals
+    stack. The SKYRESID/ERROR ratio is plane-independent (the sensfunc cancels), so this is correct
+    for both FLAM and SKYSUB planes."""
     flux = np.asarray(hdul[flux_ext].data, dtype=np.float32)
     err = np.asarray(hdul[err_ext].data, dtype=np.float32)
     wave = np.asarray(hdul['WAVE'].data, dtype=np.float64)
@@ -225,6 +244,13 @@ def _read_channel(hdul, flux_ext, err_ext):
         mask |= np.asarray(hdul['MASK'].data) != 0
     mask |= ~np.isfinite(flux) | ~np.isfinite(err) | (err <= 0) | ~np.isfinite(wave)
     var = np.where(mask, np.inf, err.astype(np.float64) ** 2)
+
+    if sky_penalty and 'SKYRESID' in hdul and 'ERROR' in hdul:
+        resid = np.abs(np.asarray(hdul['SKYRESID'].data, dtype=np.float64))
+        ierr = np.asarray(hdul['ERROR'].data, dtype=np.float64)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            ratio = np.where((ierr > 0) & np.isfinite(resid), resid / ierr, 0.0)
+        var = var * (1.0 + (sky_penalty * ratio) ** 2)    # inf stays inf (masked)
 
     tab = hdul['FIBERWCS'].data if 'FIBERWCS' in hdul else hdul['FIBERMAP'].data
     ra = np.asarray(tab['RA'], dtype=np.float64)
@@ -236,12 +262,13 @@ def _read_channel(hdul, flux_ext, err_ext):
     return wave, flux, var, mask, ra, dec, solid
 
 
-def load_exposure(rss_path, *, plane='auto', channels=None):
+def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
     """Read one exposure (its channel siblings) into native per-fibre arrays.
 
     Returns ``(meta, data)`` where ``meta`` is an :class:`ExposureMeta` (scale left at 1.0) and
     ``data`` maps channel -> dict(wave, flux, var, mask, ra, dec, solid_angle). ``plane='auto'``
-    uses FLAM if the detection channel carries it, else SKYSUB."""
+    uses FLAM if the detection channel carries it, else SKYSUB. ``sky_penalty`` -> see
+    :func:`_read_channel`."""
     from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
     siblings = channel_siblings(rss_path) or {'': rss_path}
     want = [c for c in CHANNELS if c in siblings] if channels is None \
@@ -268,7 +295,7 @@ def load_exposure(rss_path, *, plane='auto', channels=None):
                 logger.warning('%s %s: no %s/%s plane; channel skipped',
                                exposure_prefix(rss_path), c, flux_ext, err_ext)
                 continue
-            w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext)
+            w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext, sky_penalty=sky_penalty)
         data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om)
 
     meta = ExposureMeta(exposure_id=exposure_prefix(det), path=det, exptime=exptime,
@@ -276,7 +303,8 @@ def load_exposure(rss_path, *, plane='auto', channels=None):
     return meta, resolved_plane, data
 
 
-def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reject_bad_fibres=True):
+def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reject_bad_fibres=True,
+                    sky_penalty=0.0):
     """Assemble a field's exposures into a :class:`SuperRSS`.
 
     ``rss_paths`` may list any channel of each exposure (siblings are found automatically) and may
@@ -300,7 +328,8 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
 
     loaded = []
     for p in prefixes:
-        meta, resolved_plane, data = load_exposure(p, plane=plane, channels=channels)
+        meta, resolved_plane, data = load_exposure(p, plane=plane, channels=channels,
+                                                   sky_penalty=sky_penalty)
         if not data:
             logger.warning('%s: no usable channels; exposure skipped', meta.exposure_id)
             continue

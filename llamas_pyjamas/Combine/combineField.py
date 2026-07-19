@@ -30,7 +30,7 @@ from typing import List, Optional
 import numpy as np
 from astropy.io import fits
 
-from llamas_pyjamas.Combine.superRSS import build_super_rss, CHANNELS
+from llamas_pyjamas.Combine.superRSS import build_super_rss, combined_dir, CHANNELS
 from llamas_pyjamas.Combine.coadd import combine_image
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         cube = combine_cube(sr, chan, dwave=args.dwave, units=args.units, weighting=args.weight,
                             kernel=args.kernel, kernel_fwhm=args.fwhm, pixscale=args.pixscale,
                             min_coverage=args.min_coverage)
-        out = args.out or f'{sr.field or "field"}_cube_{chan}.fits'
+        out = args.out or os.path.join(combined_dir(paths, create=True),
+                                       f'{sr.field or "field"}_cube_{chan}.fits')
         cube.write(out)
         logger.info('wrote %s  (%dx%dx%d, %.1f-%.1f A, max depth %d/%d)', out, cube.data.shape[2],
                     cube.data.shape[1], cube.data.shape[0], cube.wave[0], cube.wave[-1],
@@ -167,7 +168,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         weighting=args.weight, kernel=args.kernel, kernel_fwhm=args.fwhm,
                         pixscale=args.pixscale, min_coverage=args.min_coverage)
 
-    out = args.out or f'{sr.field or "field"}_coadd.fits'
+    out = args.out or os.path.join(combined_dir(paths, create=True),
+                                   f'{sr.field or "field"}_coadd.fits')
     img.write(out)
     cov = img.coverage
     logger.info('wrote %s  (%dx%d, max depth %d/%d exposures, max coverage %d fibres)',

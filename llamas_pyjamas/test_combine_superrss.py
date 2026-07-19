@@ -10,7 +10,8 @@ Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combin
 
 import numpy as np
 
-from llamas_pyjamas.Combine.superRSS import ChannelStack, SuperRSS, exposure_prefix
+from llamas_pyjamas.Combine.superRSS import (ChannelStack, SuperRSS, combined_dir,
+                                             exposure_prefix)
 
 
 def _stack(channel, wave, flux, var, mask, ra=None, dec=None, area=0.5, exp=0):
@@ -99,6 +100,13 @@ def test_mask_bad_fibres_flags_strong_negatives_as_no_data():
 def test_exposure_prefix():
     assert exposure_prefix('/x/LLAMAS_2026-05-17_02-49-56.7_RSS_green.fits') \
         == 'LLAMAS_2026-05-17_02-49-56.7'
+
+
+def test_combined_dir_standard_location():
+    # exposures in <reduced>/extractions -> combined products in the sibling <reduced>/combined
+    assert combined_dir(['/d/reduced/extractions/x_RSS_green.fits']) == '/d/reduced/combined'
+    # otherwise a 'combined' subdir beside the inputs
+    assert combined_dir(['/d/foo/x_RSS_green.fits']) == '/d/foo/combined'
 
 
 if __name__ == '__main__':
