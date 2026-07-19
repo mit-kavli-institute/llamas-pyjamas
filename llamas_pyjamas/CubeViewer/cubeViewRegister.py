@@ -211,6 +211,18 @@ if _HAVE_QT:
             info.setWordWrap(True)
             layout.addWidget(info)
 
+            # Overlay key — colours/symbols match the DS9 regions this dialog draws.
+            legend = QLabel(
+                '<b>DS9 overlay key:</b> &nbsp;'
+                '<span style="color:#1faa1f;">&#9679; green circle</span> = Gaia catalogue '
+                'position &nbsp;&nbsp;'
+                '<span style="color:#e00000;">&#10010; red cross</span> = fitted centroid '
+                '&nbsp;&nbsp;'
+                '<span style="color:#d000d0;">&#10005; magenta</span> = forced position '
+                '(last resort)')
+            legend.setWordWrap(True)
+            layout.addWidget(legend)
+
             mode_row = QHBoxLayout()
             mode_row.addWidget(QLabel('Pair to:'))
             self.mode_combo = QComboBox()
