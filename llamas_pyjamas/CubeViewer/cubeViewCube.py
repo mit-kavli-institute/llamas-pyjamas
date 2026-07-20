@@ -150,18 +150,37 @@ class CoaddCubeScene(SpectralScene):
         raise ValueError(f'{line_wave} A not covered by any channel ({", ".join(self.channels)})')
 
     def optimal_spectrum(self, ra, dec, **kwargs):
-        """PSF/ivar-weighted point-source spectrum at (ra,dec) as Spectrum objects (one per
-        channel), from the retained super-RSS. Raises if the super-RSS is not available."""
+        """PSF/ivar-weighted point-source spectrum at (ra,dec): a 2-D Gaussian is fit to the source
+        and used as the extraction profile. Returns ``(spectra, ProfileFit)`` -- one Spectrum per
+        channel plus the fitted profile (for the ellipse overlay). Needs the retained super-RSS."""
         if self.super_rss is None:
             raise ValueError('optimal extraction needs the super-RSS; rebuild via Combine ▸ '
                              'Combine field into cube')
         from llamas_pyjamas.Combine.spectrum import optimal_spectrum
-        spec, fwhm = optimal_spectrum(self.super_rss, ra, dec, **kwargs)
-        label = f'optimal ({ra:.4f},{dec:+.4f}) FWHM {fwhm:.1f}"'
+        spec, fit = optimal_spectrum(self.super_rss, ra, dec, **kwargs)
+        tag = 'fit' if fit.fitted else 'assumed'
+        label = f'optimal ({fit.ra:.4f},{fit.dec:+.4f}) FWHM {fit.fwhm:.1f}" [{tag}]'
         cal = self.super_rss.plane == 'flam'
-        return [Spectrum(wave=w, flux=f, channel=c, label=label, mask=~np.isfinite(f),
-                         flam=(f if cal else None), has_counts=not cal)
-                for c, (w, f, v) in spec.items()], fwhm
+        spectra = [Spectrum(wave=w, flux=f, channel=c, label=label, mask=~np.isfinite(f),
+                            flam=(f if cal else None), has_counts=not cal)
+                   for c, (w, f, v) in spec.items()]
+        return spectra, fit
+
+    def profile_ellipse_region(self, fit, tag='cubeview-ext'):
+        """DS9 region: 1-sigma and 2-sigma ellipses of a :class:`ProfileFit`, in image coords, so
+        the extraction aperture is shown (not just highlighted spaxels)."""
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        px, py = self.cube.wcs.celestial.world_to_pixel(SkyCoord(fit.ra * u.deg, fit.dec * u.deg))
+        x, y = float(px) + 1, float(py) + 1               # DS9 1-based
+        s = self._pixscale
+        ang = -fit.theta_deg                              # tangent (E-left) -> image angle (mod 180)
+        ax, ay = fit.sigma_x / s, fit.sigma_y / s
+        lines = ['image']
+        for k in (1, 2):
+            lines.append(f'ellipse({x:.2f},{y:.2f},{k * ax:.2f},{k * ay:.2f},{ang:.1f}) '
+                         f'# color=yellow width=2 tag={{{tag}}}')
+        return '\n'.join(lines)
 
     @classmethod
     def from_fits(cls, path: str) -> 'CoaddCubeScene':

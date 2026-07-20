@@ -296,17 +296,22 @@ class CubeViewerWindow(QMainWindow):
         open_cube_action.setToolTip('Open a cube FITS previously written by the combine step')
         open_cube_action.triggered.connect(self.open_cube)
         combine_menu.addAction(open_cube_action)
-        combine_menu.addSeparator()
-        self.optspec_action = QAction('Optimal &spectrum at crosshair', self)
-        self.optspec_action.setToolTip('PSF/inverse-variance-weighted point-source spectrum at the '
-                                       'DS9 crosshair (deepest QSO spectrum), from the super-RSS')
-        self.optspec_action.triggered.connect(self.optimal_spectrum_here)
-        combine_menu.addAction(self.optspec_action)
         self.narrowband_action = QAction('&Narrowband line image…', self)
         self.narrowband_action.setToolTip('Continuum-subtracted narrowband image at a chosen line '
                                           'wavelength (e.g. Lya), sent to a new DS9 frame')
         self.narrowband_action.triggered.connect(self.narrowband_image_dialog)
         combine_menu.addAction(self.narrowband_action)
+
+        # Extraction: point-source spectra from a combined cube.
+        extract_menu = self.menuBar().addMenu('&Extraction')
+        extract_menu.setToolTipsVisible(True)
+        self.optspec_action = QAction('Optimal &spectrum at crosshair', self)
+        self.optspec_action.setToolTip('Fit a 2-D Gaussian to the source at the DS9 crosshair and '
+                                       'PSF/inverse-variance extract its spectrum (deepest QSO '
+                                       'spectrum); draws the 1σ/2σ aperture')
+        self.optspec_action.triggered.connect(self.optimal_spectrum_here)
+        extract_menu.addAction(self.optspec_action)
+
         # Enabled only when a combined cube is loaded.
         self.cube_actions = (self.optspec_action, self.narrowband_action)
         for action in self.cube_actions:
@@ -427,7 +432,7 @@ class CubeViewerWindow(QMainWindow):
         sky = self.scene.cube.wcs.celestial.pixel_to_world(x - 1, y - 1)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            spectra, fwhm = self.scene.optimal_spectrum(float(sky.ra.deg), float(sky.dec.deg))
+            spectra, fit = self.scene.optimal_spectrum(float(sky.ra.deg), float(sky.dec.deg))
         except Exception as exc:                   # noqa: BLE001
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, 'Optimal spectrum', f'Could not extract:\n{exc}')
@@ -435,8 +440,14 @@ class CubeViewerWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self._current_spectra = list(spectra)
         self.panel.set_spectra(spectra)
-        self.statusBar().showMessage(f'Optimal spectrum at ({sky.ra.deg:.4f}, {sky.dec.deg:+.4f}), '
-                                     f'seeing FWHM {fwhm:.2f}"')
+        try:                                        # show the fitted 1σ/2σ aperture in DS9
+            self.ds9.delete_region_group('cubeview-ext')
+            self.ds9.set_regions(self.scene.profile_ellipse_region(fit))
+        except DS9Error as exc:
+            logger.debug('could not draw extraction aperture: %s', exc)
+        kind = 'fitted' if fit.fitted else 'assumed'
+        self.statusBar().showMessage(
+            f'Optimal spectrum at ({fit.ra:.4f}, {fit.dec:+.4f}) [{kind}], FWHM {fit.fwhm:.2f}"')
 
     def narrowband_image_dialog(self) -> None:
         """Build a continuum-subtracted narrowband image at a chosen line and send it to DS9."""

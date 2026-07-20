@@ -47,16 +47,16 @@ def _point_source_super(nw=8, C=10.0, fwhm=FWHM, nexp=2):
     return SuperRSS('T', 'skysub', 'counts', ex, {'green': st})
 
 
-def test_optimal_spectrum_recovers_template_shape():
+def test_optimal_spectrum_fits_profile_and_recovers_template():
     sr = _point_source_super(C=10.0)
-    spec, fwhm = optimal_spectrum(sr, RA0, DEC0, radius_arcsec=3.0, fwhm=FWHM)
+    spec, fit = optimal_spectrum(sr, RA0, DEC0, radius_arcsec=3.0)     # fits the profile by default
+    assert fit.fitted                                    # a real 2-D Gaussian fit, not assumed
+    assert abs(fit.fwhm - FWHM) < 0.4                    # recovers the ~1.5" input width
+    assert abs(fit.ra - RA0) < 5e-4 and abs(fit.dec - DEC0) < 5e-4    # refined centroid on-source
     wl, flux, var = spec['green']
     assert np.all(np.isfinite(flux))
-    # flat template -> flat extracted spectrum (shape recovered; absolute scale is the total flux,
-    # a normalisation convention anchored to Gaia later)
-    assert np.nanstd(flux) / np.nanmean(flux) < 0.02
-    # optimal S/N (total flux) beats a single core fibre (flux ~C=10, var 1 -> S/N ~10)
-    assert np.nanmedian(flux / np.sqrt(var)) > 15
+    assert np.nanstd(flux) / np.nanmean(flux) < 0.02    # flat template -> flat extracted shape
+    assert np.nanmedian(flux / np.sqrt(var)) > 15       # optimal total-flux S/N beats one fibre
 
 
 def test_estimate_psf_fwhm_recovers_seeing():
