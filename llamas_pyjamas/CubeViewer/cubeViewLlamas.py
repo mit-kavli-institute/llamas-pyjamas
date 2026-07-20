@@ -38,8 +38,12 @@ from PyQt6.QtGui import QAction, QDoubleValidator
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -58,6 +62,66 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_ORDER, SpectralScene
 from llamas_pyjamas.CubeViewer.cubeViewSpecPlot import SpectrumPanel
 
 logger = logging.getLogger(__name__)
+
+
+class CombineOptionsDialog(QDialog):
+    """Collect the spatial-combine options before stacking a field into a cube.
+
+    The kernel FWHM is the spatial gridding/interpolation scale: it fills the inter-lenslet gaps and
+    dithers onto a regular grid, but it also SOFTENS the rendered cube/image (the effective image PSF
+    is ~sqrt(source_fwhm^2 + kernel_fwhm^2)). It does NOT affect optimal point-source extraction,
+    which runs in fibre space on the super-RSS. Default 0.9" is tuned for faint diffuse emission
+    (a near-matched filter); drop it (~0.5-0.6") for a sharper view of compact structure, at the cost
+    of more holes/noise in shallow-coverage regions.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Combine options')
+        form = QFormLayout(self)
+
+        self.kernel = QComboBox()
+        self.kernel.addItems(['gaussian', 'tophat'])
+        form.addRow('Kernel', self.kernel)
+
+        self.fwhm = QDoubleSpinBox()
+        self.fwhm.setRange(0.1, 5.0)
+        self.fwhm.setSingleStep(0.1)
+        self.fwhm.setDecimals(2)
+        self.fwhm.setValue(0.9)
+        self.fwhm.setSuffix('  arcsec')
+        self.fwhm.setToolTip('Spatial gridding kernel FWHM. Larger = smoother image (better for '
+                             'faint diffuse emission); smaller = sharper (more holes/noise in '
+                             'shallow regions). Does not affect point-source extraction.')
+        form.addRow('Kernel FWHM', self.fwhm)
+
+        self.pixscale = QDoubleSpinBox()
+        self.pixscale.setRange(0.1, 2.0)
+        self.pixscale.setSingleStep(0.05)
+        self.pixscale.setDecimals(2)
+        self.pixscale.setValue(0.5)
+        self.pixscale.setSuffix('  arcsec')
+        form.addRow('Pixel scale', self.pixscale)
+
+        self.units = QComboBox()
+        self.units.addItems(['sb', 'flux'])
+        self.units.setToolTip('sb = surface brightness (diffuse emission); flux = total per spaxel.')
+        form.addRow('Units', self.units)
+
+        self.weighting = QComboBox()
+        self.weighting.addItems(['ivar', 'uniform', 'exptime'])
+        form.addRow('Weighting', self.weighting)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def options(self) -> dict:
+        return dict(kernel=self.kernel.currentText(), kernel_fwhm=float(self.fwhm.value()),
+                    pixscale=float(self.pixscale.value()), units=self.units.currentText(),
+                    weighting=self.weighting.currentText())
 
 
 class CubeViewerWindow(QMainWindow):
@@ -362,6 +426,10 @@ class CubeViewerWindow(QMainWindow):
         paths = getattr(dialog, 'chosen_files', None) or []
         if not paths:
             return
+        opts_dialog = CombineOptionsDialog(self)
+        if not opts_dialog.exec():
+            return
+        opts = opts_dialog.options()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             from llamas_pyjamas.Combine.superRSS import build_super_rss
@@ -373,7 +441,7 @@ class CubeViewerWindow(QMainWindow):
                 sr.apply_scales(transparency_scales(sr))
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
-            cubes = combine_field_cubes(sr, units='sb', weighting='ivar')
+            cubes = combine_field_cubes(sr, **opts)
             scene = CoaddCubeScene(cubes, super_rss=sr)     # keep super-RSS for optimal extraction
             # Save the built cubes to the standard combined/ directory so they are findable.
             from llamas_pyjamas.Combine.superRSS import combined_dir
@@ -389,10 +457,14 @@ class CubeViewerWindow(QMainWindow):
         self._path = written[0] if written else None
         self._open_cube_scene(scene, f"{scene.object or 'field'} combined cube (SB)")
         self.statusBar().showMessage(
-            f'Combined {len(paths)} exposures -> {", ".join(scene.channels)} cubes in '
-            f'{outdir}')
+            f'Combined {len(paths)} exposures -> {", ".join(scene.channels)} cubes '
+            f'({opts["kernel"]} {opts["kernel_fwhm"]:.2f}", {opts["pixscale"]:.2f}"/pix, '
+            f'{opts["units"]}) in {outdir}')
         QMessageBox.information(self, 'Combine field',
-                               f'Wrote {len(written)} cube(s) to:\n{outdir}')
+                               f'Wrote {len(written)} cube(s) to:\n{outdir}\n\n'
+                               f'Kernel {opts["kernel"]} FWHM {opts["kernel_fwhm"]:.2f}", '
+                               f'pixel scale {opts["pixscale"]:.2f}", units {opts["units"]}, '
+                               f'weighting {opts["weighting"]}.')
 
     def open_cube(self) -> None:
         """Open a cube FITS previously written by the combine step."""
