@@ -11,8 +11,12 @@ Usage
 -----
     python -m llamas_pyjamas.Scripts.compare_rss A_RSS_green.fits B_RSS_green.fits
     python -m llamas_pyjamas.Scripts.compare_rss A_RSS_green.fits B_RSS_green.fits --rtol 1e-6
+    # restrict to the sky planes (e.g. when the two runs used different flux
+    # standards, so FLAM/FLAM_ERR legitimately differ via the sensfunc):
+    python -m llamas_pyjamas.Scripts.compare_rss A.fits B.fits \
+        --planes SKYSUB SKY SKYRESID COUNTS ERROR
 
-Exit code 0 if every shared plane is identical (within tolerance), 1 otherwise.
+Exit code 0 if every compared plane is identical (within tolerance), 1 otherwise.
 """
 
 import argparse
@@ -48,13 +52,25 @@ def _plane_diff(a, b, rtol, atol):
     return n_diff == 0, n_diff, max_abs, ""
 
 
-def compare(path_a, path_b, rtol=0.0, atol=0.0):
-    """Compare two RSS files. Returns True if all shared planes are identical."""
+def compare(path_a, path_b, rtol=0.0, atol=0.0, planes=None):
+    """Compare two RSS files. Returns True if all compared planes are identical.
+
+    ``planes`` (optional) restricts the comparison to the named EXTNAMEs — use it
+    to check only the sky planes when e.g. the two runs used different flux
+    standards (so FLAM/FLAM_ERR differ via the sensfunc, unrelated to sky).
+    """
     with fits.open(path_a) as ha, fits.open(path_b) as hb:
         A, B = _image_hdus(ha), _image_hdus(hb)
     shared = [k for k in A if k in B]
     only_a = sorted(set(A) - set(B))
     only_b = sorted(set(B) - set(A))
+
+    if planes:
+        want = {p.upper() for p in planes}
+        missing = sorted(want - {k.upper() for k in shared})
+        shared = [k for k in shared if k.upper() in want]
+        if missing:
+            print(f"WARNING: requested planes not shared/present: {missing}")
 
     print(f"A: {path_a}")
     print(f"B: {path_b}")
@@ -69,8 +85,8 @@ def compare(path_a, path_b, rtol=0.0, atol=0.0):
         extra = f"  {detail}" if detail else ""
         print(f"{k:<12} {flag:<10} {n_diff:>10} {max_abs:>14.6g}{extra}")
     verdict = "IDENTICAL" if all_same else "DIFFERENCES FOUND"
-    print(f"\n{verdict} across {len(shared)} shared plane(s)"
-          + (" (added extensions are informational)" if (only_a or only_b) else ""))
+    print(f"\n{verdict} across {len(shared)} compared plane(s)"
+          + (" (only-in-A/B extensions are informational)" if (only_a or only_b) else ""))
     return all_same
 
 
@@ -80,8 +96,10 @@ def main(argv=None):
     p.add_argument("file_b")
     p.add_argument("--rtol", type=float, default=0.0, help="relative tolerance (default 0 = exact)")
     p.add_argument("--atol", type=float, default=0.0, help="absolute tolerance (default 0 = exact)")
+    p.add_argument("--planes", nargs="+", metavar="EXTNAME",
+                   help="only compare these planes (e.g. SKYSUB SKY SKYRESID COUNTS ERROR)")
     args = p.parse_args(argv)
-    ok = compare(args.file_a, args.file_b, rtol=args.rtol, atol=args.atol)
+    ok = compare(args.file_a, args.file_b, rtol=args.rtol, atol=args.atol, planes=args.planes)
     return 0 if ok else 1
 
 
