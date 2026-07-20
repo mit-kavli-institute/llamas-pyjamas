@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 CHANNEL_ORDER = ('blue', 'green', 'red')
 
 
+class NoXPSpectrumError(RuntimeError):
+    """Raised when a Gaia source has no published XP (BP/RP) spectrum (typically G > ~17.6)."""
+
+
 def nearest_gaia_source(ra_deg, dec_deg, *, radius_arcsec=5.0, mag_limit=21.0, timeout=30):
     """Gaia DR3 ``source_id`` nearest ``(ra_deg, dec_deg)`` within ``radius_arcsec`` (the anchor
     source), or None. Live TAP cone search (urllib), ordered by separation."""
@@ -60,17 +64,38 @@ def nearest_gaia_source(ra_deg, dec_deg, *, radius_arcsec=5.0, mag_limit=21.0, t
 
 def gaia_xp_sed(source_id, *, timeout=120):
     """Gaia DR3 XP flux-calibrated SED for a source: returns ``(wave_A, flam)`` with flam in
-    erg/s/cm^2/A. Needs ``gaiaxpy`` (conda install -c conda-forge gaiaxpy) + network."""
+    erg/s/cm^2/A. Needs ``gaiaxpy`` (conda install -c conda-forge gaiaxpy) + network.
+
+    gaiaxpy flips matplotlib's ``text.usetex`` to True on import (for its own plots), which would
+    make every other matplotlib canvas (e.g. the CubeViewer spectrum panel) require a LaTeX install;
+    we save and restore it so importing gaiaxpy can't poison the shared matplotlib state."""
+    import matplotlib
+    saved_usetex = matplotlib.rcParams.get('text.usetex', False)
     try:
-        import gaiaxpy
-    except ImportError as exc:                           # noqa: BLE001
-        raise ImportError('gaiaxpy is required for the Gaia XP flux anchor '
-                          '(conda install -c conda-forge gaiaxpy)') from exc
-    calibrated, sampling = gaiaxpy.calibrate([int(source_id)], save_file=False)
-    row = calibrated.iloc[0]
-    wave_A = np.asarray(sampling, dtype=float) * 10.0            # nm -> Angstrom
-    flam = np.asarray(row['flux'], dtype=float) * 100.0         # W m^-2 nm^-1 -> erg s^-1 cm^-2 A^-1
-    return wave_A, flam
+        try:
+            import gaiaxpy
+        except ImportError as exc:                       # noqa: BLE001
+            raise ImportError('gaiaxpy is required for the Gaia XP flux anchor '
+                              '(conda install -c conda-forge gaiaxpy)') from exc
+        try:
+            calibrated, sampling = gaiaxpy.calibrate([int(source_id)], save_file=False)
+        except Exception as exc:                          # noqa: BLE001
+            # gaiaxpy raises a cryptic "No continuous BP/RP data found" when the source has no
+            # published XP spectrum -- true for faint sources (roughly G > 17.6). Make it actionable.
+            raise NoXPSpectrumError(
+                f'Gaia source {source_id} has no XP (BP/RP) spectrum -- it is likely fainter than '
+                f'the XP publication limit (~G>17.6). Use a brighter in-field source for the anchor.'
+            ) from exc
+        if calibrated is None or len(calibrated) == 0:
+            raise NoXPSpectrumError(
+                f'Gaia source {source_id} has no XP (BP/RP) spectrum (empty gaiaxpy result); '
+                f'it is likely fainter than the XP publication limit (~G>17.6).')
+        row = calibrated.iloc[0]
+        wave_A = np.asarray(sampling, dtype=float) * 10.0        # nm -> Angstrom
+        flam = np.asarray(row['flux'], dtype=float) * 100.0     # W m^-2 nm^-1 -> erg s^-1 cm^-2 A^-1
+        return wave_A, flam
+    finally:
+        matplotlib.rcParams['text.usetex'] = saved_usetex       # undo gaiaxpy's global change
 
 
 def anchor_scale(spec_by_channel: Dict[str, tuple], ref_wave, ref_flam, *, nbins=24) -> Optional[dict]:

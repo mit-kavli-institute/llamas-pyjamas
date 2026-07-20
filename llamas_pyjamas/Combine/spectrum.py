@@ -301,9 +301,12 @@ def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channe
         ddy = dy[sel][:, None] - np.atleast_1d(cyg)[None, :]
         xr = ddx * ct + ddy * stheta                             # rotate into the profile frame
         yr = -ddx * stheta + ddy * ct
-        P = np.exp(-0.5 * ((xr / sigx) ** 2 + (yr / sigy) ** 2))
-        psum = P.sum(axis=0, keepdims=True)
-        P = np.divide(P, psum, out=np.zeros_like(P), where=psum > 0)   # normalise per wavelength
+        # P = fraction of the source's TOTAL flux falling in each fibre = normalised-PSF * fibre
+        # area. Analytic (2*pi*sigx*sigy) normalisation, NOT sum-over-fibres: the latter divides by
+        # the number of sampling fibre-instances, so N dithers would inflate F_hat by ~N. This makes
+        # F_hat the true total flux (any exposure count) -> directly comparable to Gaia.
+        area = sub.solid_angle[:, None]                          # arcsec^2 per fibre
+        P = np.exp(-0.5 * ((xr / sigx) ** 2 + (yr / sigy) ** 2)) * area / (2.0 * np.pi * sigx * sigy)
         wgt = np.where(bad, 0.0, 1.0 / V)
         num = np.nansum(P * x * wgt, axis=0)
         den = np.nansum(P * P * wgt, axis=0)

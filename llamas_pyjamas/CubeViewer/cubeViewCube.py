@@ -216,20 +216,27 @@ class CoaddCubeScene(SpectralScene):
             def prof(ix, iy):
                 return float(np.exp(-0.5 * ((ix - cx) ** 2 + (iy - cy) ** 2) / sig ** 2))
 
+        # analytic PSF normalisation (fraction per spaxel) so F_hat is the TOTAL flux, matching the
+        # fibre-space path; spaxel Gaussian sigmas (pixels) -> 1/(2*pi*sx*sy). Cube SB -> flux per
+        # spaxel via the pixel solid angle (pixscale^2) when the cube is in surface brightness.
+        sgx = abs(float(g.x_stddev.value)) if g is not None else 1.2 / self._pixscale
+        sgy = abs(float(g.y_stddev.value)) if g is not None else sgx
+        pnorm = 1.0 / (2.0 * np.pi * sgx * sgy)
         x0, x1 = max(0, int(cx - rpix)), min(self._nx - 1, int(cx + rpix))
         y0, y1 = max(0, int(cy - rpix)), min(self._ny - 1, int(cy + rpix))
         spec = {}
         for c in self.channels:
             cube = self._cubes[c]
+            to_flux = self._pixscale ** 2 if '/arcsec2' in cube.bunit else 1.0   # SB -> flux/spaxel
             num = np.zeros(cube.wave.size)
             den = np.zeros(cube.wave.size)
             for iy in range(y0, y1 + 1):
                 for ix in range(x0, x1 + 1):
                     if (ix - cx) ** 2 + (iy - cy) ** 2 > rpix ** 2 or cube.coverage[iy, ix] <= 0:
                         continue
-                    P = prof(ix, iy)
-                    S = np.asarray(cube.data[:, iy, ix], float)
-                    V = np.asarray(cube.var[:, iy, ix], float)
+                    P = prof(ix, iy) * pnorm
+                    S = np.asarray(cube.data[:, iy, ix], float) * to_flux
+                    V = np.asarray(cube.var[:, iy, ix], float) * to_flux ** 2
                     wgt = np.where(np.isfinite(V) & (V > 0) & np.isfinite(S), 1.0 / V, 0.0)
                     num += P * np.where(np.isfinite(S), S, 0.0) * wgt
                     den += P * P * wgt

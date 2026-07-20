@@ -65,6 +65,40 @@ def test_estimate_psf_fwhm_recovers_seeing():
     assert 1.0 < fw < 2.2                                   # ~1.5" (moment estimate, aperture-biased)
 
 
+def _abs_super(F0=100.0, sigma=1.0, area=0.44, nexp=1, nw=5):
+    """A Gaussian point source of known TOTAL flux F0: fibre flux = F0 * (normalised PSF) * area."""
+    offs = [(dx, dy) for dx in range(-5, 6) for dy in range(-5, 6)]
+    dx = np.array([o[0] * 0.75 for o in offs])
+    dy = np.array([o[1] * 0.75 for o in offs])
+    psf = np.exp(-0.5 * (dx ** 2 + dy ** 2) / sigma ** 2) / (2 * np.pi * sigma ** 2)   # /arcsec^2
+    fib_flux = F0 * psf * area                            # flux in each fibre
+    flux1 = np.repeat(fib_flux[:, None], nw, axis=1)      # flat spectrum at level F0 (total)
+    cosd = np.cos(np.deg2rad(DEC0))
+    ra = RA0 + dx / cosd / 3600.0
+    dec = DEC0 + dy / 3600.0
+    wave = np.tile(np.linspace(5000, 5000 + nw - 1, nw), (len(offs), 1))
+    exps, s = [], dict(ra=[], dec=[], wave=[], flux=[], var=[], mask=[], solid=[], exp=[])
+    for e in range(nexp):
+        s['ra'].append(ra); s['dec'].append(dec); s['wave'].append(wave)
+        s['flux'].append(flux1.copy()); s['var'].append(np.ones_like(flux1))
+        s['mask'].append(np.zeros_like(flux1, bool)); s['solid'].append(np.full(len(offs), area))
+        s['exp'].append(np.full(len(offs), e))
+        exps.append(ExposureMeta(f'e{e}', f'p{e}', 1.0, 1.0, float(e)))
+    st = ChannelStack('green', np.concatenate(s['ra']), np.concatenate(s['dec']),
+                      np.concatenate(s['wave']), np.concatenate(s['flux']), np.concatenate(s['var']),
+                      np.concatenate(s['mask']), np.concatenate(s['solid']), np.concatenate(s['exp']))
+    return SuperRSS('T', 'skysub', 'counts', exps, {'green': st})
+
+
+def test_optimal_spectrum_recovers_absolute_total_flux():
+    # F_hat must equal the source total flux AND be invariant to exposure count (the N-count bug fix)
+    for nexp in (1, 4):
+        sr = _abs_super(F0=100.0, sigma=1.0, nexp=nexp)
+        spec, fit = optimal_spectrum(sr, RA0, DEC0, dar=False)
+        f = spec['green'][1]
+        assert np.isclose(np.nanmedian(f), 100.0, rtol=0.1), (nexp, np.nanmedian(f))
+
+
 def _dar_super(nw=40, C=10.0, fwhm=1.5, shift_per_A=0.03):
     """Point source whose centroid WALKS in x with wavelength (differential refraction)."""
     sigma = fwhm / 2.35482

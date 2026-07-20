@@ -25,6 +25,9 @@ import logging
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
+import matplotlib
+matplotlib.rcParams['text.usetex'] = False   # CubeViewer runs with mathtext only (no LaTeX); keep
+#                                              this even if a library (e.g. gaiaxpy) flips usetex on.
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
