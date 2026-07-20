@@ -13,7 +13,7 @@ from astropy.wcs import WCS
 
 from llamas_pyjamas.Combine.superRSS import ChannelStack, SuperRSS, ExposureMeta
 from llamas_pyjamas.Combine.cube import CoaddCube, narrowband_image
-from llamas_pyjamas.Combine.spectrum import optimal_spectrum, estimate_psf_fwhm
+from llamas_pyjamas.Combine.spectrum import optimal_spectrum, estimate_psf_fwhm, measure_dar
 
 RA0, DEC0 = 150.0, 20.0
 FWHM = 1.5
@@ -63,6 +63,48 @@ def test_estimate_psf_fwhm_recovers_seeing():
     sr = _point_source_super(fwhm=1.5)
     fw = estimate_psf_fwhm(sr, RA0, DEC0, radius_arcsec=3.0)
     assert 1.0 < fw < 2.2                                   # ~1.5" (moment estimate, aperture-biased)
+
+
+def _dar_super(nw=40, C=10.0, fwhm=1.5, shift_per_A=0.03):
+    """Point source whose centroid WALKS in x with wavelength (differential refraction)."""
+    sigma = fwhm / 2.35482
+    offs = [(dx, dy) for dx in range(-3, 4) for dy in range(-3, 4)]
+    dx = np.array([o[0] * 0.75 for o in offs])
+    dy = np.array([o[1] * 0.75 for o in offs])
+    wl = 5000.0 + np.arange(nw)
+    cx = shift_per_A * (wl - wl.mean())                          # centroid track (arcsec)
+    flux = C * np.exp(-0.5 * ((dx[:, None] - cx[None, :]) ** 2 + dy[:, None] ** 2) / sigma ** 2)
+    cosd = np.cos(np.deg2rad(DEC0))
+    ra = RA0 + dx / cosd / 3600.0
+    dec = DEC0 + dy / 3600.0
+    wave = np.tile(wl, (len(offs), 1))
+    exps, s = [], dict(ra=[], dec=[], wave=[], flux=[], var=[], mask=[], solid=[], exp=[])
+    for e in range(2):
+        s['ra'].append(ra); s['dec'].append(dec); s['wave'].append(wave)
+        s['flux'].append(flux.copy()); s['var'].append(np.ones_like(flux))
+        s['mask'].append(np.zeros_like(flux, bool)); s['solid'].append(np.full(len(offs), 0.44))
+        s['exp'].append(np.full(len(offs), e))
+        exps.append(ExposureMeta(f'e{e}', f'p{e}', 1.0, 1.0, float(e)))
+    st = ChannelStack('green', np.concatenate(s['ra']), np.concatenate(s['dec']),
+                      np.concatenate(s['wave']), np.concatenate(s['flux']), np.concatenate(s['var']),
+                      np.concatenate(s['mask']), np.concatenate(s['solid']), np.concatenate(s['exp']))
+    return SuperRSS('T', 'skysub', 'counts', exps, {'green': st})
+
+
+def test_dar_tracks_centroid_and_flattens_extraction():
+    sr = _dar_super(shift_per_A=0.03)                            # ~1.2" walk over 40 A
+    track = measure_dar(sr, RA0, DEC0)
+    assert track is not None
+    _px, _py, shift = track
+    assert shift > 0.5                                           # detects the wavelength walk
+    dar, fit = optimal_spectrum(sr, RA0, DEC0, dar=True)
+    nod, _ = optimal_spectrum(sr, RA0, DEC0, dar=False)
+    fd = dar['green'][1]
+    fn = nod['green'][1]
+    # DAR tracking keeps the extracted flux flat; fixed-centre loses flux where the source walked
+    assert np.nanstd(fd) / np.nanmean(fd) < np.nanstd(fn) / np.nanmean(fn)
+    assert np.nanmean(fd) > np.nanmean(fn)                       # recovers more total flux
+    assert fit.dar_shift > 0.5
 
 
 def _line_cube(nw=41, line_k=20, ny=6, nx=6):

@@ -161,7 +161,8 @@ class CoaddCubeScene(SpectralScene):
             spec, fit = self._optimal_from_cubes(ra, dec, radius_arcsec)
         tag = 'fit' if fit.fitted else 'assumed'
         src = 'fibre' if self.super_rss is not None else 'cube'
-        label = f'optimal ({fit.ra:.4f},{fit.dec:+.4f}) FWHM {fit.fwhm:.1f}" [{tag}/{src}]'
+        dar = f' DAR {fit.dar_shift:.1f}"' if fit.dar_shift > 0.3 else ''
+        label = f'optimal ({fit.ra:.4f},{fit.dec:+.4f}) FWHM {fit.fwhm:.1f}"{dar} [{tag}/{src}]'
         cal = 'erg' in self.cube.bunit
         spectra = [Spectrum(wave=w, flux=f, channel=c, label=label, mask=~np.isfinite(f),
                             flam=(f if cal else None), has_counts=not cal)

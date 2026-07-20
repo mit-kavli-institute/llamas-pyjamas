@@ -443,8 +443,10 @@ class CubeViewerWindow(QMainWindow):
         except DS9Error as exc:
             logger.debug('could not draw extraction aperture: %s', exc)
         kind = 'fitted' if fit.fitted else 'assumed'
+        dar = f', DAR {fit.dar_shift:.2f}" tracked' if fit.dar_shift > 0.3 else ''
         self.statusBar().showMessage(
-            f'Optimal spectrum at ({fit.ra:.4f}, {fit.dec:+.4f}) [{kind}], FWHM {fit.fwhm:.2f}"')
+            f'Optimal spectrum at ({fit.ra:.4f}, {fit.dec:+.4f}) [{kind}], '
+            f'FWHM {fit.fwhm:.2f}"{dar}')
 
     def narrowband_image_dialog(self) -> None:
         """Build a continuum-subtracted narrowband image at a chosen line and send it to DS9."""

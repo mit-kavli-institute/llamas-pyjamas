@@ -36,12 +36,13 @@ logger = logging.getLogger(__name__)
 class ProfileFit:
     """The fitted source profile used as the extraction weight, in sky terms so a viewer can draw
     it (1-sigma / 2-sigma ellipses)."""
-    ra: float                 #: fitted centroid RA (deg)
-    dec: float                #: fitted centroid Dec (deg)
+    ra: float                 #: reference (broadband) centroid RA (deg)
+    dec: float                #: reference centroid Dec (deg)
     sigma_x: float            #: arcsec (major/x axis)
     sigma_y: float            #: arcsec
     theta_deg: float          #: position angle of the x axis (deg)
     fitted: bool              #: True = 2-D Gaussian fit; False = fallback (moment / assumed)
+    dar_shift: float = 0.0    #: total centroid shift across the band (arcsec), 0 if DAR not tracked
 
     @property
     def fwhm(self) -> float:
@@ -160,15 +161,56 @@ def fit_gaussian_image(img, x0, y0, radius_pix):
         return None
 
 
+def measure_dar(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None, nbins=12, order=2):
+    """Track the source centroid vs wavelength (differential atmospheric refraction / ADC residual).
+
+    Bins the full wavelength range, takes the background-subtracted flux-weighted centroid of the
+    fibres in each bin, and fits smooth polynomials x0(lambda), y0(lambda) (tangent-plane arcsec,
+    relative to ``(ra, dec)``). Returns ``(px, py, shift_arcsec)`` (numpy poly coeffs + the total
+    blue-to-red centroid shift) or None if too few usable bins."""
+    chans = [c for c in ('blue', 'green', 'red')
+             if c in super_rss.channels and (channels is None or c in channels)]
+    lo, hi = _full_band(super_rss, chans)
+    edges = np.linspace(lo, hi, nbins + 1)
+    cosd = np.cos(np.deg2rad(dec))
+    wc, x0s, y0s, amps = [], [], [], []
+    for i in range(nbins):
+        ft = super_rss.collapse_band(edges[i], edges[i + 1], channels=chans)
+        if len(ft) == 0:
+            continue
+        dx = (ft.ra - ra) * cosd * 3600.0
+        dy = (ft.dec - dec) * 3600.0
+        sep = np.hypot(dx, dy)
+        sel = sep < radius_arcsec
+        ann = (sep >= radius_arcsec) & (sep < 2 * radius_arcsec)
+        bg = float(np.nanmedian(ft.value[ann])) if ann.any() else 0.0
+        w = np.clip(ft.value[sel] - bg, 0.0, None)
+        if sel.sum() < 6 or not np.isfinite(w).any() or w.sum() <= 0:
+            continue
+        wc.append(0.5 * (edges[i] + edges[i + 1]))
+        x0s.append(float(np.sum(w * dx[sel]) / w.sum()))
+        y0s.append(float(np.sum(w * dy[sel]) / w.sum()))
+        amps.append(float(w.sum()))
+    if len(wc) < 2:
+        return None
+    order = min(order, len(wc) - 1)
+    wc, x0s, y0s, amps = map(np.asarray, (wc, x0s, y0s, amps))
+    px = np.polyfit(wc, x0s, order, w=amps)
+    py = np.polyfit(wc, y0s, order, w=amps)
+    shift = float(np.hypot(np.polyval(px, hi) - np.polyval(px, lo),
+                           np.polyval(py, hi) - np.polyval(py, lo)))
+    return px, py, shift
+
+
 def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channels=None,
-                     dwave=None, fit_profile=True) -> Tuple[Dict[str, tuple], ProfileFit]:
+                     dwave=None, fit_profile=True, dar=True) -> Tuple[Dict[str, tuple], ProfileFit]:
     """PSF/inverse-variance-weighted 1D spectrum at ``(ra, dec)``, per channel.
 
-    ``fit_profile`` (default) fits a 2-D Gaussian to the source (centroid + widths + PA) and uses
-    that fitted profile -- and its refined centroid -- as the extraction weight P; if the fit fails
-    it falls back to an assumed circular Gaussian (``fwhm``, or a moment estimate) at the input
-    position. Returns ``({channel: (wave, flux, var)}, ProfileFit)``. Flux is in the plane's units
-    (FLAM if flux-calibrated)."""
+    ``fit_profile`` (default) fits a 2-D Gaussian to the source (centroid + widths + PA) for the
+    extraction weight P; falls back to an assumed circular Gaussian if it can't. ``dar`` (default)
+    tracks the centroid vs wavelength (differential atmospheric refraction / ADC residual) and
+    centres P per-wavelength, so blue/red flux is not lost when the source walks with wavelength.
+    Returns ``({channel: (wave, flux, var)}, ProfileFit)``; flux is in the plane's units."""
     from llamas_pyjamas.Combine.cube import _wave_grid, _resample_fibres
     chans = [c for c in ('blue', 'green', 'red')
              if c in super_rss.channels and (channels is None or c in channels)]
@@ -177,38 +219,50 @@ def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channe
                                channels=chans) if fit_profile else None
     if model is not None:
         g, fit = model
-        cxm, cym = float(g.x_mean.value), float(g.y_mean.value)   # aperture centre (arcsec frame)
-
-        def profile(dxa, dya):                                    # normalised shape (amp=1)
-            return g(dxa, dya) / g.amplitude.value
+        cx0, cy0 = float(g.x_mean.value), float(g.y_mean.value)   # reference centre (arcsec frame)
+        sigx, sigy = fit.sigma_x, fit.sigma_y
+        th = np.deg2rad(fit.theta_deg)
     else:
         fw = fwhm or estimate_psf_fwhm(super_rss, ra, dec, channels=chans,
                                        radius_arcsec=radius_arcsec)
-        sig = fw / 2.35482
-        cxm = cym = 0.0
-        fit = ProfileFit(ra=ra, dec=dec, sigma_x=sig, sigma_y=sig, theta_deg=0.0, fitted=False)
+        sigx = sigy = fw / 2.35482
+        cx0 = cy0 = 0.0
+        th = 0.0
+        fit = ProfileFit(ra=ra, dec=dec, sigma_x=sigx, sigma_y=sigy, theta_deg=0.0, fitted=False)
 
-        def profile(dxa, dya):
-            return np.exp(-0.5 * (dxa ** 2 + dya ** 2) / sig ** 2)
+    # centroid track vs wavelength (DAR); constant reference centre if disabled/unavailable
+    track = measure_dar(super_rss, ra, dec, radius_arcsec=radius_arcsec, channels=chans) if dar \
+        else None
+    if track is not None:
+        px, py, fit.dar_shift = track
+    else:
+        px, py = np.array([cx0]), np.array([cy0])
 
+    ct, stheta = np.cos(th), np.sin(th)
     cosd = np.cos(np.deg2rad(dec))
     out: Dict[str, tuple] = {}
     for c in chans:
         st = super_rss.channels[c]
         dx = (st.ra - ra) * cosd * 3600.0
         dy = (st.dec - dec) * 3600.0
-        sel = np.hypot(dx - cxm, dy - cym) < radius_arcsec       # aperture around the (fitted) centre
+        sel = np.hypot(dx - cx0, dy - cy0) < radius_arcsec       # aperture around the reference centre
         if sel.sum() == 0:
             continue
         sub = _subselect(st, sel)
         wl, _dw = _wave_grid(sub, dwave, None)
         x, V, bad = _resample_fibres(sub, wl, units='flux')      # (nsel, nw) flux + variance
-        P = profile(dx[sel], dy[sel])
-        P = P / P.sum() if P.sum() > 0 else P                    # normalise over the aperture
-        Pc = P[:, None]
+        cxg = np.polyval(px, wl)                                  # (nw,) per-wavelength centre
+        cyg = np.polyval(py, wl)
+        ddx = dx[sel][:, None] - cxg[None, :]                    # (nsel, nw)
+        ddy = dy[sel][:, None] - cyg[None, :]
+        xr = ddx * ct + ddy * stheta                             # rotate into the profile frame
+        yr = -ddx * stheta + ddy * ct
+        P = np.exp(-0.5 * ((xr / sigx) ** 2 + (yr / sigy) ** 2))
+        psum = P.sum(axis=0, keepdims=True)
+        P = np.divide(P, psum, out=np.zeros_like(P), where=psum > 0)   # normalise per wavelength
         wgt = np.where(bad, 0.0, 1.0 / V)
-        num = np.nansum(Pc * x * wgt, axis=0)
-        den = np.nansum(Pc ** 2 * wgt, axis=0)
+        num = np.nansum(P * x * wgt, axis=0)
+        den = np.nansum(P * P * wgt, axis=0)
         with np.errstate(invalid='ignore', divide='ignore'):
             flux = np.where(den > 0, num / den, np.nan)
             var = np.where(den > 0, 1.0 / den, np.nan)
