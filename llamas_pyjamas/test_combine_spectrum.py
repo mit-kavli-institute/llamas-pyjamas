@@ -95,8 +95,7 @@ def test_dar_tracks_centroid_and_flattens_extraction():
     sr = _dar_super(shift_per_A=0.03)                            # ~1.2" walk over 40 A
     track = measure_dar(sr, RA0, DEC0)
     assert track is not None
-    _px, _py, shift = track
-    assert shift > 0.5                                           # detects the wavelength walk
+    assert track.shift(5000.0, 5039.0) > 0.5                     # detects the wavelength walk
     dar, fit = optimal_spectrum(sr, RA0, DEC0, dar=True)
     nod, _ = optimal_spectrum(sr, RA0, DEC0, dar=False)
     fd = dar['green'][1]

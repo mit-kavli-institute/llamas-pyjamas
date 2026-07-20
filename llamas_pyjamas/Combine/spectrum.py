@@ -32,6 +32,43 @@ from llamas_pyjamas.Combine.superRSS import ChannelStack
 logger = logging.getLogger(__name__)
 
 
+def _refractivity(lam_A):
+    """Air refractivity (n-1) vs wavelength (Angstrom), standard dispersion formula. The DAR offset
+    is proportional to this, so centroid-vs-refractivity is linear -- with the correct nonlinear-in-
+    wavelength (blue-steepening) shape built in."""
+    lam_um = np.asarray(lam_A, float) / 1e4
+    s = 1.0 / lam_um ** 2
+    return 1e-6 * (64.328 + 29498.1 / (146.0 - s) + 255.4 / (41.0 - s))
+
+
+@dataclass
+class DARModel:
+    """Differential-refraction centroid track: tangent-plane offset (arcsec) vs wavelength, LINEAR
+    in refractivity Delta-n (physics-shaped, so robust to faint/low-blue signal)."""
+    ax: float
+    bx: float
+    ay: float
+    by: float
+    lam0: float               #: reference wavelength (Angstrom)
+    ra0: float = 0.0          #: sky reference the offsets are measured from (deg)
+    dec0: float = 0.0
+
+    def center(self, lam):
+        """Tangent-plane centroid offset (arcsec) from (ra0, dec0) at wavelength ``lam``."""
+        dn = _refractivity(lam) - _refractivity(self.lam0)
+        return self.ax * dn + self.bx, self.ay * dn + self.by
+
+    def center_sky(self, lam):
+        """Centroid (RA, DEC) in degrees at wavelength ``lam``."""
+        cx, cy = self.center(lam)
+        cosd = np.cos(np.deg2rad(self.dec0))
+        return self.ra0 + cx / (cosd * 3600.0), self.dec0 + cy / 3600.0
+
+    def shift(self, lo, hi):
+        (x0, y0), (x1, y1) = self.center(lo), self.center(hi)
+        return float(np.hypot(x1 - x0, y1 - y0))
+
+
 @dataclass
 class ProfileFit:
     """The fitted source profile used as the extraction weight, in sky terms so a viewer can draw
@@ -43,6 +80,7 @@ class ProfileFit:
     theta_deg: float          #: position angle of the x axis (deg)
     fitted: bool              #: True = 2-D Gaussian fit; False = fallback (moment / assumed)
     dar_shift: float = 0.0    #: total centroid shift across the band (arcsec), 0 if DAR not tracked
+    dar: Optional['DARModel'] = None   #: the fitted DAR track (for the R/G/B overlay), or None
 
     @property
     def fwhm(self) -> float:
@@ -161,13 +199,15 @@ def fit_gaussian_image(img, x0, y0, radius_pix):
         return None
 
 
-def measure_dar(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None, nbins=12, order=2):
+def measure_dar(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None, nbins=12, min_frac=0.1):
     """Track the source centroid vs wavelength (differential atmospheric refraction / ADC residual).
 
-    Bins the full wavelength range, takes the background-subtracted flux-weighted centroid of the
-    fibres in each bin, and fits smooth polynomials x0(lambda), y0(lambda) (tangent-plane arcsec,
-    relative to ``(ra, dec)``). Returns ``(px, py, shift_arcsec)`` (numpy poly coeffs + the total
-    blue-to-red centroid shift) or None if too few usable bins."""
+    Bins the wavelength range, takes the background-subtracted flux-weighted centroid of the fibres
+    in each bin, and fits the centroid LINEARLY against air refractivity Delta-n (tangent-plane
+    arcsec, relative to ``(ra, dec)``) -- a 2-parameter, physics-shaped fit that captures the blue
+    steepening without overfitting. Low-S/N bins (amplitude below ``min_frac`` of the brightest) are
+    rejected so faint / low-blue-signal sources don't drive it. Returns a :class:`DARModel` or None.
+    """
     chans = [c for c in ('blue', 'green', 'red')
              if c in super_rss.channels and (channels is None or c in channels)]
     lo, hi = _full_band(super_rss, chans)
@@ -193,13 +233,15 @@ def measure_dar(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None, nbins=1
         amps.append(float(w.sum()))
     if len(wc) < 2:
         return None
-    order = min(order, len(wc) - 1)
     wc, x0s, y0s, amps = map(np.asarray, (wc, x0s, y0s, amps))
-    px = np.polyfit(wc, x0s, order, w=amps)
-    py = np.polyfit(wc, y0s, order, w=amps)
-    shift = float(np.hypot(np.polyval(px, hi) - np.polyval(px, lo),
-                           np.polyval(py, hi) - np.polyval(py, lo)))
-    return px, py, shift
+    keep = amps > min_frac * amps.max()                  # drop low-S/N bins (avoid overfitting)
+    if keep.sum() < 2:
+        keep = np.ones_like(amps, dtype=bool)
+    lam0 = float(np.average(wc[keep], weights=amps[keep]))
+    dn = _refractivity(wc) - _refractivity(lam0)
+    ax, bx = np.polyfit(dn[keep], x0s[keep], 1, w=amps[keep])   # linear in refractivity
+    ay, by = np.polyfit(dn[keep], y0s[keep], 1, w=amps[keep])
+    return DARModel(float(ax), float(bx), float(ay), float(by), lam0, ra0=ra, dec0=dec)
 
 
 def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channels=None,
@@ -234,9 +276,9 @@ def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channe
     track = measure_dar(super_rss, ra, dec, radius_arcsec=radius_arcsec, channels=chans) if dar \
         else None
     if track is not None:
-        px, py, fit.dar_shift = track
-    else:
-        px, py = np.array([cx0]), np.array([cy0])
+        lo, hi = _full_band(super_rss, chans)
+        fit.dar = track
+        fit.dar_shift = track.shift(lo, hi)
 
     ct, stheta = np.cos(th), np.sin(th)
     cosd = np.cos(np.deg2rad(dec))
@@ -251,10 +293,12 @@ def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channe
         sub = _subselect(st, sel)
         wl, _dw = _wave_grid(sub, dwave, None)
         x, V, bad = _resample_fibres(sub, wl, units='flux')      # (nsel, nw) flux + variance
-        cxg = np.polyval(px, wl)                                  # (nw,) per-wavelength centre
-        cyg = np.polyval(py, wl)
-        ddx = dx[sel][:, None] - cxg[None, :]                    # (nsel, nw)
-        ddy = dy[sel][:, None] - cyg[None, :]
+        if track is not None:
+            cxg, cyg = track.center(wl)                           # (nw,) per-wavelength centre
+        else:
+            cxg, cyg = cx0, cy0                                   # constant reference centre
+        ddx = dx[sel][:, None] - np.atleast_1d(cxg)[None, :]     # (nsel, nw) or broadcast scalar
+        ddy = dy[sel][:, None] - np.atleast_1d(cyg)[None, :]
         xr = ddx * ct + ddy * stheta                             # rotate into the profile frame
         yr = -ddx * stheta + ddy * ct
         P = np.exp(-0.5 * ((xr / sigx) ** 2 + (yr / sigy) ** 2))

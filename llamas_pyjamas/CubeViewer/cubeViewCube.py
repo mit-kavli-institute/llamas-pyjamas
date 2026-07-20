@@ -239,6 +239,15 @@ class CoaddCubeScene(SpectralScene):
                          f'# color=cyan width=2 tag={{{tag}}}')
         lines.append(f'circle({x:.2f},{y:.2f},{radius_arcsec / s:.2f}) '
                      f'# color=green dash=1 width=1 tag={{{tag}}}')   # extraction aperture
+        # DAR: the source position at blue/green/red, as coloured 1-sigma ellipses on the track
+        if getattr(fit, 'dar', None) is not None:
+            lo, hi = self.wavelength_range()
+            for frac, col in ((0.12, 'blue'), (0.5, 'green'), (0.88, 'red')):
+                lam = lo + frac * (hi - lo)
+                cra, cdec = fit.dar.center_sky(lam)
+                cpx, cpy = self.cube.wcs.celestial.world_to_pixel(SkyCoord(cra * u.deg, cdec * u.deg))
+                lines.append(f'ellipse({cpx + 1:.2f},{cpy + 1:.2f},{ax:.2f},{ay:.2f},{ang:.1f}) '
+                             f'# color={col} width=2 tag={{{tag}}}')
         return '\n'.join(lines)
 
     @staticmethod
