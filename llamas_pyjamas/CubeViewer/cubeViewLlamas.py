@@ -313,9 +313,15 @@ class CubeViewerWindow(QMainWindow):
                                        'spectrum); draws the 1σ/2σ aperture')
         self.optspec_action.triggered.connect(self.optimal_spectrum_here)
         extract_menu.addAction(self.optspec_action)
+        self.anchor_action = QAction('Anchor cube flux to &Gaia (at crosshair)…', self)
+        self.anchor_action.setToolTip('Compare the in-field source at the crosshair to its Gaia XP '
+                                      'SED and rescale the cube to absolute flux (zero-point + '
+                                      'aperture correction). Needs gaiaxpy.')
+        self.anchor_action.triggered.connect(self.anchor_flux_to_gaia)
+        extract_menu.addAction(self.anchor_action)
 
         # Enabled only when a combined cube is loaded.
-        self.cube_actions = (self.optspec_action, self.narrowband_action)
+        self.cube_actions = (self.optspec_action, self.narrowband_action, self.anchor_action)
         for action in self.cube_actions:
             action.setEnabled(False)
 
@@ -447,6 +453,51 @@ class CubeViewerWindow(QMainWindow):
         self.statusBar().showMessage(
             f'Optimal spectrum at ({fit.ra:.4f}, {fit.dec:+.4f}) [{kind}], '
             f'FWHM {fit.fwhm:.2f}"{dar}')
+
+    def anchor_flux_to_gaia(self) -> None:
+        """Rescale the cube to absolute flux by anchoring the in-field source to its Gaia XP SED."""
+        from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
+        if not isinstance(self.scene, CoaddCubeScene):
+            return
+        try:
+            x, y = self.ds9.crosshair('image')
+        except DS9Error as exc:
+            self._report_ds9(exc)
+            return
+        sky = self.scene.cube.wcs.celestial.pixel_to_world(x - 1, y - 1)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            res = self.scene.anchor_to_gaia(float(sky.ra.deg), float(sky.dec.deg))
+        except ImportError as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, 'Anchor to Gaia',
+                                f'{exc}\n\nInstall it (conda install -c conda-forge gaiaxpy) '
+                                'and retry.')
+            return
+        except Exception as exc:                   # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, 'Anchor to Gaia', f'Could not anchor:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        if res is None:
+            QMessageBox.information(self, 'Anchor to Gaia',
+                                   'No Gaia source with an XP SED near the crosshair, or too little '
+                                   'wavelength overlap.')
+            return
+        self.scene.apply_flux_scale(res['scale'])
+        try:
+            self.display()
+        except Exception:                          # noqa: BLE001
+            pass
+        warn = '  (large colour scatter — check throughput / QSO variability)' \
+            if res['scatter'] > 0.1 else ''
+        self.statusBar().showMessage(
+            f"Flux anchored to Gaia {res['source_id']}: scale x{res['scale']:.3f}, "
+            f"colour scatter {res['scatter'] * 100:.0f}%{warn}")
+        QMessageBox.information(self, 'Anchor to Gaia',
+                               f"Rescaled the cube by x{res['scale']:.3f} to match Gaia source "
+                               f"{res['source_id']}.\nColour scatter {res['scatter'] * 100:.0f}% "
+                               f"over {res['lo']:.0f}-{res['hi']:.0f} A.")
 
     def narrowband_image_dialog(self) -> None:
         """Build a continuum-subtracted narrowband image at a chosen line and send it to DS9."""

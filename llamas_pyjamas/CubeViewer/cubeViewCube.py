@@ -140,6 +140,21 @@ class CoaddCubeScene(SpectralScene):
                              for (iy, ix) in elements]
         return '\n'.join(lines) if len(lines) > 1 else ''
 
+    def anchor_to_gaia(self, ra, dec, *, radius_arcsec=3.0, source_arcsec=5.0):
+        """Compute the absolute-flux scale from the in-field Gaia source near the extraction: fit +
+        extract the point source, then compare to its Gaia XP SED. Returns the fluxanchor result
+        dict (scale, scatter, source_id, ...) or None. Needs gaiaxpy + network."""
+        from llamas_pyjamas.Combine.fluxanchor import flux_anchor
+        spec, fit = self._optimal_raw(ra, dec, radius_arcsec=radius_arcsec)
+        return flux_anchor(spec, fit.ra, fit.dec, radius_arcsec=source_arcsec)
+
+    def apply_flux_scale(self, scale):
+        """Apply an absolute-flux scale to every channel cube in place (data*=scale, var*=scale^2)."""
+        for cube in self._cubes.values():
+            cube.data = cube.data * scale
+            cube.var = cube.var * scale ** 2
+            cube.meta['FLUXANCH'] = float(scale)
+
     def narrowband(self, line_wave, half_width=8.0, **kwargs):
         """Continuum-subtracted narrowband image at ``line_wave`` from whichever channel covers it."""
         from llamas_pyjamas.Combine.cube import narrowband_image
@@ -149,16 +164,19 @@ class CoaddCubeScene(SpectralScene):
                 return narrowband_image(cube, line_wave, half_width=half_width, **kwargs)
         raise ValueError(f'{line_wave} A not covered by any channel ({", ".join(self.channels)})')
 
+    def _optimal_raw(self, ra, dec, *, radius_arcsec=3.0, **kwargs):
+        """Raw optimal extraction: ``({channel: (wave, flux, var)}, ProfileFit)``. Fibre-space from
+        the super-RSS when available (best), else cube-space from the spaxels."""
+        if self.super_rss is not None:
+            from llamas_pyjamas.Combine.spectrum import optimal_spectrum
+            return optimal_spectrum(self.super_rss, ra, dec, radius_arcsec=radius_arcsec, **kwargs)
+        return self._optimal_from_cubes(ra, dec, radius_arcsec)
+
     def optimal_spectrum(self, ra, dec, *, radius_arcsec=3.0, **kwargs):
         """PSF/ivar-weighted point-source spectrum at (ra,dec): a 2-D Gaussian is fit to the source
         and used as the extraction profile. Uses fibre-space extraction from the super-RSS when
         available (best), else cube-space (from the spaxels). Returns ``(spectra, ProfileFit)``."""
-        if self.super_rss is not None:
-            from llamas_pyjamas.Combine.spectrum import optimal_spectrum
-            spec, fit = optimal_spectrum(self.super_rss, ra, dec, radius_arcsec=radius_arcsec,
-                                         **kwargs)
-        else:
-            spec, fit = self._optimal_from_cubes(ra, dec, radius_arcsec)
+        spec, fit = self._optimal_raw(ra, dec, radius_arcsec=radius_arcsec, **kwargs)
         tag = 'fit' if fit.fitted else 'assumed'
         src = 'fibre' if self.super_rss is not None else 'cube'
         dar = f' DAR {fit.dar_shift:.1f}"' if fit.dar_shift > 0.3 else ''
