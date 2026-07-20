@@ -419,9 +419,12 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                     fiber_y[k] = traces[fiber[k], traces.shape[1] // 2]
             if not np.isfinite(fiber_y).any():
                 fiber_y = None  # no trace info -> select_sky_fibres falls back to quantile
-        sel_mask = skySelect.select_sky_fibres(
+        # Route through the shared SkyMask provider (identical fibres to
+        # select_sky_fibres; carries provenance). We use only the boolean mask
+        # here; persisting the base selection is a later step.
+        sel_mask = skySelect.build_sky_mask(
             counts, usable, method=selection_method,
-            n_fibres=n_sky_fibres, in_sky_region=in_region, fiber_y=fiber_y)
+            n_fibres=n_sky_fibres, in_sky_region=in_region, fiber_y=fiber_y).mask
 
         # Min-fibre floor for 'dimmest'/'quantile': low-signal cameras (e.g. faint
         # blue) may have very few positive fibres, leaving a fit built from 1-2

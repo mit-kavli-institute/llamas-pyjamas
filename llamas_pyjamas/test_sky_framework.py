@@ -19,6 +19,7 @@ from astropy.io import fits
 
 from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
 from llamas_pyjamas.Sky.skyMask import build_sky_fiber_mask, white_light
+from llamas_pyjamas.Sky.skySelect import SkyMask
 from llamas_pyjamas.Sky.skyScale import scale_sky_per_fiber, _continuum, _line_mask
 from llamas_pyjamas.Sky.skyResidual import clean_residuals
 from llamas_pyjamas.Sky.skySubtract import subtract_sky_rss
@@ -133,13 +134,19 @@ class TestSkyMask(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             truth = build_synthetic_rss(os.path.join(d, "x_RSS_green_FF.fits"), rng)
         cfg = SkySubtractConfig()
-        mask = build_sky_fiber_mask(truth["counts"], None, cfg)
+        sm = build_sky_fiber_mask(truth["counts"], None, cfg)
+        self.assertIsInstance(sm, SkyMask)              # now a first-class SkyMask
+        mask = sm.mask
         self.assertEqual(mask.dtype, np.bool_)
         # The bright object fibres (first N_OBJ) should be excluded.
         self.assertFalse(mask[:N_OBJ].any(),
                          "bright object fibres must not be selected as sky")
         # Plenty of genuine sky fibres should remain.
         self.assertGreater(mask.sum(), N_SKY // 2)
+        # Honest provenance: the broad white-light cut is labelled 'percentile'
+        # (a PCA basis), not the configured selection_method.
+        self.assertEqual(sm.method, "percentile")
+        self.assertEqual(sm.provenance.get("requested_selection"), cfg.selection_method)
 
     def test_white_light_orders_fibers(self):
         rng = np.random.default_rng(1)
@@ -205,7 +212,7 @@ class TestSkyResidual(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             truth = build_synthetic_rss(os.path.join(d, "x_RSS_green_FF.fits"), rng)
         cfg = SkySubtractConfig(method="pca", pca_ncomp=10)
-        sky_mask = build_sky_fiber_mask(truth["counts"], None, cfg)
+        sky_mask = build_sky_fiber_mask(truth["counts"], None, cfg).mask
         model, info = clean_residuals(truth["flux"], truth["wave"], sky_mask, cfg)
         self.assertEqual(model.shape, truth["flux"].shape)
         self.assertGreaterEqual(info["ncomp"], 1)
@@ -235,10 +242,15 @@ class TestOrchestrator(unittest.TestCase):
                 self.assertIn("SKYRESID", h)
                 self.assertIn("COUNTS", h)   # copied through
                 self.assertIn("SKY", h)
+                self.assertIn("SKYMASK", h)  # persisted sky-fibre mask
                 flux_out = h["FLUX"].data
                 self.assertEqual(flux_out.shape, truth["flux"].shape)
                 self.assertTrue(np.all(np.isfinite(flux_out)))
                 self.assertTrue(h["FLUX"].header.get("SKYSUB2"))
+                # The persisted SkyMask round-trips and matches the recorded count.
+                sm = SkyMask.from_hdu(h["SKYMASK"])
+                self.assertEqual(sm.n_sky, h["FLUX"].header["SKYNMASK"])
+                self.assertEqual(h["FLUX"].header["SKYBASIS"], sm.method)
 
             # OH residual on sky fibres should improve end-to-end.
             cfg2 = SkySubtractConfig()
