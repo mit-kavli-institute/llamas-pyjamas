@@ -68,10 +68,17 @@ class CoaddCube:
         hdr = self.wcs.to_header()
         hdr['BUNIT'] = self.bunit
         for k, v in self.meta.items():
+            if k == 'exposure_paths':
+                continue                                  # written as RSSFILn cards below
             try:
                 hdr[k] = v
             except (ValueError, TypeError):
                 hdr[k] = str(v)
+        exps = self.meta.get('exposure_paths') or []
+        if exps:                                          # provenance to rebuild the super-RSS
+            hdr['NRSSFILE'] = (len(exps), 'contributing RSS exposures (super-RSS rebuild)')
+            for i, p in enumerate(exps, 1):
+                hdr[f'RSSFIL{i}'] = str(p)
         hdus = [fits.PrimaryHDU(self.data.astype(np.float32), header=hdr),
                 fits.ImageHDU(self.var.astype(np.float32), header=self.wcs.to_header(), name='VAR'),
                 fits.ImageHDU(self.coverage.astype(np.int32), name='COVERAGE'),
@@ -233,7 +240,8 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
     unit = (super_rss.bunit + '/arcsec2') if units == 'sb' else super_rss.bunit
     meta = dict(FIELD=super_rss.field, CHANNEL=channel, WGHT=weighting, UNITS=units,
                 KERNFWHM=kernel_fwhm, PIXSCALE=pixscale, DWAVE=dwave,
-                NEXPTOT=super_rss.n_exposures)
+                NEXPTOT=super_rss.n_exposures,
+                exposure_paths=[e.path for e in super_rss.exposures])   # provenance for rebuild
     return CoaddCube(data=data, var=var, wave=wl, coverage=coverage.reshape(ny, nx),
                      nexp=nexp.reshape(ny, nx), wcs=wcs, bunit=unit, meta=meta)
 

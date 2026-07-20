@@ -122,6 +122,17 @@ def test_from_fits_loads_all_channel_siblings():
     assert len(sc.spectra_at(5, 5)) == 2                 # full spectrum across channels
 
 
+def test_provenance_paths_roundtrip():
+    cube = _cube()
+    cube.meta['exposure_paths'] = ['/x/a_RSS_green.fits', '/x/b_RSS_green.fits']
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, 'F_cube_green.fits')
+        cube.write(p)
+        sc = CoaddCubeScene.from_fits(p)                  # provenance paths don't exist here
+    assert sc.cube.meta['exposure_paths'] == ['/x/a_RSS_green.fits', '/x/b_RSS_green.fits']
+    assert sc.super_rss is None                           # missing RSS -> cube-space fallback
+
+
 def _point_cube(ny=11, nx=11, nw=6, sigma_pix=1.5):
     yy, xx = np.mgrid[0:ny, 0:nx]
     prof = np.exp(-0.5 * ((xx - 5) ** 2 + (yy - 5) ** 2) / sigma_pix ** 2)

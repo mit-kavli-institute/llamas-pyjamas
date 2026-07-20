@@ -265,8 +265,10 @@ class CoaddCubeScene(SpectralScene):
             nexp = np.asarray(h['NEXP'].data) if 'NEXP' in h else np.zeros(data.shape[1:], int)
             wave = (np.asarray(h['WAVELENGTH'].data['WAVELENGTH'], float) if 'WAVELENGTH' in h
                     else np.arange(data.shape[0], dtype=float))
+            n = int(hdr.get('NRSSFILE', 0))
+            paths = [hdr[f'RSSFIL{i}'] for i in range(1, n + 1) if f'RSSFIL{i}' in hdr]
             meta = {'FIELD': hdr.get('FIELD', ''), 'CHANNEL': hdr.get('CHANNEL', 'green'),
-                    'PIXSCALE': hdr.get('PIXSCALE', 0.5)}
+                    'PIXSCALE': hdr.get('PIXSCALE', 0.5), 'exposure_paths': paths}
             return CoaddCube(data=data, var=var, wave=wave, coverage=cov, nexp=nexp,
                              wcs=WCS(hdr), bunit=hdr.get('BUNIT', ''), meta=meta)
 
@@ -288,4 +290,28 @@ class CoaddCubeScene(SpectralScene):
         if not cubes:                                     # not the standard naming: load it alone
             cube = cls._read_cube(path)
             cubes[str(cube.meta.get('CHANNEL', 'green'))] = cube
-        return cls(cubes)
+        return cls(cubes, super_rss=cls._rebuild_super_rss(next(iter(cubes.values()))))
+
+    @staticmethod
+    def _rebuild_super_rss(ref_cube):
+        """Rebuild the super-RSS from a cube's recorded provenance (contributing RSS paths), so an
+        opened cube gets full fibre-space extraction + DAR. Returns None if the paths are missing
+        (extraction then falls back to cube-space)."""
+        import os
+        paths = ref_cube.meta.get('exposure_paths') or []
+        if not paths or not all(os.path.exists(p) for p in paths):
+            if paths:
+                logger.info('super-RSS not rebuilt: some source RSS files are missing')
+            return None
+        try:
+            from llamas_pyjamas.Combine.superRSS import build_super_rss
+            from llamas_pyjamas.Combine.transparency import transparency_scales
+            sr = build_super_rss(paths)
+            try:                                          # match the combine's photometric scaling
+                sr.apply_scales(transparency_scales(sr))
+            except Exception as exc:                      # noqa: BLE001
+                logger.debug('transparency scaling skipped on rebuild: %s', exc)
+            return sr
+        except Exception as exc:                          # noqa: BLE001
+            logger.warning('super-RSS rebuild failed (%s); cube-space extraction only', exc)
+            return None
