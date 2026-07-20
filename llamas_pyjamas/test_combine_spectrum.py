@@ -13,7 +13,8 @@ from astropy.wcs import WCS
 
 from llamas_pyjamas.Combine.superRSS import ChannelStack, SuperRSS, ExposureMeta
 from llamas_pyjamas.Combine.cube import CoaddCube, narrowband_image
-from llamas_pyjamas.Combine.spectrum import optimal_spectrum, estimate_psf_fwhm, measure_dar
+from llamas_pyjamas.Combine.spectrum import (optimal_spectrum, estimate_psf_fwhm, measure_dar,
+                                             fit_source_profile)
 
 RA0, DEC0 = 150.0, 20.0
 FWHM = 1.5
@@ -57,6 +58,20 @@ def test_optimal_spectrum_fits_profile_and_recovers_template():
     assert np.all(np.isfinite(flux))
     assert np.nanstd(flux) / np.nanmean(flux) < 0.02    # flat template -> flat extracted shape
     assert np.nanmedian(flux / np.sqrt(var)) > 15       # optimal total-flux S/N beats one fibre
+
+
+def test_profile_fit_converges_at_flux_calibrated_scale():
+    # FLAM-scale data (~1e-14) must still be FIT, not silently return the initial guess. The LSQ
+    # fitter meets its convergence tolerance immediately on tiny values and leaves sigma at its 0.6"
+    # start -> a spurious constant 1.41" FWHM (and a wrong extraction profile). Regression for the
+    # rescale-to-O(1) fix.
+    sr = _point_source_super(C=3e-14, fwhm=1.8)
+    r = fit_source_profile(sr, RA0, DEC0)
+    assert r is not None
+    _g, fit = r
+    assert fit.fitted
+    assert abs(fit.fwhm - 1.8) < 0.4                     # recovers the input width...
+    assert abs(fit.fwhm - 2.3548 * 0.6) > 0.15          # ...and is NOT the un-converged 0.6" init
 
 
 def test_estimate_psf_fwhm_recovers_seeing():

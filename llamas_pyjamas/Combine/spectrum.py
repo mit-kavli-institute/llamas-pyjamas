@@ -147,8 +147,15 @@ def fit_source_profile(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None):
     good = np.isfinite(z) & np.isfinite(dx[sel]) & np.isfinite(dy[sel])
     if good.sum() < 6 or not np.any(z[good] > 0):
         return None
-    g0 = models.Gaussian2D(amplitude=float(np.nanmax(z[good])), x_mean=0.0, y_mean=0.0,
-                           x_stddev=0.6, y_stddev=0.6)
+    # Rescale to O(1) before the least-squares fit. Flux-calibrated data is ~1e-14 (FLAM); at that
+    # magnitude the LSQ fitter's convergence tolerance is met immediately and it returns the INITIAL
+    # guess unchanged (sigma=0.6" -> a spurious constant 1.41" FWHM, and a wrong extraction profile).
+    # Amplitude scaling leaves the centroid, widths and PA unchanged, so this is safe; we restore the
+    # physical amplitude afterwards for callers that might read it.
+    scale = float(np.nanmax(z[good]))
+    if not np.isfinite(scale) or scale <= 0:
+        return None
+    g0 = models.Gaussian2D(amplitude=1.0, x_mean=0.0, y_mean=0.0, x_stddev=0.6, y_stddev=0.6)
     g0.x_mean.bounds = g0.y_mean.bounds = (-radius_arcsec, radius_arcsec)
     g0.x_stddev.bounds = g0.y_stddev.bounds = (0.2, radius_arcsec)
     try:
@@ -156,10 +163,11 @@ def fit_source_profile(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None):
     except AttributeError:                                        # older astropy
         fitter = fitting.LevMarLSQFitter()
     try:
-        g = fitter(g0, dx[sel][good], dy[sel][good], z[good], maxiter=300)
+        g = fitter(g0, dx[sel][good], dy[sel][good], z[good] / scale, maxiter=300)
     except Exception as exc:                                      # noqa: BLE001
         logger.warning('profile fit failed (%s); falling back', exc)
         return None
+    g.amplitude.value = float(g.amplitude.value) * scale          # back to physical units
     ra_fit = ra + float(g.x_mean.value) / (cosd * 3600.0)
     dec_fit = dec + float(g.y_mean.value) / 3600.0
     fit = ProfileFit(ra=ra_fit, dec=dec_fit, sigma_x=abs(float(g.x_stddev.value)),
@@ -184,7 +192,12 @@ def fit_gaussian_image(img, x0, y0, radius_pix):
     z = img[sel] - bg
     if not np.any(z > 0):
         return None
-    g0 = models.Gaussian2D(float(np.nanmax(z)), x0, y0, radius_pix / 3, radius_pix / 3)
+    # Rescale to O(1) so the LSQ fit converges on flux-calibrated (~1e-14) data instead of returning
+    # the initial guess (see fit_source_profile). Widths/centroid are amplitude-invariant.
+    scale = float(np.nanmax(z))
+    if not np.isfinite(scale) or scale <= 0:
+        return None
+    g0 = models.Gaussian2D(1.0, x0, y0, radius_pix / 3, radius_pix / 3)
     g0.x_mean.bounds = (x0 - radius_pix, x0 + radius_pix)
     g0.y_mean.bounds = (y0 - radius_pix, y0 + radius_pix)
     g0.x_stddev.bounds = g0.y_stddev.bounds = (0.5, radius_pix)
@@ -193,10 +206,12 @@ def fit_gaussian_image(img, x0, y0, radius_pix):
     except AttributeError:
         fitter = fitting.LevMarLSQFitter()
     try:
-        return fitter(g0, xx[sel], yy[sel], z, maxiter=300)
+        g = fitter(g0, xx[sel], yy[sel], z / scale, maxiter=300)
     except Exception as exc:                                      # noqa: BLE001
         logger.warning('image profile fit failed (%s)', exc)
         return None
+    g.amplitude.value = float(g.amplitude.value) * scale          # back to physical units
+    return g
 
 
 def measure_dar(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None, nbins=12, min_frac=0.1):
