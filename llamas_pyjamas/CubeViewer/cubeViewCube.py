@@ -219,9 +219,12 @@ class CoaddCubeScene(SpectralScene):
                            np.where(den > 0, 1.0 / den, np.nan))
         return spec, fit
 
-    def profile_ellipse_region(self, fit, tag='cubeview-ext'):
-        """DS9 region: the fitted centroid + 1-sigma and 2-sigma ellipses of a :class:`ProfileFit`,
-        in image coords, so the extraction aperture (shape + tilt) is shown."""
+    def profile_ellipse_region(self, fit, radius_arcsec=3.0, tag='cubeview-ext'):
+        """DS9 region for an extraction: the fitted centroid (x), the fitted PSF as 1-sigma and
+        2-sigma ellipses (shape + tilt), and the extraction APERTURE as a dashed circle at
+        ``radius_arcsec`` -- so both the fitted profile and the region actually summed are shown.
+        The PSF ellipses can look small against the cube white-light because the cube is smoothed by
+        the co-add kernel; the fit is the true (sharper) PSF."""
         from astropy.coordinates import SkyCoord
         import astropy.units as u
         px, py = self.cube.wcs.celestial.world_to_pixel(SkyCoord(fit.ra * u.deg, fit.dec * u.deg))
@@ -233,6 +236,8 @@ class CoaddCubeScene(SpectralScene):
         for k in (1, 2):
             lines.append(f'ellipse({x:.2f},{y:.2f},{k * ax:.2f},{k * ay:.2f},{ang:.1f}) '
                          f'# color=cyan width=2 tag={{{tag}}}')
+        lines.append(f'circle({x:.2f},{y:.2f},{radius_arcsec / s:.2f}) '
+                     f'# color=green dash=1 width=1 tag={{{tag}}}')   # extraction aperture
         return '\n'.join(lines)
 
     @staticmethod
