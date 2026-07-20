@@ -16,25 +16,39 @@ User-facing selection methods (config key ``sky_selection_method``)
                  region — a 2-D FITS *mask* or *flux image* (see ``load_sky_map``).
 ``frame``/``all`` every finite fibre.  Used when the data source is itself a
                  dedicated blank-sky exposure, so all fibres are sky.
+``manual``       an explicit, user-supplied set of sky fibres (a boolean mask or
+                 a list of live fibre indices) — the seam for future providers
+                 that define sky fibres externally (e.g. from an LSST broadband
+                 image or a hand-drawn region).  Handled by :func:`build_sky_mask`.
+
+The first-class :class:`SkyMask` (a boolean mask + provenance, with FITS
+serialisation) is the reusable, inspectable, persistable representation of a
+selection; :func:`build_sky_mask` is the single provider that produces one for
+every method, so the base 1-D model and the framework agree on what "sky" means.
 
 Public API
 ----------
+SkyMask                                              boolean mask + provenance (+ FITS I/O)
+build_sky_mask(brightness, finite, *, method, ...) -> SkyMask
 select_sky_fibres(brightness, finite, *, method, n_fibres, in_sky_region) -> bool[n]
 load_sky_map(path) -> SkyMap
 fibres_in_sky_region(benchsides, fibers, skymap, *, ra, dec, faint_percentile) -> bool[n]
 """
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Methods understood by select_sky_fibres / SkySubtractConfig.
+# Methods understood by select_sky_fibres / build_sky_mask / SkySubtractConfig.
+# 'manual' is handled by build_sky_mask (an explicit mask/id list), not by the
+# brightness-based select_sky_fibres.
 VALID_METHODS = ("stratified", "quantile", "dimmest", "middle-third",
-                 "skymap", "frame", "all")
+                 "skymap", "frame", "all", "manual")
 
 # Rank band for the 'quantile' method: fibres whose white-light brightness rank
 # (among finite fibres) falls in [QUANTILE_LO, QUANTILE_HI). Sits just above the
@@ -225,6 +239,144 @@ def _fallback_if_degenerate(mask, finite, brightness, n_fibres, *, label):
     logger.warning("skySelect: '%s' degenerate (%d fibres); falling back to all "
                    "finite (%d)", label, int(mask.sum()), int(finite.sum()))
     return finite.copy()
+
+
+# ----------------------------------------------------------------------------
+# SkyMask: a first-class, persistable "which fibres are sky" object
+# ----------------------------------------------------------------------------
+@dataclass
+class SkyMask:
+    """The set of fibres treated as sky, plus how it was chosen.
+
+    A thin, reusable wrapper around the boolean mask returned by
+    :func:`select_sky_fibres`, carrying provenance so a selection can be
+    inspected, persisted (as an RSS extension), reused, and user-overridden.
+
+    Attributes
+    ----------
+    mask : np.ndarray[bool] (n_fiber,)
+        True for fibres contributing to the sky model.  **Live-indexed** (row
+        order), matching the RSS/extraction fibre arrays — not physical
+        fibremap position.
+    method : str
+        The selection method that produced it (one of :data:`VALID_METHODS`).
+    provenance : dict
+        Parameters that produced the mask (e.g. ``n_fibres``, ``source``,
+        quantile band, sky-map path).  Serialised to the FITS header as JSON.
+    """
+    mask: np.ndarray
+    method: str = "unknown"
+    provenance: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.mask = np.asarray(self.mask, dtype=bool)
+
+    @property
+    def n_sky(self) -> int:
+        """Number of sky fibres."""
+        return int(self.mask.sum())
+
+    @property
+    def n_fiber(self) -> int:
+        """Total number of fibres the mask spans."""
+        return int(self.mask.size)
+
+    def ids(self) -> np.ndarray:
+        """Live indices of the sky fibres."""
+        return np.where(self.mask)[0]
+
+    def to_hdu(self, name="SKYMASK"):
+        """Serialise to a FITS ``ImageHDU`` (uint8 mask + provenance header)."""
+        from astropy.io import fits
+        hdu = fits.ImageHDU(self.mask.astype(np.uint8), name=name)
+        h = hdu.header
+        h["SKYMETH"] = (self.method, "sky-fibre selection method")
+        h["SKYNSKY"] = (self.n_sky, "number of sky fibres")
+        h["SKYNFIB"] = (self.n_fiber, "total fibres in the mask")
+        h["SKYPROV"] = (json.dumps(self.provenance, default=str),
+                        "sky-mask selection provenance (JSON)")
+        return hdu
+
+    @classmethod
+    def from_hdu(cls, hdu):
+        """Reconstruct a :class:`SkyMask` from a FITS HDU written by :meth:`to_hdu`."""
+        mask = np.asarray(hdu.data, dtype=bool)
+        h = hdu.header
+        prov = {}
+        raw = h.get("SKYPROV")
+        if raw:
+            try:
+                prov = json.loads(raw)
+            except (ValueError, TypeError):
+                logger.warning("SkyMask.from_hdu: could not parse SKYPROV; dropping provenance")
+        return cls(mask=mask, method=h.get("SKYMETH", "unknown"), provenance=prov)
+
+
+def _as_bool_mask(explicit, n_fiber=None):
+    """Coerce an explicit selection into a boolean mask.
+
+    A **boolean** array is taken as the mask directly.  An **integer** array is
+    taken as live fibre indices, requiring ``n_fiber`` to size the mask.
+    """
+    arr = np.asarray(explicit)
+    if arr.dtype == bool:
+        return arr.copy()
+    ids = arr.astype(int)
+    if n_fiber is None:
+        raise ValueError("build_sky_mask(method='manual'): integer ids need n_fiber "
+                         "(or pass a boolean mask instead)")
+    mask = np.zeros(int(n_fiber), dtype=bool)
+    if ids.size:
+        if ids.min() < 0 or ids.max() >= n_fiber:
+            raise ValueError("build_sky_mask(method='manual'): fibre id out of range "
+                             f"[0, {n_fiber})")
+        mask[ids] = True
+    return mask
+
+
+def build_sky_mask(brightness=None, finite=None, *, method="dimmest", n_fibres=20,
+                   in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI, fiber_y=None,
+                   explicit=None, n_fiber=None, source="in-exposure") -> SkyMask:
+    """Canonical sky-fibre mask provider — the single seam both sky stages use.
+
+    For every brightness-based method this simply wraps :func:`select_sky_fibres`
+    (so the resulting mask is *identical*) and attaches provenance.  For
+    ``method='manual'`` it uses ``explicit`` (a boolean mask, or live fibre
+    indices with ``n_fiber``) directly — the hook for externally-defined sky
+    fibres (e.g. from an LSST image or a hand-drawn region).
+
+    Returns
+    -------
+    SkyMask
+    """
+    method_l = (method or "dimmest").lower()
+
+    if method_l == "manual":
+        if explicit is None:
+            raise ValueError("build_sky_mask(method='manual') requires 'explicit'")
+        nf = n_fiber
+        if nf is None and finite is not None:
+            nf = np.asarray(finite).size
+        elif nf is None and brightness is not None:
+            nf = np.asarray(brightness).size
+        mask = _as_bool_mask(explicit, n_fiber=nf)
+        prov = {"source": source, "n_requested": int(mask.sum())}
+        return SkyMask(mask=mask, method="manual", provenance=prov)
+
+    if brightness is None or finite is None:
+        raise ValueError(f"build_sky_mask(method={method_l!r}) requires brightness and finite")
+
+    mask = select_sky_fibres(brightness, finite, method=method, n_fibres=n_fibres,
+                             in_sky_region=in_sky_region, q_lo=q_lo, q_hi=q_hi,
+                             fiber_y=fiber_y)
+    prov = {"source": source, "n_fibres": int(n_fibres)}
+    if method_l == "quantile":
+        prov.update(q_lo=float(q_lo), q_hi=float(q_hi))
+    if method_l == "skymap":
+        prov["skymap"] = True
+    if method_l == "stratified":
+        prov["fiber_y"] = fiber_y is not None
+    return SkyMask(mask=mask, method=method_l, provenance=prov)
 
 
 # ----------------------------------------------------------------------------
