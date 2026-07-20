@@ -149,26 +149,79 @@ class CoaddCubeScene(SpectralScene):
                 return narrowband_image(cube, line_wave, half_width=half_width, **kwargs)
         raise ValueError(f'{line_wave} A not covered by any channel ({", ".join(self.channels)})')
 
-    def optimal_spectrum(self, ra, dec, **kwargs):
+    def optimal_spectrum(self, ra, dec, *, radius_arcsec=3.0, **kwargs):
         """PSF/ivar-weighted point-source spectrum at (ra,dec): a 2-D Gaussian is fit to the source
-        and used as the extraction profile. Returns ``(spectra, ProfileFit)`` -- one Spectrum per
-        channel plus the fitted profile (for the ellipse overlay). Needs the retained super-RSS."""
-        if self.super_rss is None:
-            raise ValueError('optimal extraction needs the super-RSS; rebuild via Combine ▸ '
-                             'Combine field into cube')
-        from llamas_pyjamas.Combine.spectrum import optimal_spectrum
-        spec, fit = optimal_spectrum(self.super_rss, ra, dec, **kwargs)
+        and used as the extraction profile. Uses fibre-space extraction from the super-RSS when
+        available (best), else cube-space (from the spaxels). Returns ``(spectra, ProfileFit)``."""
+        if self.super_rss is not None:
+            from llamas_pyjamas.Combine.spectrum import optimal_spectrum
+            spec, fit = optimal_spectrum(self.super_rss, ra, dec, radius_arcsec=radius_arcsec,
+                                         **kwargs)
+        else:
+            spec, fit = self._optimal_from_cubes(ra, dec, radius_arcsec)
         tag = 'fit' if fit.fitted else 'assumed'
-        label = f'optimal ({fit.ra:.4f},{fit.dec:+.4f}) FWHM {fit.fwhm:.1f}" [{tag}]'
-        cal = self.super_rss.plane == 'flam'
+        src = 'fibre' if self.super_rss is not None else 'cube'
+        label = f'optimal ({fit.ra:.4f},{fit.dec:+.4f}) FWHM {fit.fwhm:.1f}" [{tag}/{src}]'
+        cal = 'erg' in self.cube.bunit
         spectra = [Spectrum(wave=w, flux=f, channel=c, label=label, mask=~np.isfinite(f),
                             flam=(f if cal else None), has_counts=not cal)
                    for c, (w, f, v) in spec.items()]
         return spectra, fit
 
+    def _optimal_from_cubes(self, ra, dec, radius_arcsec):
+        """Cube-space optimal extraction (no super-RSS): fit a 2-D Gaussian to the white-light image
+        and Horne-combine the cube spaxels within the aperture."""
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        from llamas_pyjamas.Combine.spectrum import fit_gaussian_image, ProfileFit
+        lo, hi = self.wavelength_range()
+        img, wcs2, _ = self.collapse(lo, hi)
+        px, py = wcs2.world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
+        cx, cy = float(px), float(py)
+        rpix = radius_arcsec / self._pixscale
+        g = fit_gaussian_image(img, cx, cy, rpix)
+        if g is not None:
+            cx, cy = float(g.x_mean.value), float(g.y_mean.value)
+            sky = wcs2.pixel_to_world(cx, cy)
+            fit = ProfileFit(float(sky.ra.deg), float(sky.dec.deg),
+                             abs(float(g.x_stddev.value)) * self._pixscale,
+                             abs(float(g.y_stddev.value)) * self._pixscale,
+                             float(np.rad2deg(g.theta.value)), True)
+
+            def prof(ix, iy):
+                return float(g(ix, iy) / g.amplitude.value)
+        else:
+            sig = 1.2 / self._pixscale
+            fit = ProfileFit(ra, dec, 1.2, 1.2, 0.0, False)
+
+            def prof(ix, iy):
+                return float(np.exp(-0.5 * ((ix - cx) ** 2 + (iy - cy) ** 2) / sig ** 2))
+
+        x0, x1 = max(0, int(cx - rpix)), min(self._nx - 1, int(cx + rpix))
+        y0, y1 = max(0, int(cy - rpix)), min(self._ny - 1, int(cy + rpix))
+        spec = {}
+        for c in self.channels:
+            cube = self._cubes[c]
+            num = np.zeros(cube.wave.size)
+            den = np.zeros(cube.wave.size)
+            for iy in range(y0, y1 + 1):
+                for ix in range(x0, x1 + 1):
+                    if (ix - cx) ** 2 + (iy - cy) ** 2 > rpix ** 2 or cube.coverage[iy, ix] <= 0:
+                        continue
+                    P = prof(ix, iy)
+                    S = np.asarray(cube.data[:, iy, ix], float)
+                    V = np.asarray(cube.var[:, iy, ix], float)
+                    wgt = np.where(np.isfinite(V) & (V > 0) & np.isfinite(S), 1.0 / V, 0.0)
+                    num += P * np.where(np.isfinite(S), S, 0.0) * wgt
+                    den += P * P * wgt
+            with np.errstate(invalid='ignore', divide='ignore'):
+                spec[c] = (cube.wave, np.where(den > 0, num / den, np.nan),
+                           np.where(den > 0, 1.0 / den, np.nan))
+        return spec, fit
+
     def profile_ellipse_region(self, fit, tag='cubeview-ext'):
-        """DS9 region: 1-sigma and 2-sigma ellipses of a :class:`ProfileFit`, in image coords, so
-        the extraction aperture is shown (not just highlighted spaxels)."""
+        """DS9 region: the fitted centroid + 1-sigma and 2-sigma ellipses of a :class:`ProfileFit`,
+        in image coords, so the extraction aperture (shape + tilt) is shown."""
         from astropy.coordinates import SkyCoord
         import astropy.units as u
         px, py = self.cube.wcs.celestial.world_to_pixel(SkyCoord(fit.ra * u.deg, fit.dec * u.deg))
@@ -176,15 +229,15 @@ class CoaddCubeScene(SpectralScene):
         s = self._pixscale
         ang = -fit.theta_deg                              # tangent (E-left) -> image angle (mod 180)
         ax, ay = fit.sigma_x / s, fit.sigma_y / s
-        lines = ['image']
+        lines = ['image', f'point({x:.2f},{y:.2f}) # point=x 12 color=cyan width=2 tag={{{tag}}}']
         for k in (1, 2):
             lines.append(f'ellipse({x:.2f},{y:.2f},{k * ax:.2f},{k * ay:.2f},{ang:.1f}) '
-                         f'# color=yellow width=2 tag={{{tag}}}')
+                         f'# color=cyan width=2 tag={{{tag}}}')
         return '\n'.join(lines)
 
-    @classmethod
-    def from_fits(cls, path: str) -> 'CoaddCubeScene':
-        """Open a single-channel cube FITS written by :meth:`CoaddCube.write`."""
+    @staticmethod
+    def _read_cube(path):
+        """Read one cube FITS written by :meth:`CoaddCube.write` -> CoaddCube."""
         from astropy.io import fits
         from astropy.wcs import WCS
         from llamas_pyjamas.Combine.cube import CoaddCube
@@ -197,10 +250,27 @@ class CoaddCubeScene(SpectralScene):
             nexp = np.asarray(h['NEXP'].data) if 'NEXP' in h else np.zeros(data.shape[1:], int)
             wave = (np.asarray(h['WAVELENGTH'].data['WAVELENGTH'], float) if 'WAVELENGTH' in h
                     else np.arange(data.shape[0], dtype=float))
-            wcs = WCS(hdr)
             meta = {'FIELD': hdr.get('FIELD', ''), 'CHANNEL': hdr.get('CHANNEL', 'green'),
                     'PIXSCALE': hdr.get('PIXSCALE', 0.5)}
-            bunit = hdr.get('BUNIT', '')
-        cube = CoaddCube(data=data, var=var, wave=wave, coverage=cov, nexp=nexp, wcs=wcs,
-                         bunit=bunit, meta=meta)
-        return cls(cube)
+            return CoaddCube(data=data, var=var, wave=wave, coverage=cov, nexp=nexp,
+                             wcs=WCS(hdr), bunit=hdr.get('BUNIT', ''), meta=meta)
+
+    @classmethod
+    def from_fits(cls, path: str) -> 'CoaddCubeScene':
+        """Open a combined cube. Cubes are written one file per channel (``*_cube_{blue,green,red}
+        .fits``); this loads every channel sibling it can find so a spaxel shows the full spectrum.
+        Optimal extraction on an opened cube uses the cube spaxels (no super-RSS)."""
+        import os
+        import re
+        d, name = os.path.split(path)
+        cubes = {}
+        m = re.search(r'_cube_(blue|green|red)', name)
+        if m:
+            for c in CHANNEL_ORDER:
+                sib = os.path.join(d, re.sub(r'_cube_(blue|green|red)', f'_cube_{c}', name))
+                if os.path.exists(sib):
+                    cubes[c] = cls._read_cube(sib)
+        if not cubes:                                     # not the standard naming: load it alone
+            cube = cls._read_cube(path)
+            cubes[str(cube.meta.get('CHANNEL', 'green'))] = cube
+        return cls(cubes)

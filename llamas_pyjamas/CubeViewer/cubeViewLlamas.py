@@ -227,6 +227,12 @@ class CubeViewerWindow(QMainWindow):
         obslog_action.setToolTip('Pick an exposure by object name / notes instead of filename')
         obslog_action.triggered.connect(self.open_from_obslog)
         file_menu.addAction(obslog_action)
+        open_cube_action = QAction('Open combined &cube…', self)
+        open_cube_action.setShortcut('Ctrl+K')
+        open_cube_action.setToolTip('Open a combined cube (loads all channel siblings; '
+                                    'built by Combine ▸ Combine field into cube)')
+        open_cube_action.triggered.connect(self.open_cube)
+        file_menu.addAction(open_cube_action)
         file_menu.addSeparator()
         quit_action = QAction('&Quit', self)
         quit_action.setShortcut('Ctrl+Q')
@@ -292,10 +298,6 @@ class CubeViewerWindow(QMainWindow):
                                '(green, surface brightness) and open it for spaxel picking')
         cube_action.triggered.connect(self.combine_field_cube)
         combine_menu.addAction(cube_action)
-        open_cube_action = QAction('&Open combined cube…', self)
-        open_cube_action.setToolTip('Open a cube FITS previously written by the combine step')
-        open_cube_action.triggered.connect(self.open_cube)
-        combine_menu.addAction(open_cube_action)
         self.narrowband_action = QAction('&Narrowband line image…', self)
         self.narrowband_action.setToolTip('Continuum-subtracted narrowband image at a chosen line '
                                           'wavelength (e.g. Lya), sent to a new DS9 frame')
@@ -418,11 +420,6 @@ class CubeViewerWindow(QMainWindow):
         """Extract the PSF/ivar-weighted point-source spectrum at the DS9 crosshair."""
         from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
         if not isinstance(self.scene, CoaddCubeScene):
-            return
-        if self.scene.super_rss is None:
-            QMessageBox.information(self, 'Optimal spectrum',
-                                   'Optimal extraction needs the super-RSS — rebuild via '
-                                   'Combine ▸ Combine field into cube (an opened cube FITS lacks it).')
             return
         try:
             x, y = self.ds9.crosshair('image')

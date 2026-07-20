@@ -105,12 +105,44 @@ def test_calibrated_cube_has_no_counts_plane():
 def test_from_fits_roundtrip():
     cube = _cube()
     with tempfile.TemporaryDirectory() as d:
-        p = os.path.join(d, 'cube.fits')
+        p = os.path.join(d, 'F_cube_green.fits')
         cube.write(p)
         sc = CoaddCubeScene.from_fits(p)
     assert sc.cube.data.shape == cube.data.shape
     assert np.allclose(sc.cube.wave, cube.wave)
     assert np.allclose(sc.spectra_at(5, 5)[0].flux, [1, 2, 9, 2, 1])
+
+
+def test_from_fits_loads_all_channel_siblings():
+    with tempfile.TemporaryDirectory() as d:
+        for c, w0 in (('green', 5000.0), ('red', 6000.0)):
+            _cube(channel=c, wave0=w0).write(os.path.join(d, f'J_cube_{c}.fits'))
+        sc = CoaddCubeScene.from_fits(os.path.join(d, 'J_cube_green.fits'))   # open one
+    assert sc.channels == ('green', 'red')               # both siblings loaded
+    assert len(sc.spectra_at(5, 5)) == 2                 # full spectrum across channels
+
+
+def _point_cube(ny=11, nx=11, nw=6, sigma_pix=1.5):
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    prof = np.exp(-0.5 * ((xx - 5) ** 2 + (yy - 5) ** 2) / sigma_pix ** 2)
+    data = prof[None, :, :] * np.full(nw, 3.0)[:, None, None]
+    w = WCS(naxis=3)
+    w.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
+    w.wcs.crval = [150.0, 20.0, 5000.0]; w.wcs.crpix = [6, 6, 1]
+    w.wcs.cdelt = [-0.5 / 3600, 0.5 / 3600, 1.0]; w.wcs.cunit = ['deg', 'deg', 'Angstrom']
+    return CoaddCube(data, np.ones((nw, ny, nx)), 5000.0 + np.arange(nw),
+                     np.full((ny, nx), 3, int), np.full((ny, nx), 2, int), w,
+                     'erg/s/cm2/Angstrom/arcsec2', {'FIELD': 'T', 'CHANNEL': 'green', 'PIXSCALE': 0.5})
+
+
+def test_cube_space_optimal_extraction_without_super_rss():
+    sc = CoaddCubeScene(_point_cube())                   # no super-RSS -> cube-space path
+    assert sc.super_rss is None
+    sky = sc.cube.wcs.celestial.pixel_to_world(5, 5)     # source centre
+    spectra, fit = sc.optimal_spectrum(float(sky.ra.deg), float(sky.dec.deg), radius_arcsec=3.0)
+    assert fit.fitted and len(spectra) == 1
+    assert abs(fit.fwhm - 2.3548 * 1.5 * 0.5) < 0.5      # ~sigma 1.5px * 0.5"/px
+    assert np.all(np.isfinite(spectra[0].flux))
 
 
 if __name__ == '__main__':

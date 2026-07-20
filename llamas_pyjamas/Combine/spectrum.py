@@ -129,6 +129,37 @@ def fit_source_profile(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None):
     return g, fit
 
 
+def fit_gaussian_image(img, x0, y0, radius_pix):
+    """Fit a 2-D Gaussian to a white-light image around pixel ``(x0, y0)`` (background-subtracted).
+    Returns the astropy Gaussian2D model in pixel coords, or None. Used for cube-space extraction
+    (when there is no super-RSS)."""
+    from astropy.modeling import models, fitting
+    ny, nx = img.shape
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    r = np.hypot(xx - x0, yy - y0)
+    sel = (r < radius_pix) & np.isfinite(img)
+    ann = (r >= radius_pix) & (r < 2 * radius_pix) & np.isfinite(img)
+    if sel.sum() < 6:
+        return None
+    bg = float(np.median(img[ann])) if ann.any() else 0.0
+    z = img[sel] - bg
+    if not np.any(z > 0):
+        return None
+    g0 = models.Gaussian2D(float(np.nanmax(z)), x0, y0, radius_pix / 3, radius_pix / 3)
+    g0.x_mean.bounds = (x0 - radius_pix, x0 + radius_pix)
+    g0.y_mean.bounds = (y0 - radius_pix, y0 + radius_pix)
+    g0.x_stddev.bounds = g0.y_stddev.bounds = (0.5, radius_pix)
+    try:
+        fitter = fitting.TRFLSQFitter()
+    except AttributeError:
+        fitter = fitting.LevMarLSQFitter()
+    try:
+        return fitter(g0, xx[sel], yy[sel], z, maxiter=300)
+    except Exception as exc:                                      # noqa: BLE001
+        logger.warning('image profile fit failed (%s)', exc)
+        return None
+
+
 def optimal_spectrum(super_rss, ra, dec, *, radius_arcsec=3.0, fwhm=None, channels=None,
                      dwave=None, fit_profile=True) -> Tuple[Dict[str, tuple], ProfileFit]:
     """PSF/inverse-variance-weighted 1D spectrum at ``(ra, dec)``, per channel.
