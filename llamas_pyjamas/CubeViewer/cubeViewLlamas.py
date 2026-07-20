@@ -481,23 +481,28 @@ class CubeViewerWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         if res is None:
             QMessageBox.information(self, 'Anchor to Gaia',
-                                   'No Gaia source with an XP SED near the crosshair, or too little '
-                                   'wavelength overlap.')
+                                   'No Gaia source near the crosshair with an XP SED or usable '
+                                   'broadband photometry, or too little wavelength overlap.')
             return
         self.scene.apply_flux_scale(res['scale'])
         try:
             self.display()
         except Exception:                          # noqa: BLE001
             pass
+        phot = res.get('method') == 'gaia_phot'
+        src = 'Gaia broadband phot.' if phot else 'Gaia XP SED'
         warn = '  (large colour scatter — check throughput / QSO variability)' \
             if res['scatter'] > 0.1 else ''
         self.statusBar().showMessage(
-            f"Flux anchored to Gaia {res['source_id']}: scale x{res['scale']:.3f}, "
+            f"Flux anchored to {src} {res['source_id']}: scale x{res['scale']:.3f}, "
             f"colour scatter {res['scatter'] * 100:.0f}%{warn}")
+        note = ('\n\nNote: this source has no Gaia XP spectrum, so the anchor used the coarse G/BP/RP '
+                'broadband SED — it fixes the flux level but not the detailed shape (approximate).') \
+            if phot else ''
         QMessageBox.information(self, 'Anchor to Gaia',
-                               f"Rescaled the cube by x{res['scale']:.3f} to match Gaia source "
+                               f"Rescaled the cube by x{res['scale']:.3f} to match {src} source "
                                f"{res['source_id']}.\nColour scatter {res['scatter'] * 100:.0f}% "
-                               f"over {res['lo']:.0f}-{res['hi']:.0f} A.")
+                               f"over {res['lo']:.0f}-{res['hi']:.0f} A.{note}")
 
     def narrowband_image_dialog(self) -> None:
         """Build a continuum-subtracted narrowband image at a chosen line and send it to DS9."""
