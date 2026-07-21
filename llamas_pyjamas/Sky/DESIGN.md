@@ -211,10 +211,26 @@ is amplified by flux-cal in blue. This is the **per-camera throughput NORMALISAT
 the fibre flat is normalised per camera, so the absolute per-benchside gain is discarded → per-benchside
 gain steps → banding.
 
-**⇒ The fix is UPSTREAM in the flat / fibre-throughput (single-reference, cross-camera-consistent
-normalisation), NOT in sky subtraction.** The whole sky-refine / pedestal line targets the wrong stage.
-`pedestal-fix` stays only as the falsification record; nothing merged. Next: verify the per-benchside
-gain steps in COUNTS and prototype a cross-camera-consistent throughput normalisation in `Flat/`.
+### Verified mechanism + corrected fix (`throughput-norm` branch)
+
+Per-benchside verification (`verify_throughput.py` → `figures/throughput_qa.png`): the per-benchside
+FLAM residual is **inversely correlated with throughput** (`corr(benchside COUNTS, FLAM residual) =
+−0.72`; blank COUNTS spread ~10 %). So the striping is the **fibre-flat (÷throughput) AMPLIFYING a
+per-benchside ADDITIVE floor** — `FLAM_residual ∝ floor / throughput` — worst in the low-throughput
+benchsides (1A, 3B). It is **not** a multiplicative flat error (scaling the ~0 sky-subtracted signal
+would give ~0, as RS noted); the flat is doing its job — it is amplifying a real additive floor.
+
+**Correction to the concept-check verdict:** that test subtracted the pedestal in **FLAM (post-flat)**,
+where the floor is already multiplied per-fibre by 1/throughput, so a per-camera constant could not
+match it (→ 0 %). The floor is **additive in the pre-flat counts**; removing it *there* (before
+÷throughput) makes it vanish cleanly — which is exactly what `Sky/skyPedestal.py` does (pkl domain,
+pre-flat). **So the pedestal was tested in the wrong domain and is NOT falsified.**
+
+**⇒ Corrected fix direction:** remove the per-benchside additive floor **pre-flat, in the counts/pkl
+domain** (the pedestal, correctly applied) — not a flat-normalisation change and not a post-flat
+correction. **Definitive test:** a faithful **re-reduction with `sky_pedestal=True`** (which applies
+pre-flat) and measure the striping. (Origin of the additive floor itself = the diffuse scattered
+continuum, cf. [[between-line-residual-rootcause]].)
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
