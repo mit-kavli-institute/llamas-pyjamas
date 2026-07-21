@@ -252,6 +252,39 @@ structure). **The fix needs per-fibre granularity in the flat/extraction domain,
 nothing merged. Next direction (needs decision): a per-fibre-along-slit flat/throughput correction, or
 investigate why the fibre flat leaves the per-fibre benchside banding in COUNTS.
 
+### Floor origin — RESOLVED: through-fibre 2D illumination on the IFU plane
+
+Elimination chain on J1613 green (scripts: `gap_scatter_test.py`, `floor_origin_tests.py`,
+`chromaticity_test.py`; figures `gap_scatter_qa.png`, `lsf_floor_qa.png`, `chromaticity_qa.png`):
+
+1. **Not detector-level 2D scattered light**: the inter-trace gap background is a small (~5 ADU/px),
+   essentially FLAT veil along the slit — a local-flux "skirt" explains only 2 % of its variance and
+   the residual dome has zero correlation with the fibre floor (corr −0.01). A flat veil is absorbed
+   harmlessly by the pooled sky model.
+2. **Not OH line-wing / LSF redistribution**: the floor persists at 70–90 % strength >40 px from any
+   sky line (wings die by ~10 px); floor-vs-measured-line-width correlations have mixed signs.
+3. **Not achromatic-throughput mismatch** (secondary only): per-fibre t_blue/t_red from the sky's own
+   OH lines scatters ±8 % (RS's chromaticity hypothesis CONFIRMED — the scalar `relative_throughput`
+   assumption is violated), but the twilight flat's chromaticity does not track it (corr ≈ 0 to −0.4),
+   and this component explains only ~20 % of the banding in half the cameras (~0 in 2A/2B).
+
+**Conclusion:** the floor is genuine continuum that is on the traces but not in the gaps — light coming
+**down the fibres**: a smooth diffuse illumination pattern across the **IFU / fore-optics plane**
+(consistent with the original 2B root cause, now generalised to all cameras at lower amplitude; mildly
+concentrated toward the bright QSO pair). Each benchside = a block of IFU rows → the smooth IFU pattern
+becomes the smooth per-camera along-slit arch/tilt/step → rotates into the sky striping. So the correct
+mental model is a **2D scattered-light correction in IFU coordinates** — the slit pedestal is its
+per-camera 1D sampling.
+
+**Faithful slit-pedestal result** (`sky_pedestal_scope=slit`, real pipeline, pre-flat): per-frame
+striping 7.07 → 5.58 (**+21 %**; offline blank-fibre metric predicted 60 % — the white-light metric
+also carries noise + the jagged 2A/2B component). Stack comparison inconclusive on the unregistered
+test RSS. Open engineering: (a) robustify the local-linear fit (one `max|ΔSKY|~5e3` outlier — no
+sigma-clip yet); (b) register the test frames for an honest stack verdict; (c) the natural upgrade:
+fit ONE smooth 2D surface on the IFU (x, y) to all cameras' blank-fibre floors simultaneously
+(regularises camera edges, fewer dof) instead of 8 independent 1D profiles; (d) sky-line-derived
+chromatic throughput (future, logged).
+
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
