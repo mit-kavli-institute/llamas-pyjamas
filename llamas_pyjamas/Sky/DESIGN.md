@@ -232,6 +232,26 @@ correction. **Definitive test:** a faithful **re-reduction with `sky_pedestal=Tr
 pre-flat) and measure the striping. (Origin of the additive floor itself = the diffuse scattered
 continuum, cf. [[between-line-residual-rootcause]].)
 
+### Faithful re-reduction result — PEDESTAL FALSIFIED (definitive)
+
+Re-reduced 3 J1613 dithers with `sky_pedestal` off vs on in the real pipeline (pre-flat, correct
+domain; flat/traces reused; `SKYPED=True`, SKY changed ~6 counts, so it genuinely ran). Striping
+(SKYSUB white-light high-pass): **per-frame off 7.07 → on 7.12 (−1 %); 3-frame stack off 4.02 →
+on 5.01 (−25 %, WORSE)** (`figures/pedestal_result_qa.png`). So the per-camera additive pedestal does
+**not** reduce the striping even applied correctly — it slightly worsens the stack. **Phase 3a is
+falsified.** (Trajectory, for honesty: falsified by the post-flat concept check → temporarily
+un-falsified on the "wrong domain" argument → re-falsified by this faithful test. The faithful test is
+the arbiter.)
+
+**Why:** the striping is a finer **per-fibre** banding (benchside/IFU-row-organized, present in COUNTS),
+not a removable per-camera *additive* floor. The verification's flat-amplification-of-a-floor was a real
+mechanism, but the floor is not per-camera-constant — it varies per fibre within a camera (edge dips +
+gradient), so a per-camera additive term misses it (and the noisy per-camera estimate adds stack
+structure). **The fix needs per-fibre granularity in the flat/extraction domain, not a sky pedestal.**
+`banding-fix` is a diagnosis + falsification record; `skyPedestal.py` stays config-gated (default OFF),
+nothing merged. Next direction (needs decision): a per-fibre-along-slit flat/throughput correction, or
+investigate why the fibre flat leaves the per-fibre benchside banding in COUNTS.
+
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
