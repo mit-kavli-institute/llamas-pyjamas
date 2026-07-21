@@ -73,19 +73,26 @@ appear in every field. It is a **fixed instrumental pattern** — **1A/2A are co
 (1A dominant in red, up to +11–15). **Red is worse than green** (larger additive floor). The residual is
 additive in all cases (`corr(floor, SKY) ≈ 0`).
 
-**\*Blue is different — and its striping is real.** The between-line-floor metric is *blind* in blue
-because the blue continuum sky model is ≈0 (29–31% of "between-line" pixels are exact zeros), so it
-reads a spurious 0. Measured on non-zero pixels, the blue per-fibre residual is *small* (+0.5, OH-
-concentrated +1.5, ~uniform across benchsides) — **not** the green/red per-camera floor. **But the blue
-stack striping is coherent at 10–13× the photon noise.** So blue has genuine striping from a **distinct,
-not-yet-identified mechanism** (candidates: the large outlier tail — blue MAD 1 but std 115 — near-zero
-continuum handling, or blue-only base-B-spline behaviour since the derivative stage skips blue). **Blue is
-the Lyα channel, so this needs its own investigation** (Phase 2b) before a fix.
+**\*Blue — RESOLVED (Phase 2b): the same residual, amplified by flux calibration.** The between-line
+metric is *blind* in blue (continuum sky ≈0, ~30% exact-zero pixels → a spurious 0). Measured properly
+(white-light mean over non-zero pixels), blue blank fibres **do** carry a positive count residual
+(**+2.6 counts**) — the same additive floor as green/red. The large blue flux calibration then amplifies
+it: **+2.56 counts × 1.6e-19 FLAM/count = 4.1e-19**, matching the measured FLAM residual exactly. And the
+blue **stack striping peaks at the extreme blue end** (3320 Å: 4.4e-18, 6× noise), where the sensfunc is
+largest, falling to ~2e-19 by 3800 Å. So blue is **not a separate mechanism** — it is the same additive
+per-camera sky residual, blown up by the (blue-end-peaked) flux calibration. Lyα (~4000–4300 Å) sits in
+the moderate-striping region, not the catastrophic blue edge.
 
 ![Per-fibre residual by channel, J1613](figures/verify_J1613.png)
 
 *Blue (top) reads flat-zero — the metric artifact; green (middle) and red (bottom) show the real
 per-camera floor + slit-edge dips.*
+
+![Blue: wavelength localization + flux-cal amplification](figures/blue_investigation.png)
+
+*Left: blue striping spikes at the extreme blue end where the sensfunc is largest. Right: the FLAM
+residual tracks the SKYSUB(counts) residual scaled by the flux-cal factor — amplification, not a new
+mechanism.*
 
 ## Caveats
 
@@ -95,5 +102,6 @@ per-camera floor + slit-edge dips.*
 - **Run-to-run non-determinism:** the pipeline is not bit-reproducible at the extraction/wavelength
   level (WAVE/xshift jitter), so residual measurements carry some run-to-run scatter; the per-camera
   *pattern* is robust across the 8 dithers.
-- Green/red now verified across all three fields (see Generalization). **Blue striping is real but its
-  mechanism is unresolved** — the next diagnosis target (Phase 2b), and the one that matters most for Lyα.
+- Verified across all three fields **and all three channels** (green/red directly; blue as the same
+  additive residual amplified by flux calibration). One unified root cause → one fix addresses every
+  channel. Fixing it in the **counts / pkl domain, before flux calibration**, is what protects blue.
