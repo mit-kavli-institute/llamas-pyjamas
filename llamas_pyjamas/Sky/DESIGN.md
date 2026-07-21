@@ -180,9 +180,24 @@ Multiplicative per-camera renorm gave only +16% (per-camera SKY-scale spread ~12
 profile +13% — both minor. **The bulk of the striping is a regular per-fibre band pattern in each
 exposure.** Neither an additive pedestal nor a per-camera scale is the fix.
 
-**Revised lead:** identify what the per-fibre banding tracks (slit position / benchside boundaries /
-dead-fibre regions / the fibre flat), then correct that per-fibre systematic in the pkl domain,
-per frame. The `pedestal-fix` branch stays as the falsification record; nothing is merged.
+**Moiré test (RS's hypothesis; `moire_test.py` → `figures/moire_qa.png`):** the high-pass stripes are
+*identical* at output pixel scales 0.3 / 0.5 / 0.75″ (same positions, same ~arcsec spacing), and the
+banding is present in the **raw fibre values** (no grid), regular with a **~4–5″ period** at 145°. So it
+is **NOT an output-grid moiré** (that would change with pixscale) — it is a **real, periodic per-fibre
+banding fixed on the IFU/sky**.
+
+**Hypothesis scoreboard (keep several alive):**
+- ✗ additive per-camera pedestal (concept check: ≤13 %, wrong pattern)
+- ✗ multiplicative per-camera scale (+16 %, minor; ~0 residual has little leverage)
+- ✗ output-grid moiré (pixscale-invariant)
+- ✓ real periodic per-fibre banding (~4–5″) fixed on the IFU — CONFIRMED, origin open
+- ? origin candidates: (a) the IFU↔slit interleaving mapping a per-benchside residual into regular
+  diagonal sky bands; (b) a per-lenslet-row IFU throughput/flat pattern; (c) an **extraction-level**
+  beat (fibre traces vs detector pixels) imprinting periodic per-fibre throughput.
+
+**Next discriminators:** is the banding already in **COUNTS (pre-sky, pre-flux-cal)**? — if yes it is a
+flat/extraction artifact, not a sky residual. And does it track fibre IFU X/Y (lenslet rows) or
+benchside interleaving? The `pedestal-fix` branch stays as the falsification record; nothing merged.
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
