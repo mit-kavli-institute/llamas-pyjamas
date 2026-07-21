@@ -368,8 +368,13 @@ sky_selection_method = stratified
 # counts domain before flux calibration. It is a CONTINUUM term (narrow line emission such as Lya is
 # preserved). CAUTION: could subtract real diffuse continuum emission; validate before trusting.
 # sky_pedestal = False
-# sky_pedestal_window = 51            # continuum median-filter width (pixels)
-# sky_pedestal_nfibres = 40           # blank fibres per camera used to measure the floor
+# sky_pedestal_scope = slit           # 'slit': per-fibre profile, smooth along the slit (matches the
+#                                     # diagnosed arch/tilt residual shape); 'camera': one constant
+#                                     # profile per camera (falsified for the striping; comparison only)
+# sky_pedestal_window = 51            # continuum median-filter width in wavelength (pixels)
+# sky_pedestal_slit_window = 15       # scope=slit: local-linear fit half-width along the slit (fibres)
+# sky_pedestal_blank_pct = 60         # scope=slit: blank = faintest this-% of live fibres
+# sky_pedestal_nfibres = 40           # scope=camera: blank fibres per camera used to measure the floor
 # sky_pedestal_clip_negative = False  # clip the pedestal at >= 0
 
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it

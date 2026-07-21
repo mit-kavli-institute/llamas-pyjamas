@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 # Defaults (overridable via the pipeline config).
 PEDESTAL_WINDOW = 51        # continuum median-filter width (pixels); >> OH/line widths
-PEDESTAL_NFIBRES = 40       # conservative "blank" set: the N faintest fibres per camera
+PEDESTAL_NFIBRES = 40       # scope='camera': the N faintest fibres per camera
+SLIT_WINDOW = 15            # scope='slit': running-median half-width along the slit (fibres)
+BLANK_PCT = 60.0            # scope='slit': blank = faintest this-percent of live fibres
 MIN_BLANK = 5               # need at least this many blank fibres to estimate a pedestal
 
 
@@ -80,6 +82,78 @@ def estimate_pedestal(counts, sky, blank_mask, *, cont_window=PEDESTAL_WINDOW,
     return ped
 
 
+def estimate_slit_pedestal(counts, sky, blank_mask, *, cont_window=PEDESTAL_WINDOW,
+                           slit_window=SLIT_WINDOW, clip_negative=False):
+    """Per-fibre additive continuum pedestal, SMOOTH ALONG THE SLIT (scope='slit').
+
+    The diagnosed residual floor is not constant per camera — it is a smooth, low-order profile
+    along the slit (arch / tilt / step; Sky/DESIGN.md investigation (a)). Estimate it per fibre:
+    take each *blank* fibre's continuum residual (median-filtered in wavelength, so narrow line
+    emission never enters), then for EVERY fibre fit a LOCAL LINEAR profile over the blank fibres
+    within ``slit_window`` of it in slit position — smooth along the slit, correct at the slit
+    ends (a running median is biased there: its one-sided window pulls toward the interior,
+    exactly where the real dips are steepest), and interpolated from blank neighbours under
+    object fibres (an object's own continuum is never in the estimate).
+
+    Returns
+    -------
+    np.ndarray (n_fiber, n_wave)
+        The additive continuum to ADD to each fibre's sky model.
+    """
+    counts = np.asarray(counts, float)
+    sky = np.asarray(sky, float)
+    resid = counts - sky
+    nfib, nwave = resid.shape
+    idx = np.where(np.asarray(blank_mask, bool))[0]
+    if idx.size < MIN_BLANK:
+        logger.warning("skyPedestal(slit): only %d blank fibres (<%d); pedestal=0",
+                       idx.size, MIN_BLANK)
+        return np.zeros((nfib, nwave))
+    win = max(3, int(cont_window) | 1)
+    cont = np.empty((idx.size, nwave))
+    for k, i in enumerate(idx):
+        cont[k] = median_filter(np.nan_to_num(resid[i], nan=0.0), size=win, mode="nearest")
+    W = max(3, int(slit_window))
+    ped = np.empty((nfib, nwave))
+    for i in range(nfib):
+        d = idx - i
+        sel = np.where(np.abs(d) <= W)[0]
+        if sel.size < 4:                                    # sparse blanks: take the nearest few
+            sel = np.argsort(np.abs(d))[:max(4, MIN_BLANK)]
+        x = d[sel].astype(float)
+        A = np.column_stack([np.ones_like(x), x])
+        coef, *_ = np.linalg.lstsq(A, cont[sel], rcond=None)   # (2, n_wave)
+        ped[i] = coef[0]                                    # local linear fit evaluated AT fibre i
+    ped = np.nan_to_num(ped, nan=0.0)
+    if clip_negative:
+        ped = np.clip(ped, 0.0, None)
+    return ped
+
+
+def _blank_mask_frac(sci, pct):
+    """Blank fibres as the faintest ``pct`` percent of live fibres — spans the whole slit
+    (needed for the along-slit running median), unlike a fixed dimmest-N which can cluster."""
+    from llamas_pyjamas.Sky.skySelect import build_sky_mask
+    counts = np.asarray(sci.counts, float)
+    tp = getattr(sci, "relative_throughput", None)
+    if tp is not None:
+        tp = np.asarray(tp, float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bright = np.nansum(np.where(tp[:, None] > 0, counts / tp[:, None], np.nan), axis=1)
+    else:
+        bright = np.nansum(counts, axis=1)
+    finite = np.isfinite(bright) & (bright != 0)
+    dead = getattr(sci, "dead_fibers", None) or []
+    for d in dead:
+        if 0 <= d < finite.size:
+            finite[d] = False
+    if not finite.any():
+        return finite
+    cut = np.nanpercentile(bright[finite], float(pct))
+    mask = finite & (bright <= cut)
+    return build_sky_mask(method="manual", explicit=mask).mask
+
+
 def _blank_mask(sci, n_fibres):
     """Conservative blank-fibre mask for one camera: the ``n_fibres`` faintest live fibres.
 
@@ -108,16 +182,25 @@ def apply_continuum_pedestal(science, config):
     ``science`` is the list of per-camera extraction objects from a sky-subtracted pkl (``.sky``
     already populated by ``skyModel_1d``). Config keys (all optional):
 
-    * ``sky_pedestal_window``   continuum median-filter width (px), default 51
-    * ``sky_pedestal_nfibres``  blank fibres per camera, default 40
+    * ``sky_pedestal_scope``    'slit' (default: per-fibre profile, smooth along the slit —
+                                matches the diagnosed residual shape) or 'camera' (one constant
+                                profile per camera; falsified for the striping, kept for comparison)
+    * ``sky_pedestal_window``   continuum median-filter width in wavelength (px), default 51
+    * ``sky_pedestal_slit_window``  scope='slit': running-median half-width along the slit (fibres), default 15
+    * ``sky_pedestal_blank_pct``    scope='slit': blank = faintest this-% of live fibres, default 60
+    * ``sky_pedestal_nfibres``  scope='camera': blank fibres per camera, default 40
     * ``sky_pedestal_clip_negative``  clip pedestal at 0, default False
 
-    Returns ``science`` (mutated). Each camera also gets a ``.sky_pedestal`` (n_wave) attribute for
-    provenance/diagnostics. Placeholder/empty cameras are skipped.
+    Returns ``science`` (mutated). Each camera also gets a ``.sky_pedestal`` attribute
+    ((n_wave,) for 'camera', (n_fib, n_wave) for 'slit') for provenance/diagnostics.
+    Placeholder/empty cameras are skipped.
     """
     win = int(config.get("sky_pedestal_window", PEDESTAL_WINDOW))
     nfib = int(config.get("sky_pedestal_nfibres", PEDESTAL_NFIBRES))
     clip = bool(config.get("sky_pedestal_clip_negative", False))
+    scope = str(config.get("sky_pedestal_scope", "slit")).lower()
+    slit_win = int(config.get("sky_pedestal_slit_window", SLIT_WINDOW))
+    blank_pct = float(config.get("sky_pedestal_blank_pct", BLANK_PCT))
     n_applied = 0
     for sci in science:
         counts = getattr(sci, "counts", None)
@@ -127,14 +210,24 @@ def apply_continuum_pedestal(science, config):
         counts = np.asarray(counts, float)
         if not np.any(np.isfinite(counts)) or np.nanmax(np.abs(np.nan_to_num(counts))) == 0:
             continue                                       # placeholder / missing camera
-        blank = _blank_mask(sci, nfib)
-        ped = estimate_pedestal(counts, np.asarray(sky, float), blank,
-                                cont_window=win, clip_negative=clip)
-        sci.sky = np.asarray(sky, float) + ped[None, :]    # per-camera additive; subtracted downstream
+        if scope == "slit":
+            # smooth along-slit per-fibre profile (the diagnosed shape of the residual floor)
+            blank = _blank_mask_frac(sci, blank_pct)
+            ped = estimate_slit_pedestal(counts, np.asarray(sky, float), blank,
+                                         cont_window=win, slit_window=slit_win,
+                                         clip_negative=clip)
+            sci.sky = np.asarray(sky, float) + ped         # (n_fib, n_wave)
+        else:
+            # scope='camera': one constant profile per camera (falsified for the striping;
+            # kept for comparison/experimentation)
+            blank = _blank_mask(sci, nfib)
+            ped = estimate_pedestal(counts, np.asarray(sky, float), blank,
+                                    cont_window=win, clip_negative=clip)
+            sci.sky = np.asarray(sky, float) + ped[None, :]
         sci.sky_pedestal = ped
         n_applied += 1
-    logger.info("skyPedestal: applied continuum pedestal on %d/%d cameras "
-                "(window=%d px, %d blank fibres)", n_applied, len(science), win, nfib)
+    logger.info("skyPedestal: applied continuum pedestal (scope=%s) on %d/%d cameras "
+                "(wave window=%d px)", scope, n_applied, len(science), win)
     return science
 
 
