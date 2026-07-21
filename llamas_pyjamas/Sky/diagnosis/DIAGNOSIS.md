@@ -52,6 +52,41 @@ Key measurements (J1613 green, blank fibres):
 - Both are **per-camera coherent**, which is precisely why they survive co-adding and cross-hatch into
   stripes; a correct per-camera treatment should remove most of the striping.
 
+## Generalization — all fields × channels
+
+Verified the signature across J1613 / J2151 / J0958 and blue / green / red (blank fibres;
+`verify_<field>.png`):
+
+| field | chan | med floor | edge dip | corr(floor,SKY) | worst benchsides | stack stripe RMS |
+|-------|------|-----------|----------|-----------------|------------------|------------------|
+| J1613 | green | +1.1 | −6.4 | −0.07 | **2A/1A**/3B | 1.9e-19 |
+| J1613 | red | +3.4 | −6.5 | +0.05 | **1A(+11)**/2B/3A | 1.4e-19 |
+| J1613 | blue | ~0\* | — | — | metric-blind\* | 1.7e-19 (coherent, 12.6× noise) |
+| J2151 | green | +0.6 | −4.8 | ~0 | **1A/2A**/3A | 1.9e-19 |
+| J2151 | red | +2.6 | −5.5 | +0.15 | **1A(+15)**/2B/3A | 1.8e-19 |
+| J2151 | blue | ~0\* | — | — | metric-blind\* | 2.7e-19 (coherent, 10.7× noise) |
+| J0958 | green | +0.0 | −4.9 | −0.15 | **1A/2A**/3B | — |
+| J0958 | red | +2.1 | −4.0 | +0.08 | **1A(+9)**/2B/4A | — |
+
+**Green & red: confirmed and universal.** The additive per-camera floor + negative slit-edge dips
+appear in every field. It is a **fixed instrumental pattern** — **1A/2A are consistently the worst**
+(1A dominant in red, up to +11–15). **Red is worse than green** (larger additive floor). The residual is
+additive in all cases (`corr(floor, SKY) ≈ 0`).
+
+**\*Blue is different — and its striping is real.** The between-line-floor metric is *blind* in blue
+because the blue continuum sky model is ≈0 (29–31% of "between-line" pixels are exact zeros), so it
+reads a spurious 0. Measured on non-zero pixels, the blue per-fibre residual is *small* (+0.5, OH-
+concentrated +1.5, ~uniform across benchsides) — **not** the green/red per-camera floor. **But the blue
+stack striping is coherent at 10–13× the photon noise.** So blue has genuine striping from a **distinct,
+not-yet-identified mechanism** (candidates: the large outlier tail — blue MAD 1 but std 115 — near-zero
+continuum handling, or blue-only base-B-spline behaviour since the derivative stage skips blue). **Blue is
+the Lyα channel, so this needs its own investigation** (Phase 2b) before a fix.
+
+![Per-fibre residual by channel, J1613](figures/verify_J1613.png)
+
+*Blue (top) reads flat-zero — the metric artifact; green (middle) and red (bottom) show the real
+per-camera floor + slit-edge dips.*
+
 ## Caveats
 
 - **Metric confound (resolved):** a "between-line floor" measured on *all* fibres is contaminated by
@@ -60,5 +95,5 @@ Key measurements (J1613 green, blank fibres):
 - **Run-to-run non-determinism:** the pipeline is not bit-reproducible at the extraction/wavelength
   level (WAVE/xshift jitter), so residual measurements carry some run-to-run scatter; the per-camera
   *pattern* is robust across the 8 dithers.
-- Verified on J1613 green; should be checked on the other channels/fields before finalising a fix
-  (blue is skipped by the derivative stage; red has different OH).
+- Green/red now verified across all three fields (see Generalization). **Blue striping is real but its
+  mechanism is unresolved** — the next diagnosis target (Phase 2b), and the one that matters most for Lyα.
