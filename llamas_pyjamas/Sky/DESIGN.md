@@ -195,9 +195,26 @@ banding fixed on the IFU/sky**.
   diagonal sky bands; (b) a per-lenslet-row IFU throughput/flat pattern; (c) an **extraction-level**
   beat (fibre traces vs detector pixels) imprinting periodic per-fibre throughput.
 
-**Next discriminators:** is the banding already in **COUNTS (pre-sky, pre-flux-cal)**? — if yes it is a
-flat/extraction artifact, not a sky residual. And does it track fibre IFU X/Y (lenslet rows) or
-benchside interleaving? The `pedestal-fix` branch stays as the falsification record; nothing merged.
+**COUNTS-vs-SKYSUB + IFU/benchside test (`counts_ifu_test.py` → `figures/counts_ifu_qa.png`) — ROOT
+CAUSE FOUND:**
+- the banding **is already in COUNTS** (pre-sky, pre-flux-cal) at **~5 %** (7.4 counts); the SKY model
+  has nearly the same ~5 % (it inherits throughput) and absorbs ~half, leaving ~3.8 counts in SKYSUB —
+  the striping. SKYSUB/FLAM banding correlates with the COUNTS pattern (+0.32), **not** with the sky
+  model (~0). So it is an **upstream flat/throughput artifact, not a sky-subtraction error**.
+- it is organized by **benchside / IFU-row block**: each benchside is a contiguous block of IFU rows
+  that rotates into a diagonal band on the sky (the stripes). FLAM-vs-COUNTS shows discrete per-benchside
+  throughput clusters.
+
+**Root cause (confirmed):** a **per-benchside (IFU-row-block) ~5 % throughput/flat gain banding in the
+extracted COUNTS**, which maps to the diagonal sky stripes, is only half-removed by sky subtraction, and
+is amplified by flux-cal in blue. This is the **per-camera throughput NORMALISATION** issue surfacing:
+the fibre flat is normalised per camera, so the absolute per-benchside gain is discarded → per-benchside
+gain steps → banding.
+
+**⇒ The fix is UPSTREAM in the flat / fibre-throughput (single-reference, cross-camera-consistent
+normalisation), NOT in sky subtraction.** The whole sky-refine / pedestal line targets the wrong stage.
+`pedestal-fix` stays only as the falsification record; nothing merged. Next: verify the per-benchside
+gain steps in COUNTS and prototype a cross-camera-consistent throughput normalisation in `Flat/`.
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
