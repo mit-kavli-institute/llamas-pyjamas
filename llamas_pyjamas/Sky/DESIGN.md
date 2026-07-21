@@ -168,10 +168,21 @@ Tested on J1613 green (FLAM white-light, existing RSS; `Sky/diagnosis/pedestal_c
 scope) removes ≤13 % and, worse, subtracts a broad smooth component — the real-diffuse-continuum
 over-subtraction risk — for little gain. **Phase 3a (pedestal) is deprioritised.**
 
-**Revised lead:** the striping is likely **multiplicative** — a per-camera throughput / flat /
-flux-cal *scaling* error (cf. the per-camera throughput-normalisation finding), which an additive term
-cannot fix. Next diagnostic: test whether renormalising the per-camera scale removes the stripes.
-(The `pedestal-fix` branch stays as the falsification record; the additive fix is not merged.)
+**Single-frame test (RS's idea — decisive; `singleframe_test.py` → `figures/singleframe_qa.png`):**
+the striping is **worse in a single frame (3.4e-19) than in the 8-frame stack (1.6e-19)** — co-adding
+*reduces* it. And the **raw fibres (pre-grid) already show the diagonal bands**. So the striping is:
+- **NOT a co-add / cross-hatch effect** (stacking helps, ~partial averaging as dithers move the
+  fibre-fixed pattern on the sky) — this revises the earlier "coherent across dithers" claim;
+- **NOT a gridding artifact** (it's in the fibre values before resampling);
+- a **per-fibre, per-frame banded systematic** in the sky-subtracted data.
+
+Multiplicative per-camera renorm gave only +16% (per-camera SKY-scale spread ~12%), additive slit
+profile +13% — both minor. **The bulk of the striping is a regular per-fibre band pattern in each
+exposure.** Neither an additive pedestal nor a per-camera scale is the fix.
+
+**Revised lead:** identify what the per-fibre banding tracks (slit position / benchside boundaries /
+dead-fibre regions / the fibre flat), then correct that per-fibre systematic in the pkl domain,
+per frame. The `pedestal-fix` branch stays as the falsification record; nothing is merged.
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
