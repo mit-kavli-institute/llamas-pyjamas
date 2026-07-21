@@ -93,31 +93,71 @@ Config keeps every current key and default; new knobs default to exactly today's
 
 ## 4. Phasing
 
-### Phase 1 — architecture, thinner first cut (behaviour-preserving) ← we are here
-- Introduce the first-class, **persisted `SkyMask`** (RSS extension + provenance).
-- **Unify** the two inline selections behind one provider (wrapping `skySelect`), **fixing the
-  stratified-collapse bug** so the recorded method is the method actually used.
-- **Regression test:** the default pipeline output is **bit-identical** on a may26 exposure.
-- Prove the seam with a trivial **manual-mask provider** — no change to the default result.
-- **Defer** the full `SkyEstimator` (base + refinement chain) and `SkySource` registries to Phase 3 — the
-  diagnosis may reshape the estimator interface, so we don't over-build it now.
+### Phase 1 — architecture, thinner first cut (behaviour-preserving) — ✓ DONE
+- Persisted first-class `SkyMask` + `build_sky_mask` provider; both stages unified onto it; honest
+  provenance (the "stratified-collapse" turned out to be inert — it feeds only the PCA basis, which is
+  off — so it was recorded honestly rather than changed). Manual-mask seam proven. Tests green.
 
-### Phase 2 — diagnose the striping (current model)
-- Quantify the striping on a stacked field (a repeatable metric).
-- Decompose the `SKYRESID` / `SKY` / `SKYSUB` / `COUNTS` planes; determine whether the coherent additive
-  residual originates in the base B-spline or the framework refinement (toggle the framework and compare).
-- Correlate the residual against fibre throughput (flat amplification), slit-y position, bench/side,
-  wavelength (between-line continuum vs OH lines), and across dithers.
-- Build on the prior finding that the striping is an **additive, flat-amplified, coherent-across-dithers**
-  residual (diffuse scattered continuum into low-throughput fibres). Deliverable: a diagnostic toolkit +
-  a root-cause memo.
+### Phase 2 — diagnose the striping — ✓ DONE (see `Sky/diagnosis/DIAGNOSIS.md`)
+- Root cause (all channels): **one additive per-camera / per-fibre sky-subtraction residual** — a
+  positive interior floor (worst benchsides 1A/2A green, 1A red) + negative slit-edge over-subtraction
+  dips — coherent across dithers, so the two rotation groups cross-hatch it into diagonal stripes.
+  Additive, not a scaling error; a fixed instrumental pattern across J1613/J2151/J0958. **Blue** is the
+  same residual **amplified by the large blue flux calibration** (worst at the blue end). One root
+  cause ⇒ one fix, applied in the counts/pkl domain before flux calibration, helps every channel.
 
-### Phase 3 — later (informed by Phase 2)
-- The full `SkyEstimator` base+refinement-chain abstraction and model improvements from the diagnosis.
+### Phase 3 — the striping fix (branch `pedestal-fix`) — HYPOTHESIS UNDER TEST
+
+**Framing (important).** The Phase 2 diagnosis — one additive per-camera sky-subtraction residual
+(positive interior floor + slit-edge over-subtraction), amplified by flux-cal in blue — is the
+**best-available theory, not proven**. Phase 3 is therefore built to be **falsifiable and reversible**:
+
+- it lives on a **separate branch (`pedestal-fix`)** off `sky-refine`;
+- every correction is **config-gated, default OFF** (the pipeline is unchanged unless enabled);
+- it is judged by **whether it actually reduces the measured striping** — if it doesn't, we abandon
+  the branch and lose nothing.
+
+All corrections act in the **counts / pkl / xshift domain, *before* flux calibration** — that is what
+protects blue (where flux-cal otherwise amplifies the residual). RSS stays write-once after sky is done.
+
+**The two corrections** (built as refinements on a `SkyEstimator` = B-spline base + ordered,
+individually-toggleable refinement chain — the abstraction deferred from Phase 1):
+
+1. **Per-camera additive continuum pedestal.** Estimate the positive additive floor from *genuinely
+   blank* fibres in line-free pixels (per camera; optionally smooth along the slit) and subtract it.
+   Targets the +floor (worst 1A/2A in green, 1A in red).
+   - **CENTRAL RISK — could eat real Lyα.** A per-camera additive pedestal can subtract the very diffuse
+     emission we want. Mitigations: (a) measure the pedestal only from fibres/regions known blank
+     (field edge, away from the QSO pair — or a user sky mask / offset field); (b) restrict it to a
+     smooth, low-spatial-frequency instrumental component distinct from compact emission; (c) keep it
+     optional and gated behind the signal-preservation guardrail below. This risk is the main reason
+     the theory must be *tested*, not assumed.
+
+2. **Slit-edge / across-slit LSF refinement in the xshift domain.** Relocate the derivative refinement
+   (α·S + β·S′ + γ·S″) into the pkl/xshift domain so it corrects the edge over-subtraction (the negative
+   dips) at the source, where xshift lives (per the domain principle).
+
+**Sub-phases:** 3a build the `SkyEstimator` base+chain scaffold + the pedestal refinement (gated);
+3b the edge-LSF derivative refinement in xshift; 3c validate on may26.
+
+**Validation / falsification (the whole point of the branch):**
+- **Primary metric:** does the stacked-image striping RMS (blank regions) drop across *all* channels and
+  fields? Reuse `Sky/diagnosis/{sky_residual_diag,sky_residual_verify,blue_striping_investigation}.py`
+  as the before/after test.
+- **Guardrail — real signal preserved:** QSO point-source spectra unchanged; no over-subtraction of
+  diffuse flux; explicitly check the pedestal does not remove real Lyα (test on/off on a field region).
+- **Not bit-identical:** the pipeline has run-to-run non-determinism (WAVE/xshift jitter), so validate
+  with the striping-RMS + signal-preservation metrics, not bit-for-bit.
+- **Reversible:** default OFF, separate branch; compare on/off on the same reduction.
+
+**Config keys (defaults reproduce today's behaviour):** `sky_pedestal` (false), `sky_pedestal_scope`
+(`camera` | `fibre-along-slit`), `sky_pedestal_source` (`blank` | `edge` | `mask` | `offset`),
+`sky_edge_refine` (false) + `sky_refine_domain` (`xshift`).
+
+### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
-- Cross-camera sky sharing (requires fixing the per-camera throughput normalisation noted in the diagnosis
-  work).
+- Cross-camera sky sharing (requires fixing the per-camera throughput normalisation).
 
 ---
 
