@@ -304,6 +304,20 @@ fit ONE smooth 2D surface on the IFU (x, y) to all cameras' blank-fibre floors s
 (regularises camera edges, fewer dof) instead of 8 independent 1D profiles; (d) sky-line-derived
 chromatic throughput (future, logged).
 
+### Template faithful test (3 J1613 dithers, green, Gaia-registered, identical WCS off/on)
+
+- **Per-frame striping: 7.06 → 5.77 (+18 %)** — matches the per-frame slit scope (+21 %) with the
+  safety properties (static cleaned shape, no 5e3 outliers, cannot absorb target diffuse emission).
+- **Registered 3-frame stack: 3.46 → 3.70 (−7 %, ~neutral).** Interpretation: the static component
+  partially self-averages under dithering (off: per-frame 7.06 → stack 3.46 with only 3 frames), and
+  with small same-rotation dithers the template's own noise/misfit (built from 17 frames, mildly
+  self-referential here) enters the stack coherently, cancelling the gain. Weak test: 3 frames, no
+  180° rotations, template includes the test frames.
+- **Verdict so far:** the template pedestal is a clear per-frame improvement and safe by construction;
+  its benefit to DEEP stacks is unproven — the science-grade test is the full 8-dither + rotations
+  J1613 stack (needs an ~8-frame re-reduction), and the deep-stack striping likely also carries
+  components the template cannot touch (2B-type field-dependent scattered light, non-static residuals).
+
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
