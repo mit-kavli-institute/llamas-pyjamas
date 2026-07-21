@@ -30,6 +30,8 @@ from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
 from llamas_pyjamas.Sky.skyMask import build_sky_fiber_mask
 from llamas_pyjamas.Sky.skySubtract import (subtract_sky_rss,
                                             subtract_sky_all_colors)
+from llamas_pyjamas.Sky.skyPedestal import (estimate_pedestal,
+                                            apply_continuum_pedestal)
 
 __all__ = [
     "SkyMask",
@@ -38,4 +40,6 @@ __all__ = [
     "build_sky_fiber_mask",
     "subtract_sky_rss",
     "subtract_sky_all_colors",
+    "estimate_pedestal",
+    "apply_continuum_pedestal",
 ]

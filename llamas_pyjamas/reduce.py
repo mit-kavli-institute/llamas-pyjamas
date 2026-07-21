@@ -2971,6 +2971,15 @@ def main(config_path):
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 
+                # Phase 3a (sky-refine): optional per-camera additive continuum pedestal, in the
+                # pkl domain before flux cal. Default OFF; HYPOTHESIS UNDER TEST (Sky/DESIGN.md).
+                if config.get('sky_pedestal', False):
+                    from llamas_pyjamas.Sky.skyPedestal import apply_pedestal_file
+                    print("Applying per-camera continuum pedestal (sky_pedestal=True)...")
+                    ped_file = apply_pedestal_file(sky1d_file, config)
+                    rss_input_file = ped_file
+                    print(f"Continuum pedestal applied -> {os.path.basename(ped_file)}")
+
                 # Per-science wavelength QA: final xshift (incl. refineSkyX if
                 # enabled) + populated .sky. Writes one HTML report + CSV per
                 # science frame into qa_output_dir. Never fatal. Note: lives

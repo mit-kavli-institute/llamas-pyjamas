@@ -362,6 +362,16 @@ sky_selection_method = stratified
 # (If several are listed, only the first is used for now.)
 # sky_frame_files = /path/to/sky1_mef.fits, /path/to/sky2_mef.fits
 
+# Per-camera additive continuum PEDESTAL (sky-refine Phase 3a; EXPERIMENTAL, default OFF).
+# After the base sky model, subtract a smooth per-camera continuum floor measured from the faintest
+# (blank) fibres -- targets the additive residual that co-adds into stacked-image striping, in the
+# counts domain before flux calibration. It is a CONTINUUM term (narrow line emission such as Lya is
+# preserved). CAUTION: could subtract real diffuse continuum emission; validate before trusting.
+# sky_pedestal = False
+# sky_pedestal_window = 51            # continuum median-filter width (pixels)
+# sky_pedestal_nfibres = 40           # blank fibres per camera used to measure the floor
+# sky_pedestal_clip_negative = False  # clip the pedestal at >= 0
+
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it
 # reads the *_FF.fits files, applies source masking -> per-fibre OH scaling ->
 # PCA/ZAP residual cleaning, and writes *_FF_SKYSUB.fits (consumed by the
