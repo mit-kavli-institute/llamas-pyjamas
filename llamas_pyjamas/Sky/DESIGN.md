@@ -320,8 +320,22 @@ chromatic throughput (future, logged).
   stack. A stripe-specific metric (amplitude of the banding along the 145° stripe axis,
   `stripe_metric.py`) gives the honest numbers: **single frame −85 %, registered 3-frame stack −52 %.**
 - **Verdict:** the template pedestal removes the striping. Remaining stack residual carries the
-  non-static components (2B-type field-dependent light) and noise. A full 8-dither+rotation stack test
-  remains as production-grade confirmation.
+  non-static components (2B-type field-dependent light) and noise.
+
+### Production-grade confirmation — FULL 8-dither test, template EXCLUDING J1613
+
+All 8 J1613 dithers (both 180° rotation groups), pedestal OFF vs template ON, templates rebuilt from
+the 9 J2151+J0958 frames only (fully non-self-referential), one shared Gaia registration
+(`run_full8.py`, `figures/pedestal8_visual_qa.png`; DS9 products `pedestal8_stack_{off,on,diff}.fits`):
+
+| stripe amplitude (145°) | OFF | ON | reduction |
+|---|---|---|---|
+| single frame | 1.74 | 0.23 | **−87 %** |
+| 8-frame stack | 0.41 | 0.19 | **−54 %** |
+
+Matches the 3-frame numbers (−85 / −52 %) → no self-reference inflation; plan B (include the target
+field with ± outlier rejection) was not needed. The ON stack is visually clean; sources intact.
+**The static per-camera floor template (scope='template') is the validated striping correction.**
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
