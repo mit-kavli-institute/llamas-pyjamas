@@ -154,6 +154,25 @@ individually-toggleable refinement chain — the abstraction deferred from Phase
 (`camera` | `fibre-along-slit`), `sky_pedestal_source` (`blank` | `edge` | `mask` | `offset`),
 `sky_edge_refine` (false) + `sky_refine_domain` (`xshift`).
 
+### Phase 3a concept-check result — the additive pedestal does NOT fix the striping
+
+Tested on J1613 green (FLAM white-light, existing RSS; `Sky/diagnosis/pedestal_concept_check.py` →
+`figures/pedestal_concept_qa.png`):
+
+- **per-camera constant pedestal: −1%** striping (no effect);
+- **per-slit-position profile: +13%**, but what it removes is a **smooth broad field** (positive
+  interior, negative edges), **not** the diagonal stripes — which persist. QSO continuum preserved
+  (0.1 %).
+
+**The diagonal striping is not a removable additive continuum floor.** The additive pedestal (any
+scope) removes ≤13 % and, worse, subtracts a broad smooth component — the real-diffuse-continuum
+over-subtraction risk — for little gain. **Phase 3a (pedestal) is deprioritised.**
+
+**Revised lead:** the striping is likely **multiplicative** — a per-camera throughput / flat /
+flux-cal *scaling* error (cf. the per-camera throughput-normalisation finding), which an additive term
+cannot fix. Next diagnostic: test whether renormalising the per-camera scale removes the stripes.
+(The `pedestal-fix` branch stays as the falsification record; the additive fix is not merged.)
+
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
