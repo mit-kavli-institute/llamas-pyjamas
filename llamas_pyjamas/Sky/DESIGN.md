@@ -337,6 +337,26 @@ Matches the 3-frame numbers (−85 / −52 %) → no self-reference inflation; p
 field with ± outlier rejection) was not needed. The ON stack is visually clean; sources intact.
 **The static per-camera floor template (scope='template') is the validated striping correction.**
 
+### Production-combine validation + the transparency side-finding
+
+Full production combine (`build_super_rss` with bad-fibre masking → `combine_field_cubes`) on the 8-frame
+off/on reductions (`run_prod_combine.py`, `prod_combine_nt.py`, `figures/prodcombine*_qa.png`; cubes at
+`reduced_ped_{off,on}/combined/J1613_cube_{chan}[_noscale].fits`):
+
+- **Side-finding: the floor was silently breaking the in-field transparency auto-scaling.** OFF-set
+  auto-scales: [1.0 ×6, **2.26, 0.094**] (two catastrophically mis-measured frames); ON-set: sane
+  0.87–1.12 on all 8. The reference-source aperture was sitting on the variable per-camera pedestal.
+  Removing the floor **fixes the transparency measurement** — an independent benefit, and a caution:
+  historical transparency scales measured on uncorrected data are suspect.
+- **Fair comparison (transparency disabled both sides, stripe metric over nexp≥4):**
+  **blue +89 %, green +45 %, red +53 %** stripe-amplitude reduction; white-lights visibly clean, sources
+  intact. (A first pass with transparency enabled produced garbage numbers — the broken OFF scales +
+  a metric window collapsed to the QSO-dominated 8-exposure overlap; recorded as a metric lesson.)
+
+**The template correction is validated end-to-end: per-frame, quick stack, and full production combine,
+in all three channels.** Remaining tuning targets (RS): low-NEXP edge residual, template-build knobs
+(CLIP_SIGMA/NLBIN/MIN_FRAMES) + amplitude clamp as config, blue detailed behaviour.
+
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
