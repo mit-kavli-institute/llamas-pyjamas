@@ -268,13 +268,32 @@ Elimination chain on J1613 green (scripts: `gap_scatter_test.py`, `floor_origin_
    assumption is violated), but the twilight flat's chromaticity does not track it (corr ≈ 0 to −0.4),
    and this component explains only ~20 % of the banding in half the cameras (~0 in 2A/2B).
 
-**Conclusion:** the floor is genuine continuum that is on the traces but not in the gaps — light coming
-**down the fibres**: a smooth diffuse illumination pattern across the **IFU / fore-optics plane**
-(consistent with the original 2B root cause, now generalised to all cameras at lower amplitude; mildly
-concentrated toward the bright QSO pair). Each benchside = a block of IFU rows → the smooth IFU pattern
-becomes the smooth per-camera along-slit arch/tilt/step → rotates into the sky striping. So the correct
-mental model is a **2D scattered-light correction in IFU coordinates** — the slit pedestal is its
-per-camera 1D sampling.
+**Conclusion (corrected after RS's challenge — "how does a smooth field give stripes?"):**
+
+4. **Not a single smooth IFU-plane field either** (`terrace_test.py`): the terracing mechanism (smooth
+   field − per-camera mean = striped residual) is real in principle, but the data reject it — ONE
+   smooth 2D surface + 8 per-camera offsets fits R²=0.27 (17 dof) vs R²=0.66 for 8 *independent*
+   per-camera profiles (32 dof). The within-camera shapes are not slices of one IFU field; the floor's
+   natural coordinate is **slit/camera position, not IFU position**.
+5. **The profile is a STATIC INSTRUMENTAL signature per camera** (`stability_test.py`): smoothed
+   along-slit floor profiles correlate 0.85–0.98 across J1613 dithers AND **0.88–0.96 across different
+   fields** (J1613/J2151/J0958) for the large-amplitude cameras (1A/1B/2A). Exceptions: 2B (cross-field
+   −0.19 — its extra jagged component is field/target-dependent, the original scattered-continuum
+   finding) and 4A (0.7-count amplitude, noise-dominated).
+
+**So:** each camera carries a fixed, additive, smooth along-slit continuum floor (on the traces, not in
+the mid-gaps → in the extracted light path; origin: camera-internal stray light near the traces or a
+fixed extraction-domain systematic — calibratable regardless). The striping arises because these
+per-camera profiles, mean-removed by each camera's pooled sky fit, tile the IFU in benchside bands →
+periodic banding → diagonal sky stripes. Per-benchside *throughput* differences remain ruled out as
+primary (additive, not ∝ sky).
+
+**Fix architecture this implies (facility-grade):** a per-camera additive floor **TEMPLATE** —
+shape calibrated once from stacked blank-sky data (static), with a single per-frame amplitude fit per
+camera (1 dof, robust; adapts to any slow level changes). Safer than the per-frame slit pedestal for
+fields with diffuse emission filling the IFU (the template shape comes from *other* fields), and
+degenerate-free for 2B where the per-frame fit chases the jagged field-dependent part. The per-frame
+slit pedestal (+21 % per-frame, faithful test) remains as the fallback/option.
 
 **Faithful slit-pedestal result** (`sky_pedestal_scope=slit`, real pipeline, pre-flat): per-frame
 striping 7.07 → 5.58 (**+21 %**; offline blank-fibre metric predicted 60 % — the white-light metric
