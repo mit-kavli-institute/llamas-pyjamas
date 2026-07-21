@@ -313,10 +313,15 @@ chromatic throughput (future, logged).
   with small same-rotation dithers the template's own noise/misfit (built from 17 frames, mildly
   self-referential here) enters the stack coherently, cancelling the gain. Weak test: 3 frames, no
   180° rotations, template includes the test frames.
-- **Verdict so far:** the template pedestal is a clear per-frame improvement and safe by construction;
-  its benefit to DEEP stacks is unproven — the science-grade test is the full 8-dither + rotations
-  J1613 stack (needs an ~8-frame re-reduction), and the deep-stack striping likely also carries
-  components the template cannot touch (2B-type field-dependent scattered light, non-static residuals).
+- **METRIC CORRECTION (RS asked to see the images — rightly):** the isotropic high-pass RMS above is a
+  misleading figure of merit — it is dominated by non-stripe variance (broken-fibre holes, noise, mask
+  edges), so near-complete stripe removal barely moves it (hence the spurious "−7 %"). The images
+  (`figures/pedestal_visual_qa.png`) show the stripes essentially GONE in both the single frame and the
+  stack. A stripe-specific metric (amplitude of the banding along the 145° stripe axis,
+  `stripe_metric.py`) gives the honest numbers: **single frame −85 %, registered 3-frame stack −52 %.**
+- **Verdict:** the template pedestal removes the striping. Remaining stack residual carries the
+  non-static components (2B-type field-dependent light) and noise. A full 8-dither+rotation stack test
+  remains as production-grade confirmation.
 
 ### Deferred beyond the striping fix
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
