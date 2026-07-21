@@ -368,9 +368,14 @@ sky_selection_method = stratified
 # counts domain before flux calibration. It is a CONTINUUM term (narrow line emission such as Lya is
 # preserved). CAUTION: could subtract real diffuse continuum emission; validate before trusting.
 # sky_pedestal = False
-# sky_pedestal_scope = slit           # 'slit': per-fibre profile, smooth along the slit (matches the
-#                                     # diagnosed arch/tilt residual shape); 'camera': one constant
-#                                     # profile per camera (falsified for the striping; comparison only)
+# sky_pedestal_scope = slit           # 'template': RECOMMENDED — static per-camera floor shape from a
+#                                     # calibration built across many frames/fields (see
+#                                     # Sky/skyFloorTemplate.py) x one amplitude fitted per frame; the
+#                                     # shape comes from OTHER fields so it cannot absorb real diffuse
+#                                     # emission in the target. 'slit': per-frame per-fibre profile,
+#                                     # smooth along the slit. 'camera': one constant per camera
+#                                     # (falsified for the striping; comparison only)
+# sky_pedestal_template = /path/to/floor_template_{channel}.fits   # required for scope=template
 # sky_pedestal_window = 51            # continuum median-filter width in wavelength (pixels)
 # sky_pedestal_slit_window = 15       # scope=slit: local-linear fit half-width along the slit (fibres)
 # sky_pedestal_blank_pct = 60         # scope=slit: blank = faintest this-% of live fibres

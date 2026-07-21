@@ -130,6 +130,81 @@ def estimate_slit_pedestal(counts, sky, blank_mask, *, cont_window=PEDESTAL_WIND
     return ped
 
 
+def _clean_template(T):
+    """Mask dead-fibre spikes in a template (rows whose level is a strong outlier vs the smooth
+    along-slit profile) and replace them by along-slit interpolation."""
+    prof = np.nanmedian(T, axis=1)
+    sm = median_filter(np.nan_to_num(prof, nan=0.0), size=11, mode="nearest")
+    dev = prof - sm
+    mad = 1.4826 * np.nanmedian(np.abs(dev - np.nanmedian(dev)))
+    bad = ~np.isfinite(prof) | (np.abs(dev) > 5 * max(mad, 1e-3))
+    if bad.any() and (~bad).sum() > 5:
+        idx = np.arange(T.shape[0])
+        for k in range(T.shape[1]):
+            col = T[:, k]
+            good = ~bad & np.isfinite(col)
+            if good.sum() > 5:
+                T[bad, k] = np.interp(idx[bad], idx[good], col[good])
+    return T
+
+
+def load_template_for(config, channel):
+    """Load the per-camera floor templates for ``channel`` from ``sky_pedestal_template``
+    (a path; ``{channel}`` is substituted if present). Returns dict cam -> cleaned (nfib, NLBIN)."""
+    from llamas_pyjamas.Sky.skyFloorTemplate import load_template
+    path = config.get("sky_pedestal_template")
+    if not path:
+        raise ValueError("sky_pedestal_scope='template' requires sky_pedestal_template=<path>")
+    path = str(path).replace("{channel}", str(channel))
+    tpl = load_template(path, channel=channel)
+    return {cam: _clean_template(T) for cam, T in tpl.items()}
+
+
+def estimate_template_pedestal(counts, sky, blank_mask, T, *, cont_window=PEDESTAL_WINDOW,
+                               amp_range=(0.0, 3.0)):
+    """Template-scope pedestal: static shape ``T`` (nfib, nbin) x ONE amplitude fitted on this
+    frame's blank fibres (robust: one positive-outlier clip rejects residual object light).
+
+    Returns ``(ped_full (nfib, nwave), amplitude)``; amplitude clamped to ``amp_range``
+    (negative scattered light is unphysical)."""
+    counts = np.asarray(counts, float)
+    sky = np.asarray(sky, float)
+    nfib, nwave = counts.shape
+    nbin = T.shape[1]
+    edges = np.linspace(0, nwave, nbin + 1).astype(int)
+    win = max(3, int(cont_window) | 1)
+    idxb = np.where(np.asarray(blank_mask, bool))[0]
+    cont = np.full((idxb.size, nbin), np.nan)
+    for k, i in enumerate(idxb):
+        sm = median_filter(np.nan_to_num(counts[i] - sky[i], nan=0.0), size=win, mode="nearest")
+        for b in range(nbin):
+            seg = sm[edges[b]:edges[b + 1]]
+            if seg.size > 5:
+                cont[k, b] = np.median(seg)
+    tt = T[idxb]
+    m = np.isfinite(cont) & np.isfinite(tt)
+    if m.sum() < 100 or np.nansum(tt[m] ** 2) <= 0:
+        logger.warning("skyPedestal(template): too little data to fit amplitude; a=1")
+        a = 1.0
+    else:
+        a = float(np.nansum(cont[m] * tt[m]) / np.nansum(tt[m] ** 2))
+        resid = cont - a * tt
+        s = 1.4826 * np.nanmedian(np.abs(resid[m] - np.nanmedian(resid[m])))
+        keep = m & (resid < np.nanmedian(resid[m]) + 3 * max(s, 1e-3))   # clip positive outliers
+        if keep.sum() > 100:
+            a = float(np.nansum(cont[keep] * tt[keep]) / np.nansum(tt[keep] ** 2))
+    a = float(np.clip(a, *amp_range))
+    # upsample the binned template to the full wavelength grid
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    ped = np.empty((nfib, nwave))
+    xg = np.arange(nwave)
+    for i in range(nfib):
+        row = T[i]
+        g = np.isfinite(row)
+        ped[i] = np.interp(xg, centers[g], row[g]) if g.sum() > 2 else 0.0
+    return a * ped, a
+
+
 def _blank_mask_frac(sci, pct):
     """Blank fibres as the faintest ``pct`` percent of live fibres — spans the whole slit
     (needed for the along-slit running median), unlike a fixed dimmest-N which can cluster."""
@@ -176,7 +251,7 @@ def _blank_mask(sci, n_fibres):
     return build_sky_mask(bright, finite, method="dimmest", n_fibres=int(n_fibres)).mask
 
 
-def apply_continuum_pedestal(science, config):
+def apply_continuum_pedestal(science, config, metadata=None):
     """Add a per-camera additive continuum pedestal to each science camera's ``.sky`` (in place).
 
     ``science`` is the list of per-camera extraction objects from a sky-subtracted pkl (``.sky``
@@ -201,8 +276,9 @@ def apply_continuum_pedestal(science, config):
     scope = str(config.get("sky_pedestal_scope", "slit")).lower()
     slit_win = int(config.get("sky_pedestal_slit_window", SLIT_WINDOW))
     blank_pct = float(config.get("sky_pedestal_blank_pct", BLANK_PCT))
+    templates = {}                                         # channel -> {cam: T}, lazy-loaded
     n_applied = 0
-    for sci in science:
+    for j, sci in enumerate(science):
         counts = getattr(sci, "counts", None)
         sky = getattr(sci, "sky", None)
         if counts is None or sky is None:
@@ -210,7 +286,31 @@ def apply_continuum_pedestal(science, config):
         counts = np.asarray(counts, float)
         if not np.any(np.isfinite(counts)) or np.nanmax(np.abs(np.nan_to_num(counts))) == 0:
             continue                                       # placeholder / missing camera
-        if scope == "slit":
+        if scope == "template":
+            # static per-camera template shape x one per-frame amplitude (safest for fields with
+            # diffuse emission filling the IFU: the shape comes from OTHER frames/fields)
+            md = metadata[j] if metadata is not None and j < len(metadata) else {}
+            chan = str(md.get("channel", getattr(sci, "channel", ""))).lower()
+            cam = f"{md.get('bench', getattr(sci, 'bench', ''))}{md.get('side', getattr(sci, 'side', ''))}"
+            if chan not in templates:
+                try:
+                    templates[chan] = load_template_for(config, chan)
+                except Exception as exc:                   # noqa: BLE001
+                    logger.warning("skyPedestal(template): no template for channel %r (%s)",
+                                   chan, exc)
+                    templates[chan] = {}
+            T = templates[chan].get(cam)
+            if T is None or T.shape[0] != counts.shape[0]:
+                logger.warning("skyPedestal(template): no matching template for %s %s; skipped",
+                               chan, cam)
+                continue
+            blank = _blank_mask_frac(sci, blank_pct)
+            ped, amp = estimate_template_pedestal(counts, np.asarray(sky, float), blank, T,
+                                                  cont_window=win)
+            sci.sky = np.asarray(sky, float) + ped
+            sci.sky_pedestal_amp = amp
+            logger.info("skyPedestal(template): %s %s amplitude=%.2f", chan, cam, amp)
+        elif scope == "slit":
             # smooth along-slit per-fibre profile (the diagnosed shape of the residual floor)
             blank = _blank_mask_frac(sci, blank_pct)
             ped = estimate_slit_pedestal(counts, np.asarray(sky, float), blank,
@@ -241,7 +341,7 @@ def apply_pedestal_file(sky1d_file, config):
     d = ExtractLlamas.loadExtraction(sky1d_file)
     science = d["extractions"]
     hdr = d.get("primary_header")
-    apply_continuum_pedestal(science, config)
+    apply_continuum_pedestal(science, config, metadata=d.get("metadata"))
     if hdr is not None:
         hdr["SKYPED"] = (True, "per-camera additive continuum pedestal subtracted")
         hdr["SKYPEDWN"] = (int(config.get("sky_pedestal_window", PEDESTAL_WINDOW)),

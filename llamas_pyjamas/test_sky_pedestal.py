@@ -151,6 +151,53 @@ def test_slit_scope_object_continuum_preserved():
     assert abs(np.median(cam.sky_pedestal[30, 60:-60]) - arch[30]) < 2.5
 
 
+def _write_template(tmpdir, arch, spike_row=None):
+    """Write a green_1_A template FITS: shape = arch (per fibre), flat in lambda; optional dead spike."""
+    from astropy.io import fits as pf
+    import os
+    T = np.repeat(arch[:, None], 64, axis=1)
+    if spike_row is not None:
+        T[spike_row] = -150.0                              # dead-fibre spike artifact
+    hdus = [pf.PrimaryHDU(), pf.ImageHDU(T.astype(np.float32), name='GREEN_1A')]
+    path = os.path.join(tmpdir, 'floor_template_green.fits')
+    pf.HDUList(hdus).writeto(path, overwrite=True)
+    return path
+
+
+def test_template_scope_recovers_amplitude_and_floor():
+    import tempfile
+    counts, base_sky, tp, arch = _camera_slitfloor(line_fibres=(50,))
+    counts = counts + 0.30 * arch[:, None]                 # this frame is 1.3x the template shape
+    cam = _Cam(counts.copy(), base_sky.copy(), tp)
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_template(td, arch, spike_row=10)     # includes a dead spike to clean
+        apply_continuum_pedestal([cam], {'sky_pedestal_scope': 'template',
+                                         'sky_pedestal_template': path},
+                                 metadata=[{'channel': 'green', 'bench': '1', 'side': 'A'}])
+    assert abs(cam.sky_pedestal_amp - 1.3) < 0.15          # amplitude recovered
+    resid = cam.counts - cam.sky
+    for i in (5, 15, 45, 55):                              # blank fibres flattened, incl. slit end
+        assert abs(np.median(resid[i, 60:-60])) < 1.5, i
+    assert resid[50, 200] > 0.5 * 40.0                     # narrow line preserved
+    assert abs(np.median(resid[30, 60:-60]) - 2000.0) < 6.0   # object continuum preserved
+    # dead-spike row was cleaned: its pedestal follows the local arch, not -150
+    ped10 = np.median(cam.sky_pedestal[10])
+    assert abs(ped10 - 1.3 * arch[10]) < 3.0
+
+
+def test_template_scope_missing_camera_skipped():
+    import tempfile
+    counts, base_sky, tp, arch = _camera_slitfloor()
+    cam = _Cam(counts.copy(), base_sky.copy(), tp)
+    sky0 = cam.sky.copy()
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_template(td, arch)
+        apply_continuum_pedestal([cam], {'sky_pedestal_scope': 'template',
+                                         'sky_pedestal_template': path},
+                                 metadata=[{'channel': 'green', 'bench': '4', 'side': 'B'}])
+    assert np.array_equal(cam.sky, sky0)                   # no matching template -> untouched
+
+
 def test_placeholder_camera_skipped():
     cam = _Cam(np.zeros((NFIB, NWAVE)), np.zeros((NFIB, NWAVE)), np.ones(NFIB))
     apply_continuum_pedestal([cam], {})
