@@ -126,7 +126,8 @@ def build_floor_template(rss_files, channel='green'):
                 idx = np.arange(col.size)
                 T[:, k] = np.interp(idx, idx[g], col[g])
         templates[cam] = T
-        diag['reject_frac'][cam] = float(np.nanmean(pos_out[np.isfinite(A)]))
+        fin = np.isfinite(A)
+        diag['reject_frac'][cam] = float(np.nanmean(pos_out[fin])) if fin.any() else 0.0
         # per-frame amplitude of the template in each frame (physical diagnostic)
         amps = []
         for fA in Ac:
@@ -147,7 +148,8 @@ def save_template(path, templates, diag, channel='green'):
     hdus[0].header['NLBIN'] = NLBIN
     for cam, T in sorted(templates.items()):
         hd = fits.ImageHDU(T.astype(np.float32), name=f'{channel}_{cam}'.upper())
-        hd.header['REJFRAC'] = diag['reject_frac'].get(cam, 0.0)
+        rej = diag['reject_frac'].get(cam, 0.0)
+        hd.header['REJFRAC'] = float(rej) if np.isfinite(rej) else 0.0
         hdus.append(hd)
     cams = sorted(templates)
     cols = [fits.Column(name='FILE', format='120A',
