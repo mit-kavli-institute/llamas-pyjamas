@@ -331,6 +331,23 @@ def apply_continuum_pedestal(science, config, metadata=None):
     return science
 
 
+def _short_exposure(hdr, config):
+    """True if this frame is too short for a meaningful pedestal (standards etc.).
+
+    Short exposures accumulate almost no sky, so the floor is negligible and the per-frame
+    amplitude fit would be noise-dominated. Threshold: ``sky_pedestal_min_exptime`` (s, default
+    300). An unknown exposure time (0/absent) is treated as long (proceed)."""
+    min_expt = float(config.get("sky_pedestal_min_exptime", 300.0))
+    if hdr is None:
+        return False
+    expt = hdr.get("SEXPTIME", hdr.get("DEXPTIME", hdr.get("EXPTIME", 0.0)))
+    try:
+        expt = float(expt or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 < expt < min_expt
+
+
 def apply_pedestal_file(sky1d_file, config):
     """Load a ``*_sky1d_extractions.pkl``, add the continuum pedestal, and save a new pkl.
 
@@ -341,6 +358,10 @@ def apply_pedestal_file(sky1d_file, config):
     d = ExtractLlamas.loadExtraction(sky1d_file)
     science = d["extractions"]
     hdr = d.get("primary_header")
+    if _short_exposure(hdr, config):
+        logger.info("skyPedestal: short exposure (< sky_pedestal_min_exptime); pedestal skipped "
+                    "for %s", sky1d_file)
+        return sky1d_file
     apply_continuum_pedestal(science, config, metadata=d.get("metadata"))
     if hdr is not None:
         hdr["SKYPED"] = (True, "per-camera additive continuum pedestal subtracted")

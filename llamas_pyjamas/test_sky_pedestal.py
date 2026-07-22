@@ -198,6 +198,15 @@ def test_template_scope_missing_camera_skipped():
     assert np.array_equal(cam.sky, sky0)                   # no matching template -> untouched
 
 
+def test_short_exposure_guard():
+    from llamas_pyjamas.Sky.skyPedestal import _short_exposure
+    assert _short_exposure({'SEXPTIME': 4.0}, {})                       # 4s standard -> skip
+    assert not _short_exposure({'SEXPTIME': 2200.0}, {})                # science -> apply
+    assert not _short_exposure({'SEXPTIME': 0.0}, {})                   # unknown -> apply
+    assert not _short_exposure(None, {})
+    assert _short_exposure({'SEXPTIME': 500.0}, {'sky_pedestal_min_exptime': 600})  # configurable
+
+
 def test_placeholder_camera_skipped():
     cam = _Cam(np.zeros((NFIB, NWAVE)), np.zeros((NFIB, NWAVE)), np.ones(NFIB))
     apply_continuum_pedestal([cam], {})

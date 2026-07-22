@@ -376,6 +376,8 @@ sky_selection_method = stratified
 #                                     # smooth along the slit. 'camera': one constant per camera
 #                                     # (falsified for the striping; comparison only)
 # sky_pedestal_template = /path/to/floor_template_{channel}.fits   # required for scope=template
+# sky_pedestal_min_exptime = 300      # skip the pedestal on shorter exposures (standards): almost no
+#                                     # accumulated sky -> negligible floor + noise-dominated amplitude
 # sky_pedestal_window = 51            # continuum median-filter width in wavelength (pixels)
 # sky_pedestal_slit_window = 15       # scope=slit: local-linear fit half-width along the slit (fibres)
 # sky_pedestal_blank_pct = 60         # scope=slit: blank = faintest this-% of live fibres
