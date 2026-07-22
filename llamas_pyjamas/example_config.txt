@@ -383,10 +383,14 @@ sky_selection_method = stratified
 # sky_pedestal_blank_pct = 60         # scope=slit: blank = faintest this-% of live fibres
 # sky_pedestal_nfibres = 40           # scope=camera: blank fibres per camera used to measure the floor
 # sky_pedestal_clip_negative = False  # clip the pedestal at >= 0
-# sky_pedestal_edge_refine = True     # scope=template: also remove the residual slit-edge continuum
-#                                     # ramp (cleans the benchside-edge streaks; cosmetic ~+3-5% on the
-#                                     # broadband floor). The deeper noise floor is set by the per-fibre
-#                                     # sky-subtraction residual, handled separately.
+# sky_pedestal_edge_refine = True     # scope=template: also remove the residual per-fibre continuum
+#                                     # offset -> flattens the benchside striping (green white-light
+#                                     # core RMS ~-20% on flux-cal'd cubes; blue/red minor). A per-fibre
+#                                     # DC (constant-in-lambda) shift: preserves line fluxes/EWs/profiles
+#                                     # and diffuse LINE emission (e.g. Lya); point sources untouched.
+#                                     # ASSUMES the IFU is >~60% blank sky. TURN OFF (False) when sky is
+#                                     # measured from dedicated blank-sky exposures for source-filled
+#                                     # fields -- it would then absorb genuine diffuse continuum.
 # sky_pedestal_edge_window = 4        # edge-refine running-median half-width (fibres)
 
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it

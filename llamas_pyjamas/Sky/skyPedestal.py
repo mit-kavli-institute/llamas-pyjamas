@@ -254,16 +254,27 @@ def _blank_mask(sci, n_fibres):
 
 
 def edge_refine_profile(counts, sky, blank_mask, window=EDGE_WINDOW):
-    """Residual per-slit-position continuum ramp -> per-fibre additive correction (cosmetic).
+    """Residual per-slit-position continuum offset -> per-fibre additive correction.
 
-    The template pedestal under-corrects the slit-EDGE fibres (a smooth continuum over-subtraction
-    ramp, ~7 fibres deep at each benchside edge; Sky/diagnosis/edge_fibre_diag). This measures the
-    remaining along-slit ramp: each blank fibre's residual continuum (median over wavelength of
-    counts-sky), then a RUNNING MEDIAN over blank fibres within ``window`` of each fibre index
-    INCLUDING the edges (unlike the pedestal's blank set which under-weights them). Because it's a
-    neighbour running-median it removes the smooth slit-position ramp, NOT each fibre's own offset,
-    so it cleans the visible benchside-edge streaks without touching per-fibre signal. Returns a
-    per-fibre (n_fib,) additive continuum correction to ADD to the sky model.
+    Removes the smooth per-fibre continuum residual the main sky subtraction + template pedestal leave
+    behind (worst as a ~7-fibre over-subtraction ramp at each benchside slit edge; Sky/diagnosis/
+    edge_fibre_diag). Because fibres map to contiguous bands in the reconstructed image, this residual
+    shows up as horizontal benchside STRIPING. Algorithm, per benchside, per exposure:
+      1. r[i] = median over ALL wavelengths of (counts-sky)[i]   -> each fibre's continuum residual
+         (robust to the few sky-line pixels; blind to narrow spectral features by construction).
+      2. blank set = the faint fibres passed in ``blank_mask`` (objects excluded).
+      3. prof[i] = median of r over BLANK fibres within ``window`` fibre-positions of i (edges incl.)
+         -> a running median ALONG the slit; window small (default 4) to follow the edge ramp.
+    Returns prof (n_fib,), a WAVELENGTH-FLAT per-fibre offset to ADD to the sky model (sky += prof).
+
+    Effect on measurements: it is a per-fibre DC (constant-in-lambda) shift, so it preserves line
+    ratios / EWs / profiles and, being a neighbour running-median over blank fibres, never subtracts a
+    fibre's own flux (point sources survive). Because r[] is a median over all wavelengths, DIFFUSE
+    LINE emission (e.g. Lya) is NOT absorbed. CAVEAT: a genuinely diffuse, spectrally-flat CONTINUUM
+    filling the faint fibres over a benchside IS indistinguishable from a sky-continuum residual and
+    would be partially removed -> this assumes the IFU is >~60% blank sky. When sky is instead measured
+    from dedicated blank-sky exposures (source-filled fields), DISABLE this (sky_pedestal_edge_refine
+    = False). See build_floor_template / the blank-sky-subtraction TODO.
     """
     counts = np.asarray(counts, float); sky = np.asarray(sky, float)
     nfib = counts.shape[0]
@@ -303,8 +314,11 @@ def apply_continuum_pedestal(science, config, metadata=None):
     * ``sky_pedestal_blank_pct``    scope='slit': blank = faintest this-% of live fibres, default 60
     * ``sky_pedestal_nfibres``  scope='camera': blank fibres per camera, default 40
     * ``sky_pedestal_clip_negative``  clip pedestal at 0, default False
-    * ``sky_pedestal_edge_refine``  scope='template': also remove the residual slit-edge continuum
-                                ramp (cleans benchside-edge streaks; cosmetic ~+3-5%), default True
+    * ``sky_pedestal_edge_refine``  scope='template': also remove the residual per-fibre continuum
+                                offset -> flattens benchside striping (green white-light core RMS
+                                ~-20% on flux-cal'd cubes). Default True. ASSUMES the IFU is >~60%
+                                blank sky; set False when sky is measured from dedicated blank-sky
+                                exposures (source-filled fields) -- see the blank-sky-subtraction TODO.
     * ``sky_pedestal_edge_window``  edge-refine running-median half-width (fibres), default 4
 
     Returns ``science`` (mutated). Each camera also gets a ``.sky_pedestal`` attribute
@@ -366,9 +380,10 @@ def apply_continuum_pedestal(science, config, metadata=None):
                                     cont_window=win, clip_negative=clip)
             sci.sky = np.asarray(sky, float) + ped[None, :]
         sci.sky_pedestal = ped
-        # cosmetic edge-refine: remove the residual slit-edge continuum ramp the pedestal leaves
-        # (cleans the benchside-edge streaks; ~+3-5% on the coherent floor). Skip for scope='slit'
-        # (already per-fibre along-slit) and scope='camera'.
+        # edge-refine: remove the residual per-fibre continuum offset the pedestal leaves -> flattens
+        # the benchside striping (white-light core RMS: green ~-20%, blue/red minor, on flux-cal'd
+        # cubes). Assumes >~60% blank sky; disable for blank-sky-exposure subtraction. Skip for
+        # scope='slit' (already per-fibre along-slit) and scope='camera'.
         if scope == "template" and bool(config.get("sky_pedestal_edge_refine", True)):
             er = edge_refine_profile(counts, np.asarray(sci.sky, float),
                                      _blank_mask_frac(sci, blank_pct),

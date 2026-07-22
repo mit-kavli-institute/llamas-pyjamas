@@ -357,7 +357,42 @@ off/on reductions (`run_prod_combine.py`, `prod_combine_nt.py`, `figures/prodcom
 in all three channels.** Remaining tuning targets (RS): low-NEXP edge residual, template-build knobs
 (CLIP_SIGMA/NLBIN/MIN_FRAMES) + amplitude clamp as config, blue detailed behaviour.
 
+### Edge-refine — the residual per-fibre continuum offset (`sky_pedestal_edge_refine`, on by default)
+
+The template pedestal removes the per-camera broadband floor but leaves a small residual per-fibre
+continuum offset that varies smoothly along the slit (worst as a ~7-fibre over-subtraction ramp at each
+benchside slit edge). Because fibres map to contiguous bands in the reconstruction, this shows as
+horizontal **benchside striping**. `edge_refine_profile` (in `skyPedestal.py`) removes it, per benchside
+per exposure:
+
+1. `r[i]` = median over **all** wavelengths of `(counts − sky)[i]` → each fibre's continuum residual.
+2. blank set = faint fibres (objects excluded).
+3. `prof[i]` = median of `r` over **blank** fibres within ±`sky_pedestal_edge_window` (default 4)
+   fibre-positions of `i`, edges included → a running median **along the slit**.
+4. `sky += prof[:, None]` → a **wavelength-flat per-fibre DC** correction.
+
+**Validated on the flux-cal'd cubes** (`reduced_rev01_edge/`, before/after re-combine of J2151/J0958):
+white-light core blank-region RMS improves **green +17–21 %, blue +0–4 %, red −1..+6 %**. Bigger than
+the ~3–5 % seen in raw counts because the striping is flat/sensitivity-amplified — larger in FLAM. The
+difference images show coherent horizontal-band removal with point sources intact.
+
+**Effect on measurements** — a per-fibre constant-in-λ shift: preserves line ratios / EWs / profiles;
+never subtracts a fibre's own flux (neighbour running-median over blank fibres); and because `r` is a
+median over all λ, **diffuse LINE emission (Lyα) is not absorbed** (narrow features don't move the
+median). It shifts each spectrum's continuum zero-point by ≲ few×10⁻²⁰–10⁻¹⁹.
+
+**⚠ Assumption / when to disable.** It treats the faint-fibre wavelength-averaged level as sky, so it
+**assumes the IFU is >~60 % blank sky**. A genuinely diffuse, spectrally-flat *continuum* filling a
+benchside would be partially absorbed. When we add **blank-sky-exposure subtraction** for source-filled
+fields (deferred, likely a separate session), `sky_pedestal_edge_refine` **must be set False** — see the
+deferred item below.
+
 ### Deferred beyond the striping fix
+- **Blank-sky-exposure subtraction for source-filled fields — and then set `sky_pedestal_edge_refine =
+  False`.** The in-field floor/pedestal/edge-refine machinery all assume most of the IFU is blank sky;
+  when sky is instead built from dedicated offset blank-sky exposures (source fills the field), the
+  edge-refine (and the in-field template amplitude fit) would absorb real diffuse continuum and must be
+  disabled. Wire this as an automatic coupling to the blank-sky `SkySource` when that lands.
 - New selection providers: external broadband-image (e.g. LSST) masks, manual / GUI-defined masks.
 - Full offset/blank-field sky, including multi-frame combination.
 - Cross-camera sky sharing (requires fixing the per-camera throughput normalisation).
