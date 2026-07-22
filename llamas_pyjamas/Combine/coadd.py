@@ -40,6 +40,23 @@ from astropy.wcs import WCS
 
 logger = logging.getLogger(__name__)
 
+# Default short-wavelength floor for WHITE-LIGHT collapses. Below this the blue detector sensitivity
+# falls to ~0, so the flux calibration diverges and those planes are read-noise + artifact dominated
+# (see Sky/diagnosis: the blue-edge over-subtraction spike). The CUBE keeps all wavelengths; this only
+# floors the DEFAULT white-light window, and callers warn rather than discard if a user goes bluer.
+WHITELIGHT_BLUE_MIN_A = 3600.0
+
+
+def whitelight_floor(wave_min, wave_max):
+    """Apply the white-light blue floor to a default window; returns (floored_min, below_floor).
+
+    ``below_floor`` is True when the requested min was below the floor (so callers can warn). Only
+    lowers when it wouldn't invert the window (max still above the floor)."""
+    below = wave_min < WHITELIGHT_BLUE_MIN_A
+    if below and wave_max > WHITELIGHT_BLUE_MIN_A:
+        return WHITELIGHT_BLUE_MIN_A, True
+    return wave_min, below
+
 
 def _tan_wcs(ra0, dec0, crpix, pixscale_arcsec):
     """A plain north-up / east-left TAN WCS (no instrument rotation) for the output grid."""

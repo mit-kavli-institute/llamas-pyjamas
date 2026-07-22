@@ -55,6 +55,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from llamas_pyjamas.Combine.coadd import WHITELIGHT_BLUE_MIN_A, whitelight_floor
 from llamas_pyjamas.CubeViewer.cubeViewDS9 import DS9, DS9Error
 from llamas_pyjamas.CubeViewer.cubeViewPick import ElementPicker
 from llamas_pyjamas.CubeViewer.cubeViewRSS import RSSScene
@@ -138,6 +139,7 @@ class CubeViewerWindow(QMainWindow):
         self._header = None
         self._standard = None                 # StandardMatch if the loaded file is a standard
         self._current_spectra: List[Spectrum] = []
+        self._blue_floor_ack = False           # warned once about sub-3600A white light this session
         self.picker = ElementPicker(self.ds9)
         self.picker.selectionChanged.connect(self._on_selection)
         self.picker.statusChanged.connect(self._on_pick_status)
@@ -697,6 +699,7 @@ class CubeViewerWindow(QMainWindow):
         if self.scene is None:
             return
         low, high = self.scene.wavelength_range()
+        low, _ = whitelight_floor(low, high)               # default white light floors the blue edge
         self.wave_min.setText(f'{low:.1f}')
         self.wave_max.setText(f'{high:.1f}')
 
@@ -721,6 +724,16 @@ class CubeViewerWindow(QMainWindow):
             QMessageBox.warning(self, 'Invalid wavelengths',
                                 'Maximum wavelength must exceed the minimum.')
             return
+        if wave_min < WHITELIGHT_BLUE_MIN_A < wave_max and not self._blue_floor_ack:
+            reply = QMessageBox.warning(
+                self, 'Below the blue white-light limit',
+                f'The window extends below {WHITELIGHT_BLUE_MIN_A:.0f} A, where the blue detector '
+                'sensitivity is near zero and the flux calibration diverges — those planes are kept '
+                'in the cube but are not recommended for a white-light image.\n\nInclude them anyway?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self._blue_floor_ack = True                    # don't nag again this session
 
         channels = self._selected_channels()
         if not channels:

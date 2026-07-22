@@ -31,7 +31,7 @@ import numpy as np
 from astropy.io import fits
 
 from llamas_pyjamas.Combine.superRSS import build_super_rss, combined_dir, CHANNELS
-from llamas_pyjamas.Combine.coadd import combine_image
+from llamas_pyjamas.Combine.coadd import combine_image, WHITELIGHT_BLUE_MIN_A, whitelight_floor
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,16 @@ def discover_field(directory: str, obj: str) -> List[str]:
 
 
 def _band(super_rss, args) -> tuple:
-    """Resolve the wavelength window: explicit --band, else the full range of the chosen channels."""
+    """Resolve the white-light window: explicit --band, else the full range of the chosen channels
+    floored at the blue white-light limit. An explicit --band below the floor is respected but warned
+    (data is never discarded from the cube; this is only the collapse window)."""
     if args.band is not None:
-        return float(args.band[0]), float(args.band[1])
+        lo, hi = float(args.band[0]), float(args.band[1])
+        if lo < WHITELIGHT_BLUE_MIN_A and hi > WHITELIGHT_BLUE_MIN_A:
+            logger.warning("--band %.0f-%.0f includes wavelengths below %.0f A (low-sensitivity blue "
+                           "edge; flux cal diverges there). Proceeding as requested.",
+                           lo, hi, WHITELIGHT_BLUE_MIN_A)
+        return lo, hi
     lo, hi = np.inf, -np.inf
     for c in (args.channels or list(super_rss.channels)):
         st = super_rss.channels.get(c)
@@ -61,7 +68,11 @@ def _band(super_rss, args) -> tuple:
         w = st.wave[np.isfinite(st.wave)]
         if w.size:
             lo, hi = min(lo, float(w.min())), max(hi, float(w.max()))
-    return lo, hi
+    lo2, below = whitelight_floor(lo, hi)
+    if below:
+        logger.info("white-light window floored to >= %.0f A (blue edge below that is kept in the "
+                    "cube but excluded from the default white light).", WHITELIGHT_BLUE_MIN_A)
+    return lo2, hi
 
 
 def _write_png(img, path):
@@ -95,7 +106,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--dir', help='reduction directory to search for --object')
     p.add_argument('--object', help='OBJECT prefix to select a field (e.g. J2151)')
     p.add_argument('--band', nargs=2, type=float, metavar=('LO', 'HI'),
-                   help='wavelength window (A); default = full range of the chosen channels')
+                   help='white-light window (A); default = full range of the chosen channels, floored '
+                        'at %d A (the low-sensitivity blue edge is kept in the cube but excluded from '
+                        'the default white light; pass an explicit --band below it to override)'
+                        % int(WHITELIGHT_BLUE_MIN_A))
     p.add_argument('--channels', nargs='+', choices=CHANNELS, help='channels (default: all)')
     p.add_argument('--units', choices=('sb', 'flux'), default='sb')
     p.add_argument('--weight', choices=('ivar', 'uniform', 'exptime'), default='ivar')
