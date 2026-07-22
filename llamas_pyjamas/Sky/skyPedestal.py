@@ -35,7 +35,9 @@ logger = logging.getLogger(__name__)
 PEDESTAL_WINDOW = 51        # continuum median-filter width (pixels); >> OH/line widths
 PEDESTAL_NFIBRES = 40       # scope='camera': the N faintest fibres per camera
 SLIT_WINDOW = 15            # scope='slit': running-median half-width along the slit (fibres)
-BLANK_PCT = 60.0            # scope='slit': blank = faintest this-percent of live fibres
+EDGE_WINDOW = 4             # scope='template' edge-refine: running-median half-width (fibres); small
+                           # enough to follow the ~7-fibre slit-edge ramp
+BLANK_PCT = 60.0            # scope='slit'/edge-refine: blank = faintest this-percent of live fibres
 MIN_BLANK = 5               # need at least this many blank fibres to estimate a pedestal
 
 
@@ -251,6 +253,42 @@ def _blank_mask(sci, n_fibres):
     return build_sky_mask(bright, finite, method="dimmest", n_fibres=int(n_fibres)).mask
 
 
+def edge_refine_profile(counts, sky, blank_mask, window=EDGE_WINDOW):
+    """Residual per-slit-position continuum ramp -> per-fibre additive correction (cosmetic).
+
+    The template pedestal under-corrects the slit-EDGE fibres (a smooth continuum over-subtraction
+    ramp, ~7 fibres deep at each benchside edge; Sky/diagnosis/edge_fibre_diag). This measures the
+    remaining along-slit ramp: each blank fibre's residual continuum (median over wavelength of
+    counts-sky), then a RUNNING MEDIAN over blank fibres within ``window`` of each fibre index
+    INCLUDING the edges (unlike the pedestal's blank set which under-weights them). Because it's a
+    neighbour running-median it removes the smooth slit-position ramp, NOT each fibre's own offset,
+    so it cleans the visible benchside-edge streaks without touching per-fibre signal. Returns a
+    per-fibre (n_fib,) additive continuum correction to ADD to the sky model.
+    """
+    counts = np.asarray(counts, float); sky = np.asarray(sky, float)
+    nfib = counts.shape[0]
+    idx = np.where(np.asarray(blank_mask, bool))[0]
+    if idx.size < MIN_BLANK:
+        return np.zeros(nfib)
+    r = np.full(nfib, np.nan)
+    for i in idx:
+        d = counts[i] - sky[i]
+        fin = np.isfinite(d)
+        if fin.sum() > 50:
+            r[i] = np.nanmedian(d[fin])
+    ok = idx[np.isfinite(r[idx])]
+    if ok.size < MIN_BLANK:
+        return np.zeros(nfib)
+    W = max(1, int(window))
+    prof = np.zeros(nfib)
+    for i in range(nfib):
+        near = ok[np.abs(ok - i) <= W]
+        if near.size < 3:
+            near = ok[np.argsort(np.abs(ok - i))[:max(3, MIN_BLANK)]]
+        prof[i] = np.nanmedian(r[near])
+    return np.nan_to_num(prof, nan=0.0)
+
+
 def apply_continuum_pedestal(science, config, metadata=None):
     """Add a per-camera additive continuum pedestal to each science camera's ``.sky`` (in place).
 
@@ -265,6 +303,9 @@ def apply_continuum_pedestal(science, config, metadata=None):
     * ``sky_pedestal_blank_pct``    scope='slit': blank = faintest this-% of live fibres, default 60
     * ``sky_pedestal_nfibres``  scope='camera': blank fibres per camera, default 40
     * ``sky_pedestal_clip_negative``  clip pedestal at 0, default False
+    * ``sky_pedestal_edge_refine``  scope='template': also remove the residual slit-edge continuum
+                                ramp (cleans benchside-edge streaks; cosmetic ~+3-5%), default True
+    * ``sky_pedestal_edge_window``  edge-refine running-median half-width (fibres), default 4
 
     Returns ``science`` (mutated). Each camera also gets a ``.sky_pedestal`` attribute
     ((n_wave,) for 'camera', (n_fib, n_wave) for 'slit') for provenance/diagnostics.
@@ -325,6 +366,15 @@ def apply_continuum_pedestal(science, config, metadata=None):
                                     cont_window=win, clip_negative=clip)
             sci.sky = np.asarray(sky, float) + ped[None, :]
         sci.sky_pedestal = ped
+        # cosmetic edge-refine: remove the residual slit-edge continuum ramp the pedestal leaves
+        # (cleans the benchside-edge streaks; ~+3-5% on the coherent floor). Skip for scope='slit'
+        # (already per-fibre along-slit) and scope='camera'.
+        if scope == "template" and bool(config.get("sky_pedestal_edge_refine", True)):
+            er = edge_refine_profile(counts, np.asarray(sci.sky, float),
+                                     _blank_mask_frac(sci, blank_pct),
+                                     window=int(config.get("sky_pedestal_edge_window", EDGE_WINDOW)))
+            sci.sky = np.asarray(sci.sky, float) + er[:, None]
+            sci.sky_edge_refine = er
         n_applied += 1
     logger.info("skyPedestal: applied continuum pedestal (scope=%s) on %d/%d cameras "
                 "(wave window=%d px)", scope, n_applied, len(science), win)

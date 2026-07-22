@@ -198,6 +198,21 @@ def test_template_scope_missing_camera_skipped():
     assert np.array_equal(cam.sky, sky0)                   # no matching template -> untouched
 
 
+def test_edge_refine_captures_ramp():
+    from llamas_pyjamas.Sky.skyPedestal import edge_refine_profile
+    n, nw = 60, 200
+    fib = np.arange(n); dist = np.minimum(fib, n - 1 - fib)
+    ramp = np.where(dist < 7, -2.0 * (1 - dist / 7.0), 0.0)     # -2 at edge -> 0 by 7 fibres
+    counts = ramp[:, None] + rng.normal(0, 0.1, (n, nw))
+    sky = np.zeros((n, nw))                                     # counts-sky = the edge ramp
+    prof = edge_refine_profile(counts, sky, np.ones(n, bool), window=4)
+    assert prof[0] < -1.0 and prof[-1] < -1.0                   # edge ramp substantially captured
+    assert abs(prof[n // 2]) < 0.5                              # interior ~0 (no over-subtraction)
+    resid = (counts - (sky + prof[:, None]))                    # after adding prof to sky
+    # edge ramp substantially reduced (running median is one-sided at the very edge, so ~70% not 100%)
+    assert abs(np.median(resid[0])) < 0.5 * abs(ramp[0])
+
+
 def test_short_exposure_guard():
     from llamas_pyjamas.Sky.skyPedestal import _short_exposure
     assert _short_exposure({'SEXPTIME': 4.0}, {})                       # 4s standard -> skip
