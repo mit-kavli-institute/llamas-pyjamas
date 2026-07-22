@@ -5,7 +5,7 @@ mean: single-fibre value preserved, inverse-variance combine of co-located fibre
 counting, min-coverage masking, flux vs surface-brightness units, and the output WCS round-trip.
 The full pipeline (build -> collapse -> co-add -> FITS) is validated on real may26 data.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_coadd`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_coadd`).
 """
 
 import numpy as np

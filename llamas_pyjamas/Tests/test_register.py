@@ -4,7 +4,7 @@ Synthetic and network-free: source detection on a fibre lattice, the common-offs
 (robust to the pointing error, rejecting decoys), and the solve with its rotation cap. The full
 register_exposure orchestrator + live Gaia is validated on real fields separately.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_register`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_register`).
 """
 
 import numpy as np

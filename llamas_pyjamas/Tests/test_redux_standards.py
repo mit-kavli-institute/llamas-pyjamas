@@ -4,7 +4,7 @@ These cover the non-Qt seams: the header matcher used during a directory scan, a
 round-trip (generate -> parse) that carries the flux_standard_files selection between sessions.
 The crossmatch itself is tested in test_flux_standards; here we check it is wired in correctly.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_redux_standards`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_redux_standards`).
 """
 
 import os
@@ -18,7 +18,7 @@ from llamas_pyjamas.Utils.reduxSetupGUI import (
 )
 
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'llamas_pyjamas', 'example_config.txt')
+                        'example_config.txt')   # Tests/ -> parent is llamas_pyjamas/
 
 
 def _write_and_parse(assignments, tmp_path):

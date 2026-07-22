@@ -5,7 +5,7 @@ that user edits change the result — but the dialog is also constructed to catc
 regressions (a missing QComboBox import once stopped the Build window opening). Qt runs under
 the offscreen platform.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_sensfunc`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_sensfunc`).
 """
 
 import os

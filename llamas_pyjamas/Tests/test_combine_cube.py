@@ -5,7 +5,7 @@ exposures, run through combine_cube; checks the spectrum is recovered at the sou
 position + inverse-variance combined amplitude), coverage/exposure depth, surface-brightness units,
 and the wavelength axis. The full pipeline is validated on real may26 data.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_cube`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_cube`).
 """
 
 import numpy as np

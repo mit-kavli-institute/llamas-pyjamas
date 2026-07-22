@@ -3,7 +3,7 @@
 These pin down the invariant that motivated the 2026-07 dead-fibre refactor:
 every per-fibre array is LIVE-indexed and mutually aligned, and the fibermap
 expansion is a clean, round-trippable operation. Runnable with pytest or as a
-plain script (`python -m llamas_pyjamas.test_deadfibers`).
+plain script (`python -m llamas_pyjamas.Tests.test_deadfibers`).
 """
 
 import numpy as np

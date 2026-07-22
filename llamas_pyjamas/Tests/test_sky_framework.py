@@ -7,7 +7,7 @@ cleaning, and the full orchestrator + FITS contract.
 
 Run:
     pytest llamas_pyjamas/test_sky_framework.py -v
-    python -m unittest llamas_pyjamas.test_sky_framework
+    python -m unittest llamas_pyjamas.Tests.test_sky_framework
 """
 
 import os

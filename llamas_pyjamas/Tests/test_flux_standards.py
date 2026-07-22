@@ -4,7 +4,7 @@ The crossmatch is what tells a standard-star exposure from a science target when
 cannot, so these pin the behaviour that matters: the two may26 standards match and the three
 quasars do not, coordinates round-trip through the header keys, and the radius actually gates.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_flux_standards`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_flux_standards`).
 """
 
 import numpy as np

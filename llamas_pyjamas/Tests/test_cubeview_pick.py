@@ -5,7 +5,7 @@ offscreen platform. What they pin down is the behaviour that keeps the GUI respo
 selections are deduplicated on element identity, not position — and the panel's handling of
 empty selections and outlier-dominated flux.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_pick`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_pick`).
 """
 
 import os

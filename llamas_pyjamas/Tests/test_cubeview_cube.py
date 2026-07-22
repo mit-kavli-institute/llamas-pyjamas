@@ -4,7 +4,7 @@ Headless coverage of the SpectralScene the CubeViewer wraps around a combined cu
 collapse, DS9-pixel -> spaxel mapping (respecting coverage), the per-spaxel spectrum, aperture
 elements_within, region strings, and a FITS round-trip. The DS9/Qt display is verified live.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_cube`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_cube`).
 """
 
 import os

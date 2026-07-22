@@ -5,7 +5,7 @@ reply parsing, command construction, and the in-memory FITS piping. A fake pair 
 xpaget/xpaset executables stands in for the real XPA clients, which records the argv and
 stdin it was handed — so the bytes CubeViewer would send to DS9 are asserted directly.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_ds9`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_ds9`).
 """
 
 import json

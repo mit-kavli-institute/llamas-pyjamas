@@ -5,7 +5,7 @@ the headless :class:`InteractiveWCSSession` -- the click->centroid snap, the for
 nearest-Gaia pairing, and the incremental solve (translation, translation+rotation, held rotation)
 that the dialog is a thin shell around.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_register`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_register`).
 """
 
 import numpy as np

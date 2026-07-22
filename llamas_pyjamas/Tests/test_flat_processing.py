@@ -42,7 +42,7 @@ def _init_ray():
     if ray.is_initialized():
         return
 
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).parent.parent   # Tests/ -> llamas_pyjamas/ (Ray working_dir)
     allowed_subdirs = [
         "Arc", "Bias", "Cube", "Docs", "Extract", "File", "Flat", "Flux",
         "GUI", "Image", "Postprocessing", "QA", "Trace", "Tutorials", "Utils",
@@ -64,8 +64,8 @@ def _init_ray():
 # Initialize Ray early
 _init_ray()
 
-# Add the llamas_pyjamas package to the path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add the repo root to the path (Tests/ -> llamas_pyjamas/ -> repo root)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, LlamasFlatFielding, Thresholding
 from llamas_pyjamas.reduce import apply_flat_field_correction, build_flat_field_map

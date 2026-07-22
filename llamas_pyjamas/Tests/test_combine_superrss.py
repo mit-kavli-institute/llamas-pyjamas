@@ -5,7 +5,7 @@ the headless view logic: band collapse (native per-fibre, no resample), masking 
 with no good pixel in the window, quadrature variance, multi-channel concatenation, and the
 surface-brightness conversion.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_superrss`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_superrss`).
 """
 
 import numpy as np

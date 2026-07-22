@@ -5,7 +5,7 @@ the LLAMAS policy around it: which frames are corrected, the reversible header r
 factor<->velocity relation, idempotency, and graceful no-op when inputs are missing. Exact
 velocities are not asserted (they depend on the ephemeris) -- only that they are physical.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_wave_frame`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_wave_frame`).
 """
 
 import math

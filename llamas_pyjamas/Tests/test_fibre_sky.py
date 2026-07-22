@@ -5,7 +5,7 @@ header WCS fills RA/DEC for real fibres, that the fibre-map scale round-trips to
 that a header without pointing leaves RA/DEC NaN while still returning fibre-map x/y (so a later
 astrometric solve can run).
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_fibre_sky`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_fibre_sky`).
 """
 
 import numpy as np

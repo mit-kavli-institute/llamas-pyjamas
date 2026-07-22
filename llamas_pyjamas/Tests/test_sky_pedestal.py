@@ -5,7 +5,7 @@ additive continuum FLOOR on every fibre plus object flux on the bright fibres. T
 recover the floor from blank fibres, remove it, PRESERVE narrow line emission (the Lyα guard),
 preserve real object continuum, select only blank fibres, and no-op when there is no data.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_sky_pedestal`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_sky_pedestal`).
 """
 
 import numpy as np

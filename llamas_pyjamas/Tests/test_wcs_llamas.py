@@ -4,7 +4,7 @@ Pins the calibrated convention (mirrored field, det(CD)>0; rotation = header PA 
 0.75"/fibre) and the two solve paths -- the rough header builder and the astrometric fit /
 translation-only registration. Exact catalog values are not asserted; geometry is.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_wcs_llamas`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_wcs_llamas`).
 """
 
 import numpy as np

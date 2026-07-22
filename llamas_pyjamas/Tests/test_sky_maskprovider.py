@@ -4,7 +4,7 @@ Behaviour-preserving guarantee: build_sky_mask must return the SAME fibres as se
 every brightness-based method (it just wraps it and attaches provenance). Plus: the 'manual' provider,
 SkyMask properties, and FITS round-trip.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_sky_maskprovider`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_sky_maskprovider`).
 """
 
 import numpy as np

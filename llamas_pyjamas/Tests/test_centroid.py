@@ -4,7 +4,7 @@ Synthetic, deterministic (no data dependency): a Gaussian source sampled on a he
 lattice, checking sub-fibre recovery, background-bias removal, window recentring, the flux^2
 option, and the too-few-fibres guard. Real-field validation against Gaia is done separately.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_centroid`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_centroid`).
 """
 
 import numpy as np

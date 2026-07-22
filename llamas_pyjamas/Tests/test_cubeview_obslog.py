@@ -6,7 +6,7 @@ The dialog is also constructed in both modes to catch import/wiring regressions 
 selection -> result mapping (representative file for open; all planes flattened for apply). Qt
 runs under the offscreen platform.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_cubeview_obslog`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_obslog`).
 """
 
 import os

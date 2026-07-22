@@ -5,7 +5,7 @@ checks that the per-exposure scales bring the source flux to a common level, tha
 by scale^2, and that apply_scales is applied as a ratio (composes/idempotent). find_reference_sources
 and the peak-finder are validated on real may26 data.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_transparency`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_transparency`).
 """
 
 import numpy as np

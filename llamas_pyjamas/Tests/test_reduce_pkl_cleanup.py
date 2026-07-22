@@ -6,7 +6,7 @@ Two lean-output behaviours, pinned without running the pipeline:
 * keep_intermediate_rss (default off) -> the extract/_FF/_FF_SKYSUB RSS files are collapsed to
   one per (frame, channel), the most-corrected renamed to a clean name (consolidate_rss_files).
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_reduce_pkl_cleanup`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_reduce_pkl_cleanup`).
 """
 
 import os

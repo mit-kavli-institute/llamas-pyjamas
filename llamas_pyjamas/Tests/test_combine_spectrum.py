@@ -5,7 +5,7 @@ recover the template and beat a single fibre / uniform sum), the seeing estimate
 line on one spaxel (narrowband should recover the line integral and continuum-subtract to zero
 off-line). Validated further on real may26 data.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_spectrum`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_spectrum`).
 """
 
 import numpy as np

@@ -4,7 +4,7 @@ Pure/offline: given a reference SED and an extracted spectrum that is a scaled (
 version of it, anchor_scale must recover the scale with low scatter; a colour-sloped extraction must
 show high scatter; no overlap -> None. The gaiaxpy XP retrieval + TAP query are verified live.
 
-Runnable with pytest or as a plain script (`python -m llamas_pyjamas.test_combine_fluxanchor`).
+Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_fluxanchor`).
 """
 
 import numpy as np
