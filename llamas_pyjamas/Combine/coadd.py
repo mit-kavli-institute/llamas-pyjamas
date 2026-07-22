@@ -58,6 +58,23 @@ def whitelight_floor(wave_min, wave_max):
     return wave_min, below
 
 
+# Default coverage-depth floor for WHITE-LIGHT / collapsed views, as a fraction of the field's peak
+# NEXP. Spaxels shallower than this are built from only a few dithers' edge-of-IFU fibres, so the
+# co-add value is BIASED and its variance is under-estimated (Sky/diagnosis/boundary_diag: J0958 NaN-
+# stripe boundaries reach ~90x sqrt(VAR); the bias clears by ~0.8*max). Default-EXCLUDED from images/
+# stats but NEVER discarded from the cube -- the coverage/NEXP maps stay so the mask is reversible.
+COVERAGE_FRAC_MIN = 0.7
+
+
+def low_coverage_mask(nexp, frac=COVERAGE_FRAC_MIN):
+    """Boolean map (True = exclude) of spaxels shallower than ``frac`` x peak NEXP. frac<=0 => none."""
+    nexp = np.asarray(nexp, float)
+    peak = np.nanmax(nexp) if np.isfinite(nexp).any() else 0.0
+    if frac <= 0 or peak <= 0:
+        return np.zeros(nexp.shape, bool)
+    return nexp < frac * peak
+
+
 def _tan_wcs(ra0, dec0, crpix, pixscale_arcsec):
     """A plain north-up / east-left TAN WCS (no instrument rotation) for the output grid."""
     w = WCS(naxis=2)

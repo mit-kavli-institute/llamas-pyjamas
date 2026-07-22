@@ -20,6 +20,7 @@ from typing import Dict, Hashable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from llamas_pyjamas.Combine.coadd import COVERAGE_FRAC_MIN, low_coverage_mask
 from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_ORDER, Spectrum, SpectralScene
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,10 @@ class CoaddCubeScene(SpectralScene):
         self.pitch = 0.75                                 # arcsec -> radius UI reads in fibre-spacings
         self._ny, self._nx = self.cube.data.shape[1:]
         self._coverage = np.max([c.coverage for c in self._cubes.values()], axis=0)
+        self._nexp = np.max([getattr(c, 'nexp', c.coverage) for c in self._cubes.values()], axis=0)
+        #: white-light spaxels shallower than this fraction of peak NEXP are excluded from the
+        #: collapsed image (biased at partial-coverage boundaries); the cube itself is untouched.
+        self.coverage_frac = COVERAGE_FRAC_MIN
         self.keys: List[Tuple[int, int]] = list(zip(*np.nonzero(self._coverage > 0)))
 
     def _step(self) -> float:
@@ -78,8 +83,15 @@ class CoaddCubeScene(SpectralScene):
             img = np.full((self._ny, self._nx), np.nan)
         else:
             img = np.nanmean(np.stack(imgs, axis=0), axis=0)
+            # default-exclude biased partial-coverage spaxels (kept in the cube; only masked here)
+            excl = low_coverage_mask(self._nexp, self.coverage_frac)
+            n_excl = int((excl & np.isfinite(img)).sum())
+            img = np.where(excl, np.nan, img)
+            if n_excl:
+                contrib['_low_coverage_excluded'] = n_excl
         meta = {'contributions': contrib, 'WAVEMIN': (float(wave_min), 'A'),
-                'WAVEMAX': (float(wave_max), 'A'), 'WCSFRAME': ('sky', 'Combined cube white light')}
+                'WAVEMAX': (float(wave_max), 'A'), 'WCSFRAME': ('sky', 'Combined cube white light'),
+                'COVFRAC': (float(self.coverage_frac), 'min NEXP frac shown in white light')}
         return img, self.cube.wcs.celestial, meta
 
     def _spaxel(self, x_pix: float, y_pix: float) -> Optional[Tuple[int, int]]:

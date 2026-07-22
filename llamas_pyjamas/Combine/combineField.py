@@ -31,7 +31,8 @@ import numpy as np
 from astropy.io import fits
 
 from llamas_pyjamas.Combine.superRSS import build_super_rss, combined_dir, CHANNELS
-from llamas_pyjamas.Combine.coadd import combine_image, WHITELIGHT_BLUE_MIN_A, whitelight_floor
+from llamas_pyjamas.Combine.coadd import (combine_image, WHITELIGHT_BLUE_MIN_A, whitelight_floor,
+                                          COVERAGE_FRAC_MIN, low_coverage_mask)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--fwhm', type=float, default=0.9, help='kernel FWHM in arcsec')
     p.add_argument('--pixscale', type=float, default=0.5, help='output pixel scale, arcsec')
     p.add_argument('--min-coverage', type=int, default=1, dest='min_coverage')
+    p.add_argument('--min-coverage-frac', type=float, default=COVERAGE_FRAC_MIN, dest='min_coverage_frac',
+                   help='exclude image spaxels shallower than this fraction of peak NEXP (biased at '
+                        'partial-coverage boundaries; default %(default)s). 0 keeps all. The cube (--cube) '
+                        'always keeps every spaxel; this only masks the 2-D image.')
     p.add_argument('--cube', action='store_true',
                    help='build an (RA,DEC,wave) cube (single channel) instead of a 2-D image')
     p.add_argument('--dwave', type=float, help='cube wavelength step (A); default native median')
@@ -181,6 +186,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     img = combine_image(sr, lo, hi, channels=args.channels, units=args.units,
                         weighting=args.weight, kernel=args.kernel, kernel_fwhm=args.fwhm,
                         pixscale=args.pixscale, min_coverage=args.min_coverage)
+
+    # default-exclude biased partial-coverage spaxels from the IMAGE (coverage maps kept for reversal)
+    excl = low_coverage_mask(img.nexp, args.min_coverage_frac)
+    n_excl = int((excl & np.isfinite(img.data)).sum())
+    if n_excl:
+        img.data[excl] = np.nan
+        img.meta['COVFRAC'] = float(args.min_coverage_frac)
+        logger.info('excluded %d partial-coverage spaxels (NEXP < %.2f x peak) from the image; the '
+                    'coverage/NEXP maps are kept.', n_excl, args.min_coverage_frac)
 
     out = args.out or os.path.join(combined_dir(paths, create=True),
                                    f'{sr.field or "field"}_coadd.fits')
