@@ -112,10 +112,17 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         # 2. Per-fibre OH scaling (in FLUX space). NB scale_sky_per_fiber does not
         #    use the mask (each fibre is scaled against its own template); only the
-        #    PCA stage below consumes it.
-        scale, scale_corr, flux1 = scale_sky_per_fiber(flux, sky, config,
-                                                       sky_mask=mask,
-                                                       color=color)
+        #    PCA stage below consumes it. Skipped when the pkl-domain sky_line_refine
+        #    already did the OH refinement (config.skip_oh_scale) — avoids double-correction.
+        if getattr(config, "skip_oh_scale", False):
+            scale = np.ones(flux.shape[0], dtype=float)
+            scale_corr = np.zeros_like(flux)
+            flux1 = flux
+            logger.info("skySubtract: RSS-domain OH scaling skipped (pkl-domain sky_line_refine active)")
+        else:
+            scale, scale_corr, flux1 = scale_sky_per_fiber(flux, sky, config,
+                                                           sky_mask=mask,
+                                                           color=color)
 
         # 3. PCA residual cleaning (optional).
         if config.run_pca:

@@ -393,6 +393,16 @@ sky_selection_method = stratified
 #                                     # fields -- it would then absorb genuine diffuse continuum.
 # sky_pedestal_edge_window = 4        # edge-refine running-median half-width (fibres)
 
+# --- pkl-domain (xshift) OH sky-line refinement (Sky/skyLineRefine.py) ---
+# sky_line_refine = False             # per-line OH refinement in the pkl/xshift domain (removes the
+#                                     # wavelength-domain arc-solution shift artifact the RSS framework
+#                                     # re-encodes). When True the RSS-domain framework OH scaling is
+#                                     # auto-skipped (sky_skip_oh_scale) to avoid double-correction.
+# sky_line_template = /path/to/calib/line_template_{channel}.fits   # optional static per-(camera,slit)
+#                                     # LSF-residual template ({channel} -> green/red/blue); fit with a
+#                                     # per-line amplitude on top of the per-line refine. Omit to skip.
+# sky_skip_oh_scale =                 # override: skip the RSS-domain OH scaling (defaults to sky_line_refine)
+
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it
 # reads the *_FF.fits files, applies source masking -> per-fibre OH scaling ->
 # PCA/ZAP residual cleaning, and writes *_FF_SKYSUB.fits (consumed by the

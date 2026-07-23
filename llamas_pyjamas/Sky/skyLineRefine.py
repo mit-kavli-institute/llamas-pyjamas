@@ -124,10 +124,11 @@ def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid
     per-line residual in NATIVE pixels and the correction is added to ``.sky`` so the written RSS
     ``SKYSUB = counts - sky`` carries it. Blue skips the derivative (amplitude-only) by default.
 
-    ``templates`` (benchside -> ``(n_slitbin, n_off)`` from :func:`Sky.skyLineTemplate.load_template`)
-    and ``offgrid`` enable the Phase-B static LSF-residual template: each fibre's slit-bin profile is
-    passed to :func:`refine_fibre` and fit with a per-line amplitude. Returns ``science`` (mutated); each
-    camera gets ``.sky_line_refine`` ((n_fib,n_pix)) for provenance.
+    ``templates`` (``{channel: {benchside: (n_slitbin, n_off)}}`` from
+    :func:`Sky.skyLineTemplate.load_template`, keyed by channel since a benchside like ``1A`` exists in
+    every channel) and ``offgrid`` enable the Phase-B static LSF-residual template: each fibre's slit-bin
+    profile is passed to :func:`refine_fibre` and fit with a per-line amplitude. Returns ``science``
+    (mutated); each camera gets ``.sky_line_refine`` ((n_fib,n_pix)) for provenance.
     """
     cont_win = int(_cfg(config, "sky_line_cont_window", CONT_WIN))
     sigdet = float(_cfg(config, "sky_line_sigdetect", SIGDETECT))
@@ -146,7 +147,7 @@ def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid
         color = str(md.get("channel", getattr(e, "channel", ""))).lower()
         deriv = color not in skip_deriv
         cam = f"{md.get('bench', getattr(e, 'bench', ''))}{md.get('side', getattr(e, 'side', ''))}"
-        T = templates.get(cam) if templates is not None else None
+        T = templates.get(color, {}).get(cam) if templates is not None else None
         xshift = np.asarray(e.xshift, float) if T is not None and hasattr(e, "xshift") else None
         nfib = sky.shape[0]
         corr = np.zeros_like(sky)
@@ -167,19 +168,43 @@ def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid
     return science
 
 
+def _load_channel_templates(config):
+    """Load per-channel LSF-residual templates from ``config['sky_line_template']`` (a path with a
+    ``{channel}`` placeholder). Returns ``({channel: {cam: T}}, offgrid)`` or ``(None, None)``."""
+    import os
+    tpath = _cfg(config, "sky_line_template", None)
+    if not tpath:
+        return None, None
+    from llamas_pyjamas.Sky.skyLineTemplate import load_template
+    templates = {}; offgrid = None
+    for chan in ("green", "red", "blue"):
+        p = tpath.format(channel=chan) if "{channel}" in str(tpath) else tpath
+        if os.path.exists(p):
+            try:
+                t, off = load_template(p, chan)
+                templates[chan] = t; offgrid = off
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning("skyLineRefine: failed to load template %s (%s)", p, exc)
+    return (templates or None), offgrid
+
+
 def apply_line_refine_file(pkl_file, config):
     """Load a ``*_sky1d[...]_extractions.pkl``, apply :func:`refine_sky_lines_pkl`, save a new pkl.
 
-    Thin pkl-I/O wrapper for the pipeline (mirrors ``skyPedestal.apply_pedestal_file``). Returns the
-    path to the written ``*_lr_extractions.pkl``. Leaves the input untouched so the step is reversible.
+    Thin pkl-I/O wrapper for the pipeline (mirrors ``skyPedestal.apply_pedestal_file``). Loads the static
+    LSF-residual template per channel from ``config['sky_line_template']`` if set. Returns the path to the
+    written ``*_lr_extractions.pkl``. Leaves the input untouched so the step is reversible.
     """
     from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
     d = ExtractLlamas.loadExtraction(pkl_file)
     science = d["extractions"]
     hdr = d.get("primary_header")
-    refine_sky_lines_pkl(science, config, metadata=d.get("metadata"))
+    templates, offgrid = _load_channel_templates(config)
+    refine_sky_lines_pkl(science, config, metadata=d.get("metadata"),
+                         templates=templates, offgrid=offgrid)
     if hdr is not None:
         hdr["SKYLR"] = (True, "pkl-domain (xshift) OH-line refinement applied")
+        hdr["SKYLRTMP"] = (templates is not None, "LSF-residual template applied")
     if "_extractions.pkl" in pkl_file:
         out = pkl_file.replace("_extractions.pkl", "_lr_extractions.pkl")
     else:

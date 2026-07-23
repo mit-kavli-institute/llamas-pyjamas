@@ -118,6 +118,9 @@ class SkySubtractConfig:
     scale_deriv_ridge: float = 0.1
     scale_deriv_gate: float = 0.05
     scale_deriv_skip_colors: List[str] = field(default_factory=lambda: ["blue"])
+    # skip the RSS-domain OH scaling entirely (set when the pkl-domain sky_line_refine already did it,
+    # to avoid double-correction)
+    skip_oh_scale: bool = False
 
     # PCA residual cleaning
     pca_ncomp: int = 20
@@ -188,6 +191,9 @@ class SkySubtractConfig:
                                        default=cls.scale_deriv_gate)),
             scale_deriv_skip_colors=list(get("sky_scale_deriv_skip_colors",
                                              default=["blue"])),
+            # defer the RSS-domain OH scaling to the pkl-domain refine when it is active
+            skip_oh_scale=bool(get("sky_skip_oh_scale",
+                                   default=bool(get("sky_line_refine", default=False)))),
             pca_ncomp=int(get("sky_pca_ncomp", default=cls.pca_ncomp)),
             pca_max_basis_fibers=int(get("sky_pca_max_basis_fibers",
                                          default=cls.pca_max_basis_fibers)),

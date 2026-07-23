@@ -2971,12 +2971,22 @@ def main(config_path):
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 
+                # sky-refine: optional pkl-domain (xshift) per-line OH refinement + static LSF-residual
+                # template. Runs in the pkl domain before flux cal; when on, the RSS-domain framework OH
+                # scaling is skipped (sky_skip_oh_scale) to avoid double-correction. Default OFF.
+                if config.get('sky_line_refine', False):
+                    from llamas_pyjamas.Sky.skyLineRefine import apply_line_refine_file
+                    print("Applying pkl-domain OH line refinement (sky_line_refine=True)...")
+                    lr_file = apply_line_refine_file(rss_input_file, config)
+                    rss_input_file = lr_file
+                    print(f"OH line refinement applied -> {os.path.basename(lr_file)}")
+
                 # Phase 3a (sky-refine): optional per-camera additive continuum pedestal, in the
                 # pkl domain before flux cal. Default OFF; HYPOTHESIS UNDER TEST (Sky/DESIGN.md).
                 if config.get('sky_pedestal', False):
                     from llamas_pyjamas.Sky.skyPedestal import apply_pedestal_file
                     print("Applying per-camera continuum pedestal (sky_pedestal=True)...")
-                    ped_file = apply_pedestal_file(sky1d_file, config)
+                    ped_file = apply_pedestal_file(rss_input_file, config)
                     rss_input_file = ped_file
                     print(f"Continuum pedestal applied -> {os.path.basename(ped_file)}")
 
