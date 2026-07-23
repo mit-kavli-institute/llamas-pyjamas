@@ -387,6 +387,42 @@ benchside would be partially absorbed. When we add **blank-sky-exposure subtract
 fields (deferred, likely a separate session), `sky_pedestal_edge_refine` **must be set False** — see the
 deferred item below.
 
+### Sky-line residuals — pkl-domain xshift refinement (`Sky/skyLineRefine.py`)
+
+The bright-sky-line residuals (green + red) are the noise floor *at* the lines (between lines the data is
+photon-limited). Diagnosis (`Sky/diagnosis/green_line_resid.py`, `green_pkl_xshift_test.py`,
+`green_pkl_lsf_shape.py`, on the pkl run `reduced_rev01_pkl/`):
+
+- The production framework refinement (`skyScale.scale_sky_per_fiber` via `skySubtract.py`) runs on the
+  **wavelength-resampled RSS**, so it re-encodes the per-fibre **arc-solution** error as a spurious
+  fibre-to-fibre line SHIFT — field-dependent (opposite signs across fields), doesn't average down in
+  stacks. In the native/**xshift** domain (where the base B-spline sky is built) that shift collapses to
+  one field-independent curve → it is an artifact of wavelength resampling.
+- What remains in xshift is **static, field-independent across-slit structure**: a smooth shift ramp
+  (±0.2 px) + an **LSF wing asymmetry** that flips sign edge-to-edge (~12 % of line amp after
+  amplitude+shift+width) — genuine instrument signature, calibratable.
+
+**Phase A (DONE, `skyLineRefine.refine_fibre`, config `sky_line_refine`, default off):** relocate the
+refinement into the pkl/native-pixel (xshift) domain and fit **per line** (not one global (α,β,γ) per
+fibre — different lines carry different shift/width). Per detected OH line: fit `(counts−sky) ~ α·S +
+β·S′ + γ·S″` + absorbed continuum nuisance; fold the line-only correction into `.sky`. Validated on green
+5577 (3 fields): at-line residual −41..−53 %, per-fibre shift **nulled**; 2D fibre×pixel and fixed-xshift
+QA (`Sky/diagnosis/qa_2d_residual*.py`, `qa_line_refine.py`) confirm the coherent shift dipole is removed
+on isolated lines (5577/6300/6863: −40..−61 %). Tests `Tests/test_sky_line_refine.py` 5/5.
+
+**Phase B (TODO):**
+- Static **per-slit-position LSF-residual template** (shape-agnostic, calibrated across fields/frames,
+  floor-template style with positive-outlier rejection) to absorb the ~12 % across-slit wing asymmetry
+  that the α/β/γ derivative basis can't span.
+- **Blended lines / NaD.** The per-line single-shape fit poorly handles close blends: the Na D **doublet**
+  (5890/5896) improves only ~15 % (2D-xshift QA) because one line shape + derivatives can't represent two
+  components; the O₂ 6863 cluster is partially affected. Fix in Phase B — either a multi-component template
+  for blended segments, or let the shape-agnostic per-slit-position template absorb them. NaD matters
+  astrophysically, so handle it explicitly.
+- Wire into `reduce.py` after `skyModel_1d` and make the RSS-domain framework OH scaling defer to the
+  pkl-domain refine when `sky_line_refine` is on (avoid double-correction); then verify end-to-end on cubes.
+- Generalize to **red** (same residual class, currently the dominant systematic).
+
 ### Deferred beyond the striping fix
 - **Blank-sky-exposure subtraction for source-filled fields — and then set `sky_pedestal_edge_refine =
   False`.** The in-field floor/pedestal/edge-refine machinery all assume most of the IFU is blank sky;
