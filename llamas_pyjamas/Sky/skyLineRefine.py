@@ -36,6 +36,9 @@ SIGDETECT = 5.0       # OH-line detection sigma on the sky template
 PAD = 3               # pixels of wing added on each side of a detected line segment
 AMP_FLOOR = 50.0      # min line amplitude (counts) to refine a segment
 AMP_CLIP = 0.6        # clip |alpha| (amplitude residual as a fraction of the line)
+CORE_EXCLUDE = 0      # exclude ±this many peak pixels from the fit (0 = off; TESTED HARMFUL — under-
+                     # determines alpha/amplitude. Kept as an option but NOT the ringing fix.)
+DERIV_RIDGE = 0.0     # optional ridge on the derivative (β,γ) columns (0 = plain lstsq)
 
 
 def _cfg(config, key, default):
@@ -49,7 +52,8 @@ def _cfg(config, key, default):
 
 def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, pad=PAD,
                  amp_floor=AMP_FLOOR, amp_clip=AMP_CLIP, deriv=True,
-                 xshift_1d=None, tprof=None, offgrid=None, tmpl_clip=(-1.0, 3.0)):
+                 xshift_1d=None, tprof=None, offgrid=None, tmpl_clip=(-1.0, 3.0),
+                 core_exclude=CORE_EXCLUDE, deriv_ridge=DERIV_RIDGE):
     """Per-line OH residual correction for one fibre (native pixels / xshift domain).
 
     Detects OH lines in the base ``sky`` template, then for EACH line segment independently fits the
@@ -86,6 +90,17 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
         good = np.isfinite(d) & np.isfinite(sl)
         if good.sum() < 5:
             continue
+        # Exclude the ±core_exclude peak pixels from the FIT (not the correction): on bright lines the
+        # high-freq terms (γ·S″, δ·T) otherwise over-subtract the sharp core → a pos-neg-pos ring. Fitting
+        # only the shoulders/wings still constrains α/β/γ/δ but can't chase the peak. Correction is still
+        # evaluated over all pixels (smoothly through the core).
+        peak = int(np.nanargmax(sl))
+        fit_good = good.copy()
+        if core_exclude > 0:
+            c0 = max(0, peak - core_exclude); c1 = min(seg.size, peak + core_exclude + 1)
+            fit_good[c0:c1] = False
+            if fit_good.sum() < 4:
+                fit_good = good
         # --- Phase A: alpha (amplitude) + beta (shift) + gamma (width) + continuum nuisance ---
         cols = [sl]
         if deriv:
@@ -94,8 +109,15 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
         xr = np.arange(seg.size, dtype=float); xr -= xr.mean()
         cols += [np.ones_like(sl), xr]                        # continuum nuisance: ABSORBED, NOT applied
         B = np.column_stack(cols)
+        A = B[fit_good]; y = d[fit_good]
         try:
-            coef, *_ = np.linalg.lstsq(B[good], d[good], rcond=None)
+            if deriv_ridge > 0 and deriv:
+                M = A.T @ A
+                for j in range(1, n_corr):                    # ridge derivative cols (β,γ), not α/nuisance
+                    M[j, j] += deriv_ridge * M[j, j]
+                coef = np.linalg.solve(M, A.T @ y)
+            else:
+                coef, *_ = np.linalg.lstsq(A, y, rcond=None)
         except np.linalg.LinAlgError:
             continue
         coef = np.asarray(coef, float)
@@ -105,10 +127,10 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
         # --- Phase B: fit the static LSF-residual template amplitude on the Phase-A LEFTOVER ---
         # (two-stage: keeps gamma; delta is a single well-determined param on what Phase A leaves)
         if use_T and np.all(np.isfinite(xs[seg])):
-            x0 = xs[seg][int(np.nanargmax(sl))]               # line centre in xshift
+            x0 = xs[seg][peak]                                # line centre in xshift
             t_col = amp * np.interp(xs[seg] - x0, offgrid, tprof, left=0.0, right=0.0)
             rA = d - cA
-            gg = good & np.isfinite(t_col)
+            gg = fit_good & np.isfinite(t_col)                # same excluded core
             den = float(np.dot(t_col[gg], t_col[gg]))
             if den > 0:
                 delta = float(np.clip(np.dot(rA[gg], t_col[gg]) / den, tmpl_clip[0], tmpl_clip[1]))
@@ -133,6 +155,8 @@ def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid
     cont_win = int(_cfg(config, "sky_line_cont_window", CONT_WIN))
     sigdet = float(_cfg(config, "sky_line_sigdetect", SIGDETECT))
     amp_clip = float(_cfg(config, "sky_line_amp_clip", AMP_CLIP))
+    core_excl = int(_cfg(config, "sky_line_core_exclude", CORE_EXCLUDE))
+    deriv_ridge = float(_cfg(config, "sky_line_deriv_ridge", DERIV_RIDGE))
     skip_deriv = [str(c).lower() for c in _cfg(config, "sky_line_deriv_skip_colors", ["blue"])]
     n_applied = 0
     for j, e in enumerate(science):
@@ -157,7 +181,8 @@ def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid
                 sb = min(T.shape[0] - 1, int((fb / max(1, nfib - 1)) * T.shape[0]))
                 tprof = T[sb]
             corr[fb] = refine_fibre(counts[fb], sky[fb], cont_win=cont_win, sigdetect=sigdet,
-                                    amp_clip=amp_clip, deriv=deriv,
+                                    amp_clip=amp_clip, deriv=deriv, core_exclude=core_excl,
+                                    deriv_ridge=deriv_ridge,
                                     xshift_1d=(xshift[fb] if xshift is not None else None),
                                     tprof=tprof, offgrid=offgrid)
         e.sky = sky + corr
