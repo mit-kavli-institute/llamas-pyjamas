@@ -68,6 +68,35 @@ def test_camera_driver_folds_into_sky():
     assert np.std((C - cam.sky)[0][core]) < np.std((C - S)[0][core])
 
 
+def test_template_term_removes_shape():
+    from llamas_pyjamas.Sky.skyLineTemplate import OFF
+    x, sky = _sky_with_lines()
+    line = sky - 40.0
+    xshift = np.arange(x.size, dtype=float)
+    tprof = 0.04 * (OFF / 3.0) * np.exp(-((OFF / 3.0) ** 2))   # antisymmetric wing, ~few %
+    resid = np.zeros(x.size)
+    for c0, p0 in [(100, 5000.0), (250, 3000.0), (330, 1500.0)]:
+        resid += p0 * np.interp(xshift - c0, OFF, tprof, left=0.0, right=0.0)
+    counts = sky + resid                                        # residual is a pure template shape
+    corr = refine_fibre(counts, sky, xshift_1d=xshift, tprof=tprof, offgrid=OFF)
+    m = line > 0.05 * line.max()
+    assert np.std((resid - corr)[m]) < 0.35 * np.std(resid[m])  # template component removed
+
+
+def test_template_save_load_roundtrip(tmp_path=None):
+    import tempfile, os
+    from llamas_pyjamas.Sky.skyLineTemplate import save_template, load_template, OFF, N_SLITBIN
+    tmpl = {"1A": rng.normal(0, 0.02, (N_SLITBIN, OFF.size)),
+            "2B": rng.normal(0, 0.02, (N_SLITBIN, OFF.size))}
+    d = tmp_path or tempfile.mkdtemp()
+    p = os.path.join(str(d), "line_template_green.fits")
+    save_template(p, tmpl, OFF, "green")
+    t2, o2 = load_template(p, "green")
+    assert sorted(t2) == sorted(tmpl)
+    assert np.allclose(o2, OFF)
+    assert np.allclose(t2["1A"], tmpl["1A"], atol=1e-5)
+
+
 if __name__ == "__main__":
     p = f = 0
     for name in list(globals()):

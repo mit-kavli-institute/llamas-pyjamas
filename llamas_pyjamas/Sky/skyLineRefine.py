@@ -48,14 +48,17 @@ def _cfg(config, key, default):
 
 
 def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, pad=PAD,
-                 amp_floor=AMP_FLOOR, amp_clip=AMP_CLIP, deriv=True):
+                 amp_floor=AMP_FLOOR, amp_clip=AMP_CLIP, deriv=True,
+                 xshift_1d=None, tprof=None, offgrid=None, tmpl_clip=(-1.0, 3.0)):
     """Per-line OH residual correction for one fibre (native pixels / xshift domain).
 
     Detects OH lines in the base ``sky`` template, then for EACH line segment independently fits the
     base sky-subtracted residual ``counts - sky`` to the local line shape and its pixel-space
-    derivatives ``d ~ alpha*S + beta*S' + gamma*S''`` (per-line, unlike the RSS framework's single
-    global per-fibre fit — different lines carry different shift/width). Returns a (n_pix,) additive
-    correction to ADD to the sky model (line-localised; continuum untouched via local DC removal).
+    derivatives ``d ~ alpha*S + beta*S'`` (per-line, unlike the RSS framework's single global per-fibre
+    fit). When a static LSF-residual template ``tprof`` (on ``offgrid``, from :mod:`Sky.skyLineTemplate`)
+    and ``xshift_1d`` are given, a ``delta * amp * T(xshift-line_centre)`` term REPLACES the width
+    ``gamma*S''`` term (the empirical template subsumes it) with a per-line fitted, clipped amplitude
+    ``delta``. Returns a (n_pix,) additive correction to ADD to the sky model (line-localised).
     """
     c = np.asarray(counts_1d, float); s = np.asarray(sky_1d, float)
     n = s.size
@@ -63,6 +66,8 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
     fin = np.isfinite(c) & np.isfinite(s)
     if fin.sum() < 20:
         return corr
+    use_T = tprof is not None and xshift_1d is not None and offgrid is not None
+    xs = np.asarray(xshift_1d, float) if use_T else None
     s_line = s - _continuum(np.where(fin, s, 0.0), cont_win)
     mask = _line_mask(s_line, sigdetect) & fin
     if not mask.any():
@@ -81,33 +86,48 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
         good = np.isfinite(d) & np.isfinite(sl)
         if good.sum() < 5:
             continue
-        cols = [sl]                                           # line terms (applied as the correction)
+        # --- Phase A: alpha (amplitude) + beta (shift) + gamma (width) + continuum nuisance ---
+        cols = [sl]
         if deriv:
-            s1 = np.gradient(sl); s2 = np.gradient(s1)
-            cols += [s1, s2]
+            cols += [np.gradient(sl), np.gradient(np.gradient(sl))]
         n_corr = len(cols)
         xr = np.arange(seg.size, dtype=float); xr -= xr.mean()
-        cols += [np.ones_like(sl), xr]                        # continuum nuisance: ABSORBED by the fit,
-                                                              # NOT applied (the pedestal owns the floor)
+        cols += [np.ones_like(sl), xr]                        # continuum nuisance: ABSORBED, NOT applied
         B = np.column_stack(cols)
         try:
             coef, *_ = np.linalg.lstsq(B[good], d[good], rcond=None)
         except np.linalg.LinAlgError:
             continue
         coef = np.asarray(coef, float)
-        coef[0] = float(np.clip(coef[0], -amp_clip, amp_clip))   # clip amplitude residual only
-        corr[seg] += B[:, :n_corr] @ coef[:n_corr]            # apply line terms only
+        coef[0] = float(np.clip(coef[0], -amp_clip, amp_clip))   # clip amplitude residual
+        cA = B[:, :n_corr] @ coef[:n_corr]                    # Phase-A line correction
+        corr[seg] += cA
+        # --- Phase B: fit the static LSF-residual template amplitude on the Phase-A LEFTOVER ---
+        # (two-stage: keeps gamma; delta is a single well-determined param on what Phase A leaves)
+        if use_T and np.all(np.isfinite(xs[seg])):
+            x0 = xs[seg][int(np.nanargmax(sl))]               # line centre in xshift
+            t_col = amp * np.interp(xs[seg] - x0, offgrid, tprof, left=0.0, right=0.0)
+            rA = d - cA
+            gg = good & np.isfinite(t_col)
+            den = float(np.dot(t_col[gg], t_col[gg]))
+            if den > 0:
+                delta = float(np.clip(np.dot(rA[gg], t_col[gg]) / den, tmpl_clip[0], tmpl_clip[1]))
+                corr[seg] += delta * t_col
     return corr
 
 
-def refine_sky_lines_pkl(science, config, metadata=None):
+def refine_sky_lines_pkl(science, config, metadata=None, templates=None, offgrid=None):
     """Refine per-fibre OH-line residuals in the pkl/xshift domain (in place on each camera's ``.sky``).
 
     ``science`` is the list of per-camera extraction objects from a sky-subtracted pkl (``.sky`` already
     populated by ``skyModel_1d``; ``.counts`` present). For each live fibre :func:`refine_fibre` fits the
     per-line residual in NATIVE pixels and the correction is added to ``.sky`` so the written RSS
-    ``SKYSUB = counts - sky`` carries it. Blue skips the derivative (amplitude-only) by default. Returns
-    ``science`` (mutated); each camera gets ``.sky_line_refine`` ((n_fib,n_pix)) for provenance.
+    ``SKYSUB = counts - sky`` carries it. Blue skips the derivative (amplitude-only) by default.
+
+    ``templates`` (benchside -> ``(n_slitbin, n_off)`` from :func:`Sky.skyLineTemplate.load_template`)
+    and ``offgrid`` enable the Phase-B static LSF-residual template: each fibre's slit-bin profile is
+    passed to :func:`refine_fibre` and fit with a per-line amplitude. Returns ``science`` (mutated); each
+    camera gets ``.sky_line_refine`` ((n_fib,n_pix)) for provenance.
     """
     cont_win = int(_cfg(config, "sky_line_cont_window", CONT_WIN))
     sigdet = float(_cfg(config, "sky_line_sigdetect", SIGDETECT))
@@ -125,14 +145,25 @@ def refine_sky_lines_pkl(science, config, metadata=None):
         md = metadata[j] if metadata is not None and j < len(metadata) else {}
         color = str(md.get("channel", getattr(e, "channel", ""))).lower()
         deriv = color not in skip_deriv
+        cam = f"{md.get('bench', getattr(e, 'bench', ''))}{md.get('side', getattr(e, 'side', ''))}"
+        T = templates.get(cam) if templates is not None else None
+        xshift = np.asarray(e.xshift, float) if T is not None and hasattr(e, "xshift") else None
+        nfib = sky.shape[0]
         corr = np.zeros_like(sky)
-        for fb in range(sky.shape[0]):
+        for fb in range(nfib):
+            tprof = None
+            if T is not None:
+                sb = min(T.shape[0] - 1, int((fb / max(1, nfib - 1)) * T.shape[0]))
+                tprof = T[sb]
             corr[fb] = refine_fibre(counts[fb], sky[fb], cont_win=cont_win, sigdetect=sigdet,
-                                    amp_clip=amp_clip, deriv=deriv)
+                                    amp_clip=amp_clip, deriv=deriv,
+                                    xshift_1d=(xshift[fb] if xshift is not None else None),
+                                    tprof=tprof, offgrid=offgrid)
         e.sky = sky + corr
         e.sky_line_refine = corr
         n_applied += 1
-    logger.info("skyLineRefine: pkl-domain per-line OH refinement on %d/%d cameras", n_applied, len(science))
+    logger.info("skyLineRefine: pkl-domain per-line OH refinement on %d/%d cameras (template=%s)",
+                n_applied, len(science), templates is not None)
     return science
 
 
