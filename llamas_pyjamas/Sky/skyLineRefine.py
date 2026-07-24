@@ -53,7 +53,7 @@ def _cfg(config, key, default):
 def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, pad=PAD,
                  amp_floor=AMP_FLOOR, amp_clip=AMP_CLIP, deriv=True,
                  xshift_1d=None, tprof=None, offgrid=None, tmpl_clip=(-1.0, 3.0),
-                 core_exclude=CORE_EXCLUDE, deriv_ridge=DERIV_RIDGE):
+                 core_exclude=CORE_EXCLUDE, deriv_ridge=DERIV_RIDGE, include_width=True):
     """Per-line OH residual correction for one fibre (native pixels / xshift domain).
 
     Detects OH lines in the base ``sky`` template, then for EACH line segment independently fits the
@@ -101,20 +101,23 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
             fit_good[c0:c1] = False
             if fit_good.sum() < 4:
                 fit_good = good
-        # --- Phase A: alpha (amplitude) + beta (shift) + gamma (width) + continuum nuisance ---
+        # --- Phase A: alpha (amplitude) + beta (shift) [+ gamma (width)] + continuum nuisance ---
         cols = [sl]
+        gamma_col = -1
         if deriv:
-            cols += [np.gradient(sl), np.gradient(np.gradient(sl))]
+            cols.append(np.gradient(sl))                      # beta (shift)
+            if include_width:
+                cols.append(np.gradient(np.gradient(sl)))     # gamma (width) — the ringing source
+                gamma_col = len(cols) - 1
         n_corr = len(cols)
         xr = np.arange(seg.size, dtype=float); xr -= xr.mean()
         cols += [np.ones_like(sl), xr]                        # continuum nuisance: ABSORBED, NOT applied
         B = np.column_stack(cols)
         A = B[fit_good]; y = d[fit_good]
         try:
-            if deriv_ridge > 0 and deriv:
+            if deriv_ridge > 0 and gamma_col >= 0:
                 M = A.T @ A
-                for j in range(1, n_corr):                    # ridge derivative cols (β,γ), not α/nuisance
-                    M[j, j] += deriv_ridge * M[j, j]
+                M[gamma_col, gamma_col] += deriv_ridge * M[gamma_col, gamma_col]   # ridge gamma ONLY
                 coef = np.linalg.solve(M, A.T @ y)
             else:
                 coef, *_ = np.linalg.lstsq(A, y, rcond=None)

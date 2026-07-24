@@ -237,7 +237,7 @@ def _apply_sky_model(sset, xshift_min, xshift_max, sky_hi, sky_lo,
 
 def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_plots=False,
                 selection_method='dimmest', n_sky_fibres=20, sky_map=None,
-                arc_soln=None):
+                arc_soln=None, bkspace=0.5):
     """
     Create a 1D sky model from the sky extraction.
 
@@ -577,7 +577,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         sky_reject_lower = 5.0
         sset, outmask = iterfit(sky_fitx, sky_fity, maxiter=6,
                                 upper=sky_reject_upper, lower=sky_reject_lower,
-                                kwargs_bspline={'bkspace': 0.5})
+                                kwargs_bspline={'bkspace': bkspace})
 
         # Guard: a singular fit (e.g. "NaN in cholesky_band") returns an sset
         # that evaluates to ~zero everywhere while the data are healthy. Never
@@ -662,7 +662,7 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             logger.warning("skyModel_1d: %s %s%s channel-global sky degenerate; "
                            "leaving zero sky, flagged SKY_NONE", channel, bench, side)
             continue
-        gset, _ = iterfit(gx, gy, maxiter=6, kwargs_bspline={'bkspace': 0.5})
+        gset, _ = iterfit(gx, gy, maxiter=6, kwargs_bspline={'bkspace': bkspace})
         n_clip = _apply_sky_model(
             gset, gx.min(), gx.max(), g_hi, 0.0,
             cam['extension'], cam['fiber'], cam['n_fibers'], sky, science,
