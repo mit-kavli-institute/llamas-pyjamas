@@ -56,6 +56,36 @@ DEFAULT_GAIN = 1.0        # e-/ADU
 DEFAULT_READNOISE = 2.5   # e-
 
 
+def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
+    """Effective pixel count for the read-noise term of the extracted per-fibre error.
+
+    The variance model is var = (counts_e + aperture_pix * RN^2) / gain^2, i.e. the read
+    noise adds in quadrature over the pixels that contribute to the extracted value. That
+    pixel count is method-dependent:
+
+    - boxcar: a straight (fractional-weight) sum over the +/-halfwidth aperture, so the RN
+      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels. With the current halfwidth=2.5
+      that is ~5 px, NOT the legacy hard-coded 9 (which came from the old 9-px total window
+      and over-counted RN by sqrt(9/5)=1.34x, worst for the faint blue/red).
+    - optimal/Horne: read noise is profile-WEIGHTED, RN variance = sum(w_i^2)*RN^2 with the
+      optimal weights, i.e. an effective aperture of 1/sum(P_i^2) (< the boxcar width, since
+      the wings are downweighted). The Horne estimator is currently disabled (unstable on
+      blended profiles); until it is rebuilt to expose per-column profile weights we fall
+      back to the boxcar-equivalent width (a conservative over-estimate), preferring an
+      explicit trace.extraction_aperture if one has been set.
+
+    Keeping this method-aware means the RN term stays correct if/when optimal is re-enabled,
+    instead of silently reusing the boxcar straight-sum formula.
+    """
+    method = str(method).lower()
+    half = float(boxcar_halfwidth)
+    if method in ('optimal', 'horne'):
+        ea = getattr(trace, 'extraction_aperture', None)
+        return float(ea) if ea else 2.0 * half
+    # boxcar / legacy: straight sum over the +/-halfwidth aperture
+    return 2.0 * half
+
+
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
 
@@ -329,7 +359,11 @@ class ExtractLlamas:
             # fraction of the budget, and for S/N-weighted cube combination.
             gain, readnoise, src = props_for_header(
                 self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
-            aperture_pix = float(getattr(self.trace, 'extraction_aperture', 9.0))
+            # Method-aware effective aperture for the RN term (see effective_aperture_pix).
+            # Boxcar -> ~2*halfwidth px (straight sum); optimal/Horne -> profile-weighted.
+            _method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+            _half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
+            aperture_pix = effective_aperture_pix(_method, _half, self.trace)
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
             self.counts_err = np.sqrt(var_adu).astype(np.float32)
