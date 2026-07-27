@@ -492,7 +492,7 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         if remove_cosmic_rays:
             bias_subtracted_data, cr_mask = clean_cosmic_rays(
                 bias_subtracted_data,
-                color=color, bench=bench, side=side
+                color=color, bench=bench, side=side, header=header
             )
             header['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
             header['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
@@ -967,7 +967,7 @@ def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None)
                 bench = hdr.get('BENCH', '')
                 side = hdr.get('SIDE', '')
                 bias_subtracted, cr_mask = clean_cosmic_rays(
-                    bias_subtracted, color=color, bench=bench, side=side
+                    bias_subtracted, color=color, bench=bench, side=side, header=hdr
                 )
                 cr_masks[hdu_index] = cr_mask
                 hdr['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
