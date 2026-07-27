@@ -113,6 +113,23 @@ class CombineOptionsDialog(QDialog):
         self.weighting.addItems(['ivar', 'uniform', 'exptime'])
         form.addRow('Weighting', self.weighting)
 
+        # White-light coverage floor: exclude collapsed spaxels shallower than this
+        # fraction of the peak dither depth (NEXP). 0 keeps the FULL field (outer,
+        # fewer-dither regions included, at lower SNR); 0.7 shows only the well-
+        # covered core (avoids biased partial-coverage boundaries). The CUBE always
+        # keeps every covered spaxel regardless -- this only masks the white light.
+        self.coverage_frac = QDoubleSpinBox()
+        self.coverage_frac.setRange(0.0, 0.95)
+        self.coverage_frac.setSingleStep(0.05)
+        self.coverage_frac.setDecimals(2)
+        self.coverage_frac.setValue(0.0)
+        self.coverage_frac.setSuffix('  x peak depth')
+        self.coverage_frac.setToolTip('Min NEXP (as a fraction of peak dither depth) kept in the '
+                                      'white-light image. 0 = full field (shallow edges included, '
+                                      'lower SNR); raise toward 0.7 to show only the deeply-covered '
+                                      'core. The cube itself always retains all covered spaxels.')
+        form.addRow('Min coverage', self.coverage_frac)
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -122,7 +139,8 @@ class CombineOptionsDialog(QDialog):
     def options(self) -> dict:
         return dict(kernel=self.kernel.currentText(), kernel_fwhm=float(self.fwhm.value()),
                     pixscale=float(self.pixscale.value()), units=self.units.currentText(),
-                    weighting=self.weighting.currentText())
+                    weighting=self.weighting.currentText(),
+                    coverage_frac=float(self.coverage_frac.value()))
 
 
 class CubeViewerWindow(QMainWindow):
@@ -443,8 +461,10 @@ class CubeViewerWindow(QMainWindow):
                 sr.apply_scales(transparency_scales(sr))
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
+            cov_frac = opts.pop('coverage_frac', 0.0)
             cubes = combine_field_cubes(sr, **opts)
             scene = CoaddCubeScene(cubes, super_rss=sr)     # keep super-RSS for optimal extraction
+            scene.coverage_frac = cov_frac                  # white-light coverage floor (0 = full field)
             # Save the built cubes to the standard combined/ directory so they are findable.
             from llamas_pyjamas.Combine.superRSS import combined_dir
             outdir = combined_dir(paths, create=True)
