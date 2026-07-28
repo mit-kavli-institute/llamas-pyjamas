@@ -130,9 +130,10 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
     error = (np.asarray(hdul['ERROR'].data, dtype=float)
              if 'ERROR' in {h.name for h in hdul} else None)
 
-    exptime = _header_value(header, 'SEXPTIME', 'REXPTIME', 'EXPTIME')
+    from llamas_pyjamas.Utils.utils import exposure_time
+    exptime = exposure_time(header)
     if exptime is None:
-        raise ValueError('no exposure time in header (SEXPTIME/REXPTIME/EXPTIME)')
+        raise ValueError('no exposure time in header (SEXPTIME/CEXPTIME/EXPTIME/REXPTIME)')
     exptime = float(exptime)
 
     x_sci = _header_value(header, 'AIRMASS', 'TEL AIRMASS')

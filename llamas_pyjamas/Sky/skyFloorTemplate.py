@@ -90,7 +90,8 @@ def build_floor_template(rss_files, channel='green'):
             continue
         cont, obj = _frame_floor(C, S, msk)
         skylev = float(np.nanmedian(S[np.isfinite(S) & (S != 0)]))
-        expt = hdr.get('SEXPTIME', hdr.get('DEXPTIME', hdr.get('EXPTIME', 0.0)))
+        from llamas_pyjamas.Utils.utils import exposure_time
+        expt = exposure_time(hdr, default=0.0)
         meta.append(dict(file=f, object=str(hdr.get('OBJECT', '')), skylev=skylev,
                          exptime=float(expt or 0.0)))
         for cam in sorted(set(bs)):

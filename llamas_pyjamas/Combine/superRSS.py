@@ -283,7 +283,8 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
             resolved_plane = 'flam' if 'FLAM' in hd else 'skysub'
         else:
             resolved_plane = plane
-        exptime = float(hdr.get('SEXPTIME', hdr.get('REXPTIME', hdr.get('EXPTIME', np.nan))))
+        from llamas_pyjamas.Utils.utils import exposure_time
+        exptime = float(exposure_time(hdr, default=np.nan))
         airmass = float(hdr.get('AIRMASS', hdr.get('TEL AIRMASS', np.nan)))
         mjd = float(hdr.get('MJD-OBS', np.nan))
     flux_ext, err_ext = _PLANES[resolved_plane]

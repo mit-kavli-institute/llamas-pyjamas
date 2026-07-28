@@ -405,7 +405,8 @@ def _short_exposure(hdr, config):
     min_expt = float(config.get("sky_pedestal_min_exptime", 300.0))
     if hdr is None:
         return False
-    expt = hdr.get("SEXPTIME", hdr.get("DEXPTIME", hdr.get("EXPTIME", 0.0)))
+    from llamas_pyjamas.Utils.utils import exposure_time
+    expt = exposure_time(hdr, default=0.0)
     try:
         expt = float(expt or 0.0)
     except (TypeError, ValueError):
