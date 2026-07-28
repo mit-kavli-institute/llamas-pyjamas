@@ -436,6 +436,7 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
         self.resize(720, 640)
         current = current or {}
         self._widgets = {}          # key -> (kind, widget, choices)
+        self._helptext = {}         # key -> rich help HTML for the help panel
         vbox = QtWidgets.QVBoxLayout(self)
 
         # Master/detail: category list on the left, matching panel on the right.
@@ -456,7 +457,10 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
             for key, kind, default, choices, help_text in specs:
                 seed = current.get(key, default)
                 w = self._make_widget(kind, seed, default, choices)
-                w.setToolTip(f'{key}\n{help_text}')
+                self._helptext[key] = self._format_help(key, kind, default, choices, help_text)
+                w.setToolTip(f'{key}\n{help_text}')            # native tooltip (flaky on macOS)
+                w.setProperty('helpKey', key)                  # for the help panel below
+                w.installEventFilter(self)
                 form.addRow(key, w)
                 self._widgets[key] = (kind, w, choices)
             scroll = QtWidgets.QScrollArea()
@@ -468,12 +472,47 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
         self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
         self._nav.setCurrentRow(0)
 
+        # Persistent help panel — reliable where macOS tooltips are not. Updates on
+        # field focus/hover via eventFilter.
+        self._help = QtWidgets.QLabel('Hover or click a setting to see what it controls.')
+        self._help.setWordWrap(True)
+        self._help.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._help.setMinimumHeight(74)
+        self._help.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+        self._help.setStyleSheet(
+            'QLabel { background: palette(midlight); padding: 8px; '
+            'border: 1px solid palette(mid); border-radius: 4px; }')
+        vbox.addWidget(self._help)
+
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         vbox.addWidget(buttons)
+
+        # baseline snapshot for the changed-only diff (after all widgets are seeded)
+        self._initial = self.values()
+
+    @staticmethod
+    def _format_help(key, kind, default, choices, help_text):
+        meta = kind if kind != 'enum' else 'enum: ' + ' | '.join(choices or [])
+        deftxt = 'unset' if default in ('', None) else default
+        return (f"<b>{key}</b> &nbsp;<span style='color:gray'>({meta}, default {deftxt})</span>"
+                f"<br>{help_text}")
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Type.FocusIn, QtCore.QEvent.Type.Enter):
+            key = obj.property('helpKey')
+            if key and key in self._helptext:
+                self._help.setText(self._helptext[key])
+        return super().eventFilter(obj, event)
+
+    def changed_values(self):
+        """Return only the keys whose value differs from the seeded baseline
+        (normalized through the same widgets, so formatting never counts as a change)."""
+        final = self.values()
+        return {k: v for k, v in final.items() if v != self._initial.get(k)}
 
     @staticmethod
     def _make_widget(kind, seed, default, choices):
@@ -713,11 +752,14 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
         dlg = ConfigOptionsDialog(current=current, parent=self)
         if dlg.exec():
-            self._config_overrides = dlg.values()
-            n_set = sum(1 for v in self._config_overrides.values() if v is not None)
+            # changed-only: accumulate just the keys the user actually changed from
+            # the seed, so the written config stays sparse (untouched keys fall back
+            # to the template/pipeline defaults).
+            self._config_overrides.update(dlg.changed_values())
+            n_set = len(self._config_overrides)
             self.statusBar().showMessage(
-                f'Configuration options captured ({n_set} keywords) — will be written on Write Config.',
-                6000)
+                f'Configuration options captured ({n_set} changed keyword'
+                f'{"" if n_set == 1 else "s"}) — written on Write Config.', 6000)
 
     # ------------------------------------------------------- directory scan
     def browse_directory(self):
