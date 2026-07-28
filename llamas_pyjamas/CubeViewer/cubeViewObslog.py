@@ -94,10 +94,10 @@ def scan_rss_exposures(directory: str) -> List[Dict]:
             'object': '', 'exptime': None, 'notes': '', 'error': '',
         }
         try:
+            from llamas_pyjamas.Utils.utils import exposure_time
             hdr = fits.getheader(representative, 0)
             entry['object'] = str(hdr.get('OBJECT', '') or '')
-            exptime = hdr.get('SEXPTIME', hdr.get('REXPTIME', hdr.get('EXPTIME')))
-            entry['exptime'] = float(exptime) if exptime is not None else None
+            entry['exptime'] = exposure_time(hdr)
             notes = hdr.get('OBS-CMNT')
             entry['notes'] = '' if notes is None else str(notes)
         except Exception as err:                           # noqa: BLE001 - a bad file is a row

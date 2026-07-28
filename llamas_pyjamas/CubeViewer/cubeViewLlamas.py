@@ -870,13 +870,14 @@ class CubeViewerWindow(QMainWindow):
 
         exptime = None
         if self._header is not None:
-            exptime = self._header.get('SEXPTIME', self._header.get('REXPTIME',
-                                       self._header.get('EXPTIME')))
+            from llamas_pyjamas.Utils.utils import exposure_time
+            exptime = exposure_time(self._header)
         try:
             exptime = float(exptime)
         except (TypeError, ValueError):
             QMessageBox.warning(self, 'Sensitivity function',
-                                'Could not read the exposure time from the header.')
+                                'Could not read the exposure time from the header '
+                                '(looked for SEXPTIME/CEXPTIME/DEXPTIME/EXPTIME/INTTIME/REXPTIME).')
             return
 
         try:
