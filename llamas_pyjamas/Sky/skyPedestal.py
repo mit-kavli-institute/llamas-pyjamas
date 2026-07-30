@@ -150,16 +150,38 @@ def _clean_template(T):
     return T
 
 
-def load_template_for(config, channel):
-    """Load the per-camera floor templates for ``channel`` from ``sky_pedestal_template``
-    (a path; ``{channel}`` is substituted if present). Returns dict cam -> cleaned (nfib, NLBIN)."""
-    from llamas_pyjamas.Sky.skyFloorTemplate import load_template
+def resolve_template_path(config, channel):
+    """Resolve the floor-template path for ``channel`` with graceful fallback (no hard crash):
+    config ``sky_pedestal_template`` ({channel}-substituted) if present, else the shipped package
+    template ``llamas_pyjamas/calib/floor_template_cps_{channel}.fits``. Returns a path or None."""
+    import os
     path = config.get("sky_pedestal_template")
+    if path:
+        path = str(path).replace("{channel}", str(channel))
+        if os.path.exists(path):
+            return path
+        logger.warning("skyPedestal: sky_pedestal_template %s not found; trying shipped fallback", path)
+    import llamas_pyjamas
+    shipped = os.path.join(os.path.dirname(llamas_pyjamas.__file__), 'calib',
+                           f'floor_template_cps_{channel}.fits')
+    if os.path.exists(shipped):
+        logger.info("skyPedestal: using shipped fallback template %s", shipped)
+        return shipped
+    logger.warning("skyPedestal: no floor template for channel %s (config or shipped); pedestal skipped",
+                   channel)
+    return None
+
+
+def load_template_for(config, channel):
+    """Load the per-camera floor templates for ``channel``. Returns ``(templates, bunit)`` where
+    templates maps cam -> cleaned (nfib, NLBIN) and bunit is 'counts/s' (scale by exptime on apply)
+    or 'counts' (legacy). Uses :func:`resolve_template_path` (graceful fallback)."""
+    from llamas_pyjamas.Sky.skyFloorTemplate import load_template, read_template_bunit
+    path = resolve_template_path(config, channel)
     if not path:
-        raise ValueError("sky_pedestal_scope='template' requires sky_pedestal_template=<path>")
-    path = str(path).replace("{channel}", str(channel))
+        return {}, 'counts'
     tpl = load_template(path, channel=channel)
-    return {cam: _clean_template(T) for cam, T in tpl.items()}
+    return {cam: _clean_template(T) for cam, T in tpl.items()}, read_template_bunit(path)
 
 
 def estimate_template_pedestal(counts, sky, blank_mask, T, *, cont_window=PEDESTAL_WINDOW,
@@ -300,7 +322,7 @@ def edge_refine_profile(counts, sky, blank_mask, window=EDGE_WINDOW):
     return np.nan_to_num(prof, nan=0.0)
 
 
-def apply_continuum_pedestal(science, config, metadata=None):
+def apply_continuum_pedestal(science, config, metadata=None, frame_exptime=None):
     """Add a per-camera additive continuum pedestal to each science camera's ``.sky`` (in place).
 
     ``science`` is the list of per-camera extraction objects from a sky-subtracted pkl (``.sky``
@@ -332,6 +354,7 @@ def apply_continuum_pedestal(science, config, metadata=None):
     slit_win = int(config.get("sky_pedestal_slit_window", SLIT_WINDOW))
     blank_pct = float(config.get("sky_pedestal_blank_pct", BLANK_PCT))
     templates = {}                                         # channel -> {cam: T}, lazy-loaded
+    template_bunit = {}                                     # channel -> 'counts/s' | 'counts'
     n_applied = 0
     for j, sci in enumerate(science):
         counts = getattr(sci, "counts", None)
@@ -349,16 +372,20 @@ def apply_continuum_pedestal(science, config, metadata=None):
             cam = f"{md.get('bench', getattr(sci, 'bench', ''))}{md.get('side', getattr(sci, 'side', ''))}"
             if chan not in templates:
                 try:
-                    templates[chan] = load_template_for(config, chan)
+                    templates[chan], template_bunit[chan] = load_template_for(config, chan)
                 except Exception as exc:                   # noqa: BLE001
                     logger.warning("skyPedestal(template): no template for channel %r (%s)",
                                    chan, exc)
-                    templates[chan] = {}
+                    templates[chan], template_bunit[chan] = {}, 'counts'
             T = templates[chan].get(cam)
             if T is None or T.shape[0] != counts.shape[0]:
                 logger.warning("skyPedestal(template): no matching template for %s %s; skipped",
                                chan, cam)
                 continue
+            # counts/s templates: scale by this frame's exposure time so the fitted amplitude stays
+            # ~O(1) and the [0,3] clamp remains meaningful (legacy 'counts' templates: no scaling).
+            if template_bunit.get(chan) == 'counts/s' and frame_exptime and frame_exptime > 0:
+                T = T * float(frame_exptime)
             blank = _blank_mask_frac(sci, blank_pct)
             ped, amp = estimate_template_pedestal(counts, np.asarray(sky, float), blank, T,
                                                   cont_window=win)
@@ -428,7 +455,9 @@ def apply_pedestal_file(sky1d_file, config):
         logger.info("skyPedestal: short exposure (< sky_pedestal_min_exptime); pedestal skipped "
                     "for %s", sky1d_file)
         return sky1d_file
-    apply_continuum_pedestal(science, config, metadata=d.get("metadata"))
+    from llamas_pyjamas.Utils.utils import exposure_time
+    apply_continuum_pedestal(science, config, metadata=d.get("metadata"),
+                             frame_exptime=exposure_time(hdr, default=0.0))
     if hdr is not None:
         hdr["SKYPED"] = (True, "per-camera additive continuum pedestal subtracted")
         hdr["SKYPEDWN"] = (int(config.get("sky_pedestal_window", PEDESTAL_WINDOW)),
@@ -439,3 +468,114 @@ def apply_pedestal_file(sky1d_file, config):
     save_extractions(science, primary_header=hdr, savefile=out)
     logger.info("skyPedestal: wrote %s", out)
     return out
+
+
+def _rss_blank_mask(counts_cam, pct):
+    """Array-based blank-fibre mask for one camera's RSS block: faintest ``pct`` percent of live
+    fibres (brightness = summed counts; RSS carries no throughput, matching the pkl tp-absent path)."""
+    bright = np.nansum(np.asarray(counts_cam, float), axis=1)
+    finite = np.isfinite(bright) & (bright != 0)
+    if not finite.any():
+        return finite
+    cut = np.nanpercentile(bright[finite], float(pct))
+    return finite & (bright <= cut)
+
+
+def apply_pedestal_rss(rss_file, config, template_path=None):
+    """RSS-domain continuum pedestal for the run-level (post-extraction) stage — option A.
+
+    The floor template needs ALL of a run's frames, so the pedestal cannot run inside the per-frame
+    loop; this applies it to a base-sky per-channel RSS after extraction, BEFORE the fibre-throughput
+    flat (the RSS COUNTS/SKY planes are pre-flat, and scattered light is not fibre-throughput-
+    modulated, so pre-flat is the physically required placement). Reuses the same estimator math as
+    the pkl path (estimate_template/slit/pedestal + edge_refine_profile), per benchside.
+
+    Modifies the SKY (+= pedestal) and SKYSUB (-= pedestal) planes in place and stamps SKYPED so a
+    resume never double-applies. ``template_path`` overrides the config/shipped resolution for this
+    file's channel. Returns rss_file (applied, skipped, or already-stamped)."""
+    import os
+    from astropy.io import fits
+    from llamas_pyjamas.Utils.utils import exposure_time
+    from llamas_pyjamas.Sky.skyFloorTemplate import load_template, read_template_bunit
+
+    base = os.path.basename(rss_file)
+    channel = next((c for c in ('red', 'green', 'blue') if f'_RSS_{c}' in base or f'_{c}.fits' in base), None)
+    if channel is None:
+        logger.warning("skyPedestal(rss): could not infer channel from %s; skipped", base)
+        return rss_file
+
+    scope = str(config.get("sky_pedestal_scope", "slit")).lower()
+    win = int(config.get("sky_pedestal_window", PEDESTAL_WINDOW))
+    blank_pct = float(config.get("sky_pedestal_blank_pct", BLANK_PCT))
+    slit_win = int(config.get("sky_pedestal_slit_window", SLIT_WINDOW))
+    clip = bool(config.get("sky_pedestal_clip_negative", False))
+
+    with fits.open(rss_file) as h:
+        hdr = h[0].header
+        if bool(hdr.get('SKYPED', False)):
+            logger.info("skyPedestal(rss): %s already has SKYPED; skipped (idempotent)", base)
+            return rss_file
+        if _short_exposure(hdr, config):
+            logger.info("skyPedestal(rss): short exposure; pedestal skipped for %s", base)
+            return rss_file
+        for ext in ('COUNTS', 'SKY', 'SKYSUB', 'FIBERMAP'):
+            if ext not in h:
+                logger.warning("skyPedestal(rss): %s missing %s; skipped", base, ext)
+                return rss_file
+        counts = np.asarray(h['COUNTS'].data, float)
+        sky = np.asarray(h['SKY'].data, float)
+        skysub = np.asarray(h['SKYSUB'].data, float)
+        bs = np.array([str(b).strip() for b in h['FIBERMAP'].data['BENCHSIDE']])
+        exptime = exposure_time(hdr, default=0.0)
+
+        # template-scope: resolve + load the per-camera templates (graceful fallback)
+        tpl, bunit = {}, 'counts'
+        if scope == 'template':
+            path = template_path or resolve_template_path(config, channel)
+            if not path:
+                logger.warning("skyPedestal(rss): no template for %s; skipped", channel)
+                return rss_file
+            tpl = {cam: _clean_template(T) for cam, T in load_template(path, channel=channel).items()}
+            bunit = read_template_bunit(path)
+
+        n_cam = 0
+        for cam in sorted(set(bs)):
+            sel = np.where(bs == cam)[0]
+            if sel.size == 0:
+                continue
+            c_cam = counts[sel]
+            if not np.any(np.isfinite(c_cam)) or np.nanmax(np.abs(np.nan_to_num(c_cam))) == 0:
+                continue
+            s_cam = sky[sel]
+            blank = _rss_blank_mask(c_cam, blank_pct)
+            if scope == 'template':
+                T = tpl.get(cam)
+                if T is None or T.shape[0] != c_cam.shape[0]:
+                    logger.warning("skyPedestal(rss): no matching template for %s %s; skipped",
+                                   channel, cam)
+                    continue
+                if bunit == 'counts/s' and exptime and exptime > 0:
+                    T = T * float(exptime)
+                ped, _amp = estimate_template_pedestal(c_cam, s_cam, blank, T, cont_window=win)
+            elif scope == 'slit':
+                ped = estimate_slit_pedestal(c_cam, s_cam, blank, cont_window=win,
+                                             slit_window=slit_win, clip_negative=clip)
+            else:
+                ped = estimate_pedestal(c_cam, s_cam, blank, cont_window=win, clip_negative=clip)
+                ped = ped[None, :]
+            sky[sel] = s_cam + ped
+            skysub[sel] = skysub[sel] - ped
+            if scope == 'template' and bool(config.get("sky_pedestal_edge_refine", True)):
+                er = edge_refine_profile(c_cam, sky[sel], blank,
+                                         window=int(config.get("sky_pedestal_edge_window", EDGE_WINDOW)))
+                sky[sel] = sky[sel] + er[:, None]
+                skysub[sel] = skysub[sel] - er[:, None]
+            n_cam += 1
+
+        h['SKY'].data = sky.astype(h['SKY'].data.dtype)
+        h['SKYSUB'].data = skysub.astype(h['SKYSUB'].data.dtype)
+        hdr['SKYPED'] = (True, "per-camera additive continuum pedestal subtracted (RSS stage)")
+        hdr['SKYPEDSC'] = (scope, "pedestal scope")
+        h.writeto(rss_file, overwrite=True)
+    logger.info("skyPedestal(rss): applied scope=%s on %d cameras -> %s", scope, n_cam, base)
+    return rss_file

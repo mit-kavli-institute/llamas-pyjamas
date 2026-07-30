@@ -59,17 +59,26 @@ def _frame_floor(C, S, msk):
     return cont, obj
 
 
-def build_floor_template(rss_files, channel='green'):
+def build_floor_template(rss_files, channel='green', per_second=True):
     """Build per-camera (benchside) floor templates from many RSS frames.
 
     Per frame: drop object-contaminated fibre-frames (broadband excess above the camera's blank
     population); per (fibre, wavelength-bin): reject POSITIVE outliers across frames (CLIP_SIGMA
     above the median -- residual object/transient light), then average.
 
+    ``per_second`` (default True): normalize each frame's floor to COUNTS/SEC (÷ exposure time)
+    BEFORE the cross-frame combine. This is essential when frames have different exposure times --
+    otherwise the shortest exposures sit systematically lowest and bias both the median and the
+    positive-outlier (object) rejection. Frames with no usable exposure time are skipped. The
+    resulting template is a per-second floor SHAPE; the pedestal application scales it back by each
+    frame's exposure time (see skyPedestal, BUNIT='counts/s'). per_second=False keeps the legacy
+    total-counts behaviour.
+
     Returns
     -------
-    templates : dict  benchside -> (nfib_cam, NLBIN) template (counts)
-    diag : dict with per-frame amplitudes, sky levels, exptimes, objects, rejection stats
+    templates : dict  benchside -> (nfib_cam, NLBIN) template (counts/s if per_second else counts)
+    diag : dict with per-frame amplitudes, sky levels, exptimes, objects, rejection stats;
+           diag['bunit'] records the template units.
     """
     from astropy.io import fits
     stacks = {}                    # cam -> list of (nfib, NLBIN) per frame (NaN = dropped)
@@ -92,6 +101,12 @@ def build_floor_template(rss_files, channel='green'):
         skylev = float(np.nanmedian(S[np.isfinite(S) & (S != 0)]))
         from llamas_pyjamas.Utils.utils import exposure_time
         expt = exposure_time(hdr, default=0.0)
+        if per_second:
+            if not (expt and expt > 0):
+                logger.warning('skyFloorTemplate: %s has no usable exposure time; skipped '
+                               '(per_second normalization)', f)
+                continue
+            cont = cont / expt                              # counts/sec floor shape
         meta.append(dict(file=f, object=str(hdr.get('OBJECT', '')), skylev=skylev,
                          exptime=float(expt or 0.0)))
         for cam in sorted(set(bs)):
@@ -110,7 +125,8 @@ def build_floor_template(rss_files, channel='green'):
         raise ValueError('skyFloorTemplate: no usable frames')
 
     templates = {}
-    diag = dict(frames=meta, amplitudes={}, reject_frac={})
+    diag = dict(frames=meta, amplitudes={}, reject_frac={},
+                bunit='counts/s' if per_second else 'counts')
     for cam, lst in stacks.items():
         A = np.stack(lst)                                  # (nframes, nfib, NLBIN)
         med = np.nanmedian(A, axis=0)
@@ -143,12 +159,15 @@ def build_floor_template(rss_files, channel='green'):
 def save_template(path, templates, diag, channel='green'):
     """Write templates + per-frame amplitude table to FITS."""
     from astropy.io import fits
+    bunit = diag.get('bunit', 'counts')
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['CHANNEL'] = channel
     hdus[0].header['NFRAMES'] = len(diag['frames'])
     hdus[0].header['NLBIN'] = NLBIN
+    hdus[0].header['BUNIT'] = (bunit, "'counts/s' => pedestal scales by frame exptime on apply")
     for cam, T in sorted(templates.items()):
         hd = fits.ImageHDU(T.astype(np.float32), name=f'{channel}_{cam}'.upper())
+        hd.header['BUNIT'] = bunit
         rej = diag['reject_frac'].get(cam, 0.0)
         hd.header['REJFRAC'] = float(rej) if np.isfinite(rej) else 0.0
         hdus.append(hd)
@@ -177,3 +196,14 @@ def load_template(path, channel='green'):
             if name.startswith(channel.upper() + '_') and hd.is_image and hd.data is not None:
                 out[name[len(channel) + 1:]] = np.asarray(hd.data, float)
     return out
+
+
+def read_template_bunit(path, default='counts'):
+    """Units of a floor template: 'counts/s' (per-second, scale by exptime on apply) or 'counts'
+    (legacy total-counts). Older templates without the BUNIT card default to 'counts'."""
+    from astropy.io import fits
+    try:
+        with fits.open(path) as h:
+            return str(h[0].header.get('BUNIT', default)).strip() or default
+    except Exception:                                      # noqa: BLE001
+        return default
