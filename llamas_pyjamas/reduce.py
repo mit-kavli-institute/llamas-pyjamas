@@ -2981,14 +2981,9 @@ def main(config_path):
                     rss_input_file = lr_file
                     print(f"OH line refinement applied -> {os.path.basename(lr_file)}")
 
-                # Phase 3a (sky-refine): optional per-camera additive continuum pedestal, in the
-                # pkl domain before flux cal. Default OFF; HYPOTHESIS UNDER TEST (Sky/DESIGN.md).
-                if config.get('sky_pedestal', False):
-                    from llamas_pyjamas.Sky.skyPedestal import apply_pedestal_file
-                    print("Applying per-camera continuum pedestal (sky_pedestal=True)...")
-                    ped_file = apply_pedestal_file(rss_input_file, config)
-                    rss_input_file = ped_file
-                    print(f"Continuum pedestal applied -> {os.path.basename(ped_file)}")
+                # The continuum pedestal (sky_pedestal) is NO LONGER applied per-frame here: its
+                # floor template is built by combining ALL of the run's frames, so it runs as a
+                # run-level stage after this loop (see run_pedestal_stage, before the fibre-flat).
 
                 # Per-science wavelength QA: final xshift (incl. refineSkyX if
                 # enabled) + populated .sky. Writes one HTML report + CSV per
@@ -3114,6 +3109,27 @@ def main(config_path):
                                                 config.get('save_extraction_pkl', False)):
                 print(f"Removed extraction pkl (save_extraction_pkl=false): "
                       f"{os.path.basename(_pkl)}")
+
+        # ── Run-level continuum pedestal (option A) ──
+        # Applied here, after every base-sky per-channel RSS exists and BEFORE the fibre-throughput
+        # flat: scattered light does not traverse the fibre so it is not throughput-modulated and must
+        # be subtracted pre-flat (the RSS COUNTS/SKY planes are pre-flat). The floor template needs all
+        # the run's frames, so it cannot run in the per-frame loop above; run_pedestal_stage builds the
+        # per-run counts/sec template (or config/shipped fallback) and applies it idempotently.
+        if config.get('sky_subtract', True) and config.get('sky_pedestal', False):
+            from llamas_pyjamas.Sky.skyPedestal import run_pedestal_stage
+            _ped_rss = [
+                os.path.join(extraction_path, f)
+                for f in os.listdir(extraction_path)
+                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
+            ]
+            if _ped_rss:
+                print(f"Applying run-level continuum pedestal to {len(_ped_rss)} RSS files "
+                      f"(scope={config.get('sky_pedestal_scope', 'slit')})...")
+                try:
+                    run_pedestal_stage(_ped_rss, config, extraction_path)
+                except Exception as _ped_exc:               # never fatal
+                    logger.warning(f"Continuum pedestal stage failed: {_ped_exc}")
 
         # ── Fibre-to-fibre flat correction on RSS files ──
         if were_flat_corrected and config.get('apply_fibre_flat', True):

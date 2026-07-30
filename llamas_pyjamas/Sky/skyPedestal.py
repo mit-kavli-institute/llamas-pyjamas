@@ -579,3 +579,66 @@ def apply_pedestal_rss(rss_file, config, template_path=None):
         h.writeto(rss_file, overwrite=True)
     logger.info("skyPedestal(rss): applied scope=%s on %d cameras -> %s", scope, n_cam, base)
     return rss_file
+
+
+def _resolve_or_build_template(channel, rss_files, config, out_dir, clobber):
+    """Resolve the floor template for ``channel``: explicit config path -> per-run counts/sec
+    template built from this run's base-sky RSS (if missing or clobber) -> shipped fallback -> None."""
+    import os
+    from llamas_pyjamas.Sky.skyFloorTemplate import build_floor_template, save_template
+    cfg = config.get('sky_pedestal_template')
+    if cfg:
+        p = str(cfg).replace('{channel}', channel)
+        if os.path.exists(p):
+            return p
+        logger.warning("skyPedestal(stage): configured sky_pedestal_template %s missing", p)
+    per_run = os.path.join(out_dir, f'floor_template_cps_{channel}.fits')
+    if os.path.exists(per_run) and not clobber:
+        logger.info("skyPedestal(stage): reusing per-run template %s", per_run)
+        return per_run
+    try:
+        tpl, diag = build_floor_template(rss_files, channel, per_second=True)
+        save_template(per_run, tpl, diag, channel)
+        logger.info("skyPedestal(stage): built per-run counts/sec template %s (%d frames)",
+                    per_run, len(diag['frames']))
+        return per_run
+    except Exception as exc:                                # noqa: BLE001
+        logger.warning("skyPedestal(stage): per-run template build failed for %s (%s); "
+                       "trying shipped fallback", channel, exc)
+    return resolve_template_path(config, channel)
+
+
+def run_pedestal_stage(rss_files, config, out_dir):
+    """Run-level (post-extraction) continuum-pedestal stage — option A.
+
+    The floor template needs ALL of a run's frames, so the pedestal runs here (after every base-sky
+    per-channel RSS exists, BEFORE the fibre-throughput flat) rather than per-frame. For each channel
+    it resolves the template (config -> per-run counts/sec build if missing/clobber -> shipped
+    fallback) and applies :func:`apply_pedestal_rss` to each RSS. Idempotent (SKYPED-stamped RSS are
+    skipped), so it is resume-safe. ``rss_files``: the run's ``*_RSS_{channel}.fits`` (pre fibre-flat).
+    """
+    import os
+    from collections import defaultdict
+    by_chan = defaultdict(list)
+    for f in rss_files:
+        b = os.path.basename(f)
+        ch = next((c for c in ('red', 'green', 'blue') if f'_RSS_{c}' in b or f'_{c}.fits' in b), None)
+        if ch:
+            by_chan[ch].append(f)
+    scope = str(config.get('sky_pedestal_scope', 'slit')).lower()
+    clobber = bool(config.get('clobber', False))
+    n = 0
+    for ch, files in by_chan.items():
+        template_path = None
+        if scope == 'template':
+            template_path = _resolve_or_build_template(ch, files, config, out_dir, clobber)
+            if template_path is None:
+                logger.warning("skyPedestal(stage): no template for %s; channel skipped", ch)
+                continue
+        for f in sorted(files):
+            try:
+                apply_pedestal_rss(f, config, template_path=template_path)
+                n += 1
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("skyPedestal(stage): failed on %s (%s)", os.path.basename(f), exc)
+    logger.info("skyPedestal(stage): pedestal applied to %d RSS files (scope=%s)", n, scope)
