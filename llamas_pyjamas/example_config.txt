@@ -255,7 +255,7 @@ ray_num_cpus = 8
 #==============================================================================
 # Refine the per-fibre xshift (wavelength-alignment map) beyond the default
 # cross-correlation quadratic. Off by default.
-# refine_arc = false
+refine_arc = true               # [standard setup] per-fibre xshift refinement
 # Channels to refine (default all): e.g. red,green
 # refine_arc_channels = red,green,blue
 #
@@ -367,15 +367,21 @@ sky_selection_method = stratified
 # (blank) fibres -- targets the additive residual that co-adds into stacked-image striping, in the
 # counts domain before flux calibration. It is a CONTINUUM term (narrow line emission such as Lya is
 # preserved). CAUTION: could subtract real diffuse continuum emission; validate before trusting.
-# sky_pedestal = False
-# sky_pedestal_scope = slit           # 'template': RECOMMENDED — static per-camera floor shape from a
+sky_pedestal = true                   # [standard setup] per-camera continuum-floor (scattered-light)
+#                                     # subtraction. Run-level (post-extraction, pre-fibre-flat): the
+#                                     # floor template is built from the whole run in COUNTS/SEC (or a
+#                                     # config/shipped template). Regenerated per run unless clobber.
+sky_pedestal_scope = template         # 'template': RECOMMENDED — static per-camera floor shape from a
 #                                     # calibration built across many frames/fields (see
 #                                     # Sky/skyFloorTemplate.py) x one amplitude fitted per frame; the
 #                                     # shape comes from OTHER fields so it cannot absorb real diffuse
 #                                     # emission in the target. 'slit': per-frame per-fibre profile,
 #                                     # smooth along the slit. 'camera': one constant per camera
 #                                     # (falsified for the striping; comparison only)
-# sky_pedestal_template = /path/to/floor_template_{channel}.fits   # required for scope=template
+# sky_pedestal_template = /path/to/floor_template_{channel}.fits   # OPTIONAL: explicit template.
+#                                     # If unset (recommended), the pipeline auto-builds a per-run
+#                                     # counts/sec template from this run's frames (floor_template_cps_
+#                                     # {channel}.fits), falling back to the shipped package template.
 # sky_pedestal_min_exptime = 300      # skip the pedestal on shorter exposures (standards): almost no
 #                                     # accumulated sky -> negligible floor + noise-dominated amplitude
 # sky_pedestal_window = 51            # continuum median-filter width in wavelength (pixels)
@@ -394,7 +400,7 @@ sky_selection_method = stratified
 # sky_pedestal_edge_window = 4        # edge-refine running-median half-width (fibres)
 
 # --- pkl-domain (xshift) OH sky-line refinement (Sky/skyLineRefine.py) ---
-# sky_line_refine = False             # per-line OH refinement in the pkl/xshift domain (removes the
+sky_line_refine = true                # [standard setup] per-line OH refinement in the pkl/xshift domain (removes the
 #                                     # wavelength-domain arc-solution shift artifact the RSS framework
 #                                     # re-encodes). When True the RSS-domain framework OH scaling is
 #                                     # auto-skipped (sky_skip_oh_scale) to avoid double-correction.
@@ -407,8 +413,8 @@ sky_selection_method = stratified
 # reads the *_FF.fits files, applies source masking -> per-fibre OH scaling ->
 # PCA/ZAP residual cleaning, and writes *_FF_SKYSUB.fits (consumed by the
 # generate_skysub_cubes stage below). Default off.
-sky_framework = False
-# sky_method = pca            # 'pca' (full) or 'scaled' (OH scaling only)
+sky_framework = true          # [standard setup] advanced post-FF RSS sky framework
+sky_method = scaled           # [standard setup] 'pca' (full) or 'scaled' (OH scaling only)
 # sky_pca_ncomp = 20          # PCA residual components removed
 # sky_mask_method = whitelight
 # sky_qa_plots = False        # write *_skyQA.png before/after OH-residual diagnostics

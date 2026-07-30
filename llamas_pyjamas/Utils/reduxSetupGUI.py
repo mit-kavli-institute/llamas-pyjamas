@@ -131,7 +131,8 @@ CONFIG_CATALOG = [
     ]),
     ('Wavelength / Arc', [
         ('generate_new_wavelength_soln', 'bool', 'false', None, 'Build a new wavelength solution (requires an arc_file).'),
-        ('refine_arc', 'bool', 'false', None, 'Refine the per-fibre wavelength (xshift).'),
+        ('refine_arc', 'bool', 'true', None, 'Refine the per-fibre wavelength (xshift). [standard: on]'),
+        ('refine_arc_channels', 'str', '', None, 'Channels to refine, e.g. red,green,blue (blank = all).'),
         ('refine_arc_method', 'enum', 'perfiber', ['perfiber', '2d'], 'Arc-refinement method.'),
         ('refine_arc_use_night_arcs', 'bool', 'true', None, 'Use night arcs for the 2D refinement.'),
         ('arc_surface_order_x', 'int', '3', None, 'Legendre order along dispersion (2D refine).'),
@@ -152,10 +153,14 @@ CONFIG_CATALOG = [
          ['stratified', 'quantile', 'dimmest', 'middle-third', 'skymap', 'frame'], 'Sky-fibre selection method.'),
         ('sky_n_fibres', 'int', '20', None, 'Number of faint fibres for the ‘dimmest’ selection.'),
         ('sky_map_file', 'str', '', None, 'Mask file for the ‘skymap’ selection (blank = none).'),
-        ('sky_line_refine', 'bool', 'false', None, 'Per-line OH sky-line refinement (pkl domain).'),
-        ('sky_pedestal', 'bool', 'false', None, 'Static additive per-camera floor template (experimental).'),
-        ('sky_framework', 'bool', 'false', None, 'Advanced post-FF RSS sky framework (master switch).'),
-        ('sky_method', 'enum', 'pca', ['pca', 'scaled'], 'Framework method (PCA vs scaled-template).'),
+        ('sky_line_refine', 'bool', 'true', None, 'Per-line OH sky-line refinement (pkl domain). [standard: on]'),
+        ('sky_line_template', 'str', '', None, 'Optional per-(camera,slit) LSF-residual template path with {channel} (blank = skip).'),
+        ('sky_pedestal', 'bool', 'true', None, 'Per-camera additive continuum-floor (scattered-light) subtraction; run-level, pre-fibre-flat. [standard: on]'),
+        ('sky_pedestal_scope', 'enum', 'template', ['template', 'slit', 'camera'], "Pedestal floor shape source. 'template' (recommended): static per-run/shipped counts/sec template x per-frame amplitude."),
+        ('sky_pedestal_template', 'str', '', None, 'Floor-template path with {channel} (blank = auto per-run counts/sec build, else shipped fallback).'),
+        ('sky_pedestal_min_exptime', 'int', '300', None, 'Skip the pedestal on exposures shorter than this (s) — negligible floor.'),
+        ('sky_framework', 'bool', 'true', None, 'Advanced post-FF RSS sky framework (master switch). [standard: on]'),
+        ('sky_method', 'enum', 'scaled', ['pca', 'scaled'], 'Framework method (PCA vs scaled-template). [standard: scaled]'),
         ('sky_mask_method', 'enum', 'whitelight', ['whitelight', 'none'], 'Framework source masking.'),
         ('sky_pca_ncomp', 'int', '20', None, 'PCA components removed by the framework.'),
         ('sky_fiber_percentile', 'float', '60.0', None, 'Faint-fibre percentile treated as sky (framework).'),
@@ -212,6 +217,9 @@ def parse_config(path):
                 bad.append(line[len('#bad:'):].strip())
             elif line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
+                # strip trailing inline comment (whitespace-preceded '#'), matching reduce.py's
+                # loader, so seeded Options values are clean numbers/paths not "0.3  # ...".
+                value = re.sub(r'\s+#.*$', '', value.strip())
                 config[key.strip()] = value.strip()
     return config, bad
 
