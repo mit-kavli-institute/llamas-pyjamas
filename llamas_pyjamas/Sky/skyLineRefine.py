@@ -50,13 +50,58 @@ def _cfg(config, key, default):
         return getattr(config, key, default)
 
 
+_OH_ATLAS = None
+
+
+def _load_oh_atlas():
+    """Cached pypeit Rousselot OH atlas: (wavelength[Angstrom], flux). Native units are microns."""
+    global _OH_ATLAS
+    if _OH_ATLAS is None:
+        from pypeit import wavemodel
+        wv, fx = wavemodel.oh_lines()
+        _OH_ATLAS = (np.asarray(wv, float) * 1e4, np.asarray(fx, float))
+    return _OH_ATLAS
+
+
+def oh_atlas_mask(wave_1d, pad=PAD, flux_frac=3e-4):
+    """Boolean OH-line-pixel mask from the pypeit OH atlas mapped onto this fibre's wavelength grid.
+
+    Uses atlas lines within the fibre's range with flux >= ``flux_frac`` x max flux; masks +/- ``pad``
+    pixels around each line's nearest pixel. The OH forest has a huge dynamic range, so ``flux_frac``
+    must be small (default 3e-4) to reach the faint lines that still matter after the bright ones.
+    NB: on the empirical-2D sky this ~matches sigdetect (~0.33 vs 0.30 OH residual) but does not beat
+    it, because sigdetect runs on the high-S/N empirical sky template (not a noisy PCA basis) and is
+    already clean; the atlas is offered as an alternative / for use when the template is low-S/N."""
+    wave = np.asarray(wave_1d, float)
+    n = wave.size
+    m = np.zeros(n, bool)
+    g = np.isfinite(wave)
+    if g.sum() < 10:
+        return m
+    gi = np.where(g)[0]
+    wg = wave[gi]
+    order = np.argsort(wg)
+    wg_s, gi_s = wg[order], gi[order]
+    wA, fx = _load_oh_atlas()
+    sel = (wA >= wg_s[0]) & (wA <= wg_s[-1]) & (fx >= flux_frac * np.nanmax(fx))
+    for wl in wA[sel]:
+        j = int(np.searchsorted(wg_s, wl))
+        j = min(max(j, 1), wg_s.size - 1)
+        k = gi_s[j] if abs(wg_s[j] - wl) < abs(wg_s[j - 1] - wl) else gi_s[j - 1]
+        m[max(0, k - pad):min(n, k + pad + 1)] = True
+    return m
+
+
 def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, pad=PAD,
                  amp_floor=AMP_FLOOR, amp_clip=AMP_CLIP, deriv=True,
                  xshift_1d=None, tprof=None, offgrid=None, tmpl_clip=(-1.0, 3.0),
-                 core_exclude=CORE_EXCLUDE, deriv_ridge=DERIV_RIDGE, include_width=True):
+                 core_exclude=CORE_EXCLUDE, deriv_ridge=DERIV_RIDGE, include_width=True,
+                 line_mask=None):
     """Per-line OH residual correction for one fibre (native pixels / xshift domain).
 
-    Detects OH lines in the base ``sky`` template, then for EACH line segment independently fits the
+    Detects OH lines in the base ``sky`` template (or uses an externally supplied ``line_mask`` of
+    OH-line pixels, e.g. from a curated atlas mapped through the wavelength solution — cleaner and more
+    consistent than sigdetect), then for EACH line segment independently fits the
     base sky-subtracted residual ``counts - sky`` to the local line shape and its pixel-space
     derivatives ``d ~ alpha*S + beta*S'`` (per-line, unlike the RSS framework's single global per-fibre
     fit). When a static LSF-residual template ``tprof`` (on ``offgrid``, from :mod:`Sky.skyLineTemplate`)
@@ -73,7 +118,10 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
     use_T = tprof is not None and xshift_1d is not None and offgrid is not None
     xs = np.asarray(xshift_1d, float) if use_T else None
     s_line = s - _continuum(np.where(fin, s, 0.0), cont_win)
-    mask = _line_mask(s_line, sigdetect) & fin
+    if line_mask is not None:
+        mask = np.asarray(line_mask, bool) & fin              # curated (atlas) OH-line pixels
+    else:
+        mask = _line_mask(s_line, sigdetect) & fin            # sigdetect on the sky template
     if not mask.any():
         return corr
     lab, nlab = label(mask)
