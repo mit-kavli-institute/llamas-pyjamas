@@ -2777,7 +2777,50 @@ def main(config_path):
             print(f"Total extensions corrected: {overall_stats['total_corrected']}")
             print(f"Total extensions skipped: {overall_stats['total_skipped']}")
             print(f"Total extensions with errors: {overall_stats['total_errors']}")
-        
+
+        # ── Field-level empirical multi-dither 2D sky (opt-in; default off) ──
+        # Build, per exposure, the empirical sky from the field's dithers on the bias+flat-corrected
+        # 2D frames and extract it with the pipeline aperture, saved as a per-exposure sidecar pkl
+        # ({stem}_empsky2d.pkl). The sky loop below seeds each fibre's .sky with it as the BASE, then
+        # skyModel_1d(residual=True) + sky_line_refine + the framework stage run as the second-pass
+        # residual cleanup (each independently config-toggleable). See Combine/empiricalSky2D.
+        if (config.get('sky_empirical_2d', False)
+                and isinstance(science_files_to_process, list)
+                and len(science_files_to_process) >= 2):
+            print("\n" + "="*60)
+            print("EMPIRICAL MULTI-DITHER 2D SKY (field-level)")
+            print("="*60)
+            try:
+                from llamas_pyjamas.Combine import empiricalSky2D as _e2
+                _ech = config.get('sky_empirical_channels', ('red', 'green', 'blue'))
+                if isinstance(_ech, str):
+                    _ech = tuple(c.strip().lower() for c in _ech.split(',') if c.strip())
+                _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+                _fields = _e2.group_fields(
+                    science_files_to_process,
+                    min_frames=int(config.get('sky_empirical_min_frames', _e2.MIN_FIELD_FRAMES)))
+                for _fld in _fields:
+                    _members = _fld['members']
+                    if resume and all(os.path.exists(os.path.join(
+                            extraction_path, f"{_science_stem(m)}_empsky2d.pkl")) for m in _members):
+                        print(f"RESUME: empirical sky sidecars present for field "
+                              f"'{_fld['object']}' ({len(_members)} frames) — skipping build.")
+                        continue
+                    print(f"Field '{_fld['object']}': {len(_members)} member frame(s) + "
+                          f"{len(_fld['donors'])} borrowed donor(s)")
+                    _sky_by_member = _e2.build_field_empirical_sky(
+                        _members, _fld['donors'], final_trace_dir,
+                        method=_emethod, channels=_ech,
+                        min_blank=int(config.get('sky_empirical_min_blank', _e2.MIN_BLANK)),
+                        blank_frac=float(config.get('sky_empirical_blank_frac', _e2.BLANK_FRAC)))
+                    _e2.save_field_empirical_sky(_sky_by_member, extraction_path, _science_stem)
+                print("Empirical 2D sky sidecars written to extraction directory.")
+            except Exception as _e2_exc:                        # never fatal -> fall back to bspline
+                import traceback as _tb
+                print(f"WARNING: empirical 2D sky stage failed: {_e2_exc}")
+                _tb.print_exc()
+                print("Proceeding without empirical sky (b-spline base sky only).")
+
         # Process science files (now potentially flat-corrected) for extraction
         if 'science_files' not in config:
             raise ValueError("No science files provided in the configuration.")
@@ -2955,19 +2998,39 @@ def main(config_path):
                 savefile = refineSkyX(savefile, channels=sky_x_channels)
                 print(f"Sky xshift refinement complete: {os.path.basename(savefile)}")
 
+            # Empirical-2D base sky: seed each fibre's .sky from the field-stage sidecar so the
+            # downstream b-spline (skyModel_1d residual mode) refines the RESIDUAL and ADDS to it,
+            # rather than modelling the full sky. Seeded AFTER refineSkyX (which only touches the
+            # xshift<->wave mapping, not the native-column .counts/.sky the seed lives on).
+            _use_empirical = False
+            if config.get('sky_empirical_2d', False):
+                _emp_pkl = os.path.join(
+                    extraction_path, f"{_science_stem(orig_science_file)}_empsky2d.pkl")
+                if os.path.exists(_emp_pkl):
+                    from llamas_pyjamas.Combine.empiricalSky2D import seed_empirical_sky
+                    _nseed = seed_empirical_sky(savefile, _emp_pkl)
+                    _use_empirical = _nseed > 0
+                    print(f"Empirical 2D sky seeded into {_nseed} cameras "
+                          f"({os.path.basename(_emp_pkl)}); b-spline runs in residual mode.")
+                else:
+                    print(f"Empirical 2D sky: no sidecar for "
+                          f"{_science_stem(orig_science_file)} — using b-spline base sky.")
+
             # Optionally run sky subtraction, populating the .sky attribute on each fiber
             sky_subtract = config.get('sky_subtract', True)
             rss_input_file = savefile
             if sky_subtract:
                 print(f"Running sky subtraction on {os.path.basename(savefile)} "
-                      f"(selection='{sky_selection_method}')...")
+                      f"(selection='{sky_selection_method}', "
+                      f"{'residual/empirical' if _use_empirical else 'absolute'})...")
                 sky1d_file = skyModel_1d(savefile, color=None,
                                          sky_extraction_file=sky_frame_extraction_file,
                                          show_plots=config.get('sky_qa_plots', False),
                                          selection_method=sky_selection_method,
                                          n_sky_fibres=sky_n_fibres,
                                          sky_map=sky_map_obj,
-                                         arc_soln=config.get('arcdict'))
+                                         arc_soln=config.get('arcdict'),
+                                         residual=_use_empirical)
                 rss_input_file = sky1d_file
                 print(f"Sky subtraction complete. Sky model saved to {os.path.basename(sky1d_file)}")
 

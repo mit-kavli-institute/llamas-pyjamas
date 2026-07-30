@@ -399,6 +399,20 @@ sky_pedestal_scope = template         # 'template': RECOMMENDED — static per-c
 #                                     # fields -- it would then absorb genuine diffuse continuum.
 # sky_pedestal_edge_window = 4        # edge-refine running-median half-width (fibres)
 
+# --- Empirical multi-dither 2D sky (Combine/empiricalSky2D.py) ---
+# Opt-in. Builds the sky from the field's own dithers on the bias+flat-corrected 2D frames
+# (pre-extraction), so per-fibre optics aberrations + inter-fibre scattered light that the b-spline
+# cannot see are matched pixel-for-pixel from each fibre's BLANK dithers, then extracted with the
+# pipeline aperture and seeded as the base SKY. The stages below (sky_subtract b-spline in RESIDUAL
+# mode, sky_line_refine, sky_framework) then run as the second pass on the residual and ADD to it —
+# each still independently toggleable. COUNTS stays raw; SKY = empirical + postprocess corrections.
+# Requires >=2 dithers of the same field (grouped by OBJECT + pointing).
+sky_empirical_2d = false              # master switch for the empirical 2D sky base
+# sky_empirical_channels = red,green,blue   # channels to build the empirical sky for
+# sky_empirical_min_frames = 5        # fields thinner than this borrow nearest-in-time frames as blank donors
+# sky_empirical_min_blank = 3         # min blank dithers per fibre to build its empirical sky
+# sky_empirical_blank_frac = 0.6      # fraction of dithers (faintest, per fibre) treated as blank sky
+
 # --- pkl-domain (xshift) OH sky-line refinement (Sky/skyLineRefine.py) ---
 sky_line_refine = true                # [standard setup] per-line OH refinement in the pkl/xshift domain (removes the
 #                                     # wavelength-domain arc-solution shift artifact the RSS framework
