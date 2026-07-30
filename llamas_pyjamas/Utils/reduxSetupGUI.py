@@ -156,7 +156,7 @@ CONFIG_CATALOG = [
         ('sky_line_refine', 'bool', 'true', None, 'Per-line OH sky-line refinement (pkl domain). [standard: on]'),
         ('sky_line_template', 'str', '', None, 'Optional per-(camera,slit) LSF-residual template path with {channel} (blank = skip).'),
         ('sky_empirical_2d', 'bool', 'false', None, 'Empirical multi-dither 2D sky base (built from the field’s dithers pre-extraction; captures optics aberrations + inter-fibre scatter). The b-spline/OH/framework stages then run as the second pass on the residual. Needs >=2 dithers of the field.'),
-        ('sky_empirical_channels', 'str', 'red,green,blue', None, 'Channels to build the empirical 2D sky for.'),
+        ('sky_empirical_channels', 'flags', 'red,green,blue', ['blue', 'green', 'red'], 'Channels to build the empirical 2D sky for (checkbox group; unchecked channels fall back to the b-spline base sky).'),
         ('sky_empirical_min_frames', 'int', '5', None, 'Fields thinner than this borrow nearest-in-time frames as extra blank donors.'),
         ('sky_empirical_min_blank', 'int', '3', None, 'Min blank dithers per fibre to build its empirical sky.'),
         ('sky_empirical_blank_frac', 'float', '0.6', None, 'Fraction of dithers (faintest, per fibre) treated as blank sky.'),
@@ -474,6 +474,10 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
                 w.setToolTip(f'{key}\n{help_text}')            # native tooltip (flaky on macOS)
                 w.setProperty('helpKey', key)                  # for the help panel below
                 w.installEventFilter(self)
+                if kind == 'flags':                            # help fires on the child checkboxes too
+                    for cb in w.findChildren(QtWidgets.QCheckBox):
+                        cb.setProperty('helpKey', key)
+                        cb.installEventFilter(self)
                 form.addRow(key, w)
                 self._widgets[key] = (kind, w, choices)
             scroll = QtWidgets.QScrollArea()
@@ -538,6 +542,18 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
             w.addItems(choices or [])
             w.setCurrentText(str(seed) if str(seed) in (choices or []) else str(default))
             return w
+        if kind == 'flags':
+            # A checkbox group over ``choices``; value is the comma-joined set of ticked labels.
+            w = QtWidgets.QWidget()
+            lay = QtWidgets.QHBoxLayout(w)
+            lay.setContentsMargins(0, 0, 0, 0)
+            on = {s.strip().lower() for s in str(seed or '').split(',') if s.strip()}
+            for ch in (choices or []):
+                cb = QtWidgets.QCheckBox(ch)
+                cb.setChecked(ch.lower() in on)
+                lay.addWidget(cb)
+            lay.addStretch(1)
+            return w
         if kind == 'int':
             w = QtWidgets.QSpinBox()
             w.setRange(0, 100_000_000)
@@ -574,6 +590,9 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
                 out[key] = None if (key in _ZERO_IS_UNSET and v == 0) else str(v)
             elif kind == 'float':
                 out[key] = ('%g' % float(w.value()))
+            elif kind == 'flags':
+                on = [cb.text() for cb in w.findChildren(QtWidgets.QCheckBox) if cb.isChecked()]
+                out[key] = ','.join(on) if on else None
             else:  # str / path
                 t = w.text().strip()
                 out[key] = t or None
