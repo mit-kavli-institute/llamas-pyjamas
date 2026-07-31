@@ -970,8 +970,13 @@ class CubeViewerWindow(QMainWindow):
 
     def _after_registration(self, message: str) -> None:
         """Reload the current file so the freshly-written (refined or rough) WCS is picked up, then
-        re-display and report."""
-        if self._path:
+        re-display and report.
+
+        Block registration operates on the SELECTED dithers, not the open file, so the currently
+        displayed scene may be unrelated (e.g. a leftover combined CUBE from an earlier Combine).
+        Only an RSS scene can be reloaded through the RSS loader — reloading a cube here raised
+        'RSS has neither a SKYSUB nor a FLUX extension'. Skip the reload for non-RSS scenes."""
+        if self._path and isinstance(self.scene, RSSScene):
             self.load(self._path)                 # reload -> scene.refined_wcs from FIBERWCS
             try:
                 self.display()
