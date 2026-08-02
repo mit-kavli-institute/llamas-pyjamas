@@ -103,15 +103,23 @@ def measure_reference_flux(super_rss, sources: Sequence[SkyCoord], *, radius_arc
 
 
 def transparency_scales(super_rss, *, sources: Optional[Sequence[SkyCoord]] = None, n_sources=2,
-                        radius_arcsec=2.0, band=None, channels=None, reference='median'
-                        ) -> Dict[str, float]:
+                        radius_arcsec=2.0, band=None, channels=None, reference='median',
+                        max_scale=3.0) -> Dict[str, float]:
     """Per-exposure photometric scale from the in-field reference source(s).
 
     For each source, scale_e = (reference flux) / (exposure e's aperture flux), with the reference
     the ``'median'`` (or ``'max'``) of that source's fluxes across exposures. Per-exposure scales
     are the MEDIAN over sources (robust to one source being partially covered). Returns
     ``{exposure_id: scale}`` for :meth:`SuperRSS.apply_scales`. Exposures with no source flux get
-    scale 1.0 (left as-is)."""
+    scale 1.0 (left as-is).
+
+    Robustness (``max_scale``, default 3.0): the aperture flux is a raw SUM over the fibres within
+    ``radius_arcsec`` of the source, so for a faint/compact source it is unstable across exposures
+    with differing coverage — a near-zero flux makes ``ref/flux`` explode. Any per-source ratio
+    outside ``[1/max_scale, max_scale]`` is discarded, and if the surviving per-exposure scales still
+    span more than ``max_scale**2`` the reference photometry is deemed unreliable and NO scaling is
+    applied (all 1.0). Applying no scaling is far safer than applying a catastrophic one — a scale of
+    e.g. 300x multiplies that whole exposure (source AND background) and wrecks the co-add."""
     if sources is None:
         sources = find_reference_sources(super_rss, n=n_sources, band=band, channels=channels)
     if not sources:
@@ -124,7 +132,10 @@ def transparency_scales(super_rss, *, sources: Optional[Sequence[SkyCoord]] = No
     per_source = np.array([[flux_by_exp[e][s] for e in range(super_rss.n_exposures)]
                            for s in range(n_src)], dtype=float)   # (n_src, n_exp)
 
+    max_scale = float(max_scale)
+    lo_r, hi_r = 1.0 / max_scale, max_scale
     scales = {}
+    unreliable = False                                      # any exploded ratio == broken photometry
     for e in range(super_rss.n_exposures):
         s_e = []
         for s in range(n_src):
@@ -132,8 +143,24 @@ def transparency_scales(super_rss, *, sources: Optional[Sequence[SkyCoord]] = No
             valid = fluxes[fluxes > 0]
             ref = (np.median(valid) if reference == 'median' else valid.max()) if valid.size else 0
             if fluxes[e] > 0 and ref > 0:
-                s_e.append(ref / fluxes[e])
+                r = ref / fluxes[e]
+                if lo_r <= r <= hi_r:
+                    s_e.append(r)
+                else:
+                    unreliable = True                       # a real transparency ratio is never this extreme
         scales[super_rss.exposures[e].exposure_id] = float(np.median(s_e)) if s_e else 1.0
+
+    # A single out-of-band ratio (e.g. 300x, 0.03x) is proof the aperture photometry is unreliable for
+    # this field (faint/compact source, per-exposure coverage differences) — so DON'T trust the plausible
+    # -looking survivors either: a lone 0.5 among garbage would still imprint a 2x per-frame level step.
+    # No scaling is far safer than partial/wrong scaling; FLAM is already per-second so exposures still
+    # co-add coherently, just without a transparency correction.
+    vals = np.array(list(scales.values()), float)
+    if unreliable or not (vals.size and np.all(np.isfinite(vals))):
+        logger.warning('transparency scales unreliable (%s); leaving all exposures UNSCALED '
+                       '(reference source photometry unstable — likely too faint/compact)',
+                       ', '.join(f'{v:.3g}' for v in scales.values()))
+        return {e.exposure_id: 1.0 for e in super_rss.exposures}
     logger.info('transparency scales: %s',
                 ', '.join(f'{v:.3f}' for v in scales.values()))
     return scales
