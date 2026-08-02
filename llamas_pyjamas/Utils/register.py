@@ -53,20 +53,33 @@ class RegistrationResult:
     files: List[str] = field(default_factory=list)
 
 
-def query_gaia(ra_deg, dec_deg, radius_arcsec=45.0, mag_limit=20.5, timeout=30):
-    """Live Gaia DR3 cone-search. Returns a SkyCoord of sources (empty on any failure)."""
+def query_gaia(ra_deg, dec_deg, radius_arcsec=45.0, mag_limit=20.5, timeout=60, retries=1):
+    """Live Gaia DR3 cone-search. Returns a SkyCoord of sources (empty on any failure).
+
+    The ESA TAP server latency varies a lot (seconds to tens of seconds); ``timeout`` is generous
+    and one ``retries`` covers a transient timeout so a slow-but-alive server still yields a solve
+    instead of dropping the frame to a rough-WCS fallback. Callers that register a whole block should
+    query ONCE and reuse the catalogue across dithers (see ``register_block``) rather than pay this
+    per frame."""
     adql = (f"SELECT ra,dec,phot_g_mean_mag FROM gaiadr3.gaia_source WHERE "
             f"1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra_deg},{dec_deg},"
             f"{radius_arcsec / 3600.0})) AND phot_g_mean_mag<{mag_limit} "
             f"ORDER BY phot_g_mean_mag")
     url = GAIA_TAP + '?' + urllib.parse.urlencode(
         {'REQUEST': 'doQuery', 'LANG': 'ADQL', 'FORMAT': 'csv', 'QUERY': adql})
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            lines = resp.read().decode().strip().splitlines()[1:]
-    except Exception as exc:                            # noqa: BLE001 - network optional
-        logger.warning('Gaia query failed (%s); no absolute reference this frame', exc)
-        return SkyCoord([], [], unit='deg')
+    lines = None
+    for attempt in range(int(retries) + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                lines = resp.read().decode().strip().splitlines()[1:]
+            break
+        except Exception as exc:                        # noqa: BLE001 - network optional
+            if attempt < int(retries):
+                logger.warning('Gaia query slow/failed (%s); retrying (%d/%d)…',
+                               exc, attempt + 1, int(retries))
+                continue
+            logger.warning('Gaia query failed (%s); no absolute reference this frame', exc)
+            return SkyCoord([], [], unit='deg')
     if not lines:
         return SkyCoord([], [], unit='deg')
     ra, dec = [], []
@@ -306,17 +319,21 @@ def _rough_wcs(ra, dec, pa, extra_rot=0.0):
                          arcsec_per_pixel=ARCSEC_PER_FIBRE, pa_deg=pa + extra_rot)
 
 
-def _detect_and_query(det_path, band, mag_limit, radius_arcsec):
+def _detect_and_query(det_path, band, mag_limit, radius_arcsec, gaia=None):
     """Load a detection frame -> (ra, dec, pa, xs, ys, flux, sources, gaia). Fibre-space detection
-    is rotation-independent, so these can be reused across rotation hypotheses."""
+    is rotation-independent, so these can be reused across rotation hypotheses.
+
+    ``gaia`` (a pre-fetched catalogue) skips the live query — used by ``register_block`` so all
+    dithers of one field reuse a single Gaia cone-search instead of querying per frame."""
     with fits.open(det_path) as hd:
         ra, dec, pa = pointing_from_header(hd[0].header)
         fmap = hd['FIBERMAP'].data
         xs, ys = _fibre_xy(list(fmap['FIBER_ID']), list(fmap['BENCHSIDE']))
         flux = per_fibre_flux(hd, band=band)
     sources = detect_fibre_sources(xs, ys, flux) if ra is not None else []
-    gaia = (query_gaia(ra, dec, radius_arcsec=radius_arcsec, mag_limit=mag_limit)
-            if ra is not None else SkyCoord([], [], unit='deg'))
+    if gaia is None:
+        gaia = (query_gaia(ra, dec, radius_arcsec=radius_arcsec, mag_limit=mag_limit)
+                if ra is not None else SkyCoord([], [], unit='deg'))
     return ra, dec, pa, xs, ys, flux, sources, gaia
 
 
@@ -488,11 +505,16 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
     # -- pass 1: per-frame detect/query + fit each frame's own rotation where 2+ stars match
     # (skipped entirely when the caller supplies a fixed block rotation)
     frames, drots = [], []
-    for p in rss_paths:
+    block_gaia = None                                     # a block shares ONE pointing -> query Gaia
+    for p in rss_paths:                                   # once and reuse (8 slow queries -> 1)
         sib = channel_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         ra, dec, pa, xs, ys, flux, sources, gaia = _detect_and_query(dp, band, mag_limit,
-                                                                      radius_arcsec)
+                                                                      radius_arcsec, gaia=block_gaia)
+        if block_gaia is None and gaia is not None and len(gaia) > 0:
+            block_gaia = gaia                             # cache first non-empty catalogue for the block
+            logger.info('block Gaia: %d stars queried once, reused across %d frame(s)',
+                        len(gaia), len(rss_paths))
         if fixed_rotation is None and ra is not None and sources and len(gaia) > 0:
             w0 = _rough_wcs(ra, dec, pa)
             det_sky = w0.pixel_to_world(np.array([s.x for s in sources]),
