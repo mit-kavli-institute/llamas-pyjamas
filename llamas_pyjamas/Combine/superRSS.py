@@ -289,6 +289,15 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
         mjd = float(hdr.get('MJD-OBS', np.nan))
     flux_ext, err_ext = _PLANES[resolved_plane]
 
+    # SKYSUB is raw counts (NOT exposure-time normalised); FLAM is already per-second (the sensfunc
+    # step divides by exptime). To honour this module's "one photometric system up front" invariant,
+    # put SKYSUB on a counts/SECOND system too, so exposures of different exposure time co-add
+    # coherently and the per-exposure `scale` is left to carry ONLY transparency (not exptime).
+    to_per_second = (resolved_plane == 'skysub') and np.isfinite(exptime) and (exptime > 0)
+    if resolved_plane == 'skysub' and not to_per_second:
+        logger.warning('%s: SKYSUB plane but no usable exposure time (%.3g); combining in raw counts '
+                       '(exposures of different exptime will NOT match)', exposure_prefix(det), exptime)
+
     data = {}
     for c in want:
         with fits.open(siblings[c]) as hd:
@@ -297,6 +306,9 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
                                exposure_prefix(rss_path), c, flux_ext, err_ext)
                 continue
             w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext, sky_penalty=sky_penalty)
+        if to_per_second:
+            f = f / exptime
+            v = v / (exptime * exptime)                 # variance of counts/s
         data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om)
 
     meta = ExposureMeta(exposure_id=exposure_prefix(det), path=det, exptime=exptime,
@@ -343,7 +355,7 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
     field_name = ''
     with fits.open(loaded[0][0].path) as hd:
         field_name = str(hd[0].header.get('OBJECT', '')).split('_rank')[0]
-    bunit = 'erg/s/cm2/Angstrom' if plane_resolved == 'flam' else 'counts'
+    bunit = 'erg/s/cm2/Angstrom' if plane_resolved == 'flam' else 'counts/s'
 
     exposures: List[ExposureMeta] = []
     acc: Dict[str, dict] = {}                        # channel -> lists of per-exposure arrays
