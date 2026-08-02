@@ -52,7 +52,13 @@ class CoaddCubeScene(SpectralScene):
         self._nexp = np.max([getattr(c, 'nexp', c.coverage) for c in self._cubes.values()], axis=0)
         #: white-light spaxels shallower than this fraction of peak NEXP are excluded from the
         #: collapsed image (biased at partial-coverage boundaries); the cube itself is untouched.
-        self.coverage_frac = COVERAGE_FRAC_MIN
+        #: Reproduce the floor the cube was COMBINED with (persisted as the COVFRAC header) so opening
+        #: a saved cube shows the same field it was built with. Full field (0.0) when unrecorded
+        #: (older cubes) — the data is always complete, so default to showing all of it, not the old
+        #: 0.7 deep-core floor. (The combine dialog still overrides this on freshly-built scenes.)
+        _covfracs = [c.meta.get('COVFRAC') for c in self._cubes.values()
+                     if c.meta.get('COVFRAC') is not None]
+        self.coverage_frac = float(_covfracs[0]) if _covfracs else 0.0
         self.keys: List[Tuple[int, int]] = list(zip(*np.nonzero(self._coverage > 0)))
 
     def _step(self) -> float:
@@ -306,6 +312,8 @@ class CoaddCubeScene(SpectralScene):
             paths = [hdr[f'RSSFIL{i}'] for i in range(1, n + 1) if f'RSSFIL{i}' in hdr]
             meta = {'FIELD': hdr.get('FIELD', ''), 'CHANNEL': hdr.get('CHANNEL', 'green'),
                     'PIXSCALE': hdr.get('PIXSCALE', 0.5), 'exposure_paths': paths}
+            if 'COVFRAC' in hdr:                           # display floor the cube was combined with
+                meta['COVFRAC'] = float(hdr['COVFRAC'])
             return CoaddCube(data=data, var=var, wave=wave, coverage=cov, nexp=nexp,
                              wcs=WCS(hdr), bunit=hdr.get('BUNIT', ''), meta=meta)
 

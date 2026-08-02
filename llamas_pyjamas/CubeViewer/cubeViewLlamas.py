@@ -469,6 +469,8 @@ class CubeViewerWindow(QMainWindow):
             from llamas_pyjamas.Combine.superRSS import combined_dir
             outdir = combined_dir(paths, create=True)
             field = scene.object or 'field'
+            for c in scene.channels:                        # persist the floor so reopening matches this view
+                cubes[c].meta['COVFRAC'] = float(cov_frac)
             written = [cubes[c].write(os.path.join(outdir, f'{field}_cube_{c}.fits'))
                        for c in scene.channels]
         except Exception as exc:                   # noqa: BLE001
