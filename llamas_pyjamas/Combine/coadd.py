@@ -65,6 +65,15 @@ def whitelight_floor(wave_min, wave_max):
 # stats but NEVER discarded from the cube -- the coverage/NEXP maps stay so the mask is reversible.
 COVERAGE_FRAC_MIN = 0.7
 
+# Grid guards: a mis-pointed/mislabelled exposure (wrong OBJECT, garbage RA/DEC, or a bogus WCS
+# solve on a no-Gaia field) can place fibres degrees from the field and size the output grid across
+# the sky -> a multi-TB allocation that OOM-kills the process. A LLAMAS field + its dithers spans far
+# less than a few arcmin, so fibres beyond MAX_FIELD_RADIUS_ARCSEC of the (robust median) centre are
+# excluded from the grid EXTENT (they still get pixel coords and simply fall outside the grid), and
+# the final pixel count is hard-capped with a clear error instead of a silent OOM.
+MAX_FIELD_RADIUS_ARCSEC = 600.0
+MAX_GRID_PIXELS = 8_000_000          # ~2800x2800; any real IFU field is far smaller
+
 
 def low_coverage_mask(nexp, frac=COVERAGE_FRAC_MIN):
     """Boolean map (True = exclude) of spaxels shallower than ``frac`` x peak NEXP. frac<=0 => none."""
@@ -97,11 +106,28 @@ def make_output_grid(ra, dec, pixscale, pad_pix, center=None):
 
     w0 = _tan_wcs(ra0, dec0, (1.0, 1.0), pixscale)
     px, py = w0.world_to_pixel(sc)
-    xmin, ymin = np.floor(px.min()), np.floor(py.min())
-    xmax, ymax = np.ceil(px.max()), np.ceil(py.max())
+    # Size the grid from fibres within MAX_FIELD_RADIUS of the field centre only, so a mis-pointed
+    # exposure cannot stretch the grid across the sky (multi-TB alloc -> OOM). Outliers keep their
+    # pixel coords and simply land outside the grid (skipped by the caller's coverage test).
+    sep = sc.separation(SkyCoord(ra0 * u.deg, dec0 * u.deg)).arcsec
+    inlier = np.isfinite(px) & np.isfinite(py) & (sep <= MAX_FIELD_RADIUS_ARCSEC)
+    n_out = int((~inlier).sum())
+    if n_out:
+        logger.warning('make_output_grid: %d fibre(s) > %.0f" from field centre excluded from the '
+                       'grid extent (likely a mis-pointed/mislabelled exposure at RA/DEC far from '
+                       'the field); they will not contribute to the co-add', n_out, MAX_FIELD_RADIUS_ARCSEC)
+    if not inlier.any():
+        inlier = np.isfinite(px) & np.isfinite(py)         # degenerate: fall back to all finite
+    xmin, ymin = np.floor(px[inlier].min()), np.floor(py[inlier].min())
+    xmax, ymax = np.ceil(px[inlier].max()), np.ceil(py[inlier].max())
     pad = int(np.ceil(pad_pix)) + 2
     nx = int(xmax - xmin) + 2 * pad + 1
     ny = int(ymax - ymin) + 2 * pad + 1
+    if ny * nx > MAX_GRID_PIXELS:                          # backstop: clear error, not a silent OOM
+        raise ValueError(
+            f'output grid {ny}x{nx} = {ny * nx:,} px exceeds the {MAX_GRID_PIXELS:,} cap even after '
+            f'outlier rejection (field spans {sep[inlier].max():.0f}"). The exposures likely do not '
+            f'share a pointing — check for mislabelled OBJECT / bad WCS before combining.')
     wcs = _tan_wcs(ra0, dec0, (1.0 - xmin + pad, 1.0 - ymin + pad), pixscale)
     px, py = wcs.world_to_pixel(sc)
     return wcs, ny, nx, np.asarray(px, float), np.asarray(py, float)

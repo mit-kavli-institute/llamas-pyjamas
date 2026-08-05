@@ -375,6 +375,27 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
     if not loaded:
         raise ValueError('No usable exposures to combine')
 
+    # Name any exposure whose pointing is far (>600") from the block median: mislabelled OBJECT,
+    # garbage RA/DEC, or a bogus no-Gaia WCS solve. make_output_grid excludes it from the grid so
+    # it can't OOM the co-add, but flag WHICH frame is rogue rather than silently dropping it.
+    def _expo_center(data):
+        for d in data.values():
+            ra = np.asarray(d['ra'], float); dec = np.asarray(d['dec'], float)
+            g = np.isfinite(ra) & np.isfinite(dec)
+            if g.any():
+                return float(np.nanmedian(ra[g])), float(np.nanmedian(dec[g]))
+        return np.nan, np.nan
+    _centers = np.array([_expo_center(d) for _, _, d in loaded])
+    if len(_centers) >= 2 and np.isfinite(_centers).all():
+        _rac, _decc = np.nanmedian(_centers[:, 0]), np.nanmedian(_centers[:, 1])
+        _cosd = np.cos(np.deg2rad(_decc))
+        _sep = np.hypot((_centers[:, 0] - _rac) * _cosd, _centers[:, 1] - _decc) * 3600.0
+        for (meta, _, _), s in zip(loaded, _sep):
+            if s > 600.0:
+                logger.warning('exposure %s pointing is %.0f" (%.2f deg) from the field centre — '
+                               'likely mislabelled OBJECT or bad WCS; excluded from the co-add grid',
+                               meta.exposure_id, s, s / 3600.0)
+
     loaded.sort(key=lambda t: (np.nan_to_num(t[0].mjd, nan=np.inf), t[0].exposure_id))
     plane_resolved = loaded[0][1]
     field_name = ''
