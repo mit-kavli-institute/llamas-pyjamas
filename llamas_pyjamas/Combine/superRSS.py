@@ -304,6 +304,14 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
         exptime = _hdr_float(hdr, exposure_time(hdr, default=None))
         airmass = _hdr_float(hdr.get('AIRMASS'), hdr.get('TEL AIRMASS'))
         mjd = _hdr_float(hdr.get('MJD-OBS'))
+        if not np.isfinite(mjd):                          # pre-TCS: rebuild MJD from TEL DATE-OBS+UTC
+            try:
+                from llamas_pyjamas.Utils.waveFrame import _obs_time
+                _t = _obs_time(hdr)
+                if _t is not None:
+                    mjd = float(_t.mjd)
+            except Exception:                             # noqa: BLE001 - ordering nicety, never fatal
+                pass
     flux_ext, err_ext = _PLANES[resolved_plane]
 
     # SKYSUB is raw counts (NOT exposure-time normalised); FLAM is already per-second (the sensfunc

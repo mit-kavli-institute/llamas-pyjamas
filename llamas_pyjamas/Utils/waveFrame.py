@@ -83,10 +83,14 @@ def _obs_time(header):
         except (TypeError, ValueError):
             t = None
     if t is None:
-        date, utc = header.get('TEL DATE-OBS'), header.get('UTC')
-        if date and utc:
+        date = header.get('TEL DATE-OBS')
+        for utc_key in ('UTC', 'TEL UTC'):                # plain UTC may be empty on pre-TCS data;
+            utc = header.get(utc_key)                     # TEL UTC carries the same time
+            if not (date and utc) or 'Undefined' in type(utc).__name__:
+                continue
             try:
                 t = Time(f'{str(date).strip()}T{str(utc).strip()}', format='isot', scale='utc')
+                break
             except (ValueError, TypeError):
                 t = None
     if t is None:
