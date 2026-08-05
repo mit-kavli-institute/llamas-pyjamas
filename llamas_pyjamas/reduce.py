@@ -686,9 +686,11 @@ def _pointing_from_header(header):
     """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header (F6).
 
     Prefers the decimal ``RA``/``DEC`` keywords, falling back to the sexagesimal
-    HIERARCH ``TEL RA``/``TEL DEC`` pair, and reads the field rotation from
-    ``TEL PA`` (then ``TEL ROT``). Returns ``(0.0, 0.0, 0.0)`` if nothing usable
-    is present so cube construction degrades to the old placeholder behaviour.
+    HIERARCH ``TEL RA``/``TEL DEC`` pair, and reads the field POSITION angle from
+    ``TEL ROT`` (then ``TEL PA``). ``TEL PA`` is the PARALLACTIC angle, not the
+    instrument orientation, so it must not preempt ``TEL ROT``. Returns
+    ``(0.0, 0.0, 0.0)`` if nothing usable is present so cube construction degrades
+    to the old placeholder behaviour.
     """
     if header is None:
         return 0.0, 0.0, 0.0
@@ -712,7 +714,7 @@ def _pointing_from_header(header):
                 return 0.0, 0.0, 0.0
         else:
             return 0.0, 0.0, 0.0
-    pa = header.get('TEL PA', header.get('TEL ROT', 0.0))
+    pa = header.get('TEL ROT', header.get('TEL PA', 0.0))   # TEL ROT = position angle; TEL PA = parallactic
     try:
         pa = float(pa)
         if not np.isfinite(pa):

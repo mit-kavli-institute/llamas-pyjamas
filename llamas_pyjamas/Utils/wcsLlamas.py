@@ -108,17 +108,21 @@ def pointing_from_header(header) -> Tuple[Optional[float], Optional[float], floa
     """Return (ra_deg, dec_deg, pa_deg) from a primary header, or (None, None, 0.0).
 
     Prefers decimal ``RA``/``DEC``; falls back to sexagesimal HIERARCH ``TEL RA``/``TEL DEC``
-    (hourangle/deg). Rotation from ``TEL PA`` then ``TEL ROT``. Matches
+    (hourangle/deg). Rotation (field POSITION angle) from ``TEL ROT`` then ``TEL PA``. Matches
     ``reduce._pointing_from_header`` but returns None (not 0,0) when the pointing is absent, so
     callers can fall back to a non-celestial WCS rather than mislabel the field as RA=DEC=0.
     """
     if header is None:
         return None, None, 0.0
-    # TEL PA / TEL ROT is the field position angle, degrees east of North -- the angle this WCS
-    # applies as a rotation. NOTE (per RS): the telescope control software has had bugs writing
-    # this correctly; it *should* be right but the value is not yet trusted. Phase 2 (star
-    # centroids -> fit the WCS) must verify both the header value and our applied sign/parity.
-    pa = header.get('TEL PA', header.get('TEL ROT', 0.0))
+    # Field POSITION angle (deg E of N) = TEL ROT (the rotator / commanded PA), which the WCS applies
+    # as its rotation. TEL PA is the PARALLACTIC angle -- a geometric readout of HA/Dec/latitude
+    # (confirmed by its header comment and by matching the computed parallactic angle), NOT the
+    # instrument orientation -- so it must NOT drive the rotation. Prefer TEL ROT; use TEL PA only if
+    # TEL ROT is absent. (may26 has no TEL PA and already used TEL ROT -> no-op there; this fixes data
+    # like mar25 that writes both, where the old TEL-PA-first order injected the parallactic angle as a
+    # spurious, time-varying rotation.) NOTE (per RS): TEL ROT itself has had TCS write bugs; the Gaia
+    # star fit verifies it when stars are present.
+    pa = header.get('TEL ROT', header.get('TEL PA', 0.0))
     try:
         pa = float(pa)
     except (TypeError, ValueError):

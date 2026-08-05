@@ -602,8 +602,11 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
         own WCS position of its source is used, so every dither registers onto frame 1 (frame 1 is
         left as-is). A single fixed anchor is what makes dithering a non-issue: each frame's source
         is pinned to the SAME sky point, so the per-frame dither offset is absorbed as translation.
-    block_pa : PA held for every frame (deg). ``None`` -> the first valid frame's header PA, so a
-        per-frame header glitch cannot tilt an individual dither.
+    block_pa : force a single PA (deg) on every frame. ``None`` (default) uses EACH frame's own header
+        POSITION angle (``TEL ROT`` via ``pointing_from_header``) — constant across a block when the
+        rotator is held fixed, and correctly different when the rotator was intentionally moved (e.g. a
+        180 deg flip between dither sets). NB the header ``TEL PA`` is the PARALLACTIC angle, NOT the
+        instrument orientation, and is deliberately not used. Only pass a value to override a bad header.
     sources_by_frame : optional {rss_path: (x, y)} overriding the auto-detected source centroid for
         that frame — the interactive click-to-override path (a cosmic/neighbour outshining the target).
     max_shift_arcsec : cap on the pin translation; generous (a deliberate dither shift is legitimate,
@@ -636,8 +639,7 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
         if ra is None:
             results[p] = rough_result
             continue
-        if block_pa is None:
-            block_pa = pa                                   # first valid frame sets the block rotation
+        use_pa = float(block_pa) if block_pa is not None else pa   # per-frame header PA unless forced
         src_xy = (sources_by_frame or {}).get(p)
         if src_xy is None:
             det = detect_fibre_sources(xs, ys, flux)
@@ -647,7 +649,7 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
                 results[p] = rough_result
                 continue
             src_xy = (det[0].x, det[0].y)                   # brightest compact source
-        w0 = _rough_wcs(ra, dec, block_pa)
+        w0 = _rough_wcs(ra, dec, use_pa)
         if anchor_sc is None:                               # first frame defines the anchor
             anchor_sc = w0.pixel_to_world(src_xy[0], src_xy[1])
             wcs, rms, refined = w0, 0.0, True               # frame 1 already sits at the anchor
@@ -666,8 +668,9 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
         written = _write_frame_solution(dp, sib, wcs, prov)
         results[p] = RegistrationResult('relative', 'relative-source', bool(refined), 1,
                                         float(rms), _axis_pa(wcs), False, written)
-    logger.info('relative registration: %d frame(s) pinned to a common source (rotation %.2f held)',
-                len(results), float(block_pa) if block_pa is not None else float('nan'))
+    logger.info('relative registration: %d frame(s) pinned to a common source (%s)', len(results),
+                f'forced rotation {float(block_pa):.2f} deg'
+                if block_pa is not None else 'per-frame header PA')
     return results
 
 
