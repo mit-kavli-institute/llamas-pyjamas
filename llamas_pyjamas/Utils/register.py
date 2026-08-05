@@ -566,6 +566,82 @@ def _block_key(rss_path):
     return f'{obj}@{rot}'
 
 
+def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
+                            sources_by_frame=None, max_shift_arcsec=120.0):
+    """Tier-2 relative registration for fields with NO Gaia stars in the FOV.
+
+    Aligns every dither of a block onto ONE common in-field source (typically the target itself),
+    holding a single calibrated rotation for the whole block and solving per-frame TRANSLATION only.
+    Gives a self-consistent RELATIVE astrometry (the dithers co-add without smearing) even with no
+    absolute catalogue — the case where Tier-1 Gaia finds no stars and would otherwise lock onto
+    noise. Rotation is assumed identical frame-to-frame (the rotator is fixed within a block).
+
+    anchor : (ra_deg, dec_deg) to pin the common source to. If ``None`` (default), the FIRST frame's
+        own WCS position of its source is used, so every dither registers onto frame 1 (frame 1 is
+        left as-is). A single fixed anchor is what makes dithering a non-issue: each frame's source
+        is pinned to the SAME sky point, so the per-frame dither offset is absorbed as translation.
+    block_pa : PA held for every frame (deg). ``None`` -> the first valid frame's header PA, so a
+        per-frame header glitch cannot tilt an individual dither.
+    sources_by_frame : optional {rss_path: (x, y)} overriding the auto-detected source centroid for
+        that frame — the interactive click-to-override path (a cosmic/neighbour outshining the target).
+    max_shift_arcsec : cap on the pin translation; generous (a deliberate dither shift is legitimate,
+        unlike a Gaia mis-match).
+
+    Returns {rss_path: RegistrationResult}.
+    """
+    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+    anchor_sc = SkyCoord(anchor[0] * u.deg, anchor[1] * u.deg) if anchor is not None else None
+    results = {}
+    for p in rss_paths:
+        sib = channel_siblings(p)
+        dp = sib.get('green') or next(iter(sib.values()))
+        with fits.open(dp) as hd:
+            ra, dec, pa = pointing_from_header(hd[0].header)
+            fmap = hd['FIBERMAP'].data
+            xs, ys = _fibre_xy(list(fmap['FIBER_ID']), list(fmap['BENCHSIDE']))
+            flux = per_fibre_flux(hd, band=band)
+        rough_result = RegistrationResult('header', 'rough-header', False, 0,
+                                          float('nan'), float('nan'), False, [])
+        if ra is None:
+            results[p] = rough_result
+            continue
+        if block_pa is None:
+            block_pa = pa                                   # first valid frame sets the block rotation
+        src_xy = (sources_by_frame or {}).get(p)
+        if src_xy is None:
+            det = detect_fibre_sources(xs, ys, flux)
+            if not det:
+                logger.warning('relative reg: no source detected in %s; keeping rough',
+                               os.path.basename(p))
+                results[p] = rough_result
+                continue
+            src_xy = (det[0].x, det[0].y)                   # brightest compact source
+        w0 = _rough_wcs(ra, dec, block_pa)
+        if anchor_sc is None:                               # first frame defines the anchor
+            anchor_sc = w0.pixel_to_world(src_xy[0], src_xy[1])
+            wcs, rms, refined = w0, 0.0, True               # frame 1 already sits at the anchor
+        else:
+            sol = solve_wcs([src_xy], anchor_sc, w0, refine_rotation=False,
+                            max_shift_arcsec=max_shift_arcsec)
+            if sol is None:
+                logger.warning('relative reg: pin shift exceeded cap for %s; keeping rough',
+                               os.path.basename(p))
+                wcs, rms, refined = w0, float('nan'), False
+            else:
+                wcs, rms, refined = sol[0], sol[1], True
+        prov = {'tier': 'relative', 'method': 'relative-source', 'refined': bool(refined),
+                'pa_offset': float(IFU_PA_OFFSET), 'catalog': 'relative',
+                'rms': float(rms), 'nstars': 1}
+        written = _write_frame_solution(dp, sib, wcs, prov)
+        results[p] = RegistrationResult('relative', 'relative-source', bool(refined), 1,
+                                        float(rms), _axis_pa(wcs), False, written)
+    logger.info('relative registration: %d frame(s) pinned to a common source (rotation %.2f held)',
+                len(results), float(block_pa) if block_pa is not None else float('nan'))
+    return results
+
+
 def register_exposures(rss_paths, **kwargs):
     """Register many exposures, auto-grouped into blocks by (OBJECT, rotator) so each pointing's
     dithers share one solved rotation (see :func:`register_block`). Returns {rss_path: result}."""
