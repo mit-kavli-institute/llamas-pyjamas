@@ -518,9 +518,10 @@ if _HAVE_QT:
         def _build_ui(self) -> None:
             lay = QVBoxLayout(self)
             info = QLabel('Auto-detected the brightest compact source per frame. Select a frame to '
-                          'show it in DS9; if the mark is on the wrong object, move the DS9 crosshair '
-                          'onto the target and "Grab" to override. Then "Register": every frame is '
-                          'pinned to the first frame\'s source, holding one rotation.')
+                          'show it in DS9 — the current source is marked with a <b>cyan circle</b>. '
+                          'If it is on the wrong object, move the DS9 crosshair onto the target and '
+                          '"Grab" to override. Then "Register": every frame is pinned to the first '
+                          'frame\'s source, holding one rotation.')
             info.setWordWrap(True)
             lay.addWidget(info)
             self.list = QListWidget()
@@ -571,9 +572,26 @@ if _HAVE_QT:
                 self.window.load(p)
                 self.window.display()
                 self.window.ds9.set('mode crosshair')
+                self._mark_source(p)
             except Exception as exc:            # noqa: BLE001
                 QMessageBox.warning(self, 'Show frame',
                                     f'Could not display {os.path.basename(p)}:\n{exc}')
+
+        def _mark_source(self, p) -> None:
+            """Draw a cyan circle at the current source of frame ``p`` (fibre-map -> DS9 image)."""
+            xy = self.sources.get(p)
+            sc = getattr(self.window, 'scene', None)
+            if xy is None or sc is None or not hasattr(sc, '_step'):
+                return
+            try:
+                step = sc._step()
+                px, py = xy[0] / step + 1.0, xy[1] / step + 1.0    # matches RegisterDialog._fm_to_image
+                self.window.ds9.delete_region_group('cubeview-src')
+                self.window.ds9.set_regions(
+                    f'image\ncircle({px:.2f},{py:.2f},8) # color=cyan width=3 '
+                    f'text={{source}} tag={{cubeview-src}}')
+            except Exception as exc:            # noqa: BLE001
+                logger.debug('Could not mark source: %s', exc)
 
         def _grab(self) -> None:
             p = self._selected_path()
@@ -596,6 +614,7 @@ if _HAVE_QT:
             xy = (float(c.x), float(c.y)) if c is not None else (float(fx), float(fy))
             self.sources[p] = xy
             self._refresh()
+            self._mark_source(p)
             self.window.statusBar().showMessage(
                 f'Source for {os.path.basename(p).split("_RSS_")[0]} set to fibre '
                 f'({xy[0]:.1f}, {xy[1]:.1f})')
