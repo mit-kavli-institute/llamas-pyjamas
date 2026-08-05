@@ -351,6 +351,11 @@ class CubeViewerWindow(QMainWindow):
                                     '(one shared, held rotation)')
         wcs_block_action.triggered.connect(self.auto_register_block)
         wcs_menu.addAction(wcs_block_action)
+        wcs_common_action = QAction('Register block on common source (no Gaia)…', self)
+        wcs_common_action.setToolTip('For fields with no Gaia stars: pin one in-field source across '
+                                     'all dithers, holding one rotation (relative registration)')
+        wcs_common_action.triggered.connect(self.register_block_common_source)
+        wcs_menu.addAction(wcs_common_action)
         wcs_menu.addSeparator()
         self.wcs_refine_action = QAction('&Refine WCS interactively…', self)
         self.wcs_refine_action.setToolTip('Click stars in DS9 to build the WCS by hand -- the '
@@ -1028,6 +1033,38 @@ class CubeViewerWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         n_ref = sum(1 for r in results.values() if r.refined)
         self._after_registration(f'Registered {n_ref}/{len(paths)} frame(s) in the block.')
+
+    def register_block_common_source(self) -> None:
+        """Register a block with NO Gaia coverage by pinning a common in-field source (Tier-2
+        relative). Holds one rotation, aligns every dither onto the first frame's source position."""
+        from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
+        dialog = ObslogDialog(self._start_dir(), multi=True,
+                              title='Register block on common source (pick the dithers)', parent=self)
+        if not dialog.exec():
+            return
+        paths = getattr(dialog, 'chosen_files', None) or []
+        if not paths:
+            return
+        from llamas_pyjamas.Utils.register import register_block_relative
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            results = register_block_relative(paths, anchor=None)
+        except Exception as exc:                  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Register on common source', f'Failed:\n{exc}')
+            return
+        QApplication.restoreOverrideCursor()
+        n_ref = sum(1 for r in results.values() if r.refined)
+        fell = [os.path.basename(p) for p, r in results.items() if not r.refined]
+        msg = (f'Pinned a common source in {n_ref}/{len(results)} frame(s) — relative registration, '
+               f'no Gaia; one rotation held from the header, dithers aligned onto the first frame.')
+        if fell:
+            msg += '\n\nNo source detected (kept rough) in:\n' + '\n'.join(fell)
+        msg += ('\n\nNote: this auto-detects the BRIGHTEST compact source per frame. If the stack '
+                'looks misaligned, a frame likely locked onto a cosmic/neighbour instead of the '
+                'target — re-run selecting only the clean dithers, or use "Refine WCS interactively" '
+                'on the odd frame.')
+        self._after_registration(msg)
 
     def refine_wcs_interactive(self) -> None:
         """Open the interactive star-clicking WCS dialog for the loaded exposure."""

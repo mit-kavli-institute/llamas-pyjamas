@@ -592,6 +592,13 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
     from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
     from astropy.coordinates import SkyCoord
     import astropy.units as u
+    _seen, _uniq = set(), []                             # de-dup channel planes -> one path/exposure
+    for p in rss_paths:
+        k = os.path.basename(p).split('_RSS_')[0]
+        if k not in _seen:
+            _seen.add(k)
+            _uniq.append(p)
+    rss_paths = _uniq
     anchor_sc = SkyCoord(anchor[0] * u.deg, anchor[1] * u.deg) if anchor is not None else None
     results = {}
     for p in rss_paths:
