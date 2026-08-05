@@ -638,6 +638,13 @@ if _HAVE_QT:
             for r in results.values():
                 self.written.extend(getattr(r, 'files', []) or [])
             n = sum(1 for r in results.values() if r.refined)
-            QMessageBox.information(self, 'Register',
-                                   f'Pinned a common source in {n}/{len(results)} frame(s).')
+            failed = [(p, r) for p, r in results.items() if not r.refined]
+            msg = f'Pinned a common source in {n}/{len(results)} frame(s).'
+            if failed:
+                lines = [f'  • {os.path.basename(p).split("_RSS_")[0]}: {r.method}'
+                         for p, r in failed]
+                msg += ('\n\nKept ROUGH (not registered):\n' + '\n'.join(lines)
+                        + '\n\nA frame far from the field is almost always a mislabelled / mis-pointed '
+                          'exposure — deselect it from the block (the cube combine also auto-excludes it).')
+            QMessageBox.information(self, 'Register', msg)
             self.accept()

@@ -634,10 +634,9 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
             fmap = hd['FIBERMAP'].data
             xs, ys = _fibre_xy(list(fmap['FIBER_ID']), list(fmap['BENCHSIDE']))
             flux = per_fibre_flux(hd, band=band)
-        rough_result = RegistrationResult('header', 'rough-header', False, 0,
-                                          float('nan'), float('nan'), False, [])
-        if ra is None:
-            results[p] = rough_result
+        if ra is None:                                      # failures carry the reason in `method`
+            results[p] = RegistrationResult('header', 'rough (no header pointing)', False, 0,
+                                            float('nan'), float('nan'), False, [])
             continue
         use_pa = float(block_pa) if block_pa is not None else pa   # per-frame header PA unless forced
         src_xy = (sources_by_frame or {}).get(p)
@@ -646,10 +645,12 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
             if not det:
                 logger.warning('relative reg: no source detected in %s; keeping rough',
                                os.path.basename(p))
-                results[p] = rough_result
+                results[p] = RegistrationResult('header', 'rough (no source detected)', False, 0,
+                                                float('nan'), float('nan'), False, [])
                 continue
             src_xy = (det[0].x, det[0].y)                   # brightest compact source
         w0 = _rough_wcs(ra, dec, use_pa)
+        reason = None
         if anchor_sc is None:                               # first frame defines the anchor
             anchor_sc = w0.pixel_to_world(src_xy[0], src_xy[1])
             wcs, rms, refined = w0, 0.0, True               # frame 1 already sits at the anchor
@@ -657,8 +658,12 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
             sol = solve_wcs([src_xy], anchor_sc, w0, refine_rotation=False,
                             max_shift_arcsec=max_shift_arcsec)
             if sol is None:
-                logger.warning('relative reg: pin shift exceeded cap for %s; keeping rough',
-                               os.path.basename(p))
+                off = float(w0.pixel_to_world(src_xy[0], src_xy[1]).separation(anchor_sc).arcsec)
+                offtxt = f'{off / 3600.0:.1f} deg' if off > 3600 else f'{off:.0f}"'
+                reason = (f'source is {offtxt} from the field — pointing off '
+                          f'(mislabelled / mis-pointed frame?)')
+                logger.warning('relative reg: pin shift %s > cap for %s; keeping rough',
+                               offtxt, os.path.basename(p))
                 wcs, rms, refined = w0, float('nan'), False
             else:
                 wcs, rms, refined = sol[0], sol[1], True
@@ -666,8 +671,9 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
                 'pa_offset': float(IFU_PA_OFFSET), 'catalog': 'relative',
                 'rms': float(rms), 'nstars': 1}
         written = _write_frame_solution(dp, sib, wcs, prov)
-        results[p] = RegistrationResult('relative', 'relative-source', bool(refined), 1,
-                                        float(rms), _axis_pa(wcs), False, written)
+        results[p] = RegistrationResult('relative' if refined else 'header',
+                                        'relative-source' if refined else f'rough ({reason})',
+                                        bool(refined), 1, float(rms), _axis_pa(wcs), False, written)
     logger.info('relative registration: %d frame(s) pinned to a common source (%s)', len(results),
                 f'forced rotation {float(block_pa):.2f} deg'
                 if block_pa is not None else 'per-frame header PA')
