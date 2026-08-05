@@ -566,6 +566,28 @@ def _block_key(rss_path):
     return f'{obj}@{rot}'
 
 
+def detect_common_sources(rss_paths, *, band=None):
+    """Auto-detect the brightest compact source (fibre x, y) per exposure — the seed the relative-
+    registration override UI shows so the user can confirm or re-click each frame's source. Returns
+    ``{rss_path: (x, y) or None}`` (None where nothing was detected). De-dups channel planes."""
+    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+    seen, out = set(), {}
+    for p in rss_paths:
+        k = os.path.basename(p).split('_RSS_')[0]
+        if k in seen:
+            continue
+        seen.add(k)
+        sib = channel_siblings(p)
+        dp = sib.get('green') or next(iter(sib.values()))
+        with fits.open(dp) as hd:
+            fmap = hd['FIBERMAP'].data
+            xs, ys = _fibre_xy(list(fmap['FIBER_ID']), list(fmap['BENCHSIDE']))
+            flux = per_fibre_flux(hd, band=band)
+        det = detect_fibre_sources(xs, ys, flux)
+        out[p] = (float(det[0].x), float(det[0].y)) if det else None
+    return out
+
+
 def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
                             sources_by_frame=None, max_shift_arcsec=120.0):
     """Tier-2 relative registration for fields with NO Gaia stars in the FOV.

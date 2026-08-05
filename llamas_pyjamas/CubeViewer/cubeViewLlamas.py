@@ -1036,7 +1036,8 @@ class CubeViewerWindow(QMainWindow):
 
     def register_block_common_source(self) -> None:
         """Register a block with NO Gaia coverage by pinning a common in-field source (Tier-2
-        relative). Holds one rotation, aligns every dither onto the first frame's source position."""
+        relative): auto-detect the source per frame, let the user confirm/re-click it in DS9, then
+        hold one rotation and align every dither onto the first frame's source."""
         from llamas_pyjamas.CubeViewer.cubeViewObslog import ObslogDialog
         dialog = ObslogDialog(self._start_dir(), multi=True,
                               title='Register block on common source (pick the dithers)', parent=self)
@@ -1045,26 +1046,18 @@ class CubeViewerWindow(QMainWindow):
         paths = getattr(dialog, 'chosen_files', None) or []
         if not paths:
             return
-        from llamas_pyjamas.Utils.register import register_block_relative
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            results = register_block_relative(paths, anchor=None)
-        except Exception as exc:                  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, 'Register on common source', f'Failed:\n{exc}')
-            return
-        QApplication.restoreOverrideCursor()
-        n_ref = sum(1 for r in results.values() if r.refined)
-        fell = [os.path.basename(p) for p, r in results.items() if not r.refined]
-        msg = (f'Pinned a common source in {n_ref}/{len(results)} frame(s) — relative registration, '
-               f'no Gaia; one rotation held from the header, dithers aligned onto the first frame.')
-        if fell:
-            msg += '\n\nNo source detected (kept rough) in:\n' + '\n'.join(fell)
-        msg += ('\n\nNote: this auto-detects the BRIGHTEST compact source per frame. If the stack '
-                'looks misaligned, a frame likely locked onto a cosmic/neighbour instead of the '
-                'target — re-run selecting only the clean dithers, or use "Refine WCS interactively" '
-                'on the odd frame.')
-        self._after_registration(msg)
+        # The override grabs from the DS9 crosshair; pause the aperture picker to avoid contention.
+        if self.pick_box.isChecked():
+            self.pick_box.setChecked(False)
+        from llamas_pyjamas.CubeViewer.cubeViewRegister import CommonSourceDialog
+        dlg = CommonSourceDialog(self, paths, parent=self)
+        if dlg.exec() and dlg.written:
+            try:
+                self.display()
+            except Exception:                     # noqa: BLE001
+                pass
+            self.statusBar().showMessage(
+                f'Relative registration wrote WCS to {len(dlg.written)} file(s).')
 
     def refine_wcs_interactive(self) -> None:
         """Open the interactive star-clicking WCS dialog for the loaded exposure."""

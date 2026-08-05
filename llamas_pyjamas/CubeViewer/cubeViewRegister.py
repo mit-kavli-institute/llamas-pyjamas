@@ -488,3 +488,137 @@ if _HAVE_QT:
         def closeEvent(self, event) -> None:    # noqa: N802 - Qt naming
             self._clear_overlay()
             super().closeEvent(event)
+
+    class CommonSourceDialog(QDialog):
+        """Pick/confirm the common in-field source for Tier-2 relative registration (no-Gaia fields).
+
+        Shows the auto-detected brightest source per frame; the user can display any frame in DS9 and
+        re-grab the true source at the crosshair when auto-detect locked onto a cosmic/neighbour.
+        Applies :func:`register.register_block_relative` with the confirmed per-frame sources (anchor
+        = first frame). Drives DS9 through the parent CubeViewer window (its load/display/ds9/scene)."""
+
+        def __init__(self, window, paths, parent=None) -> None:
+            super().__init__(parent or window)
+            self.window = window
+            seen, uniq = set(), []                          # one path per exposure, order kept
+            for p in paths:
+                k = os.path.basename(p).split('_RSS_')[0]
+                if k not in seen:
+                    seen.add(k)
+                    uniq.append(p)
+            self.paths = uniq
+            from llamas_pyjamas.Utils.register import detect_common_sources
+            self.sources = detect_common_sources(self.paths)   # {path: (x, y) or None}
+            self.written: List[str] = []
+            self.setWindowTitle('Register block on common source (no Gaia)')
+            self.resize(600, 440)
+            self._build_ui()
+            self._refresh()
+
+        def _build_ui(self) -> None:
+            lay = QVBoxLayout(self)
+            info = QLabel('Auto-detected the brightest compact source per frame. Select a frame to '
+                          'show it in DS9; if the mark is on the wrong object, move the DS9 crosshair '
+                          'onto the target and "Grab" to override. Then "Register": every frame is '
+                          'pinned to the first frame\'s source, holding one rotation.')
+            info.setWordWrap(True)
+            lay.addWidget(info)
+            self.list = QListWidget()
+            self.list.currentRowChanged.connect(lambda _r: self._show_selected())
+            lay.addWidget(self.list, 1)
+            row = QHBoxLayout()
+            self.show_btn = QPushButton('Show in DS9')
+            self.show_btn.clicked.connect(self._show_selected)
+            self.grab_btn = QPushButton('Grab source at crosshair')
+            self.grab_btn.clicked.connect(self._grab)
+            self.reset_btn = QPushButton('Reset to auto')
+            self.reset_btn.clicked.connect(self._reset)
+            for b in (self.show_btn, self.grab_btn, self.reset_btn):
+                row.addWidget(b)
+            row.addStretch(1)
+            lay.addLayout(row)
+            brow = QHBoxLayout()
+            self.reg_btn = QPushButton('Register')
+            self.reg_btn.clicked.connect(self._register)
+            cancel = QPushButton('Cancel')
+            cancel.clicked.connect(self.reject)
+            brow.addStretch(1)
+            brow.addWidget(self.reg_btn)
+            brow.addWidget(cancel)
+            lay.addLayout(brow)
+
+        def _refresh(self) -> None:
+            cur = self.list.currentRow()
+            self.list.blockSignals(True)
+            self.list.clear()
+            for p in self.paths:
+                xy = self.sources.get(p)
+                tag = f'source ({xy[0]:.1f}, {xy[1]:.1f})' if xy else 'NO SOURCE — keeps rough'
+                self.list.addItem(f'{os.path.basename(p).split("_RSS_")[0]}   {tag}')
+            if 0 <= cur < self.list.count():
+                self.list.setCurrentRow(cur)
+            self.list.blockSignals(False)
+
+        def _selected_path(self) -> Optional[str]:
+            i = self.list.currentRow()
+            return self.paths[i] if 0 <= i < len(self.paths) else None
+
+        def _show_selected(self) -> None:
+            p = self._selected_path()
+            if p is None:
+                return
+            try:
+                self.window.load(p)
+                self.window.display()
+                self.window.ds9.set('mode crosshair')
+            except Exception as exc:            # noqa: BLE001
+                QMessageBox.warning(self, 'Show frame',
+                                    f'Could not display {os.path.basename(p)}:\n{exc}')
+
+        def _grab(self) -> None:
+            p = self._selected_path()
+            if p is None:
+                return
+            sc = getattr(self.window, 'scene', None)
+            if sc is None or not hasattr(sc, '_to_world'):
+                QMessageBox.warning(self, 'Grab', 'Show the frame in DS9 first (Show in DS9).')
+                return
+            try:
+                x_pix, y_pix = self.window.ds9.crosshair('image')
+            except Exception as exc:            # noqa: BLE001
+                QMessageBox.warning(self, 'Grab', f'Could not read the DS9 crosshair: {exc}')
+                return
+            fx, fy = sc._to_world(x_pix, y_pix)
+            band = sc.wavelength_range()
+            flux = sc.fibre_flux(band[0], band[1])
+            c = fibre_centroid(sc.positions[:, 0], sc.positions[:, 1], flux,
+                               guess=(float(fx), float(fy)), radius=1.5)
+            xy = (float(c.x), float(c.y)) if c is not None else (float(fx), float(fy))
+            self.sources[p] = xy
+            self._refresh()
+            self.window.statusBar().showMessage(
+                f'Source for {os.path.basename(p).split("_RSS_")[0]} set to fibre '
+                f'({xy[0]:.1f}, {xy[1]:.1f})')
+
+        def _reset(self) -> None:
+            p = self._selected_path()
+            if p is None:
+                return
+            from llamas_pyjamas.Utils.register import detect_common_sources
+            self.sources[p] = detect_common_sources([p]).get(p)
+            self._refresh()
+
+        def _register(self) -> None:
+            from llamas_pyjamas.Utils.register import register_block_relative
+            overrides = {p: xy for p, xy in self.sources.items() if xy is not None}
+            try:
+                results = register_block_relative(self.paths, anchor=None, sources_by_frame=overrides)
+            except Exception as exc:            # noqa: BLE001
+                QMessageBox.critical(self, 'Register', f'Failed:\n{exc}')
+                return
+            for r in results.values():
+                self.written.extend(getattr(r, 'files', []) or [])
+            n = sum(1 for r in results.values() if r.refined)
+            QMessageBox.information(self, 'Register',
+                                   f'Pinned a common source in {n}/{len(results)} frame(s).')
+            self.accept()
