@@ -262,6 +262,23 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
     return wave, flux, var, mask, ra, dec, solid
 
 
+def _hdr_float(*values, default=np.nan):
+    """First of ``values`` that casts to float, else ``default``.
+
+    Pre-TCS/old frames can carry an EMPTY header card (key present, value ``None``); then
+    ``hdr.get(key, fallback)`` returns that ``None`` rather than the fallback, and ``float(None)``
+    raises. This skips ``None``/blank/non-numeric entries so a missing MJD-OBS/AIRMASS/EXPTIME
+    degrades to ``default`` (NaN) instead of crashing the whole combine."""
+    for v in values:
+        if v is None:
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return float(default)
+
+
 def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
     """Read one exposure (its channel siblings) into native per-fibre arrays.
 
@@ -284,9 +301,9 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
         else:
             resolved_plane = plane
         from llamas_pyjamas.Utils.utils import exposure_time
-        exptime = float(exposure_time(hdr, default=np.nan))
-        airmass = float(hdr.get('AIRMASS', hdr.get('TEL AIRMASS', np.nan)))
-        mjd = float(hdr.get('MJD-OBS', np.nan))
+        exptime = _hdr_float(hdr, exposure_time(hdr, default=None))
+        airmass = _hdr_float(hdr.get('AIRMASS'), hdr.get('TEL AIRMASS'))
+        mjd = _hdr_float(hdr.get('MJD-OBS'))
     flux_ext, err_ext = _PLANES[resolved_plane]
 
     # SKYSUB is raw counts (NOT exposure-time normalised); FLAM is already per-second (the sensfunc
