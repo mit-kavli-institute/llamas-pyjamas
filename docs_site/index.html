@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>LLAMAS Pipeline Docs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-4b22a5ef-d631-4bb3-b53f-ce24340a01dd/styles.css">
+<script src="_ds/modernist-4b22a5ef-d631-4bb3-b53f-ce24340a01dd/_ds_bundle.js"></script>
+<script src="./image-slot.js"></script>
+<style>
+:root {
+  --color-accent: #a31f34;
+  --color-accent-100: #f8ecee;
+  --color-accent-200: #f1d6da;
+  --color-accent-300: #e4b1b9;
+  --color-accent-400: #cc7a87;
+  --color-accent-500: #a31f34;
+  --color-accent-600: #8c1a2c;
+  --color-accent-700: #741524;
+  --color-accent-800: #57101b;
+  --color-accent-900: #3b0c13;
+  --color-accent-2: #a31f34;
+  --color-accent-2-100: #f8ecee;
+  --color-accent-2-800: #57101b;
+}
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+pre { margin: 0; }
+body { margin: 0; }
+a:hover { color: var(--color-accent-700); }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);position:relative">
+
+<sc-if value="{{ grid }}" hint-placeholder-val="{{ false }}">
+<div style="position:fixed;inset:0;z-index:99;pointer-events:none;background-image:repeating-linear-gradient(to right, color-mix(in srgb, var(--color-accent) 16%, transparent) 0 1px, transparent 1px 12.5%)"></div>
+</sc-if>
+
+<header style="display:flex;align-items:center;gap:24px;padding:14px 32px;border-bottom:2px solid var(--color-divider);background:var(--color-bg);position:sticky;top:0;z-index:40">
+  <a href="#" onClick="{{ goOverview }}" style="display:flex;align-items:center;gap:14px;text-decoration:none;color:inherit;margin-right:auto">
+    <img src="assets/llamas-logo.png" alt="LLAMAS" style="height:34px;width:auto;mix-blend-mode:multiply">
+    <span style="border-left:2px solid var(--color-divider);padding-left:14px;font-family:var(--font-heading);font-weight:800;font-size:15px;letter-spacing:-0.01em;line-height:1.15">Data Reduction<br>Pipeline</span>
+  </a>
+  <div style="display:flex;align-items:center;gap:20px;font-size:13px">
+    <span class="tag tag-neutral mono">rs-dev · 2026-07-28</span>
+    <a href="https://github.com/mit-kavli-institute/llamas-pyjamas" target="_blank" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--color-divider);padding-bottom:1px">GitHub</a>
+    <a href="https://mailman.mit.edu/mailman/listinfo/llamas-pipeline" target="_blank" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--color-divider);padding-bottom:1px">Mailing list</a>
+  </div>
+  <input class="input mono" placeholder="Search docs   /" style="width:180px;font-size:12px">
+</header>
+
+<sc-if value="{{ topnav }}" hint-placeholder-val="{{ false }}">
+<nav style="display:flex;border-bottom:2px solid var(--color-divider);padding:0 32px;overflow-x:auto;background:var(--color-bg);position:sticky;top:63px;z-index:39">
+  <a href="#" onClick="{{ goOverview }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbOverview }};color:{{ tcOverview }}">Overview</a>
+  <a href="#" onClick="{{ goSetup }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbSetup }};color:{{ tcSetup }}">1 Setup</a>
+  <a href="#" onClick="{{ goRun }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbRun }};color:{{ tcRun }}">2 Reduce</a>
+  <a href="#" onClick="{{ goRegister }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbRegister }};color:{{ tcRegister }}">3 WCS</a>
+  <a href="#" onClick="{{ goCombine }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbCombine }};color:{{ tcCombine }}">4 Combine</a>
+  <a href="#" onClick="{{ goScience }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbScience }};color:{{ tcScience }}">5 Science</a>
+  <a href="#" onClick="{{ goFlux }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbFlux }};color:{{ tcFlux }}">Flux cal</a>
+  <a href="#" onClick="{{ goCube }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbCube }};color:{{ tcCube }}">CubeViewer</a>
+  <a href="#" onClick="{{ goRef }}" style="padding:12px 16px 10px;font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;text-decoration:none;white-space:nowrap;border-bottom:3px solid {{ tbRef }};color:{{ tcRef }}">Reference</a>
+</nav>
+</sc-if>
+
+<div style="display:flex;align-items:flex-start;max-width:1560px;margin:0 auto">
+
+<sc-if value="{{ sidebar }}" hint-placeholder-val="{{ true }}">
+<aside style="width:262px;flex:none;border-right:2px solid var(--color-divider);align-self:stretch;padding:26px 0 80px;position:sticky;top:63px;max-height:calc(100vh - 63px);overflow-y:auto">
+  <div style="padding:0 24px 10px;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-neutral-600);font-family:var(--font-heading);font-weight:800">Start</div>
+  <a href="#" onClick="{{ goOverview }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbOverview }};color:{{ scOverview }};background:{{ sgOverview }}">Overview</a>
+  <a href="#" onClick="{{ goInstall }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbInstall }};color:{{ scInstall }};background:{{ sgInstall }}">Installation</a>
+
+  <div style="padding:24px 24px 10px;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-neutral-600);font-family:var(--font-heading);font-weight:800;border-top:1px solid var(--color-divider);margin-top:16px">The workflow</div>
+  <a href="#" onClick="{{ goSetup }}" style="display:flex;gap:10px;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbSetup }};color:{{ scSetup }};background:{{ sgSetup }}"><span class="mono" style="color:var(--color-neutral-600)">1</span>Setup &amp; config</a>
+  <a href="#" onClick="{{ goRun }}" style="display:flex;gap:10px;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbRun }};color:{{ scRun }};background:{{ sgRun }}"><span class="mono" style="color:var(--color-neutral-600)">2</span>Run the reduction</a>
+  <a href="#" onClick="{{ goRegister }}" style="display:flex;gap:10px;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbRegister }};color:{{ scRegister }};background:{{ sgRegister }}"><span class="mono" style="color:var(--color-neutral-600)">3</span>WCS correction</a>
+  <a href="#" onClick="{{ goCombine }}" style="display:flex;gap:10px;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbCombine }};color:{{ scCombine }};background:{{ sgCombine }}"><span class="mono" style="color:var(--color-neutral-600)">4</span>Combine dithers</a>
+  <a href="#" onClick="{{ goScience }}" style="display:flex;gap:10px;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbScience }};color:{{ scScience }};background:{{ sgScience }}"><span class="mono" style="color:var(--color-neutral-600)">5</span>Science products</a>
+
+  <div style="padding:24px 24px 10px;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-neutral-600);font-family:var(--font-heading);font-weight:800;border-top:1px solid var(--color-divider);margin-top:16px">Capabilities</div>
+  <a href="#" onClick="{{ goFlux }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbFlux }};color:{{ scFlux }};background:{{ sgFlux }}">Flux calibration</a>
+  <a href="#" onClick="{{ goCube }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbCube }};color:{{ scCube }};background:{{ sgCube }}">CubeViewer</a>
+
+  <div style="padding:24px 24px 10px;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-neutral-600);font-family:var(--font-heading);font-weight:800;border-top:1px solid var(--color-divider);margin-top:16px">Reference</div>
+  <a href="#" onClick="{{ goRef }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbRef }};color:{{ scRef }};background:{{ sgRef }}">Commands &amp; tables</a>
+  <a href="#" onClick="{{ goCite }}" style="display:block;padding:7px 24px;font-size:13.5px;text-decoration:none;border-left:3px solid {{ sbCite }};color:{{ scCite }};background:{{ sgCite }}">Cite &amp; credits</a>
+
+  <div style="margin:26px 24px 0;padding-top:16px;border-top:2px solid var(--color-divider);font-size:11px;line-height:1.5;color:var(--color-neutral-700)">
+    <div class="mono">llamas-pyjamas · rs-dev</div>
+    <div class="mono">python 3.12 · MIT license</div>
+    <div style="margin-top:6px">In-progress development pipeline. Read-only release for observation planning; no warranty until commissioning completes.</div>
+  </div>
+</aside>
+</sc-if>
+
+<main style="flex:1;min-width:0;display:flex;align-items:flex-start">
+<div style="flex:1;min-width:0;padding:0 0 100px">
+
+<sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+<div>
+  <section style="padding:52px 48px 0;border-bottom:2px solid var(--color-divider)">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+      <span class="tag tag-outline">Magellan Baade</span>
+      <span class="tag tag-neutral">2389 fibres per channel</span>
+      <span class="tag tag-neutral">3170–10051 Å</span>
+    </div>
+    <h1 style="font-size:clamp(34px,4.6vw,66px);line-height:1.0;letter-spacing:-0.03em;max-width:20em;margin:0 0 20px">The LLAMAS data reduction pipeline</h1>
+    <p style="font-size:18px;line-height:1.5;max-width:44em;color:var(--color-neutral-800);text-wrap:pretty;margin-bottom:14px">From a night of raw frames to science-ready, sky-subtracted, flux-calibrated <strong>RSS files and data cubes</strong>.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;padding-bottom:38px">
+      <a class="btn btn-primary" href="#" onClick="{{ goSetup }}">Setup &amp; config</a>
+      <a class="btn btn-secondary" href="#" onClick="{{ goCube }}">CubeViewer</a>
+      <a class="btn btn-ghost" href="#" onClick="{{ goRef }}">Command summary</a>
+    </div>
+  </section>
+
+  <section style="border-bottom:2px solid var(--color-divider);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:2px;background:var(--color-divider)">
+    <div style="padding:20px 24px;background:var(--color-bg)"><div style="font-family:var(--font-heading);font-weight:800;font-size:28px;letter-spacing:-0.02em">12</div><div style="font-size:11.5px;letter-spacing:0.05em;text-transform:uppercase;color:var(--color-neutral-600)">Configurable stages, resume-aware</div></div>
+    <div style="padding:20px 24px;background:var(--color-bg)"><div style="font-family:var(--font-heading);font-weight:800;font-size:28px;letter-spacing:-0.02em">4–6″</div><div style="font-size:11.5px;letter-spacing:0.05em;text-transform:uppercase;color:var(--color-neutral-600)">Typical TCS pointing error</div></div>
+    <div style="padding:20px 24px;background:var(--color-bg)"><div style="font-family:var(--font-heading);font-weight:800;font-size:28px;letter-spacing:-0.02em">&lt;0.25″</div><div style="font-size:11.5px;letter-spacing:0.05em;text-transform:uppercase;color:var(--color-neutral-600)">Registration RMS to aim for</div></div>
+  </section>
+
+  <section id="flow" style="padding:42px 48px 0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:20px;margin-bottom:6px;flex-wrap:wrap">
+      <h2 style="font-size:30px;margin:0">Raw frames to science</h2>
+      <span style="font-size:12px;color:var(--color-neutral-600)">Select a step for what you run, what it produces, what you check.</span>
+    </div>
+    <hr class="hr">
+    <div style="overflow-x:auto;max-width:100%">
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));min-width:760px;border:2px solid var(--color-divider);border-bottom:0">
+      <a href="#flow" onClick="{{ pick0 }}" style="display:block;text-decoration:none;color:inherit;border-right:1px solid var(--color-divider);background:{{ cbg0 }}">
+        <div style="height:6px;background:{{ ctop0 }}"></div>
+        <div style="padding:14px 14px 16px">
+          <div class="mono" style="font-size:11px;color:{{ cnum0 }}">01</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;line-height:1.15;margin-top:8px">Setup &amp; config</div>
+          <div class="mono" style="font-size:10.5px;margin-top:8px;color:{{ cmute0 }}">reduxSetupGUI</div>
+        </div>
+      </a>
+      <a href="#flow" onClick="{{ pick1 }}" style="display:block;text-decoration:none;color:inherit;border-right:1px solid var(--color-divider);background:{{ cbg1 }}">
+        <div style="height:6px;background:{{ ctop1 }}"></div>
+        <div style="padding:14px 14px 16px">
+          <div class="mono" style="font-size:11px;color:{{ cnum1 }}">02</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;line-height:1.15;margin-top:8px">Run the reduction</div>
+          <div class="mono" style="font-size:10.5px;margin-top:8px;color:{{ cmute1 }}">reduce.py</div>
+        </div>
+      </a>
+      <a href="#flow" onClick="{{ pick2 }}" style="display:block;text-decoration:none;color:inherit;border-right:1px solid var(--color-divider);background:{{ cbg2 }}">
+        <div style="height:6px;background:{{ ctop2 }}"></div>
+        <div style="padding:14px 14px 16px">
+          <div class="mono" style="font-size:11px;color:{{ cnum2 }}">03</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;line-height:1.15;margin-top:8px">WCS correction</div>
+          <div class="mono" style="font-size:10.5px;margin-top:8px;color:{{ cmute2 }}">Gaia · WCS menu</div>
+        </div>
+      </a>
+      <a href="#flow" onClick="{{ pick3 }}" style="display:block;text-decoration:none;color:inherit;border-right:1px solid var(--color-divider);background:{{ cbg3 }}">
+        <div style="height:6px;background:{{ ctop3 }}"></div>
+        <div style="padding:14px 14px 16px">
+          <div class="mono" style="font-size:11px;color:{{ cnum3 }}">04</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;line-height:1.15;margin-top:8px">Combine dithers</div>
+          <div class="mono" style="font-size:10.5px;margin-top:8px;color:{{ cmute3 }}">super-RSS · combineField</div>
+        </div>
+      </a>
+      <a href="#flow" onClick="{{ pick4 }}" style="display:block;text-decoration:none;color:inherit;background:{{ cbg4 }}">
+        <div style="height:6px;background:{{ ctop4 }}"></div>
+        <div style="padding:14px 14px 16px">
+          <div class="mono" style="font-size:11px;color:{{ cnum4 }}">05</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;line-height:1.15;margin-top:8px">Science products</div>
+          <div class="mono" style="font-size:10.5px;margin-top:8px;color:{{ cmute4 }}">Extraction menu</div>
+        </div>
+      </a>
+    </div>
+    </div>
+
+    <div style="border:2px solid var(--color-divider);border-top:0;background:var(--color-surface)">
+      <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:24px 26px">
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">01</span><h3 style="margin:0;font-size:23px">Setup &amp; config — <span class="mono" style="font-size:17px">reduxSetupGUI</span></h3></div>
+        <p style="max-width:60em;font-size:14.5px;color:var(--color-neutral-800);margin-bottom:14px">Scan a raw night, classify every frame from its header, assign roles, median-combine the biases, and write the <span class="mono">key = value</span> config file that drives everything downstream.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider)">
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You run</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR -o config.txt</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You get</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">config.txt · slow/fast_master_bias.fits</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">QA output</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">≥1 Science frame and all three Flat colours assigned</div></div>
+        </div>
+        <a class="btn btn-ghost" href="#" onClick="{{ goSetup }}" style="margin-top:12px;padding-left:0">Step 1 in full →</a>
+      </div>
+      </sc-if>
+      <sc-if value="{{ s1 }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:24px 26px">
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">02</span><h3 style="margin:0;font-size:23px">Run the reduction — <span class="mono" style="font-size:17px">reduce.py</span></h3></div>
+        <p style="max-width:60em;font-size:14.5px;color:var(--color-neutral-800);margin-bottom:14px">Twelve resume-aware stages: bias, tracing, optional arc refinement, pixel flat, extraction, wavelength transfer, sky subtraction, heliocentric shift, RSS assembly, fibre flat, consolidation and QA. Per-exposure cubes are off by default — you stack later.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider)">
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You run</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">python reduce.py config.txt</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You get</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">*_RSS_{red,green,blue}.fits · white light · QA/ · cubes (generate_cubes)</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">QA output</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">The HTML wavelength-QA report per science frame</div></div>
+        </div>
+        <a class="btn btn-ghost" href="#" onClick="{{ goRun }}" style="margin-top:12px;padding-left:0">Step 2 in full →</a>
+      </div>
+      </sc-if>
+      <sc-if value="{{ s2 }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:24px 26px">
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">03</span><h3 style="margin:0;font-size:23px">WCS correction — per-fibre WCS from Gaia</h3></div>
+        <p style="max-width:60em;font-size:14.5px;color:var(--color-neutral-800);margin-bottom:14px">The reduction writes only a provisional WCS from pointing and rotator angle, and real TCS error is often 4–6″. A Gaia cone search plus fibre-space centroid fits solves the offset — and per block the rotation — and writes the refined RA/DEC back into the RSS.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider)">
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You run</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">CubeViewer ▸ WCS ▸ Auto-register block…, or <span class="mono">register_exposures()</span></div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You get</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">FIBERMAP + FIBERWCS updated in place</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">QA output</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">Residual RMS &lt; ~0.25″ in the QA plot title</div></div>
+        </div>
+        <a class="btn btn-ghost" href="#" onClick="{{ goRegister }}" style="margin-top:12px;padding-left:0">Step 3 in full →</a>
+      </div>
+      </sc-if>
+      <sc-if value="{{ s3 }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:24px 26px">
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">04</span><h3 style="margin:0;font-size:23px">Combine the dithers — the super-RSS</h3></div>
+        <p style="max-width:60em;font-size:14.5px;color:var(--color-neutral-800);margin-bottom:14px">Every fibre from every dither goes into one table, tagged with its native wavelength, inverse-variance weight, exposure and plate-solved position. Cubes, co-add images and depth maps are all views of that table; the single resample happens only here.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider)">
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You run</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">Combine ▸ Combine field into cube…, or <span class="mono">combineField</span></div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You get</div><div class="mono" style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">&lt;field&gt;_cube_{blue,green,red}.fits + VAR/COVERAGE/NEXP</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">QA output</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">Coverage map, PSF sharpness, transparency scales</div></div>
+        </div>
+        <a class="btn btn-ghost" href="#" onClick="{{ goCombine }}" style="margin-top:12px;padding-left:0">Step 4 in full →</a>
+      </div>
+      </sc-if>
+      <sc-if value="{{ s4 }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:24px 26px">
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">05</span><h3 style="margin:0;font-size:23px">Science products</h3></div>
+        <p style="max-width:60em;font-size:14.5px;color:var(--color-neutral-800);margin-bottom:14px">Optimal spectra extracted in fibre space with DAR tracking, continuum-subtracted narrowband images, a PSF budget per channel, and an absolute flux anchor tied to an in-field Gaia source.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider)">
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You run</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">CubeViewer ▸ Extraction ▸ Optimal spectrum at crosshair</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">You get</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">1-D spectrum across three channels, narrowband images</div></div>
+          <div style="padding:13px 16px;background:var(--color-surface)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)">QA output</div><div style="font-size:12.5px;margin-top:4px;overflow-wrap:anywhere">DAR centroid track and the Gaia flux-ratio colour scatter</div></div>
+        </div>
+        <a class="btn btn-ghost" href="#" onClick="{{ goScience }}" style="margin-top:12px;padding-left:0">Step 5 in full →</a>
+      </div>
+      </sc-if>
+    </div>
+  </section>
+
+  <section style="padding:44px 48px 0">
+    <h2 style="font-size:30px">Products and stacking</h2>
+    <hr class="hr">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:2px;background:var(--color-divider)">
+      <div style="background:var(--color-bg);padding:22px">
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Products</div>
+        <div style="font-family:var(--font-heading);font-weight:800;font-size:19px;margin:8px 0 6px">RSS files and cubes, per exposure — and deeper cubes from the combine</div>
+        <p style="font-size:13.5px;color:var(--color-neutral-800);margin:0">Each exposure reduces to one row-stacked-spectra file per colour on native per-fibre wavelength, plus its own cube. Combining the dithers then yields a deeper, registered cube of the whole field.</p>
+      </div>
+      <div style="background:var(--color-bg);padding:22px">
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Stacking</div>
+        <div style="font-family:var(--font-heading);font-weight:800;font-size:19px;margin:8px 0 6px">Stacking happens afterwards, and resamples once</div>
+        <p style="font-size:13.5px;color:var(--color-neutral-800);margin:0">Interactively in the CubeViewer or headlessly with <span class="mono">combineField</span>. The single spatial and spectral resample happens only at that final step.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding:40px 48px 0">
+    <h2 style="font-size:30px">Example — a stacked field</h2>
+    <hr class="hr">
+    <figure>
+      <image-slot id="fig-coadd-depth" src="images/fig_coadd_depth.png" shape="rect" fit="contain" style="width:100%;height:340px" placeholder="fig_coadd_depth.png — co-add, coverage and NEXP maps (J2151+0235, four dithers)"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px;max-width:60em">The co-added field with its <span class="mono">COVERAGE</span> and <span class="mono">NEXP</span> maps. Dithering at two rotations fills the ~7% inter-lenslet gaps and leaves a deep core inside a shallow halo — recorded in the depth maps rather than trimmed away.</figcaption>
+    </figure>
+  </section>
+
+  <section style="margin:52px 0 0;padding:42px 48px;background:var(--color-accent);color:var(--color-bg)">
+    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.85">Instrument</div>
+    <p style="font-size:clamp(19px,2.2vw,26px);line-height:1.22;letter-spacing:-0.02em;font-family:var(--font-heading);font-weight:800;max-width:30em;margin:12px 0 16px;text-wrap:pretty">A seeing-limited, arcminute-class integral field spectrograph on the 6.5 m Magellan Baade telescope, fed by rotation of the tertiary.</p>
+    <p style="max-width:44em;font-size:14px;opacity:0.9;margin:0">The focal plane is sampled at 0.75″ by a fused-silica microlens array feeding 2400 fibres into eight replicated bench spectrographs, three channels each. NSF award AST-1836002 · PI R. Simcoe (MIT Kavli Institute).</p>
+  </section>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSetup }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Workflow · step 1 of 5</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Setup &amp; config</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Every reduction is driven by a plain-text <span class="mono">key = value</span> config file. It can be hand-written, but the intended entry point is <span class="mono">reduxSetupGUI</span>: it scans a raw night, classifies every frame from its header, lets you correct the classification, builds the master bias, and writes the config.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div class="mono" style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR -o config.txt</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div class="mono" style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">config.txt<br>slow_master_bias.fits<br>fast_master_bias.fits</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">At least one <em>Science</em> frame and all three <em>Flat</em> colours are assigned. Twilights, arcs and bias are optional but recommended for the best quality data products.</div></div>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px">Both arguments are optional: omit the directory for a browse dialog, omit <span class="mono">-o</span> to write <span class="mono">&lt;raw_night&gt;/llamas_redux_config.txt</span>. The output directory defaults to <span class="mono">&lt;raw_night&gt;/reduced/</span>.</p>
+
+  <h2 id="scan" style="font-size:26px;margin-top:40px">What it does</h2>
+  <hr class="hr">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:30px;align-items:start">
+    <figure>
+      <image-slot id="fig-reduxsetup" src="images/fig_gui_reduxsetup.png" shape="rect" fit="contain" style="width:100%;height:300px" placeholder="fig_gui_reduxsetup.png — the setup GUI on a real night"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">Real data: one row per exposure, roles colour-tinted, the observer's night notes in the lower pane.</figcaption>
+    </figure>
+    <div style="border-top:2px solid var(--color-divider)">
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">1</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Scans the directory</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0">Reads the primary header of every <span class="mono">*.fits</span> MEF — skipping <span class="mono">white</span>/<span class="mono">diff</span> quicklook products — and tabulates object, exposure time, type from <span class="mono">PRODCATG</span>, readout mode and the observer's comment.</p></div></div>
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">2</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Shows the observer's notes</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0"><span class="mono">obslog_usernotes.txt</span> from the raw directory, in a lower pane.</p></div></div>
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">3</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Recommends flux standards</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0">Science pointings landing on a catalogued spectrophotometric standard are cross-matched and pre-tagged <em>Flux Standard</em>. Overridable.</p></div></div>
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">4</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Role assignment</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0">Select rows, click a role button; roles are colour-tinted in the table. Right-click a row to preview the raw MEF in DS9 (needs <span class="mono">ds9</span> running).</p></div></div>
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">5</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Builds the master bias</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0">Frames tagged <em>Bias</em> are median-combined per readout mode. Leave the role empty to use the packaged masters.</p></div></div>
+      <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)"><span class="mono" style="font-size:12px;color:var(--color-accent-700)">6</span><div><div style="font-family:var(--font-heading);font-weight:800;font-size:15px">Writes the config</div><p style="font-size:13px;color:var(--color-neutral-800);margin:4px 0 0">Unassigned keys are commented out so the pipeline falls back to defaults. <strong>Load Config</strong> maps an existing config back onto the table for revision.</p></div></div>
+    </div>
+  </div>
+
+  <h2 id="roles" style="font-size:26px;margin-top:40px">Roles</h2>
+  <hr class="hr">
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px">
+    <thead><tr><th style="width:30%">Role</th><th style="width:16%">Multi-file</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Red / Green / Blue <strong>Flat</strong></td><td>one each</td><td>Lamp flat per colour — fibre tracing and the pixel flat. <span class="tag tag-accent" style="margin-left:6px">Required</span></td></tr>
+      <tr><td>Red / Green / Blue <strong>Twilight</strong></td><td>one each</td><td>Twilight flat — fibre-to-fibre throughput. Recommended.</td></tr>
+      <tr><td>Red / Green / Blue <strong>Arc</strong></td><td>one each</td><td>Arc lamp — wavelength refinement. Optional.</td></tr>
+      <tr><td><strong>Science</strong></td><td>many</td><td>The science exposures, including the dithers.</td></tr>
+      <tr><td><strong>Flux Standard</strong></td><td>many</td><td>Standard-star exposures for the sensitivity function.</td></tr>
+      <tr><td><strong>Bias</strong></td><td>many</td><td>Raw bias frames, median-combined into a master bias per readout mode.</td></tr>
+      <tr><td><strong>Flag Bad</strong></td><td>many</td><td>Frames to exclude — recorded, unused.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="options" style="font-size:26px;margin-top:40px">The Configuration Options window</h2>
+  <hr class="hr">
+  <div style="border:2px solid var(--color-divider);background:var(--color-surface);padding:20px 22px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">How it writes back</div>
+    <p style="margin:8px 0 0;font-size:13.5px;color:var(--color-neutral-800);max-width:56em">File and path role keys — flats, arcs, science, bias, output directories — are deliberately excluded; they stay owned by the main window's role buttons. The dialog seeds from the current config's active keys, or the catalog defaults. On OK each value is substituted and uncommented in place in the template, or appended if absent. Blank optional paths and "0 means unset" integers (<span class="mono">ray_num_cpus</span>, <span class="mono">pixel_flat_saturation_threshold</span>) are written back commented out. Opening the dialog is opt-in: untouched, <strong>Write Config</strong> behaves exactly as before and writes only changed keys.</p>
+  </div>
+
+  <h2 id="catalog" style="font-size:26px;margin-top:40px">Keyword catalog</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Filter by category or search by name and meaning. The authoritative annotated list is <span class="mono">llamas_pyjamas/example_config.txt</span>.</p>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 12px">
+    <sc-for list="{{ cats }}" as="c" hint-placeholder-count="6">
+      <button onClick="{{ c.click }}" style="font-family:var(--font-heading);font-weight:800;font-size:11px;letter-spacing:0.04em;padding:5px 10px;border:1px solid var(--color-divider);cursor:pointer;background:{{ c.bg }};color:{{ c.fg }}">{{ c.label }}</button>
+    </sc-for>
+  </div>
+  <input class="input mono" placeholder="Filter keywords…" value="{{ q }}" onChange="{{ setQ }}" style="max-width:320px;font-size:12.5px">
+  <div style="font-size:11.5px;color:var(--color-neutral-600);margin:10px 0 4px">{{ cfgCount }}</div>
+  <div style="overflow-x:auto;max-width:100%"><div style="border-top:2px solid var(--color-divider);min-width:700px">
+    <div style="display:grid;grid-template-columns:minmax(230px,1.1fr) 110px 74px minmax(220px,2fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--color-divider);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600)">
+      <div>Key</div><div>Category</div><div>Type</div><div>Meaning</div>
+    </div>
+    <sc-for list="{{ cfgRows }}" as="r" hint-placeholder-count="10">
+      <div style="display:grid;grid-template-columns:minmax(230px,1.1fr) 110px 74px minmax(220px,2fr);gap:12px;padding:10px 0;border-bottom:1px solid var(--color-divider);font-size:13px;align-items:start">
+        <div class="mono" style="font-size:12.5px;overflow-wrap:anywhere">{{ r.key }}</div>
+        <div style="font-size:11px;color:var(--color-neutral-700)">{{ r.cat }}</div>
+        <div class="mono" style="font-size:11px;color:var(--color-neutral-600)">{{ r.type }}</div>
+        <div style="color:var(--color-neutral-800)">{{ r.meaning }}</div>
+      </div>
+    </sc-for>
+  </div></div>
+
+  <h2 id="syntax" style="font-size:26px;margin-top:40px">Config file syntax</h2>
+  <hr class="hr">
+  <div style="border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 22px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Setup trap</div>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--color-accent-900);max-width:52em"><span class="mono">key = value</span> · <span class="mono">#</span> starts a comment · lists are comma-separated · booleans are <span class="mono">true</span>/<span class="mono">false</span> · <strong>paths are not quoted</strong>. Quotation marks are read as part of the path.</p>
+  </div>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;line-height:1.7;overflow-x:auto;margin-top:16px"># llamas_redux_config.txt  (excerpt)
+science_files    = /data/may26/sci_0012.fits, /data/may26/sci_0013.fits
+red_flat_file    = /data/may26/flat_r_0001.fits
+green_flat_file  = /data/may26/flat_g_0001.fits
+blue_flat_file   = /data/may26/flat_b_0001.fits
+# red_arc_file   = /data/may26/arc_r_0001.fits
+slow_bias_file   = /data/may26/reduced/slow_master_bias.fits
+output_dir       = /data/may26/reduced/
+extraction_method = boxcar
+sky_subtract     = true
+generate_cubes   = false</pre>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goInstall }}">← Installation</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goRun }}">Next — 2 · Run the reduction</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRun }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Workflow · step 2 of 5</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Run the reduction</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">One command turns a night of raw frames into per-exposure RSS files. The pipeline is resume-aware, parallelises the heavy stages with Ray, and stamps headers so a second run skips what is already done.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div class="mono" style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">python reduce.py config.txt</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div class="mono" style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">{name}_RSS_{red,green,blue}.fits<br>{name}_whitelight_fullpipeline.fits<br>QA/ reports</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">The HTML wavelength-QA report per science frame — xshift curvature, arc residuals, OH-line residuals after sky subtraction.</div></div>
+  </div>
+
+  <h2 id="invoke" style="font-size:26px;margin-top:40px">Invocation</h2>
+  <hr class="hr">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;line-height:1.7;overflow-x:auto">cd llamas-pyjamas/llamas_pyjamas
+python reduce.py /path/to/raw_night/llamas_redux_config.txt
+
+# equivalent, from anywhere
+python -m llamas_pyjamas.reduce /path/to/raw_night/llamas_redux_config.txt</pre>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:16px">Set <span class="mono">clobber = true</span> to force a full rebuild instead of resuming from on-disk products, and <span class="mono">ray_num_cpus</span> to control parallelism.</p>
+
+  <h2 id="stages" style="font-size:26px;margin-top:40px">The twelve stages</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Each stage writes a product and stamps headers, so a later run can skip it.</p>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:34px">#</th><th style="width:19%">Stage</th><th>What it does</th><th style="width:30%">Key output</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">0</td><td>Validate</td><td style="font-size:13px">Checks calibration files and keys; repairs MEFs with missing camera extensions.</td><td style="font-size:12.5px">—</td></tr>
+      <tr><td class="mono">1</td><td>Bias subtraction</td><td style="font-size:13px">Mode-matched master bias plus a per-frame edge-DC offset, on every frame.</td><td class="mono" style="font-size:12px">bias_corrected/</td></tr>
+      <tr><td class="mono">2</td><td>Fibre tracing</td><td style="font-size:13px">Locates each fibre from the flats; falls back to the packaged master traces.</td><td class="mono" style="font-size:12px">traces/LLAMAS_{color}_{bench}_{side}_traces.pkl</td></tr>
+      <tr><td class="mono">3</td><td>Arc refinement <span style="color:var(--color-neutral-600)">(opt.)</span></td><td style="font-size:13px">Refines wavelengths from the night arcs — <span class="mono">refine_arc</span>.</td><td class="mono" style="font-size:12px">arcs/</td></tr>
+      <tr><td class="mono">4</td><td>Pixel flat</td><td style="font-size:13px">2-D detector flat, divided into the science frames.</td><td class="mono" style="font-size:12px">extractions/flat/pixel_maps.fits</td></tr>
+      <tr><td class="mono">5</td><td>Extraction</td><td style="font-size:13px">Per-fibre spectra (<span class="mono">boxcar</span> default, <span class="mono">horne</span>/<span class="mono">optimal</span> available), CR removal, white light.</td><td class="mono" style="font-size:12px">*_extract.pkl · *_whitelight_fullpipeline.fits</td></tr>
+      <tr><td class="mono">6</td><td>Wavelength cal</td><td style="font-size:13px">Transfers the arc solution onto each extraction.</td><td class="mono" style="font-size:12px">*_corrected_extractions.pkl</td></tr>
+      <tr><td class="mono">7</td><td>Sky subtraction</td><td style="font-size:13px">Per-fibre 1-D sky model — <span class="mono">sky_subtract</span>.</td><td class="mono" style="font-size:12px">*_sky1d_extractions.pkl</td></tr>
+      <tr><td class="mono">8</td><td>Heliocentric shift</td><td style="font-size:13px"><span class="mono">wave_frame</span> correction.</td><td class="mono" style="font-size:12px">VELFRAME / HELIOVEL / VELCORR</td></tr>
+      <tr><td class="mono">9</td><td>RSS generation</td><td style="font-size:13px">Assembles the per-colour RSS plus provisional per-fibre RA/DEC.</td><td class="mono" style="font-size:12px">*_RSS_{red,green,blue}.fits</td></tr>
+      <tr><td class="mono">10</td><td>Fibre-flat</td><td style="font-size:13px">Twilight fibre-to-fibre throughput.</td><td class="mono" style="font-size:12px">*_RSS_{color}_FF.fits</td></tr>
+      <tr><td class="mono">11</td><td>Consolidate + QA</td><td style="font-size:13px">One clean RSS per colour; wavelength QA report.</td><td class="mono" style="font-size:12px">final *_RSS_{color}.fits · QA/</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="qa" style="font-size:26px;margin-top:40px">QA reports</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em"><span class="mono">wavelength_qa</span> defaults to <strong>true</strong> and writes one self-contained HTML report per science frame — every figure embedded as base64, no sidecar images — plus a CSV scorecard, into <span class="mono">qa_output_dir</span> (default <span class="mono">{output_dir}/QA</span>). It reports per-camera xshift curvature, arc-line fit residuals when <span class="mono">refine_arc</span> ran, and post-sky-subtraction OH-line residuals, with out-of-tolerance cells highlighted. QA failures never abort a reduction.</p>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:12.5px;overflow-x:auto;margin-top:14px">python -m llamas_pyjamas.QA.waveQA &lt;..._sky1d_extractions.pkl&gt; --qa-dir QA/ --label baseline</pre>
+  <div style="border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);background:var(--color-surface);padding:18px 20px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">Known caveats</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:10px">
+      <p style="margin:0;font-size:13.5px;color:var(--color-neutral-800)">A resumed run that reuses existing extractions <strong>does not regenerate the reports</strong>. Use the standalone <span class="mono">QA.waveQA</span> CLI on the existing pickle.</p>
+      <p style="margin:0;font-size:13.5px;color:var(--color-neutral-800)">If <span class="mono">output_dir</span> is unset the reports land in the package's own <span class="mono">reduced/QA/</span> rather than beside your data. Set <span class="mono">qa_output_dir</span> explicitly.</p>
+    </div>
+  </div>
+
+  <h2 id="rss" style="font-size:26px;margin-top:40px">The RSS file</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Per exposure: row-stacked spectra, ≈2389 fibres × 2048 wavelengths per channel, one file per colour.</p>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:44px">HDU</th><th style="width:20%">Name</th><th>Contents</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">0</td><td class="mono" style="font-size:12.5px">PRIMARY</td><td style="font-size:13px">Pointing, rotator, exposure, wavelength range, <span class="mono">VELFRAME</span>, <span class="mono">FIBAREA</span>.</td></tr>
+      <tr><td class="mono">1</td><td class="mono" style="font-size:12.5px">SKYSUB</td><td style="font-size:13px">Sky-subtracted counts — the working flux plane.</td></tr>
+      <tr><td class="mono">2</td><td class="mono" style="font-size:12.5px">ERROR</td><td style="font-size:13px">1-σ uncertainty per fibre.</td></tr>
+      <tr><td class="mono">3</td><td class="mono" style="font-size:12.5px">MASK</td><td style="font-size:13px">Data-quality mask.</td></tr>
+      <tr><td class="mono">4</td><td class="mono" style="font-size:12.5px">COUNTS</td><td style="font-size:13px">Extracted counts before sky subtraction.</td></tr>
+      <tr><td class="mono">5</td><td class="mono" style="font-size:12.5px">SKY</td><td style="font-size:13px">The sky model per fibre.</td></tr>
+      <tr><td class="mono">6</td><td class="mono" style="font-size:12.5px">WAVE</td><td style="font-size:13px">Per-fibre wavelength array — native, <strong>not</strong> resampled.</td></tr>
+      <tr><td class="mono">7</td><td class="mono" style="font-size:12.5px">FWHM</td><td style="font-size:13px">Per-fibre resolution.</td></tr>
+      <tr><td class="mono">8</td><td class="mono" style="font-size:12.5px">FIBERMAP</td><td style="font-size:13px"><span class="mono">FIBER_ID, BENCHSIDE, FIBER_TYPE, RA, DEC</span>.</td></tr>
+      <tr><td class="mono">9</td><td class="mono" style="font-size:12.5px">SKYRESID</td><td style="font-size:13px">Sky-subtraction residual estimate.</td></tr>
+      <tr><td class="mono">10</td><td class="mono" style="font-size:12.5px">FLAM</td><td style="font-size:13px"><strong>Flux-calibrated</strong> spectrum, erg s⁻¹ cm⁻² Å⁻¹ — written by <a href="#" onClick="{{ goFlux }}">flux calibration</a>.</td></tr>
+      <tr><td class="mono">11</td><td class="mono" style="font-size:12.5px">FLAM_ERR</td><td style="font-size:13px">Flux-calibration uncertainty.</td></tr>
+      <tr><td class="mono">12</td><td class="mono" style="font-size:12.5px">FIBERWCS</td><td style="font-size:13px">Per-fibre <span class="mono">RA/DEC</span>, detector <span class="mono">X/Y</span>, astrometry provenance.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px;background:var(--color-divider);margin-top:20px">
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Note</div><p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0"><span class="mono">FIBERWCS</span> is deliberately separate from <span class="mono">FIBERMAP</span> so astrometry can be re-solved without touching the data.</p></div>
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Units</div><p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0">Fibre solid angle is <span class="mono">FIBAREA</span> ≈ 0.44 arcsec². Surface brightness = flux / <span class="mono">FIBAREA</span>.</p></div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goSetup }}">← 1 · Setup &amp; config</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goRegister }}">Next — 3 · WCS correction</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRegister }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Workflow · step 3 of 5</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">WCS correction</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">A Gaia-anchored per-fibre WCS, solved per exposure or per dither block, written back into the RSS on disk.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">CubeViewer ▸ WCS ▸ Auto-register block…<br>or <span class="mono">register_exposures(paths)</span></div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Refined per-fibre RA/DEC in <span class="mono">FIBERMAP</span> and <span class="mono">FIBERWCS</span> of every colour, and in the white-light image WCS</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Residual <strong>RMS &lt; ~0.25″</strong>. The QA plot title reports solve type, star count and RMS per frame.</div></div>
+  </div>
+
+  <h2 id="why" style="font-size:26px;margin-top:40px">Background</h2>
+  <hr class="hr">
+  <div style="background:var(--color-accent);color:var(--color-bg);padding:26px 28px">
+    <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.85">Note</div>
+    <p style="margin:10px 0 0;font-size:14px;opacity:0.9;max-width:46em">The combine places every fibre at its <span class="mono">FIBERWCS</span> position, so WCS accuracy sets the sharpness of the stacked PSF. Residual offsets between dithers blur the co-add and cannot be corrected later.</p>
+  </div>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:18px"><span class="mono">reduce.py</span> writes only a <strong>provisional</strong> WCS from telescope pointing plus rotator angle. Real TCS pointing error is often <strong>4–6″</strong> — not good enough to co-add dithers cleanly.</p>
+
+  <h2 id="how" style="font-size:26px;margin-top:40px">How the solve works</h2>
+  <hr class="hr">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px;background:var(--color-divider);border:2px solid var(--color-divider)">
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">01</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Gaia cone search</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Live query seeded by the rough WCS.</p></div>
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">02</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Fibre-space centroids</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Fitted for the brightest sources — in fibre space, not on a gridded image.</p></div>
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">03</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Consensus matching</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Trust comes from two or more stars agreeing on a common shift, or one dominant standard — <strong>not</strong> from shift magnitude.</p></div>
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">04</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Solve and write back</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Offset, plus rotation per block. Stored on disk with the RSS; later stages just read it.</p></div>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px;max-width:56em">Because trust is by consensus rather than plausibility, a large-but-consistent TCS error is corrected safely instead of being rejected as implausible.</p>
+
+  <h2 id="routes" style="font-size:26px;margin-top:40px">Running it</h2>
+  <hr class="hr">
+  <div class="seg" style="margin-bottom:14px">
+    <label class="seg-opt" style="background:{{ rgBg }};color:{{ rgFg }}"><span onClick="{{ setGuiRoute }}">In the CubeViewer</span></label>
+    <label class="seg-opt" style="background:{{ rcBg }};color:{{ rcFg }}"><span onClick="{{ setCliRoute }}">From the command line</span></label>
+  </div>
+  <sc-if value="{{ routeGui }}" hint-placeholder-val="{{ true }}">
+  <div style="border-top:2px solid var(--color-divider)">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:12px 0;border-bottom:1px solid var(--color-divider)"><div style="font-family:var(--font-heading);font-weight:800;font-size:14px">WCS ▸ Auto-register this exposure</div><div style="font-size:13px;color:var(--color-neutral-800)">Gaia solve for one frame.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:12px 0;border-bottom:1px solid var(--color-divider)"><div style="font-family:var(--font-heading);font-weight:800;font-size:14px">WCS ▸ Auto-register block…</div><div style="font-size:13px;color:var(--color-neutral-800)">One rotation fit plus per-frame shifts for a whole dither group. The usual choice.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:12px 0;border-bottom:1px solid var(--color-divider)"><div style="font-family:var(--font-heading);font-weight:800;font-size:14px">WCS ▸ Refine WCS interactively…</div><div style="font-size:13px;color:var(--color-neutral-800)">Manual fallback: Gaia sources overlay as green circles, click the star at the DS9 crosshair and it snaps to the flux-weighted fibre centroid. The block's rotation can be held fixed while only translation fits.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:12px 0;border-bottom:1px solid var(--color-divider)"><div style="font-family:var(--font-heading);font-weight:800;font-size:14px">WCS ▸ Show registration QA</div><div style="font-size:13px;color:var(--color-neutral-800)">The QA plot for the current solve.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:12px 0;border-bottom:1px solid var(--color-divider)"><div style="font-family:var(--font-heading);font-weight:800;font-size:14px">WCS ▸ Reset to rough (header) WCS</div><div style="font-size:13px;color:var(--color-neutral-800)">Revert to the provisional pointing solution.</div></div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ routeCli }}" hint-placeholder-val="{{ false }}">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;line-height:1.7;overflow-x:auto">from llamas_pyjamas.Utils.register import register_exposures
+
+register_exposures(list_of_rss_paths)   # auto-groups by OBJECT + rotator, solves each block</pre>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:12px">The other entry points are <span class="mono">register_exposure</span> (one frame), <span class="mono">register_block</span> (a rotation-sharing group, optionally <span class="mono">fixed_rotation=…</span>), and <span class="mono">reset_rough</span> to revert.</p>
+  </sc-if>
+
+  <h2 id="check" style="font-size:26px;margin-top:40px">QA output</h2>
+  <hr class="hr">
+  <figure>
+    <image-slot id="fig-registration-qa" src="images/fig_registration_qa.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_qa.png — Gaia sources vs fitted centroids (J1613)"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613): catalogued Gaia positions against the fitted fibre-space centroids. The title carries solve type, star count and RMS.</figcaption>
+  </figure>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2px;background:var(--color-divider);margin-top:20px">
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Target</div><div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-top:6px">RMS &lt; 0.25″</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">On the may26 fields, ~33 of 35 frames refine automatically.</p></div>
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Known failure mode</div><div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-top:6px">Rotation off by 180°</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Fix with <strong>Auto-register block</strong> holding the correct rotation, or refine interactively.</p></div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goRun }}">← 2 · Run the reduction</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goCombine }}">Next — 4 · Combine dithers</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCombine }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Workflow · step 4 of 5</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Combine the dithers</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Every fibre from every dither goes into one table — the <strong>super-RSS</strong>. Cubes, co-add images and depth maps are all views of that table, and the single spatial and spectral resample happens only here.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Combine ▸ Combine field into cube…<br>or <span class="mono">Combine.combineField</span></div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div class="mono" style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">reduced/combined/&lt;field&gt;_cube_{blue,green,red}.fits<br>+ VAR · COVERAGE · NEXP</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">The coverage and NEXP maps, the transparency scale factors, and whether the stacked PSF looks as sharp as a single exposure.</div></div>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px">Correct the WCS first — see <a href="#" onClick="{{ goRegister }}">step 3</a>. Uncorrected dithers blur the co-add.</p>
+
+  <h2 id="dither" style="font-size:26px;margin-top:40px">Dithered fields</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">A set of exposures on the same field, taken with small telescope offsets and optionally at more than one rotator angle to fill the ~7% inter-lenslet gaps. The pattern is chosen by the observer, so coverage is generally uneven across the field: the combine makes no assumption about it and records what was actually observed in the <span class="mono">COVERAGE</span> and <span class="mono">NEXP</span> maps rather than trimming to a uniform-depth region.</p>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-superrss-fibres" src="images/fig_superrss_fibres.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_superrss_fibres.png — every fibre from four dithers on the sky (J2151+0235)"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J2151+0235, four dithers): every fibre from every exposure plotted at its plate-solved position. This scatter <em>is</em> the super-RSS.</figcaption>
+  </figure>
+
+  <h2 id="super" style="font-size:26px;margin-top:40px">The super-RSS</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Rather than resample each exposure and stack images, the pipeline gathers every fibre into one table, tagged with its native wavelength, its inverse-variance weight, its exposure, and its plate-solved RA/DEC. All deliverables are views of that one table.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px;background:var(--color-divider);border:2px solid var(--color-divider);margin-top:16px">
+    <div style="padding:18px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">TAGGED WITH</div><div style="font-size:13.5px;margin-top:8px;color:var(--color-neutral-800)">native wavelength · ivar weight · exposure · RA/DEC</div></div>
+    <div style="padding:18px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">VIEWS</div><div style="font-size:13.5px;margin-top:8px;color:var(--color-neutral-800)">cube · co-add image · narrowband · depth maps</div></div>
+    <div style="padding:18px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">RESAMPLES</div><div style="font-size:13.5px;margin-top:8px;color:var(--color-neutral-800)">once, at the very end</div></div>
+  </div>
+
+  <h2 id="transparency" style="font-size:26px;margin-top:40px">Transparency scaling</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Weather changes between dithers. Before co-adding, the combine can scale every exposure onto a common photometric system using an in-field reference source: it measures that source's flux in each exposure and scales the fainter, cloudier ones up, adjusting the variance so inverse-variance weighting still down-weights noisier frames correctly. On a good field the corrections are small (±10%), but on a night with passing cloud they matter.</p>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-transparency" src="images/fig_transparency.png" shape="rect" fit="contain" style="width:100%;height:260px" placeholder="fig_transparency.png — per-exposure transparency scales"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px">Real data: the derived scale factor per exposure.</figcaption>
+  </figure>
+
+  <h2 id="routes" style="font-size:26px;margin-top:40px">Running it</h2>
+  <hr class="hr">
+  <div class="seg" style="margin-bottom:14px">
+    <label class="seg-opt" style="background:{{ rgBg }};color:{{ rgFg }}"><span onClick="{{ setGuiRoute }}">In the CubeViewer</span></label>
+    <label class="seg-opt" style="background:{{ rcBg }};color:{{ rcFg }}"><span onClick="{{ setCliRoute }}">From the command line</span></label>
+  </div>
+  <sc-if value="{{ routeGui }}" hint-placeholder-val="{{ true }}">
+  <div>
+    <p style="color:var(--color-neutral-800);max-width:56em"><strong>Combine ▸ Combine field into cube…</strong> → pick the dithers from the observation log → set the options. It builds a cube for <strong>every</strong> channel on one shared grid, opens it, and saves to <span class="mono">reduced/combined/</span>.</p>
+    <div style="overflow-x:auto;max-width:100%">
+      <table class="table" style="min-width:560px;margin-top:14px">
+      <thead><tr><th style="width:22%">Option</th><th>Meaning</th><th style="width:16%">Default</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Kernel</strong></td><td style="font-size:13px">Spatial gridding kernel shape — <span class="mono">gaussian</span> or <span class="mono">tophat</span>.</td><td class="mono" style="font-size:12.5px">gaussian</td></tr>
+        <tr><td><strong>Kernel FWHM</strong></td><td style="font-size:13px">The gridding scale.</td><td class="mono" style="font-size:12.5px">0.9″</td></tr>
+        <tr><td><strong>Pixel scale</strong></td><td style="font-size:13px">Output spaxel size.</td><td class="mono" style="font-size:12.5px">0.5″</td></tr>
+        <tr><td><strong>Units</strong></td><td style="font-size:13px"><span class="mono">sb</span> surface brightness for diffuse emission, or <span class="mono">flux</span> per spaxel.</td><td class="mono" style="font-size:12.5px">sb</td></tr>
+        <tr><td><strong>Weighting</strong></td><td style="font-size:13px"><span class="mono">ivar</span> / <span class="mono">uniform</span> / <span class="mono">exptime</span>.</td><td class="mono" style="font-size:12.5px">ivar</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <figure style="margin-top:18px">
+      <image-slot id="fig-combine-options" src="images/fig_gui_combine_options.png" shape="rect" fit="contain" style="width:100%;height:280px" placeholder="fig_gui_combine_options.png — the combine options dialog"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">The options dialog, on a real field.</figcaption>
+    </figure>
+  </div>
+  </sc-if>
+  <sc-if value="{{ routeCli }}" hint-placeholder-val="{{ false }}">
+  <div>
+    <p style="color:var(--color-neutral-800);max-width:56em">Same products, headless.</p>
+    <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:12.5px;line-height:1.7;overflow-x:auto;margin-top:12px"># a deep cube for one field, transparency-scaled, all channels
+python -m llamas_pyjamas.Combine.combineField \
+    --dir /path/to/reduced --object J2151 --cube --scale-transparency
+
+# a broadband (or narrowband) co-added IMAGE instead of a cube
+python -m llamas_pyjamas.Combine.combineField \
+    --dir /path/to/reduced --object J2151 --band 5000 6000 --units sb --png</pre>
+    <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:12.5px;line-height:1.75;overflow-x:auto;margin-top:14px">--dir DIR --object NAME        discover a field's RSS by OBJECT prefix (or list RSS files directly)
+--cube                         build an (RA,DEC,wave) cube (else a 2-D image)
+--band LO HI                   wavelength window for an image (default: full range)
+--channels {blue,green,red}    channels to combine (default: all)
+--units {sb,flux}              surface brightness (default) or flux
+--weight {ivar,uniform,exptime}
+--kernel {gaussian,tophat}     --fwhm ARCSEC   --pixscale ARCSEC
+--scale-transparency           scale exposures to a common throughput (in-field source)
+  --scale-radius, --scale-sources, --scale-source RA DEC
+--keep-bad-fibres              keep strongly-negative broken fibres (default: masked)
+--dwave A                      cube wavelength step (default: native median)
+-o OUT.fits                    --png (preview)</pre>
+  </div>
+  </sc-if>
+
+  <div style="border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 22px;margin-top:24px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Callout — about the kernel FWHM</div>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--color-accent-900);max-width:56em">The gridding kernel fills the inter-lenslet gaps and lands the irregular dithered fibres on a regular grid, but it also <em>softens the rendered image</em>: effective image PSF ≈ √(source² + kernel²). Use ~0.9″ for faint <strong>diffuse</strong> emission, where it acts as a near-matched filter; drop to ~0.5–0.6″ for a <strong>sharper</strong> view of compact structure, at the cost of more holes and noise in shallow-coverage regions. This affects only the rendered cube or image — point-source optimal extraction works in fibre space and is <strong>not</strong> softened by it.</p>
+  </div>
+
+  <h2 id="products" style="font-size:26px;margin-top:40px">Products</h2>
+  <hr class="hr">
+  <div style="border-top:2px solid var(--color-divider)">
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Cubes — <span class="mono" style="font-size:13px">reduced/combined/&lt;field&gt;_cube_{blue,green,red}.fits</span></div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em">(RA, DEC, wavelength) with <span class="mono">VAR</span>, <span class="mono">COVERAGE</span> and <span class="mono">NEXP</span> extensions and a <span class="mono">WAVELENGTH</span> table. The header records the contributing RSS paths (<span class="mono">NRSSFILE</span>, <span class="mono">RSSFILn</span>), so re-opening the cube rebuilds the super-RSS on the fly — no giant file needed, and extraction runs on native fibre sampling rather than the gridded cube.</p>
+    </div>
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Co-add image</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em">In image mode: a DS9-ready FITS with the same <span class="mono">VAR</span>/<span class="mono">COVERAGE</span>/<span class="mono">NEXP</span> maps.</p>
+    </div>
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Depth maps</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em"><span class="mono">COVERAGE</span> counts fibres per pixel, <span class="mono">NEXP</span> counts distinct dithers: the deep-core / shallow-halo record. Broken fibres — a couple per exposure that read strongly negative — are masked as no-data by default so they don't punch holes in the co-add; <span class="mono">--keep-bad-fibres</span> disables that.</p>
+    </div>
+  </div>
+
+  <div style="border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);background:var(--color-surface);padding:20px 22px;margin-top:24px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">Known caveat — sky-subtraction striping</div>
+    <p style="margin:8px 0 0;font-size:13.5px;color:var(--color-neutral-800);max-width:56em">Faint <strong>diagonal striping</strong> in a deep co-add is an <em>additive</em> per-detector sky-subtraction residual, not a transparency effect, so transparency scaling correctly does not remove it. Because it is coherent across dithers it does not average down with more exposures either. It is an upstream sky-subtraction issue — the combine is faithfully co-adding the input residuals — and clean diffuse work at the faintest levels is gated by that separate, ongoing work.</p>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goRegister }}">← 3 · WCS correction</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goScience }}">Next — 5 · Science products</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isScience }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Workflow · step 5 of 5</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Science products</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Extracted from a stacked field: optimal spectra extracted in fibre space, a differential-refraction track, narrowband images, and an absolute flux anchor.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Extraction ▸ Optimal spectrum at crosshair<br>Combine ▸ Narrowband line image…<br>Extraction ▸ Anchor cube flux to Gaia…</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">1-D spectra across three channels, continuum-subtracted surface-brightness images, an absolute flux scale</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">The PSF fit drawn into DS9, the DAR centroid track, the per-channel PSF budget, and the colour scatter of the Gaia flux ratio.</div></div>
+  </div>
+
+  <h2 id="optimal" style="font-size:26px;margin-top:40px">Optimal extraction</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Put the DS9 crosshair on the source and take <strong>Extraction ▸ Optimal spectrum at crosshair</strong>. The extraction is PSF- and inverse-variance-weighted and runs on native fibre sampling — so the gridding kernel used to render the cube does not soften it.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:26px;margin-top:18px">
+    <figure>
+      <image-slot id="fig-profile-fit" src="images/fig_profile_fit.png" shape="rect" fit="contain" style="width:100%;height:280px" placeholder="fig_profile_fit.png — 2-D Gaussian PSF fit drawn into DS9"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">Real data: the fitted 2-D Gaussian PSF, drawn back into the DS9 frame.</figcaption>
+    </figure>
+    <figure>
+      <image-slot id="fig-optimal-spectrum" src="images/fig_optimal_spectrum.png" shape="rect" fit="contain" style="width:100%;height:280px" placeholder="fig_optimal_spectrum.png — extracted quasar spectrum, three channels"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">Real data: one quasar, extracted across blue, green and red.</figcaption>
+    </figure>
+  </div>
+
+  <h2 id="dar" style="font-size:26px;margin-top:40px">Differential atmospheric refraction</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">A source's centroid walks with wavelength. The extraction tracks that walk rather than assuming a fixed aperture, which is what keeps the blue and red ends of a single spectrum photometrically consistent.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:26px;margin-top:18px">
+    <figure>
+      <image-slot id="fig-dar-track" src="images/fig_dar_track.png" shape="rect" fit="contain" style="width:100%;height:270px" placeholder="fig_dar_track.png — centroid walk with wavelength"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">Real data: the measured DAR track.</figcaption>
+    </figure>
+    <figure>
+      <image-slot id="fig-psf-budget" src="images/fig_psf_budget.png" shape="rect" fit="contain" style="width:100%;height:270px" placeholder="fig_psf_budget.png — per-channel PSF FWHM"></image-slot>
+      <figcaption style="font-size:12px;margin-top:8px">Real data: the PSF FWHM budget per channel — the sanity check on extraction quality.</figcaption>
+    </figure>
+  </div>
+
+  <h2 id="narrow" style="font-size:26px;margin-top:40px">Narrowband images</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em"><strong>Combine ▸ Narrowband line image…</strong> builds a continuum-subtracted surface-brightness image in a chosen line window. From the command line, <span class="mono">combineField --band LO HI --units sb</span> produces the same view of the super-RSS.</p>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-narrowband" src="images/fig_narrowband.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_narrowband.png — continuum-subtracted narrowband image"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data: a continuum-subtracted narrowband image of the stacked field. For diffuse emission, keep the combine kernel near 0.9″ — it acts as a near-matched filter.</figcaption>
+  </figure>
+
+  <h2 id="anchor" style="font-size:26px;margin-top:40px">Absolute flux anchor</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em"><strong>Extraction ▸ Anchor cube flux to Gaia (at crosshair)…</strong> ties the stacked flux to the true SED of an in-field Gaia source, fixing zero-point and aperture loss at once with a source already in the frame. Full detail on the <a href="#" onClick="{{ goFlux }}">Flux calibration</a> page.</p>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goCombine }}">← 4 · Combine dithers</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goFlux }}">Flux calibration</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isFlux }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Capabilities</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Flux calibration</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">A three-phase chain: identify the standards, build the sensitivity function from one, apply it to the science RSS. Then verify against an in-field Gaia source.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;background:var(--color-divider);border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);margin-top:22px">
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What you run</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Sensitivity ▸ Build Sensitivity Function…<br>then Apply, or <span class="mono">apply_fluxcal</span></div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">What it produces</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">A sensfunc FITS carrying the standard's name, channels and <strong>airmass</strong>; <span class="mono">FLAM</span> and <span class="mono">FLAM_ERR</span> written back into each science RSS</div></div>
+    <div style="padding:16px;background:var(--color-bg)"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">QA output</div><div style="font-size:12.5px;margin-top:6px;overflow-wrap:anywhere">Fit residuals in the build dialog, then the Gaia flux-ratio colour scatter — a slope means residual throughput or colour error.</div></div>
+  </div>
+  <div style="border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 22px;margin-top:20px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Setup trap</div>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--color-accent-900);max-width:56em"><span class="mono">reduce.py</span> does <strong>not</strong> build or apply the sensitivity function. Standards tagged <span class="mono">flux_standard_files</span> are merged into the science list and reduced identically — there is no standard-specific code path in the pipeline. Calibration is a post-reduction step, by design.</p>
+  </div>
+
+  <h2 id="physics" style="font-size:26px;margin-top:40px">Formalism</h2>
+  <hr class="hr">
+  <div style="border:2px solid var(--color-divider);background:var(--color-surface);padding:24px 26px">
+    <div class="mono" style="font-size:clamp(15px,1.7vw,20px);line-height:1.6">S(λ) = F_ref(λ) / ( C_obs(λ) / t_exp )</div>
+    <p style="font-size:13.5px;color:var(--color-neutral-800);margin:12px 0 0;max-width:56em"><span class="mono">F_ref</span> is the standard's known true flux; <span class="mono">C_obs</span> its extracted counts summed over the star's aperture.</p>
+  </div>
+  <h3 style="font-size:19px;margin-top:26px">The fit must follow the instrument, not the star</h3>
+  <p style="color:var(--color-neutral-800);max-width:56em">Two families of wavelength are masked before fitting: telluric absorption bands, which belong to the atmosphere rather than the instrument, and the standard's own strong intrinsic lines. LLAMAS optical standards are hot subdwarfs and white dwarfs (GD108 sdB, Feige110 DOp) whose broad Balmer and He absorption would otherwise drag the fit down — on GD108 the raw blue ratio swings ~12×, almost all of it Balmer.</p>
+  <p style="color:var(--color-neutral-800);max-width:56em">The fit runs in <strong>log space</strong>, because <span class="mono">S</span> spans orders of magnitude and is far smoother logarithmically, using pypeit's robust iterative b-spline <span class="mono">iterfit</span> — the same fitter as the flat-field and sky steps — so outliers left by imperfect masking are rejected rather than followed.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px;background:var(--color-divider);margin-top:18px">
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Rationale</div><p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0">The VPH grating blaze features are a fixed instrument property — no moving parts — so the extra knots that capture them are established once and shipped in <span class="mono">LUT/sensfunc_breakpoints.dat</span>. Each night re-solves only the throughput on that fixed knot structure.</p></div>
+    <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Standards used</div><p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0">GD108 (sdB) and Feige110 (DOp). Their intrinsic absorption is masked by default; the interactive mode is for whatever the defaults miss.</p></div>
+  </div>
+
+  <h2 id="build" style="font-size:26px;margin-top:40px">Building it</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">When a loaded RSS is a spectrophotometric standard, define an aperture on the star in DS9 exactly as for any spectrum, then open <strong>Sensitivity ▸ Build Sensitivity Function…</strong>. Two modes, same core:</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:2px;background:var(--color-divider);border:2px solid var(--color-divider);margin-top:16px">
+    <div style="padding:20px;background:var(--color-bg)">
+      <div class="mono" style="font-size:11px;color:var(--color-accent-700)">AUTO</div>
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:17px;margin-top:6px">Defaults</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0">The fit is already in place when the dialog opens, using the default telluric and stellar masks and a span-derived breakpoint spacing. Save to accept it.</p>
+    </div>
+    <div style="padding:20px;background:var(--color-bg)">
+      <div class="mono" style="font-size:11px;color:var(--color-accent-700)">INTERACTIVE</div>
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:17px;margin-top:6px">Manual masking</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0">Drag on the plot to add a mask region, toggle the default masks, change the breakpoint spacing or spline order; fit and residuals redraw live before you Save. Use it where the default masks are insufficient.</p>
+    </div>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px;max-width:56em">The result saves as a sensitivity-function FITS carrying the standard's name, its channels, and <strong>its airmass</strong>.</p>
+
+  <h2 id="apply" style="font-size:26px;margin-top:40px">Applying it</h2>
+  <hr class="hr">
+  <div style="border:2px solid var(--color-divider);background:var(--color-surface);padding:24px 26px">
+    <div class="mono" style="font-size:clamp(14px,1.6vw,19px);line-height:1.8">FLAM(λ) = ( SKYSUB(λ) / t_exp ) · S(λ) · E(λ)<br>E(λ)    = 10 ^ ( 0.4 · k(λ) · (X_science − X_standard) )</div>
+  </div>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:16px"><span class="mono">E</span> is the <strong>differential</strong> atmospheric-extinction correction. The standard's own extinction is already folded into <span class="mono">S</span> — the sensfunc is built without correcting the standard to zero airmass — so only the airmass <em>difference</em> is applied. That is why the sensfunc must record the standard's airmass: without it, extinction is skipped with a warning and the calibration is exact only when the two airmasses match. <span class="mono">k(λ)</span> is pypeit's bundled La Silla/CTIO curve, selected by observatory coordinates as the nearest match to Las Campanas — ~30 km away, same altitude.</p>
+  <div style="border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);background:var(--color-surface);padding:18px 20px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">Written in place</div>
+    <p style="margin:8px 0 0;font-size:13.5px;color:var(--color-neutral-800);max-width:56em"><span class="mono">FLAM</span> and <span class="mono">FLAM_ERR</span> are written back into the RSS — no new files, instrumental planes untouched. Each science RSS must be a single channel present in the sensfunc; the channel is read from the file's <span class="mono">CHANNEL</span> header, so blue, green and red files each get the matching channel.</p>
+  </div>
+  <div class="seg" style="margin:20px 0 14px">
+    <label class="seg-opt" style="background:{{ rgBg }};color:{{ rgFg }}"><span onClick="{{ setGuiRoute }}">In the CubeViewer</span></label>
+    <label class="seg-opt" style="background:{{ rcBg }};color:{{ rcFg }}"><span onClick="{{ setCliRoute }}">From the command line</span></label>
+  </div>
+  <sc-if value="{{ routeGui }}" hint-placeholder-val="{{ true }}">
+  <p style="color:var(--color-neutral-800);max-width:56em"><strong>Sensitivity ▸ Apply Sensitivity Function to files…</strong> — the same operation with a file picker: choose the sensfunc, then the science RSS files to calibrate.</p>
+  </sc-if>
+  <sc-if value="{{ routeCli }}" hint-placeholder-val="{{ false }}">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:12.5px;line-height:1.7;overflow-x:auto">python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS1.fits [RSS2.fits ...]
+python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --no-extinction
+python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --outdir calibrated/</pre>
+  </sc-if>
+
+  <h2 id="anchor" style="font-size:26px;margin-top:40px">Verification — the absolute Gaia anchor</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em"><strong>Extraction ▸ Anchor cube flux to Gaia (at crosshair)…</strong> ties the stacked flux to the true SED of an in-field Gaia source, fixing zero-point and aperture loss at once with a source already in the frame — no separate standard needed.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:2px solid var(--color-divider);margin-top:16px">
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">G &lt; ~17.6</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Gaia DR3 XP spectrum</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">A flux-calibrated SED, so it is SED-independent — works for a quasar as well as a star. Needs <span class="mono">gaiaxpy</span> and network.</p></div>
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">FAINTER</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Broadband fallback</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">A coarse SED from Gaia G/BP/RP magnitudes, flagged <em>approximate</em> in the dialog.</p></div>
+    <div style="padding:20px;background:var(--color-bg)"><div class="mono" style="font-size:11px;color:var(--color-accent-700)">DIAGNOSTIC</div><div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-top:6px">Colour scatter of the ratio</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">A slope flags residual throughput or colour error — or, for a variable quasar, an epoch mismatch.</p></div>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px;max-width:56em">Prefer a genuine star for end-to-end validation; quasar anchors carry a variability caveat.</p>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-flux-anchor" src="images/fig_flux_anchor.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_flux_anchor.png — extracted spectrum on the Gaia reference SED"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data: the extracted spectrum laid over the Gaia reference SED — the verification step.</figcaption>
+  </figure>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goScience }}">← 5 · Science products</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goCube }}">CubeViewer</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCube }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Capabilities</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">CubeViewer</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">A standalone PyQt6 application for postprocessing analysis of reduced products — and the home of registration, stacking, flux calibration and extraction.</p>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:14px 16px;font-size:13px;overflow-x:auto;margin-top:20px">python -m llamas_pyjamas.CubeViewer [file]</pre>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:10px;max-width:56em">It is independent of the QuickLook/observing-log GUI in <span class="mono">llamas_pyjamas.GUI</span>: it imports read-only helpers from the reduction code and modifies nothing in it.</p>
+
+  <h2 id="ds9" style="font-size:26px;margin-top:40px">Relationship to DS9</h2>
+  <hr class="hr">
+  <div style="background:var(--color-accent);color:var(--color-bg);padding:26px 28px">
+    <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.85">Division of labour</div>
+    <p style="margin:10px 0 0;font-size:14px;opacity:0.9;max-width:46em">CubeViewer collapses the loaded product over a wavelength window you choose, sends the image to DS9, and plots the spectrum of whatever spatial element you pick in the DS9 window. Stretch, colourmap, zoom and pan stay where they are already better.</p>
+  </div>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:18px"><strong>DS9 is optional.</strong> The window opens, loads data and plots spectra without it; only image display and picking need it, and its absence is reported rather than fatal.</p>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-cubeviewer-anatomy" src="images/fig_cubeviewer_anatomy.png" shape="rect" fit="contain" style="width:100%;height:330px" placeholder="Window anatomy — DS9 image window, CubeViewer control boxes, spectrum panel"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">The two windows side by side — DS9 on the left with the white-light image and crosshair, the CubeViewer controls and spectrum panel on the right.</figcaption>
+  </figure>
+
+  <h2 id="xpa" style="font-size:26px;margin-top:40px">How it talks to DS9</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">Over the XPA messaging system, invoking the <span class="mono">xpaset</span>/<span class="mono">xpaget</span> command-line clients and piping in-memory FITS bytes on stdin — nothing is written to disk. <span class="mono">pyds9</span> is deliberately avoided: unmaintained, undeclared, and it doesn't build on recent Python.</p>
+  <div style="border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 22px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Setup trap — the XPA client tools</div>
+    <p style="margin:8px 0 12px;font-size:14px;color:var(--color-accent-900);max-width:56em">SAOImageDS9 bundles the XPA <em>name server</em> (<span class="mono">xpans</span>) but <strong>not</strong> the XPA <em>client tools</em>, and there is no Homebrew <span class="mono">xpa</span> formula — so <span class="mono">xpaset</span>/<span class="mono">xpaget</span> are frequently absent. CubeViewer searches <span class="mono">$CUBEVIEWER_XPA_DIR</span>, then <span class="mono">$PATH</span>, then the usual install locations, and raises an actionable error naming the fix rather than failing obscurely.</p>
+    <pre style="background:var(--color-bg);border:1px solid var(--color-accent-300);padding:14px 16px;font-size:12.5px;line-height:1.7;overflow-x:auto">git clone https://github.com/ericmandel/xpa &amp;&amp; cd xpa &amp;&amp; ./configure &amp;&amp; make &amp;&amp; make install
+# or install a packaged build (e.g. conda-forge), then put the binaries on $PATH
+# or: export CUBEVIEWER_XPA_DIR=/path/to/them</pre>
+  </div>
+
+  <h2 id="data" style="font-size:26px;margin-top:40px">Data model</h2>
+  <hr class="hr">
+  <div style="border-top:2px solid var(--color-divider)">
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Geometry-agnostic scenes</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em">A <span class="mono">SpectralScene</span> interface has two implementations — fibres (<span class="mono">cubeViewRSS</span>) and rectilinear spaxels (<span class="mono">cubeViewCube</span>) — so every tool works on either.</p>
+    </div>
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Siblings load together</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em">Opening one channel finds the others by name, so blue + green + red load together and cover ~3170–10051 Å.</p>
+    </div>
+    <div style="padding:16px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:16px">Cuts are per fibre, not per column</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em">Wavelength cuts are applied against each fibre's own <span class="mono">WAVE</span> row. The 2-D <span class="mono">WAVE</span> extension means fibres share no common grid, so a column slice would be wrong. Geometry is keyed on <span class="mono">(BENCHSIDE, FIBER_ID)</span> from <span class="mono">FIBERMAP</span> — never on row index.</p>
+    </div>
+  </div>
+
+  <h2 id="menus" style="font-size:26px;margin-top:40px">Menu map</h2>
+  <hr class="hr">
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:8px">
+    <thead><tr><th style="width:14%">Menu</th><th style="width:32%">Item</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>File</strong></td><td>Open RSS…</td><td style="font-size:13px">Load a per-exposure RSS; siblings auto-load.</td></tr>
+      <tr><td></td><td>Open from obslog…</td><td style="font-size:13px">Pick an exposure from the observation log.</td></tr>
+      <tr><td></td><td>Open combined cube…</td><td style="font-size:13px">Load a stacked cube; the super-RSS is rebuilt from its provenance headers.</td></tr>
+      <tr><td><strong>Sensitivity</strong></td><td>Build Sensitivity Function…</td><td style="font-size:13px">Interactive sensfunc fit on a standard → <a href="#" onClick="{{ goFlux }}">Flux calibration</a>.</td></tr>
+      <tr><td></td><td>Apply Sensitivity Function to files…</td><td style="font-size:13px">Write <span class="mono">FLAM</span>/<span class="mono">FLAM_ERR</span> into science RSS.</td></tr>
+      <tr><td><strong>WCS</strong></td><td>Auto-register this exposure</td><td style="font-size:13px">Gaia solve, one frame → <a href="#" onClick="{{ goRegister }}">WCS correction</a>.</td></tr>
+      <tr><td></td><td>Auto-register block…</td><td style="font-size:13px">One rotation fit plus per-frame shifts for a dither group.</td></tr>
+      <tr><td></td><td>Refine WCS interactively…</td><td style="font-size:13px">Manual fallback: click a star at the DS9 crosshair.</td></tr>
+      <tr><td></td><td>Show registration QA</td><td style="font-size:13px">The QA plot.</td></tr>
+      <tr><td></td><td>Reset to rough (header) WCS</td><td style="font-size:13px">Revert to the provisional WCS.</td></tr>
+      <tr><td><strong>Combine</strong></td><td>Combine field into cube…</td><td style="font-size:13px">Stack the dithers → <a href="#" onClick="{{ goCombine }}">Combining dithers</a>.</td></tr>
+      <tr><td></td><td>Narrowband line image…</td><td style="font-size:13px">Continuum-subtracted surface-brightness image.</td></tr>
+      <tr><td><strong>Extraction</strong></td><td>Optimal spectrum at crosshair</td><td style="font-size:13px">PSF- and ivar-weighted extraction with DAR tracking → <a href="#" onClick="{{ goScience }}">Science products</a>.</td></tr>
+      <tr><td></td><td>Anchor cube flux to Gaia (at crosshair)…</td><td style="font-size:13px">Absolute flux scale from an in-field Gaia source.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goFlux }}">← Flux calibration</a>
+    <a class="btn btn-primary" href="#" onClick="{{ goRef }}">Reference</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRef }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:1040px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Reference</div>
+  <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Commands &amp; tables</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">The cross-cutting layer: every command, the reduced directory tree, the config keys that matter, and the failure modes reported so far.</p>
+  <hr class="hr">
+
+  <h2 id="cheat" style="font-size:26px;margin-top:30px">Command summary</h2>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:32%">Task</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td>Classify a raw night, write a config</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR -o config.txt</td></tr>
+      <tr><td>Reduce a night <span style="color:var(--color-neutral-600)">(from <span class="mono">llamas_pyjamas/</span>)</span></td><td class="mono" style="font-size:12px">python reduce.py config.txt</td></tr>
+      <tr><td>Open the CubeViewer</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.CubeViewer [file]</td></tr>
+      <tr><td>Combine a field → cube</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --cube</td></tr>
+      <tr><td>Combine a field → image</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --band LO HI --png</td></tr>
+      <tr><td>Apply a sensitivity function</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENS.fits RSS…</td></tr>
+      <tr><td>Standalone wavelength QA</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.QA.waveQA PKL --qa-dir QA/</td></tr>
+      <tr><td>Build or update a master bias</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR</td></tr>
+      <tr><td>Fetch the flux-standard catalogue</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Scripts.fetch_standards</td></tr>
+      <tr><td>Repair a MEF with missing cameras</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.DataModel.validate in.fits -o fixed.fits</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="tree" style="font-size:26px;margin-top:40px">Directory layout</h2>
+  <p style="color:var(--color-neutral-800);max-width:56em">Rooted at <span class="mono">output_dir</span>, default <span class="mono">&lt;raw_night&gt;/reduced/</span>.</p>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:18px;font-size:12.5px;line-height:1.7;overflow-x:auto;margin-top:12px">reduced/
+├── bias_corrected/     bias-subtracted frames
+├── traces/             fibre traces: LLAMAS_{color}_{bench}_{side}_traces.pkl  (24)
+├── arcs/               extracted night arcs (only if refine_arc)
+├── extractions/        ← the main per-exposure products:
+│   ├── {name}_RSS_{red,green,blue}.fits     per-channel RSS  ← main product
+│   ├── {name}_whitelight_fullpipeline.fits  per-exposure white-light image
+│   ├── flat/           pixel_maps.fits, twilight/, dome_rss/
+│   └── masks/          cosmic-ray masks
+├── cubes/              per-exposure cubes (only if generate_cubes = true)
+├── combined/           stacked products: &lt;field&gt;_cube_{blue,green,red}.fits, mosaics
+├── QA/                 wavelength-calibration QA (HTML/CSV/PNG)
+├── QA_registration/    {..}_reg_qa.png registration QA plots
+└── logs/               llamas_pipeline_*.log</pre>
+
+  <h2 id="keys" style="font-size:26px;margin-top:40px">Most-touched config keys</h2>
+  <p style="color:var(--color-neutral-800);max-width:56em">The authoritative annotated list is <span class="mono">llamas_pyjamas/example_config.txt</span>; the filterable catalog lives on <a href="#" onClick="{{ goSetup }}">Setup &amp; config</a>.</p>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:38%">Key</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="mono" style="font-size:12.5px">science_files</td><td style="font-size:13px">Comma-separated science exposures; set by the setup GUI.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">red_ / green_ / blue_flat_file</td><td style="font-size:13px">Per-colour flats. <strong>Required.</strong></td></tr>
+      <tr><td class="mono" style="font-size:12.5px">red_twilight_flat · …</td><td style="font-size:13px">Per-colour twilights — fibre-to-fibre throughput. Recommended.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">red_arc_file · refine_arc · generate_new_wavelength_soln</td><td style="font-size:13px">Wavelength-solution controls.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">flux_standard_files</td><td style="font-size:13px">Standard-star exposures for the sensitivity function.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">slow_bias_file · fast_bias_file</td><td style="font-size:13px">Master bias per readout mode.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">output_dir · trace_ / extraction_ / cube_output_dir</td><td style="font-size:13px">Output locations.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">extraction_method · boxcar_halfwidth</td><td style="font-size:13px"><span class="mono">boxcar</span> / <span class="mono">horne</span> / <span class="mono">optimal</span>, and the boxcar window.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">sky_subtract · sky_selection_method</td><td style="font-size:13px">Sky subtraction.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">wave_frame</td><td style="font-size:13px">Wavelength reference frame — <span class="mono">heliocentric</span> and friends.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">apply_fibre_flat · twilight_throughput</td><td style="font-size:13px">Throughput corrections.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">wavelength_qa · qa_output_dir</td><td style="font-size:13px">QA report generation.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">generate_cubes</td><td style="font-size:13px">Per-exposure cubes; default off — stack later instead.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">clobber</td><td style="font-size:13px">Rebuild everything instead of resuming.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">ray_num_cpus</td><td style="font-size:13px">Parallelism.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="trouble" style="font-size:26px;margin-top:40px">Troubleshooting</h2>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:40%">Symptom</th><th>Likely cause / fix</th></tr></thead>
+    <tbody>
+      <tr><td><span class="mono">reduce.py</span> errors on <span class="mono">--config</span></td><td style="font-size:13px">The argument is <strong>positional</strong>: <span class="mono">python reduce.py config.txt</span>.</td></tr>
+      <tr><td>CubeViewer says the XPA tools are missing</td><td style="font-size:13px">SAOImageDS9 ships <span class="mono">xpans</span> but not <span class="mono">xpaset</span>/<span class="mono">xpaget</span>. Build SAO's XPA package or set <span class="mono">$CUBEVIEWER_XPA_DIR</span>.</td></tr>
+      <tr><td>A frame won't register, or the rotation looks wrong</td><td style="font-size:13px"><strong>WCS ▸ Refine WCS interactively…</strong>, or <strong>Auto-register block</strong> holding the correct rotation.</td></tr>
+      <tr><td>Missing-camera or extension errors on raw frames</td><td style="font-size:13px">Run <span class="mono">python -m llamas_pyjamas.DataModel.validate</span> on the MEF first.</td></tr>
+      <tr><td>Only the green cube appears</td><td style="font-size:13px">Build with the CubeViewer combine (shared grid, all channels), or <span class="mono">combineField</span> without <span class="mono">--channels</span>.</td></tr>
+      <tr><td>Negative "holes" in the co-add</td><td style="font-size:13px">Broken fibres — masked by default. Do <strong>not</strong> pass <span class="mono">--keep-bad-fibres</span>.</td></tr>
+      <tr><td>Co-add looks noisier than a single exposure in the red</td><td style="font-size:13px">Coherent sky-subtraction residuals; they don't average down.</td></tr>
+      <tr><td>Displayed image looks soft, PSF too big</td><td style="font-size:13px">The gridding kernel softens only the <em>rendered</em> image. Lower the combine Kernel FWHM.</td></tr>
+      <tr><td>No QA reports after a re-run</td><td style="font-size:13px">QA regenerates only when extraction reruns. Use the standalone <span class="mono">QA.waveQA</span> CLI.</td></tr>
+      <tr><td>QA reports aren't next to my data</td><td style="font-size:13px"><span class="mono">output_dir</span> unset → they land in the package's <span class="mono">reduced/QA/</span>. Set <span class="mono">qa_output_dir</span>.</td></tr>
+      <tr><td>Gaia anchor says <em>approximate</em></td><td style="font-size:13px">The source has no Gaia XP spectrum (too faint); it fell back to broadband photometry.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:2px;background:var(--color-divider);margin-top:32px">
+    <div style="background:var(--color-bg);padding:22px">
+      <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Mailing list</div>
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:19px;margin:8px 0 6px">llamas-pipeline</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800)">Release and breaking-change notices. Subscribe, or send a blank email to <span class="mono">llamas-pipeline-join@mit.edu</span> and confirm the reply.</p>
+      <div style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;flex-wrap:wrap">
+        <input class="input" placeholder="you@institution.edu" style="max-width:240px">
+        <a class="btn btn-primary" href="https://mailman.mit.edu/mailman/listinfo/llamas-pipeline" target="_blank">Subscribe</a>
+      </div>
+    </div>
+    <div style="background:var(--color-bg);padding:22px">
+      <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Report a problem</div>
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:19px;margin:8px 0 6px">GitHub Issues</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800)">Include your config file, the failing stage, and the relevant log from <span class="mono">logs/</span>.</p>
+      <a class="btn btn-secondary" href="https://github.com/mit-kavli-institute/llamas-pyjamas/issues" target="_blank" style="margin-top:10px">Open an issue ↗</a>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:32px;padding-top:20px;border-top:2px solid var(--color-divider);flex-wrap:wrap">
+    <a class="btn btn-secondary" href="#" onClick="{{ goCube }}">← CubeViewer</a>
+    <a class="btn btn-secondary" href="#" onClick="{{ goCite }}">Cite &amp; credits</a>
+  </div>
+</div>
+</sc-if>
+
+<div data-pages-end="1"></div>
+
+<sc-if value="{{ isInstall }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:920px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Start</div>
+  <h1 id="install" style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Installation</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Python 3.12, an editable install from a clone, and the packaged calibration products. Everything after this page is workflow.</p>
+  <hr class="hr">
+
+  <h2 id="env" style="font-size:26px;margin-top:30px">1 — Environment</h2>
+  <div class="seg" style="margin-bottom:14px">
+    <label class="seg-opt" style="background:{{ tabCondaBg }};color:{{ tabCondaFg }}"><span onClick="{{ setConda }}">conda</span></label>
+    <label class="seg-opt" style="background:{{ tabVenvBg }};color:{{ tabVenvFg }}"><span onClick="{{ setVenv }}">venv</span></label>
+    <label class="seg-opt" style="background:{{ tabPoetryBg }};color:{{ tabPoetryFg }}"><span onClick="{{ setPoetry }}">poetry</span></label>
+  </div>
+  <sc-if value="{{ isConda }}" hint-placeholder-val="{{ true }}">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;overflow-x:auto;line-height:1.7">git clone https://github.com/mit-kavli-institute/llamas-pyjamas.git
+cd llamas-pyjamas
+conda create -n llamas python=3.12
+conda activate llamas
+pip install -e .</pre>
+  </sc-if>
+  <sc-if value="{{ isVenv }}" hint-placeholder-val="{{ false }}">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;overflow-x:auto;line-height:1.7">git clone https://github.com/mit-kavli-institute/llamas-pyjamas.git
+cd llamas-pyjamas
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e .</pre>
+  </sc-if>
+  <sc-if value="{{ isPoetry }}" hint-placeholder-val="{{ false }}">
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:16px 18px;font-size:13px;overflow-x:auto;line-height:1.7">git clone https://github.com/mit-kavli-institute/llamas-pyjamas.git
+cd llamas-pyjamas
+poetry env use 3.12
+poetry install</pre>
+  </sc-if>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:10px">Run the install from the directory containing <span class="mono">pyproject.toml</span>. Some additional packages may still need pip-installing as development continues.</p>
+
+  <h2 id="deps" style="font-size:26px;margin-top:36px">2 — External tools</h2>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:30%">Tool</th><th style="width:18%">Needed for</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="mono" style="font-size:12.5px">ds9</td><td>QuickLook, CubeViewer</td><td>SAOImage DS9 owns all image display. Optional — the CubeViewer opens and plots without it.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">gaiaxpy</td><td>Gaia XP flux anchor</td><td>Plus network access; without it the anchor falls back to broadband photometry.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">ray</td><td>Parallel stages</td><td>Controlled by <span class="mono">ray_num_cpus</span>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="aux" style="font-size:26px;margin-top:36px">3 — Packaged calibration files</h2>
+  <p style="color:var(--color-neutral-800);max-width:52em">Master traces, master biases and the reference arc ship as downloads and live in fixed locations inside <span class="mono">llamas_pyjamas/</span>. The setup GUI can build a night-specific master bias instead; the packaged one is the fallback.</p>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:560px;margin-top:12px">
+    <thead><tr><th style="width:38%">Product</th><th style="width:26%">Destination</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Master calibration set <span class="mono" style="font-size:12px">LLAMAS_*_trace.pkl</span></td><td class="mono" style="font-size:12.5px">mastercalib/</td><td>Fallback traces when a night's flats are not traced.</td></tr>
+      <tr><td>Master bias <span class="mono" style="font-size:12px">slow_ / fast_master_bias.fits</span></td><td class="mono" style="font-size:12.5px">Bias/ and mastercalib/</td><td>Per readout mode. Rebuilt per night by the setup GUI when biases are tagged.</td></tr>
+      <tr><td>Reference arc <span class="mono" style="font-size:12px">LLAMAS_reference_arc.pkl</span></td><td class="mono" style="font-size:12.5px">LUT/</td><td>Base wavelength solution; <span class="mono">refine_arc</span> improves on it per night.</td></tr>
+      <tr><td>Sensfunc breakpoints <span class="mono" style="font-size:12px">sensfunc_breakpoints.dat</span></td><td class="mono" style="font-size:12.5px">LUT/</td><td>Fixed spline knots capturing the VPH blaze; shipped, not re-derived.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+    <a class="btn btn-secondary" href="https://mit-kavli.box.com/s/bath5hhtjqsn3m89l7579u1ev4rk2xjo" target="_blank">mastercalib ↗</a>
+    <a class="btn btn-secondary" href="https://mit-kavli.box.com/s/sn4b27et5i3xvys1nazy6alv4ijwep1a" target="_blank">master bias ↗</a>
+    <a class="btn btn-secondary" href="https://mit-kavli.box.com/s/v4kwlsx02nevnv5nw3p1i58lsxxoowe6" target="_blank">reference arc ↗</a>
+  </div>
+
+  <div style="border:2px solid var(--color-accent);padding:20px 22px;margin-top:26px;background:var(--color-accent-100)">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Known caveat — 2024 commissioning data</div>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--color-accent-900);max-width:52em">Camera positions changed after the Nov/Dec 2024 run, so that data needs its own master traces and wavelength solution in the same folders. Contact <a href="mailto:slhughes@mit.edu" style="color:var(--color-accent-800)">slhughes@mit.edu</a> before reducing it.</p>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:28px;padding-top:20px;border-top:2px solid var(--color-divider)">
+    <a class="btn btn-primary" href="#" onClick="{{ goSetup }}">Next — 1 · Setup &amp; config</a>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCite }}" hint-placeholder-val="{{ false }}">
+<div style="padding:46px 48px 0;max-width:900px">
+  <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Reference</div>
+  <h1 id="cite" style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">Cite &amp; credits</h1>
+  <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Users of this pipeline are requested to cite Hughes et al. (in prep), and the instrument papers where relevant.</p>
+  <hr class="hr">
+  <h2 id="bibtex" style="font-size:26px;margin-top:30px">Pipeline</h2>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:18px;font-size:12.5px;line-height:1.7;overflow-x:auto">@unpublished{Hughes2025,
+ author = {Hughes, Sarah and others},
+ title  = {{The LLAMAS data reduction pipeline}},
+ note   = {in preparation},
+ year   = {2025}}</pre>
+  <button class="btn btn-secondary" onClick="{{ copyBib }}" style="margin-top:10px">{{ copyLabel }}</button>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:14px;max-width:52em">The reduction leans on pypeit for its robust iterative b-spline fitter (flat field, sky, sensitivity function) and its bundled La Silla/CTIO extinction curve; Gaia DR3 supplies astrometry and, via XP spectra, the absolute flux anchor. Cite those where your analysis depends on them.</p>
+
+  <h2 id="papers" style="font-size:26px;margin-top:36px">Instrument &amp; award</h2>
+  <div style="border-top:2px solid var(--color-divider)">
+    <div style="padding:18px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:17px">LLAMAS: A Facility Integral Field Spectrograph for the Magellan Telescopes</div>
+      <div style="font-size:13px;color:var(--color-neutral-700);margin-top:4px">R. Simcoe (PI) · NSF award AST-1836002, 2018 · MIT Kavli Institute</div>
+      <a href="https://ui.adsabs.harvard.edu/abs/2018nsf....1836002S/abstract" target="_blank" style="font-size:13px">ADS record ↗</a>
+    </div>
+    <div style="padding:18px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:17px">Construction update on the Magellan LLAMAS integral field spectrograph</div>
+      <div style="font-size:13px;color:var(--color-neutral-700);margin-top:4px">Simcoe et al., Proc. SPIE 12184, 121840D (2022)</div>
+    </div>
+    <div style="padding:18px 0;border-bottom:1px solid var(--color-divider)">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:17px">Status update of LLAMAS: a wide field-of-view visible passband IFU for the 6.5 m Magellan telescopes</div>
+      <div style="font-size:13px;color:var(--color-neutral-700);margin-top:4px">Furesz et al., Proc. SPIE 11447 (2020)</div>
+    </div>
+  </div>
+
+  <h2 id="license" style="font-size:26px;margin-top:36px">License &amp; status</h2>
+  <p style="color:var(--color-neutral-800);max-width:52em">MIT license. This is an in-progress development pipeline, published read-only for observation planning and execution; no warranty is made regarding installation or execution until instrument commissioning is complete.</p>
+</div>
+</sc-if>
+
+</div>
+
+<sc-if value="{{ showToc }}" hint-placeholder-val="{{ true }}">
+<aside style="width:206px;flex:none;padding:50px 24px 60px 16px;position:sticky;top:80px;font-size:12.5px;background:var(--color-bg);z-index:2">
+  <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600);border-bottom:2px solid var(--color-divider);padding-bottom:8px;margin-bottom:10px">On this page</div>
+  <div style="display:flex;flex-direction:column;gap:7px">
+    <sc-for list="{{ toc }}" as="t" hint-placeholder-count="4">
+      <a href="{{ t.href }}" style="color:var(--color-neutral-800);text-decoration:none">{{ t.label }}</a>
+    </sc-for>
+  </div>
+  <div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--color-divider);color:var(--color-neutral-600);font-size:11.5px">
+    <a href="https://github.com/mit-kavli-institute/llamas-pyjamas" target="_blank" style="color:var(--color-neutral-700);text-decoration:none">Edit on GitHub ↗</a>
+  </div>
+</aside>
+</sc-if>
+</main>
+</div>
+
+<footer style="border-top:2px solid var(--color-divider);padding:30px 48px;display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap">
+  <div style="margin-right:auto;max-width:34em">
+    <div style="font-family:var(--font-heading);font-weight:800;font-size:15px">llamas-pyjamas</div>
+    <p style="font-size:12.5px;color:var(--color-neutral-700);margin:6px 0 0">Data reduction pipeline for the Magellan LLAMAS integral field spectrograph. MIT Kavli Institute for Astrophysics and Space Research · NSF AST-1836002.</p>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+    <a href="https://github.com/mit-kavli-institute/llamas-pyjamas" target="_blank" style="color:var(--color-neutral-800);text-decoration:none">Repository ↗</a>
+    <a href="https://github.com/mit-kavli-institute/llamas-pyjamas/issues" target="_blank" style="color:var(--color-neutral-800);text-decoration:none">Issues ↗</a>
+    <a href="https://mailman.mit.edu/mailman/listinfo/llamas-pipeline" target="_blank" style="color:var(--color-neutral-800);text-decoration:none">Mailing list ↗</a>
+  </div>
+  <div style="font-size:11.5px;color:var(--color-neutral-600);max-width:20em">Documents the <span class="mono">rs-dev</span> branch as of 2026-07-28 · in-progress development pipeline · no warranty until commissioning is complete.</div>
+</footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;navModel&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;sidebar&quot;,&quot;top&quot;],&quot;default&quot;:&quot;sidebar&quot;,&quot;tsType&quot;:&quot;'sidebar' | 'top'&quot;,&quot;section&quot;:&quot;Information architecture&quot;},&quot;showRightToc&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Information architecture&quot;},&quot;gridLines&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Information architecture&quot;}}">
+const CFG = [
+  ['clobber', 'Run / Resume', 'bool', 'Rebuild every product instead of resuming from what is on disk.'],
+  ['resume', 'Run / Resume', 'bool', 'Reuse on-disk stage products when their headers match.'],
+  ['output_dir', 'Run / Resume', 'path', 'Root of the reduced tree. Unset sends QA into the package directory.'],
+  ['trace_output_dir', 'Run / Resume', 'path', 'Override the traces/ location.'],
+  ['extraction_output_dir', 'Run / Resume', 'path', 'Override the extractions/ location.'],
+  ['slow_bias_file', 'Bias / Cosmic rays', 'path', 'Master bias for the slow readout mode.'],
+  ['fast_bias_file', 'Bias / Cosmic rays', 'path', 'Master bias for the fast readout mode.'],
+  ['cosmic_ray_reject', 'Bias / Cosmic rays', 'bool', 'Reject cosmic rays during extraction; masks land in extractions/masks/.'],
+  ['extraction_method', 'Extraction', 'enum', 'boxcar (default), horne, or optimal.'],
+  ['boxcar_halfwidth', 'Extraction', 'int', 'Half-width in pixels of the boxcar extraction window.'],
+  ['edge_bias_correct', 'Edge bias', 'bool', 'Apply the per-frame edge-DC offset alongside the master bias.'],
+  ['red_flat_file', 'Flat', 'path', 'Red lamp flat — required for tracing and the pixel flat.'],
+  ['green_flat_file', 'Flat', 'path', 'Green lamp flat — required.'],
+  ['blue_flat_file', 'Flat', 'path', 'Blue lamp flat — required.'],
+  ['red_twilight_flat', 'Flat', 'path', 'Red twilight flat — fibre-to-fibre throughput. Recommended.'],
+  ['apply_fibre_flat', 'Flat', 'bool', 'Divide by the twilight fibre-flat to equalise fibre throughput.'],
+  ['twilight_throughput', 'Flat', 'bool', 'Derive throughput from the twilight rather than the lamp flat.'],
+  ['pixel_flat_saturation_threshold', 'Flat', 'int', 'Saturation cut for the 2-D pixel flat. 0 means unset.'],
+  ['red_arc_file', 'Wavelength / Arc', 'path', 'Red arc frame for wavelength refinement.'],
+  ['refine_arc', 'Wavelength / Arc', 'bool', 'Refine the packaged wavelength solution from the night arcs.'],
+  ['generate_new_wavelength_soln', 'Wavelength / Arc', 'bool', 'Solve from scratch instead of refining the reference solution.'],
+  ['wave_frame', 'Wavelength / Arc', 'enum', 'Velocity frame for the output wavelengths — heliocentric and friends.'],
+  ['wavelength_qa', 'Wavelength / Arc', 'bool', 'Write the per-frame HTML wavelength-QA report. Default true.'],
+  ['qa_output_dir', 'Wavelength / Arc', 'path', 'Where QA reports go. Defaults to {output_dir}/QA.'],
+  ['sky_subtract', 'Sky', 'bool', 'Build and subtract the per-fibre 1-D sky model.'],
+  ['sky_selection_method', 'Sky', 'enum', 'How sky fibres are chosen for the model.'],
+  ['generate_cubes', 'Cube', 'bool', 'Per-exposure cubes. Default off — stack the dithers instead.'],
+  ['cube_output_dir', 'Cube', 'path', 'Override the cubes/ location.'],
+  ['dwave', 'Cube', 'float', 'Cube wavelength step. Defaults to the native median.'],
+  ['ray_num_cpus', 'Ray / Disk', 'int', 'CPUs for the parallel stages. 0 means unset.'],
+  ['keep_intermediate', 'Ray / Disk', 'bool', 'Keep per-stage intermediates on disk instead of cleaning up.'],
+  ['science_files', 'Run / Resume', 'list', 'Comma-separated science exposures. Written by the setup GUI.'],
+  ['flux_standard_files', 'Run / Resume', 'list', 'Standard-star exposures; reduced identically to science.'],
+  ['wcs_gaia_radius', 'WCS', 'float', 'Cone-search radius for the Gaia seed catalogue, in arcsec.'],
+  ['wcs_min_stars', 'WCS', 'int', 'Minimum consensus stars before a solve is accepted.'],
+  ['wcs_fixed_rotation', 'WCS', 'float', 'Hold the rotation at this angle and fit translation only.']
+];
+
+const CATS = ['All', 'Run / Resume', 'Bias / Cosmic rays', 'Extraction', 'Edge bias', 'Flat',
+  'Wavelength / Arc', 'Sky', 'Cube', 'Ray / Disk', 'WCS'];
+
+const TOCS = {
+  overview: [['#flow', 'Raw frames to science'], ['#flow', 'Step detail']],
+  install: [['#env', '1 — Environment'], ['#deps', '2 — External tools'], ['#aux', '3 — Calibration files']],
+  setup: [['#scan', 'What the GUI does'], ['#roles', 'Roles'], ['#options', 'Configuration Options'], ['#catalog', 'Keyword catalog'], ['#syntax', 'Config syntax']],
+  run: [['#invoke', 'Invocation'], ['#stages', 'The twelve stages'], ['#qa', 'QA reports'], ['#rss', 'The RSS file']],
+  register: [['#why', 'Background'], ['#how', 'How the solve works'], ['#routes', 'Running it'], ['#check', 'QA output']],
+  combine: [['#dither', 'Dithered fields'], ['#super', 'The super-RSS'], ['#transparency', 'Transparency'], ['#routes', 'Running it'], ['#products', 'Products']],
+  science: [['#optimal', 'Optimal spectra'], ['#dar', 'DAR'], ['#narrow', 'Narrowband'], ['#anchor', 'Flux anchor']],
+  flux: [['#physics', 'Formalism'], ['#build', 'Build'], ['#apply', 'Apply'], ['#anchor', 'Verify']],
+  cube: [['#ds9', 'Relationship to DS9'], ['#xpa', 'XPA setup'], ['#data', 'Data model'], ['#menus', 'Menu map']],
+  ref: [['#cheat', 'Command summary'], ['#tree', 'Directory layout'], ['#keys', 'Config keys'], ['#trouble', 'Troubleshooting']],
+  cite: [['#bibtex', 'Pipeline'], ['#papers', 'Instrument'], ['#license', 'License']]
+};
+
+class Component extends DCLogic {
+  state = { page: 'overview', stage: 0, tab: 'conda', route: 'gui', copied: false, cat: 'All', q: '' };
+
+  go(p) { return (e) => { if (e) e.preventDefault(); this.setState({ page: p }); window.scrollTo(0, 0); }; }
+
+  renderVals() {
+    const p = this.state.page;
+    const nav = this.props.navModel ?? 'sidebar';
+    const acc = 'var(--color-accent)';
+    const v = {
+      sidebar: nav === 'sidebar',
+      topnav: nav === 'top',
+      showToc: (this.props.showRightToc ?? true),
+      grid: this.props.gridLines ?? false,
+      toc: (TOCS[p] || []).map(([href, label]) => ({ href, label })),
+      copyLabel: this.state.copied ? 'Copied' : 'Copy BibTeX',
+      copyBib: () => {
+        const t = '@unpublished{Hughes2025,\n author = {Hughes, Sarah and others},\n title  = {{The LLAMAS data reduction pipeline}},\n note   = {in preparation},\n year   = {2025}}';
+        if (navigator.clipboard) navigator.clipboard.writeText(t);
+        this.setState({ copied: true });
+        setTimeout(() => this.setState({ copied: false }), 1600);
+      }
+    };
+
+    const pages = { Overview: 'overview', Install: 'install', Setup: 'setup', Run: 'run',
+      Register: 'register', Combine: 'combine', Science: 'science', Flux: 'flux',
+      Cube: 'cube', Ref: 'ref', Cite: 'cite' };
+    Object.keys(pages).forEach(k => {
+      const on = p === pages[k];
+      v['go' + k] = this.go(pages[k]);
+      v['is' + k] = on;
+      v['sb' + k] = on ? acc : 'transparent';
+      v['sc' + k] = on ? 'var(--color-accent-700)' : 'var(--color-text)';
+      v['sg' + k] = on ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)' : 'transparent';
+      v['tb' + k] = on ? acc : 'transparent';
+      v['tc' + k] = on ? 'var(--color-accent-700)' : 'var(--color-text)';
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const on = this.state.stage === i;
+      v['pick' + i] = (e) => { if (e) e.preventDefault(); this.setState({ stage: i }); };
+      v['s' + i] = on;
+      v['cbg' + i] = on ? 'var(--color-surface)' : 'transparent';
+      v['ctop' + i] = on ? acc : 'transparent';
+      v['cnum' + i] = on ? 'var(--color-accent-700)' : 'var(--color-neutral-600)';
+      v['cmute' + i] = on ? 'var(--color-accent-700)' : 'var(--color-neutral-600)';
+    }
+
+    const tabs = { Conda: 'conda', Venv: 'venv', Poetry: 'poetry' };
+    Object.keys(tabs).forEach(k => {
+      const on = this.state.tab === tabs[k];
+      v['tab' + k + 'Bg'] = on ? acc : 'transparent';
+      v['tab' + k + 'Fg'] = on ? 'var(--color-bg)' : 'var(--color-text)';
+      v['set' + k] = () => this.setState({ tab: tabs[k] });
+    });
+    v.isConda = this.state.tab === 'conda';
+    v.isVenv = this.state.tab === 'venv';
+    v.isPoetry = this.state.tab === 'poetry';
+
+    const gui = this.state.route === 'gui';
+    v.routeGui = gui;
+    v.routeCli = !gui;
+    v.rgBg = gui ? acc : 'transparent';
+    v.rgFg = gui ? 'var(--color-bg)' : 'var(--color-text)';
+    v.rcBg = gui ? 'transparent' : acc;
+    v.rcFg = gui ? 'var(--color-text)' : 'var(--color-bg)';
+    v.setGuiRoute = () => this.setState({ route: 'gui' });
+    v.setCliRoute = () => this.setState({ route: 'cli' });
+
+    const q = this.state.q.trim().toLowerCase();
+    v.cats = CATS.map(c => {
+      const on = this.state.cat === c;
+      return { label: c, bg: on ? acc : 'transparent', fg: on ? 'var(--color-bg)' : 'var(--color-text)',
+        click: () => this.setState({ cat: c }) };
+    });
+    const rows = CFG.filter(r => (this.state.cat === 'All' || r[1] === this.state.cat) &&
+      (!q || r[0].toLowerCase().includes(q) || r[3].toLowerCase().includes(q)));
+    v.cfgRows = rows.map(r => ({ key: r[0], cat: r[1], type: r[2], meaning: r[3] }));
+    v.cfgCount = rows.length + ' of ' + CFG.length + ' documented keys shown · 84 exist in the GUI catalog';
+    v.q = this.state.q;
+    v.setQ = (e) => this.setState({ q: e.target.value });
+    return v;
+  }
+}
+</script>
+</body>
+</html>
+

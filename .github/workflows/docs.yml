@@ -36,10 +36,20 @@ jobs:
       - name: Build HTML docs
         run: sphinx-build -b html docs docs/_build/html
 
+      # The Pages site root is the designed docs site (docs_site/); the Sphinx
+      # API reference is served alongside it under /sphinx/.
+      - name: Assemble Pages site
+        run: |
+          mkdir -p _site
+          cp -R docs_site/. _site/
+          mkdir -p _site/sphinx
+          cp -R docs/_build/html/. _site/sphinx/
+          touch _site/.nojekyll
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/_build/html
+          path: _site
 
   deploy:
     needs: build
