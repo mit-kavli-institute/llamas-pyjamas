@@ -48,6 +48,7 @@ from pypeit.bspline.bspline import bspline
 import pickle, h5py
 import logging
 import ray
+from llamas_pyjamas.Utils.rayManager import get_ray_temp_dir, init_ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
@@ -66,6 +67,38 @@ logger = logging.getLogger(__name__)
 
 
 LOG = []
+
+
+# Cache of processed master-bias HDUs, keyed by absolute path (+ mtime). A
+# master bias is ~800 MB / 24 cameras; process_fits_by_color rebuilds the whole
+# file on every call, and _grab_bias_hdu is called once PER CAMERA PER FRAME
+# (bias-first processes ~24 x N frames), so without this the 800 MB file was
+# re-processed hundreds of times (~6 min of the bias-first stage). Holds at most
+# the slow + fast master bias in memory. Per-process (Ray workers get their own).
+_BIAS_HDU_CACHE = {}
+
+
+def _load_bias_hdus_cached(path):
+    """process_fits_by_color(path) with a per-path cache keyed on mtime."""
+    try:
+        key = os.path.abspath(path)
+        mt = os.path.getmtime(path) if os.path.exists(path) else None
+    except Exception:
+        key, mt = str(path), None
+    hit = _BIAS_HDU_CACHE.get(key)
+    if hit is not None and hit[0] == mt:
+        return hit[1]
+    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
+                                          dir=get_ray_temp_dir())
+    os.close(_tmp_fd)
+    try:
+        bias_hdus, _ = process_fits_by_color(path, output_file=_tmp_path)
+    finally:
+        if os.path.exists(_tmp_path):
+            os.remove(_tmp_path)
+    if bias_hdus is not None:
+        _BIAS_HDU_CACHE[key] = (mt, bias_hdus)
+    return bias_hdus
 
 
 def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
@@ -98,9 +131,8 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
     if not (bench and side and color):
         raise ValueError("Must provide either (bench, side, color) or (benchside, color)")
     
-    with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf:
-        _tmp_path = _tf.name
-    bias_hdus, _ = process_fits_by_color(dir, output_file=_tmp_path)
+    # Load (cached) the processed master-bias HDUs for this file.
+    bias_hdus = _load_bias_hdus_cached(dir)
 
     if bias_hdus is None:
         # Try BIAS_DIR fallback before giving up
@@ -108,9 +140,7 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
             calib_path = os.path.join(BIAS_DIR, f'{required_readmode.lower()}_master_bias.fits')
         else:
             calib_path = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-        with tempfile.NamedTemporaryFile(suffix='.fits', delete=True) as _tf2:
-            _tmp_path2 = _tf2.name
-        bias_hdus, _ = process_fits_by_color(calib_path, output_file=_tmp_path2)
+        bias_hdus = _load_bias_hdus_cached(calib_path)
         if bias_hdus is None:
             raise BiasNotFoundError(dir)
         logger.warning(
@@ -220,6 +250,98 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
     
     return allowed
 
+
+
+def drop_spacing_outliers(indices, mid_positions, expected_count, benchside='') -> np.ndarray:
+    """Trim ``indices`` to ``expected_count`` by removing the most ISOLATED traces.
+
+    Fibres form an evenly spaced comb (pitch ~6.5 px), so every real trace --
+    including the one at either end of the slit -- has a neighbour about one
+    pitch away.  A spurious peak (detector-edge artifact) sits several pitches
+    from anything else.  Repeatedly dropping the trace with the largest
+    nearest-neighbour distance therefore removes ghosts and never the genuine
+    end fibre.
+
+    This replaces an earlier rule that trimmed by distance to the detector edge.
+    That rule dropped the REAL end-of-slit fibre and kept the ghost whenever the
+    ghost happened to sit marginally further from the opposite edge (3B: real
+    fibre at y=44.9 vs ghost at y=1997.3 -> edge scores 44.9 vs 50.7), which
+    shifted every fibre index by one for the whole bench.
+    """
+    keep = [int(i) for i in np.asarray(indices).ravel()]
+    excess = len(keep) - int(expected_count)
+
+    for _ in range(max(0, excess)):
+        pos = np.asarray([mid_positions[i] for i in keep], dtype=float)
+        order = np.argsort(pos)
+        p = pos[order]
+        if p.size < 2:
+            break
+        gaps = np.diff(p)
+        pitch = float(np.median(gaps))
+        # distance to the nearest neighbour on either side
+        nn = np.minimum(np.concatenate(([np.inf], gaps)),
+                        np.concatenate((gaps, [np.inf])))
+        worst = int(np.argmax(nn))
+        ratio = nn[worst] / pitch if pitch > 0 else float('nan')
+        if ratio < 1.5:
+            # No clear ghost: the comb is regular but still over-count. Dropping
+            # any trace here is a guess, so say so rather than silently shifting.
+            logger.warning(
+                "traceLlamas %s: %d traces vs %d expected but no isolated "
+                "outlier (worst neighbour gap %.1fx pitch) -- trim is ambiguous",
+                benchside, len(keep), int(expected_count), ratio)
+        else:
+            logger.info(
+                "traceLlamas %s: dropping isolated trace at y=%.1f "
+                "(nearest neighbour %.1f px = %.1fx pitch %.2f) as a ghost",
+                benchside, p[worst], nn[worst], ratio, pitch)
+        keep.remove(keep[order[worst]])
+
+    return np.sort(np.asarray(keep, dtype=int))
+
+
+def validate_trace_comb(mid_positions, benchside, dead_fibers=None,
+                        expected_count=None) -> bool:
+    """Check the traced fibre comb is regular; warn (loudly) if it is not.
+
+    A healthy comb has every gap ~= the median pitch, except at a genuinely dead
+    fibre (which leaves a ~2x gap).  Anything else means a fibre was missed or a
+    spurious peak was traced -- which silently misindexes every fibre after it
+    and lands their flux on the wrong sky position.  Dead fibres at either END
+    of the slit leave no gap, so ``n_big <= n_dead`` is fine; more big gaps than
+    dead fibres is not.
+    """
+    pos = np.sort(np.asarray([p for p in np.asarray(mid_positions).ravel()
+                              if p is not None and np.isfinite(p)], dtype=float))
+    if pos.size < 2:
+        logger.warning("traceLlamas %s: too few traces (%d) to validate comb",
+                       benchside, pos.size)
+        return False
+
+    gaps = np.diff(pos)
+    pitch = float(np.median(gaps))
+    n_dead = len(dead_fibers or [])
+    big = np.where(gaps > 1.5 * pitch)[0]
+    ok = True
+
+    if len(big) > n_dead:
+        ok = False
+        detail = ", ".join(f"y={pos[i]:.1f}(+{gaps[i]/pitch:.1f}x)" for i in big[:6])
+        logger.warning(
+            "traceLlamas %s: comb has %d gaps >1.5x pitch but only %d known dead "
+            "fibre(s) -- a fibre was missed or a ghost traced; fibre indices may "
+            "be shifted. Gaps at: %s", benchside, len(big), n_dead, detail)
+
+    if expected_count is not None and pos.size != int(expected_count):
+        ok = False
+        logger.warning("traceLlamas %s: traced %d fibres, expected %d",
+                       benchside, pos.size, int(expected_count))
+
+    if ok:
+        logger.info("traceLlamas %s: comb OK (%d fibres, pitch %.2f px, "
+                    "%d dead-fibre gap(s))", benchside, pos.size, pitch, len(big))
+    return ok
 
 
 def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
@@ -528,13 +650,25 @@ class TraceLlamas:
         #x_model = np.arange(self.naxis2).astype(float)
         self.y_model = sset.value(self.x_model)[0]
         
-        self.min_pkheight = 10000    
+        self.min_pkheight = 10000
         if self.channel.lower() == 'blue':
             self.min_pkheight = 5000
-        
+
 
         self.comb = tslice - self.y_model
-        
+
+        # F7 ROOT CAUSE (documented; fix deferred as it needs broad re-validation):
+        # Fibre peaks are detected with a FIXED prominence=500/height=100 here,
+        # while the per-channel `self.min_pkheight` computed just above is never
+        # used. Red benchsides have lower comb prominence, so 2-11 faint fibres
+        # fall below prominence=500 and are dropped -> the detected fibre count
+        # (self.nfibers) is short of N_fib, which validate_and_fix_trace_fibres
+        # then rejects, triggering the mastercalib trace fallback (7 red cameras
+        # in the Sunburst run). Recommended fix: make prominence adaptive, e.g.
+        # `prominence = max(150, 0.25*np.nanmedian(self.peak_properties...))` or
+        # a robust fraction of the comb amplitude, then re-validate fibre counts
+        # across ALL 24 benchsides to ensure no spurious peaks are introduced in
+        # blue/green. Not applied here to avoid an unvalidated detection retune.
         self.peaks, self.peak_properties = find_peaks(self.comb,distance=5,height=100,threshold=None, prominence=500)
         self.pkht = self.peak_properties['peak_heights']
         
@@ -607,22 +741,29 @@ class TraceLlamas:
             #finding the inital comb for the data we are trying to fit
             
             ######New code to subtract background from the data
-            if use_bias:
-                if os.path.isfile(use_bias):
-                    bias_file = use_bias
-                else:
-                    logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
-                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+            # Guard against double subtraction: frames preprocessed by the
+            # bias-first step (Bias/biasFirst.py) arrive with BIASSUB set and
+            # are already fully bias- and edge-DC-corrected.
+            if self.hdr.get('BIASSUB', False):
+                logger.info(f"BIASSUB already set for {self.benchside} {self.channel} "
+                            f"— skipping trace-time bias subtraction")
             else:
-                bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
-            print(f'Bias file: {bias_file}')
-            #### fix the directory here!
-            bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
-            
-            #should we be using the whole bias or just an overscan region?
-            bias_data = np.median(bias.data[20:50])
-            
-            self.data = self.data - bias_data
+                if use_bias:
+                    if os.path.isfile(use_bias):
+                        bias_file = use_bias
+                    else:
+                        logger.error(f"Bias file '{use_bias}' is not a valid file. Using fallback file from {os.path.join(BIAS_DIR, 'slow_master_bias.fits')}")
+                        bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                else:
+                    bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
+                print(f'Bias file: {bias_file}')
+                #### fix the directory here!
+                bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+
+                #should we be using the whole bias or just an overscan region?
+                bias_data = np.median(bias.data[20:50])
+
+                self.data = self.data - bias_data
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             
@@ -771,18 +912,15 @@ class TraceLlamas:
                 # Decide how to handle this situation. For example, you might use all valid edges:
                 keep_indices = valid_edge_indices
             else:
-                # Now, for the traces that remain, calculate edge proximity scores.
-                valid_traces = self.traces[valid_edge_indices]
-                valid_mid_positions = mid_positions[valid_edge_indices]
-                edge_scores = np.array([
-                    min(pos, self.naxis2 - pos) for pos in valid_mid_positions
-                ])
-
-                # Sort traces by their edge scores (descending keeps those furthest from edges)
-                sorted_valid_indices = valid_edge_indices[np.argsort(edge_scores)[::-1]]
-
-                # Keep only the expected number of traces from the remaining valid traces.
-                keep_indices = np.sort(sorted_valid_indices[:expected_count])
+                # Trim any excess by removing SPACING OUTLIERS (ghost peaks), never
+                # by distance to the detector edge: a real end-of-slit fibre still
+                # has a neighbour one pitch away, while a ghost sits several
+                # pitches from anything. The old edge-distance rule sacrificed the
+                # real end fibre to keep a ghost on 3B/4A, shifting every fibre
+                # index by one for the whole bench.
+                keep_indices = drop_spacing_outliers(
+                    valid_edge_indices, safe_mid_positions, expected_count,
+                    benchside=self.benchside)
 
             # Now filter the trace arrays using the final indices.
             self.traces = self.traces[keep_indices]
@@ -790,6 +928,14 @@ class TraceLlamas:
             self.xtracefit = self.xtracefit[keep_indices]
             self.nfibers = len(self.traces)
             print(f"Filtered to {self.nfibers} traces for {self.benchside} after edge trimming.")
+
+            # A mis-trimmed comb misindexes every fibre after the gap and puts its
+            # flux at the wrong sky position, so check it explicitly rather than
+            # trusting the count alone (the 3B/4A off-by-one kept nfibers=300).
+            validate_trace_comb(
+                self.traces[:, mid_x], self.benchside,
+                dead_fibers=(self.dead_fibres or {}).get(self.benchside, []),
+                expected_count=expected_count)
                  
 
         except Exception as e:
@@ -822,56 +968,65 @@ class TraceLlamas:
         """
 
         
-        ref = self.data[12,:]
+        # Per-column background from the unilluminated rows below the fibre
+        # bundle (traces span ~130-1950). Replaces the old single-row hack
+        # (ref = data[12,:]) which injected one row's noise into every row and
+        # left row 12 itself unsubtracted. Frames arrive bias-corrected
+        # (bias-first), so this only removes residual scattered light.
+        bg = np.nanmedian(self.data[4:20, :], axis=0)
+        data0 = self.data - bg[None, :]
 
-        # Use a working copy of "data" so as not to overwrite that with normalized data
-        data_work = np.copy(self.data) 
-        for i in range(self.naxis2):
-            if (i != 12):
-                data_work[i,:] = self.data[i,:] - ref
+        # Profile window half-width [px]. Measured trade at the ~6.9 px fibre
+        # pitch (2026-07): 3.0 admits the neighbouring fibres' wings — with a
+        # bright dithering object next door, frame-to-frame flux stability on
+        # blended cameras drops (green 4B 0.97 -> 0.80). 2.0 is the optimum;
+        # the Horne S/N gain comes from variance weighting, not window width.
+        PROF_HALFWIDTH = 2.0
 
         fiberimg = np.full(self.data.shape, -1, dtype=int)   # Lists the fiber # of each pixel
         profimg  = np.zeros(self.data.shape,dtype=float) # Profile weighting function
         bpmask   = np.zeros(self.data.shape,dtype=bool)  # bad pixel mask
-        
+
         for index, item in enumerate(self.traces):
-            
-            ytrace = item 
+
+            ytrace = item
 
             # Generate a curved "y" image
             yy = np.outer(np.arange(self.naxis2),np.ones(self.naxis1)) \
                 - np.outer(np.ones(self.naxis2),ytrace)
 
-            # Normalize out the spectral shape of the lamp for profile fitting
-            for i in range(self.naxis1):
-                norm = np.nansum(data_work[np.where(np.abs(yy[:,i]) < 2.0),i])
-                data_work[:,i] = data_work[:,i] / norm
+            profmask = np.abs(yy) < PROF_HALFWIDTH
+
+            # Normalize out the spectral shape of the lamp for profile fitting.
+            # Per-column flux of THIS fibre from the ORIGINAL background-
+            # subtracted data — the old code divided data_work in place inside
+            # the fibre loop, so each fibre saw data normalized by every
+            # previous fibre's flux, and a near-zero norm at a dead fibre
+            # exploded the column for all subsequent fibres.
+            colnorm = np.nansum(np.where(profmask, data0, 0.0), axis=0)
+            _floor = 0.05 * max(np.nanmedian(colnorm[colnorm > 0]), 1e-3)
+            goodcol = np.isfinite(colnorm) & (colnorm > _floor)
+            data_work = data0 / np.where(goodcol, colnorm, np.nan)[None, :]
 
             # Generate a mask of pixels that are
-            # (a) within 4 pixels of the profile center for this fiber and
-            # (b) not NaNs or Infs
+            # (a) within the profile window of this fiber's trace,
+            # (b) in a column with usable normalization, and
+            # (c) not NaNs/Infs/outliers.
             # Also generate an inverse variance array that is presently flat weighting
 
-            infmask = np.ones(data_work.shape,dtype=bool)
-            NaNmask = np.ones(data_work.shape,dtype=bool)
-            badmask = np.ones(data_work.shape,dtype=bool)
-            profmask = np.zeros(data_work.shape,dtype=bool)
+            infmask = ~np.isinf(data_work)
+            NaNmask = ~np.isnan(data_work)
+            badmask = (data_work <= 20) & (data_work >= -5)
             invvar = np.ones(data_work.shape,dtype=float)
-            
-            infmask[np.where(np.isinf(data_work))]  = False
-            NaNmask[np.where(np.isnan(data_work))] = False
-            badmask[np.where(data_work > 20)] = False
-            badmask[np.where(data_work < -5)] = False
-            ##this is where we ajust the width of the profile mask in pixels
-            profmask[np.where(np.abs(yy) < 2)] = True #originally this was 4
 
-            inprof = np.where(infmask & profmask & NaNmask & badmask)
+            inprof = np.where(infmask & profmask & NaNmask & badmask
+                              & goodcol[None, :])
 
             # Fit the fiber spatial profile with a bspline
-            
+
             sset,outmask = iterfit(yy[inprof],data_work[inprof],maxiter=6, \
                         invvar=invvar[inprof],kwargs_bspline={'bkspace':0.33})
-            
+
             self.profmask = profmask
             self.inprof = inprof
 
@@ -1040,24 +1195,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
 
     NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
 
-    import pkg_resources as _pkgr, shutil as _shutil, glob as _glob2
-    _package_path = _pkgr.resource_filename('llamas_pyjamas', '')
-    _package_root = os.path.dirname(_package_path)
-    for _stale in _glob2.glob('/tmp/ray/session_*/runtime_resources/py_modules_files'):
-        _shutil.rmtree(_stale, ignore_errors=True)
-    _runtime_env = {
-        "working_dir": _package_root,
-        "env_vars": {"PYTHONPATH": f"{_package_root}:{os.environ.get('PYTHONPATH', '')}"},
-        "excludes": [
-            "**/*.fits", "**/*.pkl", "**/.git/**",
-            "**/*.zip/**", "**/*.tar.gz/**", "**/mastercalib*/**", "**/*.zip",
-            "**/reduced/**", "**/extractions/**", "**/cubes/**", "**/traces/**",
-            "**/testing/**",
-        ],
-    }
-
-    ray.shutdown()  # Clear any existing Ray instances
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES, runtime_env=_runtime_env)
+    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py):
+    # canonical py_modules runtime_env, object store clamped, temp/spill in the owned
+    # scratch dir. In the pipeline this attaches to the session reduce.py started.
+    init_ray(num_cpus=NUMBER_OF_CORES)
 
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
@@ -1134,9 +1275,9 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
+
+    # No ray.shutdown() here: the run shares one session managed by rayManager
+    # (torn down once at pipeline end via cleanup_scratch / atexit).
     return
     
     

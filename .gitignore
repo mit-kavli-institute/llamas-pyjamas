@@ -15,3 +15,10 @@ llamas_pyjamas/Bias/*.fits
 
 # Sphinx documentation build output
 docs/_build/
+
+# Local data artifacts (reduction outputs, mastercalib symlink, reference files)
+llamas_pyjamas/reduced/
+llamas_pyjamas/mastercalib
+llamas_pyjamas/LUT/LLAMAS_reference_arc.pkl
+llamas_pyjamas/LUT/LLAMAS_reference_arc_refined*.pkl
+llamas_pyjamas/LUT/LLAMAS_reference_arc_slim.pkl

@@ -1,9 +1,7 @@
 # llamas_pyjamas/utils.py
 """Utils module for llamas_pyjamas package.
-
 This module provides various utility functions for logging, file handling,
 data processing, and visualization related to the llamas_pyjamas project.
-
 Functions:
     setup_logger(name, log_filename=None):
         Setup logger with file and console handlers.
@@ -64,7 +62,7 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-def configure_pipeline_logging(log_dir, level=logging.INFO):
+def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     """Configure centralized pipeline logging — one file per run.
 
     Sets up handlers on the ``llamas_pyjamas`` parent logger.
@@ -73,17 +71,39 @@ def configure_pipeline_logging(log_dir, level=logging.INFO):
 
     Call this **once** at pipeline startup in ``reduce.py:main()``.
 
-    Args:
-        log_dir (str): Directory for the log file.
-        level (int): File logging level (default: ``logging.INFO``).
+    Parameters
+    ----------
+    log_dir : str
+        Directory for the log file.
+    level : int
+        File logging level (default: ``logging.INFO``).
+    retention : int
+        Keep only the newest ``retention`` ``llamas_pipeline_*.log`` files in
+        ``log_dir`` (older ones are removed). Set to 0 to disable pruning.
 
-    Returns:
-        str: Path to the created log file.
+    Returns
+    -------
+    str
+        Path to the created log file.
     """
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = os.path.join(log_dir, f'llamas_pipeline_{timestamp}.log')
+
+    # Retention: prune old pipeline logs so the logs/ directory can't grow without
+    # bound across runs (the new file is created below and is always the newest).
+    if retention and retention > 0:
+        try:
+            existing = sorted(glob.glob(os.path.join(log_dir, 'llamas_pipeline_*.log')),
+                              key=os.path.getmtime, reverse=True)
+            for _old in existing[retention - 1:]:   # -1: the new file is not created yet
+                try:
+                    os.remove(_old)
+                except OSError:
+                    pass
+        except Exception:
+            pass
 
     parent_logger = logging.getLogger('llamas_pyjamas')
     parent_logger.setLevel(logging.DEBUG)
@@ -139,6 +159,31 @@ def setup_logger(name, log_filename=None):
         logger.addHandler(ch)
 
     return logger
+
+
+EXPTIME_KEYS = ('SEXPTIME', 'CEXPTIME', 'DEXPTIME', 'EXPTIME', 'INTTIME', 'REXPTIME')
+
+
+def exposure_time(header, default=None):
+    """Best-available exposure time (seconds) from a FITS header.
+
+    Prefers the ACTUAL exposure (SEXPTIME = measured shutter-open time, then
+    CEXPTIME) and falls back through the generic keys to REXPTIME (the *requested*
+    exposure time) for older data where SEXPTIME/CEXPTIME were never written — in
+    that regime REXPTIME is the only record and must be trusted. Returns the first
+    keyword present with a finite, positive value (HIERARCH-aware); ``default``
+    otherwise.
+    """
+    for key in EXPTIME_KEYS:
+        for k in (key, 'HIERARCH ' + key):
+            if header is not None and k in header:
+                try:
+                    v = float(header[k])
+                except (TypeError, ValueError):
+                    v = None
+                if v is not None and v > 0:
+                    return v
+    return default
 
 
 def check_header(fits_file, color=None, bench=None, side=None) -> bool:
@@ -471,31 +516,25 @@ def trace_dump_LUT(trace_obj: 'TraceLlamas')-> None:
 def flip_b_side_positions()-> None:
     """
     Flips the fiber positions for the 'B' side in the lookup table (LUT) for each color.
-
     This function reads a JSON file containing a lookup table (LUT) of fiber positions,
     processes the positions for each color ('green', 'blue', 'red'), and flips the positions
     for the 'B' side. The flipped positions are then saved to a new JSON file.
-
-    The LUT is expected to have the following structure::
-
-        {
-            "fib_pos": {
-                "color": {
-                    "benchside": {
-                        "fiber_number": "position"
-                    }
+    The LUT is expected to have the following structure:
+    {
+        "fib_pos": {
+            "color": {
+                "benchside": {
+                    "fiber_number": "position"
                 }
             }
         }
-
+    }
     The function performs the following steps:
-
     1. Loads the LUT from 'LUT/traceLUT.json'.
     2. Iterates over each color ('green', 'blue', 'red').
     3. For each color, checks if the 'B' side exists in the LUT.
     4. If the 'B' side exists, flips the fiber positions by reversing the fiber numbers.
     5. Saves the updated LUT to 'LUT/traceLUT_copy.json'.
-
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.
@@ -643,14 +682,12 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
         mastercalib_dir: Mastercalib directory for fallback traces
 
     Returns:
-        dict: Result dictionary with the following keys::
-
-            {
-                'valid_traces': [(channel, bench, side, filepath), ...],
-                'invalid_traces': [(channel, bench, side, expected, actual), ...],
-                'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
-                'all_valid': bool
-            }
+        dict: {
+            'valid_traces': [(channel, bench, side, filepath), ...],
+            'invalid_traces': [(channel, bench, side, expected, actual), ...],
+            'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
+            'all_valid': bool
+        }
 
     Example:
         >>> results = validate_and_fix_trace_fibres('/user/traces')
@@ -818,20 +855,7 @@ def flip_blue_combs()-> None:
     
     
 def check_image_properties(hdu: fits.HDUList, start_idx: int = 1) -> None:
-    """Print basic diagnostics for each image extension in a FITS HDU list.
 
-    For each extension from ``start_idx`` onward, reports the colour, bench, and
-    side from the header and whether the data contains any NaN or negative
-    values.
-
-    Args:
-        hdu (astropy.io.fits.HDUList): Open FITS HDU list to inspect.
-        start_idx (int, optional): Index of the first extension to check.
-            Defaults to 1 (skips the primary HDU).
-
-    Returns:
-        None
-    """
     for i in range(start_idx, len(hdu)):
         color = hdu[i].header['COLOR']
         bench = hdu[i].header['BENCh']
@@ -1024,11 +1048,9 @@ def assess_pixel_maps(pixel_map_file, output_dir=None, extensions=None, save_fig
         save_figs (bool): Whether to write PNG files.  Defaults to True.
 
     Returns:
-        dict: Mapping of extension name to statistics::
-
-            {ext_name: {'mean': float, 'std': float, 'median': float,
-                        'frac_outside': float, 'dominant_fft_freq': float,
-                        'dominant_fft_amp': float}}
+        dict: ``{ext_name: {'mean': float, 'std': float, 'median': float,
+                            'frac_outside': float, 'dominant_fft_freq': float,
+                            'dominant_fft_amp': float}}``
     """
     import os
     import numpy as np
@@ -1417,8 +1439,7 @@ def check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
             If False, only prints channel summaries. Defaults to True.
 
     Returns:
-        dict: Dictionary containing wavelength ranges organized by channel::
-
+        dict: Dictionary containing wavelength ranges organized by channel:
             {
                 'extensions': [
                     {
@@ -1559,8 +1580,7 @@ def check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None,
             If False, only prints channel summaries. Defaults to True.
 
     Returns:
-        dict: Dictionary containing wavelength ranges and comparison results::
-
+        dict: Dictionary containing wavelength ranges and comparison results:
             {
                 'extensions': [...],  # Same format as check_reference_arc_wavelength_ranges
                 'channels': {...},
@@ -1737,21 +1757,26 @@ def is_wavelength_solution_useable(arc_dict):
     for use in wavelength transfer operations. This function samples a few
     fibers from each extension to verify the wavelength data is valid.
 
-    Args:
-        arc_dict (dict): Dictionary containing 'extractions' (list of ExtractLlamas objects)
-            and 'metadata' for each extension. Typically loaded via
-            ExtractLlamas.loadExtraction().
+    Parameters
+    ----------
+    arc_dict : dict
+        Dictionary containing 'extractions' (list of ExtractLlamas objects)
+        and 'metadata' for each extension. Typically loaded via
+        ExtractLlamas.loadExtraction().
 
-    Returns:
-        bool: True if wavelength solutions are useable, False otherwise.
+    Returns
+    -------
+    bool
+        True if wavelength solutions are useable, False otherwise.
 
-    Notes:
-        This function uses validate_wavelength_solution() from Arc/arcValidation.py
-        to check wavelength data quality including:
-        - Non-zero wavelength values
-        - No NaN/Inf values
-        - Monotonically increasing wavelengths
-        - Reasonable wavelength ranges for each channel
+    Notes
+    -----
+    This function uses validate_wavelength_solution() from Arc/arcValidation.py
+    to check wavelength data quality including:
+    - Non-zero wavelength values
+    - No NaN/Inf values
+    - Monotonically increasing wavelengths
+    - Reasonable wavelength ranges for each channel
     """
     from llamas_pyjamas.Arc.arcValidation import validate_wavelength_solution
 
@@ -1869,14 +1894,21 @@ def plot_flat_correction_ratio(uncorrected_pkl, corrected_pkl, output_file=None,
     produces a smooth curve near 1.0; high-frequency residual structure
     indicates under- or over-correction.
 
-    Args:
-        uncorrected_pkl (str): Path to batch extraction pickle **before** flat correction.
-        corrected_pkl (str): Path to batch extraction pickle **after** flat correction.
-        output_file (str, optional): Path to save the figure.  If ``None``, displays interactively.
-        n_fibers (int): Number of representative fibers per extension (evenly spaced).
+    Parameters
+    ----------
+    uncorrected_pkl : str
+        Path to batch extraction pickle **before** flat correction.
+    corrected_pkl : str
+        Path to batch extraction pickle **after** flat correction.
+    output_file : str, optional
+        Path to save the figure.  If ``None``, displays interactively.
+    n_fibers : int
+        Number of representative fibers per extension (evenly spaced).
 
-    Returns:
-        dict: ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
+    Returns
+    -------
+    dict
+        ``{ext_label: {'median_ratio': float, 'rms_residual': float}}``
     """
     import matplotlib
     if output_file:
@@ -1958,14 +1990,20 @@ def plot_channel_flat_summary(extraction_pkl, output_file=None, filter_size=12):
     green | blue).  If one channel has systematically higher RMS, the
     signal threshold or filter size may need tuning.
 
-    Args:
-        extraction_pkl (str): Path to a batch extraction pickle (e.g. the corrected flat
-            extraction or a corrected science extraction).
-        output_file (str, optional): Save path for the figure.
-        filter_size (int): Median filter size used to build the smooth model.
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. the corrected flat
+        extraction or a corrected science extraction).
+    output_file : str, optional
+        Save path for the figure.
+    filter_size : int
+        Median filter size used to build the smooth model.
 
-    Returns:
-        dict: ``{'red': {'median_rms': float, 'fibers': int}, ...}``
+    Returns
+    -------
+    dict
+        ``{'red': {'median_rms': float, 'fibers': int}, ...}``
     """
     from scipy.ndimage import median_filter as _mf, gaussian_filter as _gf
     import matplotlib
@@ -2031,13 +2069,18 @@ def plot_fiber_consistency(extraction_pkl, output_file=None):
     systematic structure.  Lines are colored by channel so that
     red/green/blue can be compared directly.
 
-    Args:
-        extraction_pkl (str): Path to a batch extraction pickle (e.g. corrected flat lamp
-            extraction).
-        output_file (str, optional): Save path for the figure.
+    Parameters
+    ----------
+    extraction_pkl : str
+        Path to a batch extraction pickle (e.g. corrected flat lamp
+        extraction).
+    output_file : str, optional
+        Save path for the figure.
 
-    Returns:
-        dict: ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
+    Returns
+    -------
+    dict
+        ``{ext_label: {'mean_scatter': float, 'max_scatter': float}}``
     """
     import matplotlib
     if output_file:
@@ -2106,12 +2149,17 @@ def plot_flat_residual_map(pixel_map_file, output_file=None):
     is not fully removing pixel QE variations; structure perpendicular to
     traces indicates trace-edge artifacts.
 
-    Args:
-        pixel_map_file (str): Path to ``pixel_maps.fits`` (24-extension MEF).
-        output_file (str, optional): Save path for the figure.
+    Parameters
+    ----------
+    pixel_map_file : str
+        Path to ``pixel_maps.fits`` (24-extension MEF).
+    output_file : str, optional
+        Save path for the figure.
 
-    Returns:
-        dict: ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
+    Returns
+    -------
+    dict
+        ``{ext_name: {'median': float, 'std': float, 'frac_outside': float}}``
     """
     import matplotlib
     if output_file:

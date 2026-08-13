@@ -1,10 +1,3 @@
-"""Cosmic-ray and bad-pixel masking for LLAMAS detector images.
-
-Provides routines to detect and clean cosmic rays from 2D detector frames using
-the L.A.Cosmic algorithm, applying per-colour parameter overrides and
-detector-specific gain/read-noise values, and to persist the resulting cosmic
-ray masks.
-"""
 import os
 import logging
 
@@ -13,22 +6,38 @@ from astropy.io import fits
 from lacosmic import remove_cosmics
 
 from llamas_pyjamas.constants import LACOSMIC_DEFAULTS, LACOSMIC_COLOR_OVERRIDES, gain_noise_lookup
+from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger("llamas_pyjamas")
 
 
-def clean_cosmic_rays(data, color=None, bench=None, side=None):
+def clean_cosmic_rays(data, color=None, bench=None, side=None, header=None):
     """Clean cosmic rays from a 2D detector image using L.A.Cosmic.
 
-    Args:
-        data (numpy.ndarray): 2D bias-subtracted detector image.
-        color (str, optional): Detector colour channel ('red', 'green', 'blue').
-        bench (str, optional): Bench identifier ('1', '2', '3', '4').
-        side (str, optional): Side identifier ('A', 'B').
+    Parameters
+    ----------
+    data : numpy.ndarray
+        2D bias-subtracted detector image.
+    color : str, optional
+        Detector colour channel ('red', 'green', 'blue').
+    bench : str, optional
+        Bench identifier ('1', '2', '3', '4').
+    side : str, optional
+        Side identifier ('A', 'B').
+    header : astropy.io.fits.Header, optional
+        Extension header.  When provided, the L.A.Cosmic gain/read-noise are
+        resolved from the lab-characterisation CSV keyed on the CAMSN serial
+        (via :func:`props_for_header`) — the SAME source the extraction error
+        model uses — so CR detection and the ivar share one gain/RN table.
+        Falls back to the legacy ``gain_noise_lookup`` (color/bench/side) when
+        no header is given.
 
-    Returns:
-        cleaned (numpy.ndarray): Cleaned 2D image with cosmic rays replaced.
-        mask (numpy.ndarray): Boolean mask where True indicates a cosmic ray pixel.
+    Returns
+    -------
+    cleaned : numpy.ndarray
+        Cleaned 2D image with cosmic rays replaced.
+    mask : numpy.ndarray
+        Boolean mask where True indicates a cosmic ray pixel.
     """
     params = dict(LACOSMIC_DEFAULTS)
 
@@ -39,7 +48,15 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
             return data.copy(), np.zeros(data.shape, dtype=bool)
         params.update(color_overrides)
 
-    if color is not None and bench is not None and side is not None:
+    # Prefer the serial-keyed lab CSV (single source of truth, matches the error
+    # model); fall back to the legacy color/bench/side lookup.
+    if header is not None:
+        gain, readnoise, src = props_for_header(
+            header, params['effective_gain'], params['readnoise'])
+        params['effective_gain'] = gain
+        params['readnoise'] = readnoise
+        logger.debug(f"L.A.Cosmic gain/RN from {src}: gain={gain}, RN={readnoise}")
+    elif color is not None and bench is not None and side is not None:
         key = (color.lower(), str(bench), str(side).upper())
         detector_props = gain_noise_lookup.get(key)
         if detector_props:
@@ -65,14 +82,21 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
 def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_dir):
     """Save cosmic ray masks as a multi-extension FITS file.
 
-    Args:
-        masks_dict (dict): Mapping of ``{hdu_index: 2D boolean mask array}``.
-        primary_header (astropy.io.fits.Header): Primary header from the original science file.
-        original_filename (str): Path to the original science FITS file (used for naming).
-        output_dir (str): Base output directory. Masks are written to ``{output_dir}/masks/``.
+    Parameters
+    ----------
+    masks_dict : dict
+        Mapping of ``{hdu_index: 2D boolean mask array}``.
+    primary_header : astropy.io.fits.Header
+        Primary header from the original science file.
+    original_filename : str
+        Path to the original science FITS file (used for naming).
+    output_dir : str
+        Base output directory. Masks are written to ``{output_dir}/masks/``.
 
-    Returns:
-        str: Path to the saved mask FITS file.
+    Returns
+    -------
+    str
+        Path to the saved mask FITS file.
     """
     masks_dir = os.path.join(output_dir, "masks")
     os.makedirs(masks_dir, exist_ok=True)

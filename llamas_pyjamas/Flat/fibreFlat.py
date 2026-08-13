@@ -115,7 +115,8 @@ def _compute_benchside_reference(smooth_arr, wave_arr):
     return common_wave, reference
 
 
-def _write_corrections_fits(corrections, output_path, method, header_extra=None):
+def _write_corrections_fits(corrections, output_path, method, header_extra=None,
+                            lamp_only_benchsides=None):
     """Write fibre flat corrections to a multi-extension FITS file.
 
     For each benchside, writes a BinTableHDU with FIBER_ID, CORRECTION,
@@ -166,7 +167,12 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None)
         tbl.header['BENCH'] = data['bench']
         tbl.header['SIDE'] = data['side']
         tbl.header['NREF'] = (data['n_ref'], 'Fibres used for median reference')
-        tbl.header['METHOD'] = method
+        # Per-benchside provenance: a benchside processed under the twilight
+        # method but lacking twilight data actually used a lamp-only T_i (F1).
+        if lamp_only_benchsides and ext_name in lamp_only_benchsides:
+            tbl.header['METHOD'] = 'lamp_only'
+        else:
+            tbl.header['METHOD'] = method
         hdul.append(tbl)
 
         # ImageHDU: benchside reference spectrum on common grid
@@ -300,7 +306,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
-                         slow_bias, output_dir, fast_bias=None):
+                         slow_bias, output_dir, fast_bias=None, edge_bias=None):
     """Reduce a twilight flat: bias/P2P correct, extract, wavelength calibrate.
 
     Reuses existing pipeline infrastructure for each step.
@@ -338,7 +344,7 @@ def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
     extraction_file = run_extraction(
         corrected_file, twi_output_dir,
         slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir,
-        remove_cosmic_rays=False)
+        remove_cosmic_rays=False, edge_bias=edge_bias)
     logger.info(f"Twilight extraction: {extraction_file}")
 
     # Step 3: Wavelength calibration
@@ -1300,10 +1306,29 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
                                     channel_groups, output_dir)
 
+    # Record which benchsides fell back to the lamp-derived T_i inside the
+    # twilight method (e.g. a colour whose twilight flat was absent), so the
+    # products document per-benchside provenance rather than a single global
+    # method (F1).
+    lamp_fallback_str = ','.join(sorted(lamp_only_benchsides))
+    twilight_benchsides = sorted(
+        ext_name for ext_name in models if ext_name not in lamp_only_benchsides)
+    if lamp_only_benchsides:
+        logger.warning(
+            f"Twilight method: {len(lamp_only_benchsides)} benchside(s) used "
+            f"lamp-only fallback T_i (no twilight data): {lamp_fallback_str}")
+    else:
+        logger.info("Twilight method: all benchsides used twilight T_i")
+
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(
         corrections, output_path, method='twilight',
-        header_extra={'SMTHFILE': os.path.basename(smooth_models_file)})
+        header_extra={'SMTHFILE': os.path.basename(smooth_models_file),
+                      'LAMPONLY': (lamp_fallback_str,
+                                   'benchsides using lamp-only T_i fallback'),
+                      'NTWIBS': (len(twilight_benchsides),
+                                 'n benchsides using twilight T_i')},
+        lamp_only_benchsides=lamp_only_benchsides)
     return output_path
 
 
@@ -1354,9 +1379,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             corr_lookup[ext_name] = entry
 
     with fits.open(rss_file) as hdul:
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         channel = hdul[0].header.get('CHANNEL', 'unknown').lower()
 
-        flux = hdul['FLUX'].data.copy()
+        flux = hdul[sky_plane].data.copy()
         error = hdul['ERROR'].data.copy()
         fibermap = hdul['FIBERMAP'].data
 
@@ -1470,8 +1497,8 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                                      f'corrected ({corr_method})')
         out_hdul.append(primary)
 
-        # FLUX — corrected
-        flux_hdu = fits.ImageHDU(flux, header=hdul['FLUX'].header.copy())
+        # sky-subtracted plane — corrected (EXTNAME carried through the copied header)
+        flux_hdu = fits.ImageHDU(flux, header=hdul[sky_plane].header.copy())
         flux_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
         out_hdul.append(flux_hdu)
 
@@ -1489,8 +1516,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         mask_hdu.header['HISTORY'] = 'Fibre flat quality flags ORed in'
         out_hdul.append(mask_hdu)
 
-        # Copy remaining extensions unchanged (WAVE, FWHM, FIBERMAP)
-        for ext_name_copy in ['WAVE', 'FWHM', 'FIBERMAP']:
+        # Copy remaining extensions unchanged (COUNTS/SKY, WAVE, FWHM, FIBERMAP).
+        # COUNTS and SKY are intentionally NOT fibre-flat corrected; the sky-subtraction
+        # framework consumes them from the FF file (SKY as the OH line-shape template,
+        # COUNTS for the white-light source mask). They must be carried through.
+        for ext_name_copy in ['COUNTS', 'SKY', 'WAVE', 'FWHM', 'FIBERMAP']:
             try:
                 out_hdul.append(hdul[ext_name_copy].copy())
             except KeyError:

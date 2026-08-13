@@ -36,6 +36,7 @@ import pickle, cloudpickle
 import logging
 import argparse, glob
 import ray, multiprocessing, psutil
+from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import traceback
 from typing import Tuple
 import json
@@ -46,8 +47,46 @@ from pathlib import Path
 
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
+from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger(__name__)
+
+# Detector noise defaults used for per-fibre variance (F4) when the FITS header
+# does not carry EGAIN/RDNOISE. The Poisson term dominates, so these only set
+# the read-noise floor; override via header keywords when available.
+DEFAULT_GAIN = 1.0        # e-/ADU
+DEFAULT_READNOISE = 2.5   # e-
+
+
+def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
+    """Effective pixel count for the read-noise term of the extracted per-fibre error.
+
+    The variance model is var = (counts_e + aperture_pix * RN^2) / gain^2, i.e. the read
+    noise adds in quadrature over the pixels that contribute to the extracted value. That
+    pixel count is method-dependent:
+
+    - boxcar: a straight (fractional-weight) sum over the +/-halfwidth aperture, so the RN
+      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels. With the current halfwidth=2.5
+      that is ~5 px, NOT the legacy hard-coded 9 (which came from the old 9-px total window
+      and over-counted RN by sqrt(9/5)=1.34x, worst for the faint blue/red).
+    - optimal/Horne: read noise is profile-WEIGHTED, RN variance = sum(w_i^2)*RN^2 with the
+      optimal weights, i.e. an effective aperture of 1/sum(P_i^2) (< the boxcar width, since
+      the wings are downweighted). The Horne estimator is currently disabled (unstable on
+      blended profiles); until it is rebuilt to expose per-column profile weights we fall
+      back to the boxcar-equivalent width (a conservative over-estimate), preferring an
+      explicit trace.extraction_aperture if one has been set.
+
+    Keeping this method-aware means the RN term stays correct if/when optimal is re-enabled,
+    instead of silently reusing the boxcar straight-sum formula.
+    """
+    method = str(method).lower()
+    half = float(boxcar_halfwidth)
+    if method in ('optimal', 'horne'):
+        ea = getattr(trace, 'extraction_aperture', None)
+        return float(ea) if ea else 2.0 * half
+    # boxcar / legacy: straight sum over the +/-halfwidth aperture
+    return 2.0 * half
+
 
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
@@ -72,15 +111,19 @@ class ExtractLlamas:
         fiberid (np.ndarray): Array storing fiber IDs.
     """
 
-    def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True) -> None:
+    def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True,
+                 method=None) -> None:
         """Initialize the ExtractLlamas object.
 
         Args:
             trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
             hdu_data (np.ndarray): The HDU data array from the FITS file.
             hdr (dict): Header information from the FITS file.
-            optimal (bool, optional): If True, use optimal extraction. If False, use boxcar extraction. 
-                Defaults to True.
+            optimal (bool, optional): Legacy switch — True = profile-weighted mean,
+                False = boxcar. Ignored when ``method`` is given.
+            method (str, optional): 'horne' | 'boxcar' | 'optimal'. 'horne' is the
+                variance-weighted, flux-conserving, mask-aware estimator
+                (Horne 1986) built on the bspline profile images.
 
         Returns:
             None
@@ -88,47 +131,72 @@ class ExtractLlamas:
 
         if (trace is None or hdu_data is None or hdr is None):
             # Instantiate a blank object that can be used for a deep copy
-            self.trace = None
-            self.bench = None
-            self.side = None
-            self.channel = None
-            self.fitsfile = None     
-            self.counts = None
-            self.hdr    = None
-            self.frame  = None
-            self.x      = None
-            self.xshift = None
-            self.wave   = None
-            self.counts = None
-            self.errors = None
-            self.ximage = None
+            self.trace      = None
+            self.bench      = None
+            self.side       = None
+            self.channel    = None
+            self.fitsfile   = None     
+            self.hdr        = None
+            self.frame      = None
+            self.fiberid    = None
             self.relative_throughput = None
+            self.x          = None
+            self.ximage     = None  
+            self.xshift     = None
+            self.wave       = None
+            self.counts     = None
+            self.counts_err = None
+            self.sky        = None
+            self.sensfunc   = None
+            self.flux       = None
+            self.flux_err   = None
 
         else:
+
             self.trace = trace
             self.bench = trace.bench
             self.side = trace.side
             self.channel = trace.channel
             self.fitsfile = self.trace.fitsfile
             ##put in a check here for hdu against trace attributes when I have more brain capacity        
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            
             self.hdr    = hdr
             self.frame  = hdu_data.astype(float)
+            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+            self.relative_throughput = np.zeros(shape=(trace.nfibers))
+
             self.x      = np.arange(trace.naxis1)
+            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
             # xshift and wave will be populated only after an arc solution
             self.xshift = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.wave   = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.counts = np.zeros(shape=(trace.nfibers,trace.naxis1))
-            self.ximage = np.outer(np.ones(trace.naxis2),np.arange(trace.naxis1))
-            self.relative_throughput = np.zeros(shape=(trace.nfibers))
-            self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
+
+            self.counts     = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.counts_err = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sky        = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.sensfunc   = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux       = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            self.flux_err   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             
             # Get detector properties from header if available
             # self.gain = hdr.get('EGAIN', 1.0)  # e-/ADU, default to 1.0
             # self.readnoise = hdr.get('RDNOISE', 3.0) 
 
-            print(f'Optimal {optimal}')
+            if method is None:
+                method = 'optimal' if optimal else 'boxcar'
+            method = str(method).lower()
+            # 'optimal' is the user-facing name for the Horne estimator; the
+            # pre-2026-07 profile-weighted mean survives as 'legacy' for
+            # comparison only.
+            if method == 'optimal':
+                method = 'horne'
+            print(f'Extraction method: {method}')
             print(f'bench {self.bench} self.side {self.side} channel {self.channel}')
+
+            # Read noise [DN] for Horne variance weighting; modest errors here
+            # only perturb the weights, not the flux normalisation.
+            _rn2 = float(os.environ.get('LLAMAS_READ_NOISE', '3.5')) ** 2
+            _nx = trace.naxis1
             
             benchside = str(self.bench) + str(self.side)
             with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
@@ -159,13 +227,65 @@ class ExtractLlamas:
                     self.counts[ifiber,:] = extracted
                     continue
 
-                if (optimal == True):
-                    # Optimally weighted extraction (a la Horne et al ~1986)
-                    #logger.info("..Optimally Extracting fiber #{}".format(ifiber))
+                if method == 'horne':
+                    # Horne (1986) optimal extraction: variance-weighted,
+                    # flux-conserving, mask-aware.
+                    #   F = sum(P*f/V) / sum(P^2/V),  Var(F) = 1/sum(P^2/V)
+                    # with the bspline profile P renormalised to sum to 1 per
+                    # column over the VALID pixels — so missing/bad pixels
+                    # renormalise the profile instead of silently biasing the
+                    # flux (the old profile-weighted mean kept dropped pixels'
+                    # weight in the denominator).
+                    ys, xs = np.where(self.trace.fiberimg == ifiber)
+                    if ys.size == 0:
+                        logger.warning("No profile pixels for fiber #{}".format(ifiber))
+                        continue
+                    P = self.trace.profimg[ys, xs]
+                    fpix = self.frame[ys, xs]
+                    good = np.isfinite(fpix) & np.isfinite(P) & (P > 0)
+                    ys, xs, P, fpix = ys[good], xs[good], P[good], fpix[good]
+                    if xs.size == 0:
+                        continue
+                    # per-column profile normalisation over valid pixels
+                    colP = np.zeros(_nx)
+                    np.add.at(colP, xs, P)
+                    Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
+
+                    # Pass 1: profile-weighted flux with constant variance,
+                    # used only to build the MODEL-based variance. Weighting by
+                    # the raw data instead (V = RN^2 + f) anti-correlates the
+                    # weights with the noise and costs ~10% S/N.
+                    num0 = np.zeros(_nx); den0 = np.zeros(_nx)
+                    np.add.at(num0, xs, Pn * fpix)
+                    np.add.at(den0, xs, Pn * Pn)
+                    F0 = np.where(den0 > 0, num0 / np.where(den0 > 0, den0, 1.0), 0.0)
+                    # Smooth the model along the dispersion axis before it
+                    # enters the variance: an unsmoothed F0 makes the weights
+                    # track the frame's own noise, decorrelating repeat
+                    # exposures (measured: 4B stability 0.96 -> 0.80). Real
+                    # spectral structure is preserved at the 9-px scale.
+                    _k = 9
+                    F0s = np.convolve(np.clip(F0, 0, None), np.ones(_k) / _k, mode='same')
+
+                    # Pass 2: Horne with model variance V = RN^2 + max(F0s*P, 0)
+                    V = _rn2 + np.clip(F0s[xs] * Pn, 0, None)
+                    w = Pn / V
+                    num = np.zeros(_nx)
+                    den = np.zeros(_nx)
+                    np.add.at(num, xs, w * fpix)
+                    np.add.at(den, xs, w * Pn)
+                    ok = den > 0
+                    self.counts[ifiber, :] = np.where(ok, num / np.where(ok, den, 1.0), 0.0)
+                    self.counts_err[ifiber, :] = np.where(ok, 1.0 / np.sqrt(np.where(ok, den, 1.0)), 0.0)
+
+                elif method == 'legacy':
+                    # LEGACY profile-weighted mean (NOT Horne): kept for
+                    # comparison only. Not flux conserving; dropped pixels bias
+                    # the flux low because the denominator keeps their weight.
                     x_spec,f_spec,weights = self.isolateProfile(ifiber)
                     if x_spec is None:
                         continue
-                
+
                     extracted = np.zeros(self.trace.naxis1)
                     for i in range(self.trace.naxis1):
                         thisx = (x_spec == i)
@@ -177,68 +297,84 @@ class ExtractLlamas:
 
                     self.counts[ifiber,:] = extracted
                 
-                elif optimal == False:
-                    # Boxcar Extraction - fast!
+                elif method == 'boxcar':
+                    # Boxcar extraction with a trace-following aperture and
+                    # FRACTIONAL pixel weights at the aperture edges.  An
+                    # integer-rounded window (the previous implementation)
+                    # jumps by a whole pixel row whenever the trace crosses a
+                    # half-pixel boundary, imprinting discontinuities along
+                    # the spectrum; weighting the edge pixels by their
+                    # geometric overlap keeps the aperture continuous.
                     logger.info("..Boxcar extracting fiber #{}".format(ifiber))
-                    x_spec,f_spec,weights = self.isolateProfile(ifiber, boxcar=True)
-                    
-                    if x_spec is None:
-                        continue
-                
                     extracted = np.zeros(self.trace.naxis1)
                     tracey = self.trace.traces[ifiber,:]
+                    # Aperture half-width [px]. The legacy window was 9 px total
+                    # (half=4.5), but at the ~6.9 px fibre pitch that reaches the
+                    # neighbouring fibres' cores; 2.5 px (validated on-sky
+                    # 2026-07: frame-to-frame flux stability 0.98-0.99) keeps the
+                    # aperture on this fibre. Overridable via
+                    # LLAMAS_BOXCAR_HALFWIDTH (set by reduce.py from the
+                    # boxcar_halfwidth config key).
+                    half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
+                    ny = self.frame.shape[0]
                     for i in range(self.trace.naxis1):
-                        thisx = (x_spec == i)   
-                        if np.nansum(thisx) > 0:
-                            extracted[i] = np.nansum(f_spec[thisx])
-                        #handles case where there are no elements
-                        else:
-                            extracted[i] = 0.0
-                        extracted[i] = np.nansum(self.frame[round(tracey[i])-4:round(tracey[i])+5,i])
+                        yc = tracey[i]
+                        if not np.isfinite(yc):
+                            continue
+                        lo, hi = yc - half, yc + half
+                        # pixel j (centre convention) spans [j-0.5, j+0.5)
+                        j0 = int(np.floor(lo + 0.5))          # first pixel with any overlap
+                        j1 = int(np.floor(hi + 0.5 - 1e-9))   # last pixel with any overlap
+                        if j0 < 0 or j1 >= ny:
+                            continue   # aperture falls off the detector
+                        total = 0.0
+                        for jj in range(j0, j1 + 1):
+                            w = min(hi, jj + 0.5) - max(lo, jj - 0.5)
+                            if w > 0:
+                                total += self.frame[jj, i] * min(w, 1.0)
+                        extracted[i] = total
 
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape
             logger.info(f'Benchside {benchside} counts shape {self.counts.shape}')
-            # Process the dead fibers by inserting dummy arrays at specific indices
-            # if self.dead_fibers:
-            #     logger.info(f'Processing dead fibers: {self.dead_fibers}')
-                
+            # NOTE: dead fibres are NOT inserted into counts here. Every per-fibre
+            # array (counts, wave, xshift, sky, throughput, errors, ...) stays
+            # LIVE-indexed and mutually aligned, so per-fibre operations
+            # (arcTransfer, skyModel) pair the correct rows. Previously only
+            # counts was padded to fibremap indexing while wave/xshift/sky stayed
+            # live, so counts[i] and wave[i] described different fibres after the
+            # first dead fibre (a silent misalignment). The fibermap expansion is
+            # done once, explicitly, at RSS generation via
+            # llamas_pyjamas.Utils.deadfibers (dead_fibers holds the fibremap
+            # positions). self.dead_fibers is preserved for that step.
 
-            #     # Sort dead fibers in descending order to avoid index shifting
-            #     # when we insert multiple rows
-            #     for dead_idx in sorted(self.dead_fibers, reverse=True):
-            #         # Create a row of zeros for the dead fiber
-            #         dummy_counts = np.zeros(trace.naxis1)
-                    
-            #         self.counts = np.insert(self.counts, dead_idx, dummy_counts, axis=0)
-            
-            if self.dead_fibers:
-                logger.info(f'Processing dead fibers: {self.dead_fibers}')
-                
-                # Create new array with space for dead fibers
-                total_fibers = trace.nfibers + len(self.dead_fibers)
-                new_counts = np.zeros((total_fibers, trace.naxis1))
-                
-                # Copy data from original counts array to correct positions in new array
-                current_idx = 0
-                dead_set = set(self.dead_fibers)  # Convert to set for faster lookup
-                
-                for i in range(total_fibers):
-                    if i in dead_set:
-                        new_counts[i] = np.zeros(trace.naxis1)
-                        # Leave zeros for dead fiber positions
-                        logger.info(f"Inserting dead fiber at index {i}")
-                        continue
-                    else:
-                        # Copy data from original array if position exists
-                        #if current_idx < len(self.counts):
-                        new_counts[i] = self.counts[current_idx]
-                        current_idx += 1
-                
-                # Replace the counts array with the new one
-                self.counts = new_counts
-                self.fiberid = np.arange(total_fibers)
-                logger.info(f'New counts shape after dead fiber insertion: {self.counts.shape}')
+            # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
+            # Populates `errors`, which llamasRSS writes to the ERROR extension
+            # and which fibreFlat/skySubtract propagate. Previously unset, so the
+            # ERROR extension was all zeros and no S/N was derivable from products.
+            # Detector gain (e-/ADU) and read noise (e-) are read from the header
+            # when available; the Poisson term dominates either way.
+            # Gain/read-noise resolution: explicit header keyword, then the lab
+            # characterisation table (keyed on the CAMSN serial), then defaults.
+            # The lab values make the ERROR extension honest per detector — most
+            # important in the red where sky is faint and read noise is a larger
+            # fraction of the budget, and for S/N-weighted cube combination.
+            gain, readnoise, src = props_for_header(
+                self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
+            # Method-aware effective aperture for the RN term (see effective_aperture_pix).
+            # Boxcar -> ~2*halfwidth px (straight sum); optimal/Horne -> profile-weighted.
+            _method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+            _half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
+            aperture_pix = effective_aperture_pix(_method, _half, self.trace)
+            counts_e = np.clip(self.counts, 0.0, None) * gain
+            var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            self.counts_err = np.sqrt(var_adu).astype(np.float32)
+            # At extraction, flux == counts (no flux cal), so the error on the
+            # written FLUX/COUNTS is the same array.
+            self.errors = self.counts_err.copy()
+            logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
+                        f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
+                        f'pix, source={src}); median error={np.median(self.counts_err):.3f}')
 
                     
                 
@@ -285,6 +421,36 @@ class ExtractLlamas:
         
         return x_spec,f_spec,weights
 
+
+    # Set to False to include full 2D detector images in pickled files (for QA/troubleshooting).
+    # Default True strips ~7 GB of per-pixel arrays that are not needed after extraction.
+    _slim_pickle = True
+
+    def __getstate__(self):
+        """Custom pickle state: optionally strip large 2D detector images.
+
+        When _slim_pickle is True (default), removes frame, ximage, and the trace's
+        2D images (data, fiberimg, profimg, bpmask), which together account for ~7 GB
+        per extraction batch.  Per-fiber arrays (counts, sky, wave, xshift,
+        relative_throughput, sensfunc, flux, flux_err, etc.) are always preserved.
+
+        To keep the full images for QA, set before saving:
+            ExtractLlamas._slim_pickle = False
+        """
+        import copy
+        state = self.__dict__.copy()
+        if ExtractLlamas._slim_pickle:
+            # Strip large per-pixel 2D arrays from the extraction object itself
+            state['frame']  = None
+            state['ximage'] = None
+            # Strip trace.data (raw detector image copy in the trace) but keep
+            # fiberimg and profimg — they are needed by generate_pixel_flat_extension
+            # when the flat extraction pkl is reloaded for flat field generation.
+            if state.get('trace') is not None:
+                slim_trace = copy.copy(state['trace'])
+                slim_trace.data = None
+                state['trace'] = slim_trace
+        return state
 
     def saveExtraction(self, save_dir: str)-> None:
         """Save the current extraction object to a file in the specified directory.
@@ -553,9 +719,9 @@ if __name__ == '__main__':
    ##Need to edit this and the remote class so that it runs the extraction through ray not just multiple files at once.
     files = parse_args()
     
-    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count())) 
-    ray.init(ignore_reinit_error=True, num_cpus=NUMBER_OF_CORES)
-    
+    NUMBER_OF_CORES = int(os.environ.get('LLAMAS_RAY_CPUS', multiprocessing.cpu_count()))
+    init_ray(num_cpus=NUMBER_OF_CORES)
+
     print(f"\nStarting with {NUMBER_OF_CORES} cores available")
     print(f"Current CPU Usage: {psutil.cpu_percent(interval=1)}%")
     
@@ -589,6 +755,5 @@ if __name__ == '__main__':
         
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
-    
-    ray.shutdown()
-    
+
+    shutdown_ray()   # standalone CLI: release Ray (scratch cleaned by atexit)

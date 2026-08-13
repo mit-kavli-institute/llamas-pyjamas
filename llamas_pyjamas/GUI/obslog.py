@@ -241,9 +241,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # Import and run extraction
+            # Import and run extraction. force_refresh=True gives the GUI a fresh Ray
+            # session per click (re-bundles edited source), preserving prior behavior;
+            # the pipeline path leaves it False so stages share one session.
             from llamas_pyjamas.GUI.guiExtract import GUI_extract, box_extract
-            result = GUI_extract(filepath)
+            result = GUI_extract(filepath, force_refresh=True)
 
             # Show success message
             QMessageBox.information(
