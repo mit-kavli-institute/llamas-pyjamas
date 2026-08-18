@@ -12,6 +12,7 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
 <details>
 <summary>Citation</summary>
+
 ```bibtex
 @unpublished{Hughes2026,
   author       = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},
@@ -19,6 +20,7 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
   note         = {in preparation},
   year         = {2026}}
 ```
+
 </details>
 
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
