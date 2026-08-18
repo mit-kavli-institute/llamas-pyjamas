@@ -517,15 +517,11 @@ register_exposures(list_of_rss_paths)   # auto-groups by OBJECT + rotator, solve
   <p style="color:var(--color-neutral-800);max-width:56em;margin-top:12px">The other entry points are <span class="mono">register_exposure</span> (one frame), <span class="mono">register_block</span> (a rotation-sharing group, optionally <span class="mono">fixed_rotation=…</span>), and <span class="mono">reset_rough</span> to revert.</p>
   </sc-if>
 
-  <h2 id="check" style="font-size:26px;margin-top:40px">QA output</h2>
+  <h2 id="check" style="font-size:26px;margin-top:40px">DS9 display</h2>
   <hr class="hr">
   <figure>
     <image-slot id="fig-registration-qa" src="images/fig_registration_qa.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_qa.png — Gaia sources vs fitted centroids (J1613)"></image-slot>
     <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613): catalogued Gaia positions against the fitted fibre-space centroids. The title carries solve type, star count and RMS.</figcaption>
-  </figure>
-  <figure style="margin-top:18px">
-    <image-slot id="fig-registration-ps1" src="images/fig_registration_ps1.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_ps1.png — PS1 reference vs registered LLAMAS co-add (J1613+0808)"></image-slot>
-    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613+0808): the PS1 i-band reference cutout beside the registered LLAMAS stacked co-add — the crosshair marks the same source in both frames.</figcaption>
   </figure>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2px;background:var(--color-divider);margin-top:20px">
     <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Target</div><div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-top:6px">RMS &lt; 0.25″</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">On the may26 fields, ~33 of 35 frames refine automatically.</p></div>
@@ -649,6 +645,10 @@ python -m llamas_pyjamas.Combine.combineField \
       <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0;max-width:56em"><span class="mono">COVERAGE</span> counts fibres per pixel, <span class="mono">NEXP</span> counts distinct dithers: the deep-core / shallow-halo record. Broken fibres — a couple per exposure that read strongly negative — are masked as no-data by default so they don't punch holes in the co-add; <span class="mono">--keep-bad-fibres</span> disables that.</p>
     </div>
   </div>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-registration-ps1" src="images/fig_registration_ps1.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_ps1.png — PS1 reference vs stacked LLAMAS co-add (J1613+0808)"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613+0808): the PS1 i-band reference cutout beside the stacked LLAMAS co-add — the crosshair marks the same source in both frames.</figcaption>
+  </figure>
 
   <div style="border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);background:var(--color-surface);padding:20px 22px;margin-top:24px">
     <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">Known caveat — sky-subtraction striping</div>
@@ -1199,7 +1199,7 @@ const TOCS = {
   install: [['#env', '1 — Environment'], ['#deps', '2 — External tools'], ['#aux', '3 — Calibration files']],
   setup: [['#scan', 'What the GUI does'], ['#roles', 'Roles'], ['#options', 'Configuration Options'], ['#catalog', 'Keyword catalog'], ['#syntax', 'Config syntax']],
   run: [['#invoke', 'Invocation'], ['#stages', 'The twelve stages'], ['#qa', 'QA reports'], ['#rss', 'The RSS file']],
-  register: [['#why', 'Background'], ['#how', 'How the solve works'], ['#routes', 'Running it'], ['#check', 'QA output']],
+  register: [['#why', 'Background'], ['#how', 'How the solve works'], ['#routes', 'Running it'], ['#check', 'DS9 display']],
   combine: [['#dither', 'Dithered fields'], ['#super', 'The super-RSS'], ['#transparency', 'Transparency'], ['#routes', 'Running it'], ['#products', 'Products']],
   science: [['#optimal', 'Optimal spectra'], ['#dar', 'DAR'], ['#narrow', 'Narrowband'], ['#anchor', 'Flux anchor']],
   flux: [['#physics', 'Formalism'], ['#build', 'Build'], ['#apply', 'Apply'], ['#anchor', 'Verify']],
