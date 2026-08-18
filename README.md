@@ -13,15 +13,33 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 <details>
 <summary>Citation</summary>
 ```bibtex
-@unpublished{Hughes2025,
-  author       = {Hughes, Sarah and others},
+@unpublished{Hughes2026,
+  author       = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},
   title        = {{The LLAMAS data reduction pipeline}},
   note         = {in preparation},
-  year         = {2025}}
+  year         = {2026}}
 ```
 </details>
 
 For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
+
+## 📖 Documentation
+
+Full documentation for the pipeline — installation, the reduction workflow, the CubeViewer,
+flux calibration, and dither stacking — is now available at:
+
+**https://mit-kavli-institute.github.io/llamas-pyjamas/**
+
+## Version 1.0 release
+
+We are preparing for a **version 1.0 release in the next few weeks**. The full pipeline
+described in the documentation is already available on the
+[`rs-dev`](https://github.com/mit-kavli-institute/llamas-pyjamas/tree/rs-dev) branch, with
+the following caveats until the release is finalised:
+
+- some remaining bugs may still be present, and
+- older data (e.g. earlier commissioning runs) may require additional processing steps —
+  see the notes below, or contact us directly.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 <details>
@@ -34,35 +52,7 @@ For instructions on installation, compilation, and runtime, please see below and
   
 </details>
 
-
-
-**If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
-
-<details>
-<summary>Missing camera command line steps</summary>
-
-Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
-
-## Create a corrected copy
-```bash
-python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits
-```
-
-## With verbose logging to see what's happening
-```bash
-python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits -v
-```
-
-## Direct module execution
-```bash
-# From the validate.py directory
-python validate.py original_science.fits -o science_fixed.fits -v
-```
-
-</details>
-
-
-
+**If your data was observed following the 15th of Sept 2025 Blue camera failures please note that the pipeline handles this accordingly**
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
@@ -134,6 +124,9 @@ To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Py
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
 ### QuickLook GUI
+
+**Note: a new version of the LLAMAS QL is in the final development stages as will be available soon**
+
 The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
 
 To run the QL GUI, execute the following commands from the terminal:
