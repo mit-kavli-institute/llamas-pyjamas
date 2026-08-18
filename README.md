@@ -13,11 +13,11 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 <details>
 <summary>Citation</summary>
 ```bibtex
-@unpublished{Hughes2025,
-  author       = {Hughes, Sarah and others},
+@unpublished{Hughes2026,
+  author       = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},
   title        = {{The LLAMAS data reduction pipeline}},
   note         = {in preparation},
-  year         = {2025}}
+  year         = {2026}}
 ```
 </details>
 

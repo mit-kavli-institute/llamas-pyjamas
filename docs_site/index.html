@@ -1084,11 +1084,11 @@ poetry install</pre>
   <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">Users of this pipeline are requested to cite Hughes et al. (in prep), and the instrument papers where relevant.</p>
   <hr class="hr">
   <h2 id="bibtex" style="font-size:26px;margin-top:30px">Pipeline</h2>
-  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:18px;font-size:12.5px;line-height:1.7;overflow-x:auto">@unpublished{Hughes2025,
- author = {Hughes, Sarah and others},
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:18px;font-size:12.5px;line-height:1.7;overflow-x:auto">@unpublished{Hughes2026,
+ author = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},
  title  = {{The LLAMAS data reduction pipeline}},
  note   = {in preparation},
- year   = {2025}}</pre>
+ year   = {2026}}</pre>
   <button class="btn btn-secondary" onClick="{{ copyBib }}" style="margin-top:10px">{{ copyLabel }}</button>
   <p style="font-size:13px;color:var(--color-neutral-700);margin-top:14px;max-width:52em">The reduction leans on pypeit for its robust iterative b-spline fitter (flat field, sky, sensitivity function) and its bundled La Silla/CTIO extinction curve; Gaia DR3 supplies astrometry and, via XP spectra, the absolute flux anchor. Cite those where your analysis depends on them.</p>
 
@@ -1221,7 +1221,7 @@ class Component extends DCLogic {
       toc: (TOCS[p] || []).map(([href, label]) => ({ href, label })),
       copyLabel: this.state.copied ? 'Copied' : 'Copy BibTeX',
       copyBib: () => {
-        const t = '@unpublished{Hughes2025,\n author = {Hughes, Sarah and others},\n title  = {{The LLAMAS data reduction pipeline}},\n note   = {in preparation},\n year   = {2025}}';
+        const t = '@unpublished{Hughes2026,\n author = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},\n title  = {{The LLAMAS data reduction pipeline}},\n note   = {in preparation},\n year   = {2026}}';
         if (navigator.clipboard) navigator.clipboard.writeText(t);
         this.setState({ copied: true });
         setTimeout(() => this.setState({ copied: false }), 1600);
