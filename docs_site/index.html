@@ -523,6 +523,10 @@ register_exposures(list_of_rss_paths)   # auto-groups by OBJECT + rotator, solve
     <image-slot id="fig-registration-qa" src="images/fig_registration_qa.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_qa.png — Gaia sources vs fitted centroids (J1613)"></image-slot>
     <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613): catalogued Gaia positions against the fitted fibre-space centroids. The title carries solve type, star count and RMS.</figcaption>
   </figure>
+  <figure style="margin-top:18px">
+    <image-slot id="fig-registration-ps1" src="images/fig_registration_ps1.png" shape="rect" fit="contain" style="width:100%;height:320px" placeholder="fig_registration_ps1.png — PS1 reference vs registered LLAMAS co-add (J1613+0808)"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">Real data (J1613+0808): the PS1 i-band reference cutout beside the registered LLAMAS stacked co-add — the crosshair marks the same source in both frames.</figcaption>
+  </figure>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2px;background:var(--color-divider);margin-top:20px">
     <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Target</div><div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-top:6px">RMS &lt; 0.25″</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">On the may26 fields, ~33 of 35 frames refine automatically.</p></div>
     <div style="background:var(--color-bg);padding:18px"><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Known failure mode</div><div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-top:6px">Rotation off by 180°</div><p style="font-size:13px;color:var(--color-neutral-800);margin:6px 0 0">Fix with <strong>Auto-register block</strong> holding the correct rotation, or refine interactively.</p></div>
@@ -822,8 +826,8 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
   </div>
   <p style="color:var(--color-neutral-800);max-width:56em;margin-top:18px"><strong>DS9 is optional.</strong> The window opens, loads data and plots spectra without it; only image display and picking need it, and its absence is reported rather than fatal.</p>
   <figure style="margin-top:18px">
-    <image-slot id="fig-cubeviewer-anatomy" src="images/fig_cubeviewer_anatomy.png" shape="rect" fit="contain" style="width:100%;height:330px" placeholder="Window anatomy — DS9 image window, CubeViewer control boxes, spectrum panel"></image-slot>
-    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">The two windows side by side — DS9 on the left with the white-light image and crosshair, the CubeViewer controls and spectrum panel on the right.</figcaption>
+    <image-slot id="fig-cubeviewer-anatomy" src="images/fig_cubeviewer_anatomy.png" shape="rect" fit="contain" style="width:100%;height:330px" placeholder="Window anatomy — CubeViewer control boxes and spectrum panel, DS9 image window"></image-slot>
+    <figcaption style="font-size:12px;margin-top:8px;max-width:60em">The two windows side by side — the CubeViewer controls and flux-calibrated spectrum (F<sub>λ</sub>) of the J1613+0808 combined cube on the left, DS9 on the right with the collapsed image and crosshair.</figcaption>
   </figure>
 
   <h2 id="xpa" style="font-size:26px;margin-top:40px">How it talks to DS9</h2>
