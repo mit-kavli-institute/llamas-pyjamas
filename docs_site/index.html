@@ -815,8 +815,17 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
   <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-accent-700)">Capabilities</div>
   <h1 style="font-size:clamp(30px,3.8vw,46px);margin:10px 0 14px">CubeViewer</h1>
   <p style="font-size:17px;color:var(--color-neutral-800);max-width:44em">A standalone PyQt6 application for postprocessing analysis of reduced products — and the home of registration, stacking, flux calibration and extraction.</p>
-  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:14px 16px;font-size:13px;overflow-x:auto;margin-top:20px">python -m llamas_pyjamas.CubeViewer [file]</pre>
-  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:10px;max-width:56em">It is independent of the QuickLook/observing-log GUI in <span class="mono">llamas_pyjamas.GUI</span>: it imports read-only helpers from the reduction code and modifies nothing in it.</p>
+  <pre style="background:var(--color-surface);border:1px solid var(--color-divider);padding:14px 16px;font-size:13px;line-height:1.7;overflow-x:auto;margin-top:20px"># DS9 is the image display &mdash; start it in the background first
+ds9 &amp;
+
+python -m llamas_pyjamas.CubeViewer                # then load from inside (preferred)
+python -m llamas_pyjamas.CubeViewer FILE.fits     # optional shortcut, opens that file</pre>
+  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:16px"><strong>The file path is optional</strong> &mdash; and it is only a shortcut. There is no argument parser: the first argument that does not begin with <span class="mono">-</span> is taken as the file to open, anything else is handed to Qt, and there are no CubeViewer-specific flags. Given no path the window simply comes up empty, its controls greyed, with <span class="mono">Open a reduced RSS to begin</span> in the status bar &mdash; it does not pop a file dialog for you.</p>
+  <div style="border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider);background:var(--color-surface);padding:18px 20px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-700);font-family:var(--font-heading);font-weight:800">Prefer loading from inside</div>
+    <p style="margin:8px 0 0;font-size:13.5px;color:var(--color-neutral-800);max-width:56em"><strong>File &#9656; Open from obslog&hellip;</strong> (<span class="mono">Ctrl+B</span>) lists one row per <em>exposure</em> &mdash; <strong>File</strong>, <strong>Object</strong>, <strong>Exptime (s)</strong> and the <strong>observer notes</strong> (<span class="mono">OBS-CMNT</span>) &mdash; with the blue, green and red planes folded into that single row and the channels on its tooltip. You can see which object you are about to load instead of inferring it from a filename, which is why it is the better route even when you know the path. <strong>File &#9656; Open RSS&hellip;</strong> (<span class="mono">Ctrl+O</span>) is the plain file chooser, and <strong>File &#9656; Open combined cube&hellip;</strong> (<span class="mono">Ctrl+K</span>) opens a stacked cube.</p>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:14px;max-width:56em">It is independent of the QuickLook/observing-log GUI in <span class="mono">llamas_pyjamas.GUI</span>: it imports read-only helpers from the reduction code and modifies nothing in it.</p>
 
   <h2 id="ds9" style="font-size:26px;margin-top:40px">Relationship to DS9</h2>
   <hr class="hr">
@@ -824,7 +833,13 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
     <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.85">Division of labour</div>
     <p style="margin:10px 0 0;font-size:14px;opacity:0.9;max-width:46em">CubeViewer collapses the loaded product over a wavelength window you choose, sends the image to DS9, and plots the spectrum of whatever spatial element you pick in the DS9 window. Stretch, colourmap, zoom and pan stay where they are already better.</p>
   </div>
-  <p style="color:var(--color-neutral-800);max-width:56em;margin-top:18px"><strong>DS9 is optional.</strong> The window opens, loads data and plots spectra without it; only image display and picking need it, and its absence is reported rather than fatal.</p>
+  <div style="border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 22px;margin-top:18px">
+    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800">Prerequisite &mdash; start DS9 first</div>
+    <p style="margin:8px 0 12px;font-size:14px;color:var(--color-accent-900);max-width:56em">Launch <span class="mono">ds9 &amp;</span> in the background <em>before</em> the CubeViewer. The viewer never starts DS9 itself &mdash; it attaches over XPA to an instance that is already running. Everything interactive happens in that window: the collapsed image, the crosshair the picker polls ten times a second, the aperture you build by clicking fibres, and the crosshair that <em>Optimal spectrum</em> and <em>Anchor to Gaia</em> read. Without it the GUI is inert.</p>
+    <pre style="background:var(--color-bg);border:1px solid var(--color-accent-300);padding:14px 16px;font-size:12.5px;line-height:1.7;overflow-x:auto">ds9 &amp;
+python -m llamas_pyjamas.CubeViewer</pre>
+  </div>
+  <p style="font-size:13px;color:var(--color-neutral-700);margin-top:12px;max-width:56em">The connection is deliberately lazy, so a missing DS9 is never fatal: the window still opens, data still loads and the spectrum panel still plots, and the failure is reported in a dialog rather than a traceback. Ticking <strong>Pick</strong> with no DS9 simply un-ticks itself. A DS9 started late is picked up on the next action &mdash; but nothing can be displayed or selected until it is there.</p>
   <figure style="margin-top:18px">
     <image-slot id="fig-cubeviewer-anatomy" src="images/fig_cubeviewer_anatomy.png" shape="rect" fit="contain" style="width:100%;height:330px" placeholder="Window anatomy — CubeViewer control boxes and spectrum panel, DS9 image window"></image-slot>
     <figcaption style="font-size:12px;margin-top:8px;max-width:60em">The two windows side by side — the CubeViewer controls and flux-calibrated spectrum (F<sub>λ</sub>) of the J1613+0808 combined cube on the left, DS9 on the right with the collapsed image and crosshair.</figcaption>
@@ -858,6 +873,37 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
     </div>
   </div>
 
+  <h2 id="order" style="font-size:26px;margin-top:40px">A session, in order</h2>
+  <hr class="hr">
+  <p style="color:var(--color-neutral-800);max-width:56em">The menus are grouped by kind, not by sequence. A full postprocessing session runs in this order &mdash; the standard star first, because its sensitivity function has to exist before any science frame can be calibrated, and the calibration has to be written into the RSS before the dithers are stacked.</p>
+  <div style="overflow-x:auto;max-width:100%">
+    <table class="table" style="min-width:640px;margin-top:12px">
+    <thead><tr><th style="width:34px">#</th><th style="width:27%">Step</th><th>Where &mdash; and what you do</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">0</td><td>Start DS9</td><td style="font-size:13px"><span class="mono">ds9 &amp;</span> in the shell. Do this before launching the viewer &mdash; it is the image display and every pick is a click inside it.</td></tr>
+      <tr><td class="mono">1</td><td>Launch the viewer</td><td style="font-size:13px"><span class="mono">python -m llamas_pyjamas.CubeViewer</span></td></tr>
+      <tr><td class="mono">2</td><td>Load the <strong>standard star</strong></td><td style="font-size:13px"><strong>File &#9656; Open from obslog&hellip;</strong> and pick the standard by its <em>Object</em> name. Opening one channel pulls in its siblings. Confirm the status bar ends <span class="mono">| STANDARD: &lt;name&gt;</span> &mdash; that is the catalogue crossmatch succeeding, and it is what unlocks step 5.</td></tr>
+      <tr><td class="mono">3</td><td>Collapse and send the image</td><td style="font-size:13px">Set the <strong>Wavelength</strong> <span class="mono">min</span>/<span class="mono">max</span> (or press <strong>Full range</strong>), tick the channels you want in <strong>Image Display</strong>, leave <strong>Hex tiles</strong> on so a click maps to exactly one fibre, then <strong>Send to DS9</strong>. This also ticks <strong>Pick</strong> for you.</td></tr>
+      <tr><td class="mono">4</td><td>Define the aperture on the star</td><td style="font-size:13px">With <strong>Pick</strong> on, click the star in DS9. <strong>Radius</strong> is in fibre spacings (0 = the single fibre under the crosshair); <strong>Grow</strong> lets you click or drag fibres onto an accumulating aperture, and <strong>Clear</strong> empties it. The summed spectrum appears in the <em>IFU spectrum</em> panel.</td></tr>
+      <tr><td class="mono">5</td><td>Build the sensitivity function</td><td style="font-size:13px"><strong>Sensitivity &#9656; Build Sensitivity Function&hellip;</strong> The dialog opens with the fit already computed; adjust masks, breakpoint spacing or spline order if the defaults miss something, then <strong>Save sensfunc&hellip;</strong> &mdash; it defaults to <span class="mono">&lt;stem&gt;_sensfunc.fits</span> beside the standard. See <a href="#" onClick="{{ goFlux }}">Flux calibration</a>.</td></tr>
+      <tr><td class="mono">6</td><td>Apply it to the science exposures</td><td style="font-size:13px"><strong>Sensitivity &#9656; Apply Sensitivity Function to files&hellip;</strong> Choose the sensfunc (one sitting nearby is pre-filled), multi-select the exposures, confirm. <span class="mono">FLAM</span>/<span class="mono">FLAM_ERR</span> are written into each RSS in place, with the differential extinction correction applied.</td></tr>
+      <tr><td class="mono">7</td><td>Register the dithers</td><td style="font-size:13px"><strong>WCS &#9656; Auto-register block&hellip;</strong> for the whole dither group &mdash; one rotation fit plus per-frame shifts. See <a href="#" onClick="{{ goRegister }}">WCS correction</a>.</td></tr>
+      <tr><td class="mono">8</td><td>Stack the field</td><td style="font-size:13px"><strong>Combine &#9656; Combine field into cube&hellip;</strong> Pick the dithers, set kernel, pixel scale, units and weighting; the cube is written to <span class="mono">combined/</span> and opened for you. See <a href="#" onClick="{{ goCombine }}">Combining dithers</a>.</td></tr>
+      <tr><td class="mono">9</td><td>Extract, then verify</td><td style="font-size:13px">Put the DS9 crosshair on the source and run <strong>Extraction &#9656; Optimal spectrum at crosshair</strong>; then <strong>Extraction &#9656; Anchor cube flux to Gaia (at crosshair)&hellip;</strong> to check the absolute scale against an in-field source. See <a href="#" onClick="{{ goScience }}">Science products</a>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px;background:var(--color-divider);border:2px solid var(--color-divider);margin-top:18px">
+    <div style="padding:20px;background:var(--color-bg)">
+      <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Why step 5 may be greyed out</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0"><strong>Build Sensitivity Function&hellip;</strong> is enabled only when the loaded file crossmatches a recognised flux standard that has a bundled reference spectrum &mdash; hover it and the tooltip says which condition failed. It also refuses to open until an aperture exists, so do step 4 first. <strong>Apply</strong>, by contrast, needs nothing loaded and is always available.</p>
+    </div>
+    <div style="padding:20px;background:var(--color-bg)">
+      <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-accent-700)">Why 6 comes before 8</div>
+      <p style="font-size:13.5px;color:var(--color-neutral-800);margin:6px 0 0"><span class="mono">FLAM</span> is written into the per-exposure RSS, and the stack is built from those files &mdash; so calibrate first if you want a flux-calibrated cube. The <strong>Extraction</strong> menu only comes alive once a combined cube is open, which is why step 9 follows step 8.</p>
+    </div>
+  </div>
+
   <h2 id="menus" style="font-size:26px;margin-top:40px">Menu map</h2>
   <hr class="hr">
   <div style="overflow-x:auto;max-width:100%">
@@ -867,16 +913,17 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
       <tr><td><strong>File</strong></td><td>Open RSS…</td><td style="font-size:13px">Load a per-exposure RSS; siblings auto-load.</td></tr>
       <tr><td></td><td>Open from obslog…</td><td style="font-size:13px">Pick an exposure from the observation log.</td></tr>
       <tr><td></td><td>Open combined cube…</td><td style="font-size:13px">Load a stacked cube; the super-RSS is rebuilt from its provenance headers.</td></tr>
-      <tr><td><strong>Sensitivity</strong></td><td>Build Sensitivity Function…</td><td style="font-size:13px">Interactive sensfunc fit on a standard → <a href="#" onClick="{{ goFlux }}">Flux calibration</a>.</td></tr>
+      <tr><td><strong>Sensitivity</strong></td><td>Build Sensitivity Function…</td><td style="font-size:13px">Interactive sensfunc fit on a standard → <a href="#" onClick="{{ goFlux }}">Flux calibration</a>. <em>Enabled only with a recognised standard loaded and an aperture defined.</em></td></tr>
       <tr><td></td><td>Apply Sensitivity Function to files…</td><td style="font-size:13px">Write <span class="mono">FLAM</span>/<span class="mono">FLAM_ERR</span> into science RSS.</td></tr>
       <tr><td><strong>WCS</strong></td><td>Auto-register this exposure</td><td style="font-size:13px">Gaia solve, one frame → <a href="#" onClick="{{ goRegister }}">WCS correction</a>.</td></tr>
       <tr><td></td><td>Auto-register block…</td><td style="font-size:13px">One rotation fit plus per-frame shifts for a dither group.</td></tr>
+      <tr><td></td><td>Register block on common source (no Gaia)…</td><td style="font-size:13px">For fields with no Gaia stars: pin one in-field source across the dithers.</td></tr>
       <tr><td></td><td>Refine WCS interactively…</td><td style="font-size:13px">Manual fallback: click a star at the DS9 crosshair.</td></tr>
       <tr><td></td><td>Show registration QA</td><td style="font-size:13px">The QA plot.</td></tr>
       <tr><td></td><td>Reset to rough (header) WCS</td><td style="font-size:13px">Revert to the provisional WCS.</td></tr>
       <tr><td><strong>Combine</strong></td><td>Combine field into cube…</td><td style="font-size:13px">Stack the dithers → <a href="#" onClick="{{ goCombine }}">Combining dithers</a>.</td></tr>
       <tr><td></td><td>Narrowband line image…</td><td style="font-size:13px">Continuum-subtracted surface-brightness image.</td></tr>
-      <tr><td><strong>Extraction</strong></td><td>Optimal spectrum at crosshair</td><td style="font-size:13px">PSF- and ivar-weighted extraction with DAR tracking → <a href="#" onClick="{{ goScience }}">Science products</a>.</td></tr>
+      <tr><td><strong>Extraction</strong><div style="font-size:11px;font-weight:400;color:var(--color-neutral-600)">(needs a combined cube)</div></td><td>Optimal spectrum at crosshair</td><td style="font-size:13px">PSF- and ivar-weighted extraction with DAR tracking → <a href="#" onClick="{{ goScience }}">Science products</a>.</td></tr>
       <tr><td></td><td>Anchor cube flux to Gaia (at crosshair)…</td><td style="font-size:13px">Absolute flux scale from an in-field Gaia source.</td></tr>
     </tbody>
   </table>
@@ -903,7 +950,8 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
     <tbody>
       <tr><td>Classify a raw night, write a config</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR -o config.txt</td></tr>
       <tr><td>Reduce a night <span style="color:var(--color-neutral-600)">(from <span class="mono">llamas_pyjamas/</span>)</span></td><td class="mono" style="font-size:12px">python reduce.py config.txt</td></tr>
-      <tr><td>Open the CubeViewer</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.CubeViewer [file]</td></tr>
+      <tr><td>Start DS9 <span style="color:var(--color-neutral-600)">(before the CubeViewer)</span></td><td class="mono" style="font-size:12px">ds9 &amp;</td></tr>
+      <tr><td>Open the CubeViewer <span style="color:var(--color-neutral-600)">(<span class="mono">FILE</span> optional)</span></td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.CubeViewer [FILE]</td></tr>
       <tr><td>Combine a field → cube</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --cube</td></tr>
       <tr><td>Combine a field → image</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --band LO HI --png</td></tr>
       <tr><td>Apply a sensitivity function</td><td class="mono" style="font-size:12px">python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENS.fits RSS…</td></tr>
@@ -963,6 +1011,7 @@ python -m llamas_pyjamas.Postprocessing.apply_fluxcal SENSFUNC.fits RSS.fits --o
     <thead><tr><th style="width:40%">Symptom</th><th>Likely cause / fix</th></tr></thead>
     <tbody>
       <tr><td><span class="mono">reduce.py</span> errors on <span class="mono">--config</span></td><td style="font-size:13px">The argument is <strong>positional</strong>: <span class="mono">python reduce.py config.txt</span>.</td></tr>
+      <tr><td>Nothing appears in DS9, or <strong>Pick</strong> will not stay ticked</td><td style="font-size:13px">DS9 is not running. Start <span class="mono">ds9 &amp;</span> and retry &mdash; the CubeViewer attaches to an existing instance and never launches one.</td></tr>
       <tr><td>CubeViewer says the XPA tools are missing</td><td style="font-size:13px">SAOImageDS9 ships <span class="mono">xpans</span> but not <span class="mono">xpaset</span>/<span class="mono">xpaget</span>. Build SAO's XPA package or set <span class="mono">$CUBEVIEWER_XPA_DIR</span>.</td></tr>
       <tr><td>A frame won't register, or the rotation looks wrong</td><td style="font-size:13px"><strong>WCS ▸ Refine WCS interactively…</strong>, or <strong>Auto-register block</strong> holding the correct rotation.</td></tr>
       <tr><td>Missing-camera or extension errors on raw frames</td><td style="font-size:13px">Run <span class="mono">python -m llamas_pyjamas.DataModel.validate</span> on the MEF first.</td></tr>
@@ -1044,7 +1093,7 @@ poetry install</pre>
     <table class="table" style="min-width:560px;margin-top:12px">
     <thead><tr><th style="width:30%">Tool</th><th style="width:18%">Needed for</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td class="mono" style="font-size:12.5px">ds9</td><td>QuickLook, CubeViewer</td><td>SAOImage DS9 owns all image display. Optional — the CubeViewer opens and plots without it.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">ds9</td><td>QuickLook, CubeViewer</td><td>SAOImage DS9 owns all image display. Required in practice for the CubeViewer — start it in the background first; the app opens without it, but nothing can be displayed or picked.</td></tr>
       <tr><td class="mono" style="font-size:12.5px">gaiaxpy</td><td>Gaia XP flux anchor</td><td>Plus network access; without it the anchor falls back to broadband photometry.</td></tr>
       <tr><td class="mono" style="font-size:12.5px">ray</td><td>Parallel stages</td><td>Controlled by <span class="mono">ray_num_cpus</span>.</td></tr>
     </tbody>
@@ -1203,7 +1252,7 @@ const TOCS = {
   combine: [['#dither', 'Dithered fields'], ['#super', 'The super-RSS'], ['#transparency', 'Transparency'], ['#routes', 'Running it'], ['#products', 'Products']],
   science: [['#optimal', 'Optimal spectra'], ['#dar', 'DAR'], ['#narrow', 'Narrowband'], ['#anchor', 'Flux anchor']],
   flux: [['#physics', 'Formalism'], ['#build', 'Build'], ['#apply', 'Apply'], ['#anchor', 'Verify']],
-  cube: [['#ds9', 'Relationship to DS9'], ['#xpa', 'XPA setup'], ['#data', 'Data model'], ['#menus', 'Menu map']],
+  cube: [['#ds9', 'Relationship to DS9'], ['#xpa', 'XPA setup'], ['#data', 'Data model'], ['#order', 'Session order'], ['#menus', 'Menu map']],
   ref: [['#cheat', 'Command summary'], ['#tree', 'Directory layout'], ['#keys', 'Config keys'], ['#trouble', 'Troubleshooting']],
   cite: [['#bibtex', 'Pipeline'], ['#papers', 'Instrument'], ['#license', 'License']]
 };

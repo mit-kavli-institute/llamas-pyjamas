@@ -12,7 +12,8 @@ for looking things up.
 |------|---------|
 | Classify a raw night, write a config | `python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR -o config.txt` |
 | Reduce a night | `python reduce.py config.txt` *(from `llamas_pyjamas/`)* |
-| Open the CubeViewer | `python -m llamas_pyjamas.CubeViewer [file]` |
+| Start DS9 (before the CubeViewer) | `ds9 &` |
+| Open the CubeViewer | `python -m llamas_pyjamas.CubeViewer [FILE]` — `FILE` optional; prefer **File ▸ Open from obslog…**, which shows object, exptime and observer notes |
 | Combine a field → cube | `python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --cube` |
 | Combine a field → image | `python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --band LO HI --png` |
 | Build/update a master bias | `python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR` |

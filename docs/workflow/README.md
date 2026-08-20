@@ -76,6 +76,8 @@ cd llamas-pyjamas/llamas_pyjamas
 python reduce.py /path/to/raw_night/llamas_redux_config.txt
 
 # 3 & 5. open the CubeViewer (registration, combining, extraction all live here)
+#        start DS9 first — it is the image display and every pick is a click in it
+ds9 &
 python -m llamas_pyjamas.CubeViewer
 
 # 4. (alternative) combine a field from the command line
