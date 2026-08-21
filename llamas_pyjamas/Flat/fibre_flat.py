@@ -243,7 +243,8 @@ def load_rss(filepath, logger=None):
 
     logger.info(f"Loading RSS file: {filepath}")
     with fits.open(filepath) as hdul:
-        flux    = hdul['FLUX'].data.astype(np.float64)
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        flux    = hdul[skysub_extname(hdul)].data.astype(np.float64)
         error   = hdul['ERROR'].data.astype(np.float64)
         mask    = hdul['MASK'].data.astype(np.int16)
         wave    = hdul['WAVE'].data.astype(np.float64)
@@ -564,11 +565,12 @@ def _write_rss_fits(template_hdul, out_path, flux=None, error=None, mask=None,
         Header keyword/value/comment triples to add to extension 0.
         Format: {keyword: (value, comment)} or {keyword: value}.
     """
+    from llamas_pyjamas.File.llamasRSS import skysub_extname
     new_hdul = fits.HDUList()
     for ext in template_hdul:
         new_hdul.append(ext.copy())
 
-    if flux  is not None: new_hdul['FLUX'].data  = flux.astype(np.float32)
+    if flux  is not None: new_hdul[skysub_extname(new_hdul)].data  = flux.astype(np.float32)
     if error is not None: new_hdul['ERROR'].data = error.astype(np.float32)
     if mask  is not None: new_hdul['MASK'].data  = mask.astype(np.int16)
 

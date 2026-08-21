@@ -1,0 +1,215 @@
+"""
+CLI: co-add a field's dithers into an image (Phase 4).
+
+Discovers a field's registered RSS files (or takes them explicitly), builds the super-RSS, and
+writes a DS9-ready co-add image with its depth maps. A quick way to eyeball a stack before the
+photometric-scaling / cube machinery lands.
+
+Examples
+--------
+Broadband green co-add of J2151, auto-discovered in a reduction directory::
+
+    python -m llamas_pyjamas.Combine.combineField --dir /path/reduced/extractions \\
+        --object J2151 --channels green -o j2151_green.fits --png
+
+A narrowband window across all channels, surface brightness, from explicit files::
+
+    python -m llamas_pyjamas.Combine.combineField a_RSS_green.fits b_RSS_green.fits \\
+        --band 6560 6620 -o field_nb.fits
+
+Open the result in DS9 (SCI is the primary; VAR/SNR/COVERAGE/NEXP are extensions).
+"""
+
+import argparse
+import glob
+import logging
+import os
+import sys
+from typing import List, Optional
+
+import numpy as np
+from astropy.io import fits
+
+from llamas_pyjamas.Combine.superRSS import build_super_rss, combined_dir, CHANNELS
+from llamas_pyjamas.Combine.coadd import (combine_image, WHITELIGHT_BLUE_MIN_A, whitelight_floor,
+                                          COVERAGE_FRAC_MIN, low_coverage_mask)
+
+logger = logging.getLogger(__name__)
+
+
+def discover_field(directory: str, obj: str) -> List[str]:
+    """Green RSS files in `directory` whose OBJECT header starts with `obj` (one per exposure)."""
+    hits = []
+    for f in sorted(glob.glob(os.path.join(directory, '*_RSS_green.fits'))):
+        try:
+            name = str(fits.getheader(f, 0).get('OBJECT', ''))
+        except Exception:                              # noqa: BLE001
+            continue
+        if name.startswith(obj):
+            hits.append(f)
+    return hits
+
+
+def _band(super_rss, args) -> tuple:
+    """Resolve the white-light window: explicit --band, else the full range of the chosen channels
+    floored at the blue white-light limit. An explicit --band below the floor is respected but warned
+    (data is never discarded from the cube; this is only the collapse window)."""
+    if args.band is not None:
+        lo, hi = float(args.band[0]), float(args.band[1])
+        if lo < WHITELIGHT_BLUE_MIN_A and hi > WHITELIGHT_BLUE_MIN_A:
+            logger.warning("--band %.0f-%.0f includes wavelengths below %.0f A (low-sensitivity blue "
+                           "edge; flux cal diverges there). Proceeding as requested.",
+                           lo, hi, WHITELIGHT_BLUE_MIN_A)
+        return lo, hi
+    lo, hi = np.inf, -np.inf
+    for c in (args.channels or list(super_rss.channels)):
+        st = super_rss.channels.get(c)
+        if st is None:
+            continue
+        w = st.wave[np.isfinite(st.wave)]
+        if w.size:
+            lo, hi = min(lo, float(w.min())), max(hi, float(w.max()))
+    lo2, below = whitelight_floor(lo, hi)
+    if below:
+        logger.info("white-light window floored to >= %.0f A (blue edge below that is kept in the "
+                    "cube but excluded from the default white light).", WHITELIGHT_BLUE_MIN_A)
+    return lo2, hi
+
+
+def _write_png(img, path):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from astropy.visualization import ZScaleInterval
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    snr = img.snr()
+    for a, (arr, ttl, zscale) in zip(ax, [(img.data, 'co-add', True),
+                                          (img.nexp, 'depth: N exposures', False),
+                                          (snr, 'S/N', True)]):
+        d = arr.astype(float)
+        fin = np.isfinite(d)
+        if zscale and fin.any():
+            vmin, vmax = ZScaleInterval().get_limits(d[fin])
+        else:
+            vmin, vmax = 0, (np.nanmax(d) if fin.any() else 1)
+        im = a.imshow(d, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+        a.set_title(f"{img.meta.get('FIELD', '')} {ttl}")
+        plt.colorbar(im, ax=a, fraction=0.046)
+    fig.tight_layout()
+    fig.savefig(path, dpi=100)
+    return path
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    p = argparse.ArgumentParser(description='Co-add a field\'s dithers into a DS9 image.')
+    p.add_argument('rss', nargs='*', help='RSS files (any channel; siblings auto-found). '
+                                          'Or use --dir/--object to discover.')
+    p.add_argument('--dir', help='reduction directory to search for --object')
+    p.add_argument('--object', help='OBJECT prefix to select a field (e.g. J2151)')
+    p.add_argument('--band', nargs=2, type=float, metavar=('LO', 'HI'),
+                   help='white-light window (A); default = full range of the chosen channels, floored '
+                        'at %d A (the low-sensitivity blue edge is kept in the cube but excluded from '
+                        'the default white light; pass an explicit --band below it to override)'
+                        % int(WHITELIGHT_BLUE_MIN_A))
+    p.add_argument('--channels', nargs='+', choices=CHANNELS, help='channels (default: all)')
+    p.add_argument('--units', choices=('sb', 'flux'), default='sb')
+    p.add_argument('--weight', choices=('ivar', 'uniform', 'exptime'), default='ivar')
+    p.add_argument('--kernel', choices=('gaussian', 'tophat'), default='gaussian')
+    p.add_argument('--fwhm', type=float, default=0.9, help='kernel FWHM in arcsec')
+    p.add_argument('--pixscale', type=float, default=0.5, help='output pixel scale, arcsec')
+    p.add_argument('--min-coverage', type=int, default=1, dest='min_coverage')
+    p.add_argument('--min-coverage-frac', type=float, default=COVERAGE_FRAC_MIN, dest='min_coverage_frac',
+                   help='exclude image spaxels shallower than this fraction of peak NEXP (biased at '
+                        'partial-coverage boundaries; default %(default)s). 0 keeps all. The cube (--cube) '
+                        'always keeps every spaxel; this only masks the 2-D image.')
+    p.add_argument('--cube', action='store_true',
+                   help='build an (RA,DEC,wave) cube (single channel) instead of a 2-D image')
+    p.add_argument('--dwave', type=float, help='cube wavelength step (A); default native median')
+    p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto')
+    p.add_argument('--keep-bad-fibres', action='store_true',
+                   help='do NOT mask strongly-negative (broken) fibres as no-data')
+    p.add_argument('--scale-transparency', action='store_true',
+                   help='scale exposures to a common throughput via the in-field point source(s)')
+    p.add_argument('--scale-radius', type=float, default=2.0,
+                   help='reference aperture radius for transparency, arcsec')
+    p.add_argument('--scale-sources', type=int, default=2,
+                   help='number of reference sources to auto-find for transparency')
+    p.add_argument('--scale-source', nargs=2, type=float, action='append', metavar=('RA', 'DEC'),
+                   help='explicit reference source RA DEC (deg); repeatable, overrides auto-find')
+    p.add_argument('-o', '--out', help='output FITS (default: <field>_coadd.fits)')
+    p.add_argument('--png', action='store_true', help='also write a quick preview PNG')
+    args = p.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
+
+    paths = list(args.rss)
+    if args.dir and args.object:
+        paths += discover_field(args.dir, args.object)
+    if not paths:
+        p.error('give RSS files, or --dir and --object')
+    logger.info('combining %d exposure file(s)', len(paths))
+
+    sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
+                         reject_bad_fibres=not args.keep_bad_fibres)
+    logger.info(sr.summary())
+
+    if args.scale_transparency:
+        from llamas_pyjamas.Combine.transparency import transparency_scales
+        sources = None
+        if args.scale_source:
+            from astropy.coordinates import SkyCoord
+            import astropy.units as u
+            sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
+        scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
+                                     radius_arcsec=args.scale_radius, channels=args.channels)
+        sr.apply_scales(scales)
+        logger.info('after transparency scaling: %s', sr.summary())
+
+    if args.cube:
+        from llamas_pyjamas.Combine.cube import combine_cube
+        chan = args.channels[0] if args.channels else 'green'
+        cube = combine_cube(sr, chan, dwave=args.dwave, units=args.units, weighting=args.weight,
+                            kernel=args.kernel, kernel_fwhm=args.fwhm, pixscale=args.pixscale,
+                            min_coverage=args.min_coverage)
+        out = args.out or os.path.join(combined_dir(paths, create=True),
+                                       f'{sr.field or "field"}_cube_{chan}.fits')
+        cube.write(out)
+        logger.info('wrote %s  (%dx%dx%d, %.1f-%.1f A, max depth %d/%d)', out, cube.data.shape[2],
+                    cube.data.shape[1], cube.data.shape[0], cube.wave[0], cube.wave[-1],
+                    int(cube.nexp.max()), cube.meta['NEXPTOT'])
+        print(f'cube: {out}')
+        return 0
+
+    lo, hi = _band(sr, args)
+    logger.info('window %.1f-%.1f A, channels=%s, units=%s, weight=%s',
+                lo, hi, args.channels or 'all', args.units, args.weight)
+
+    img = combine_image(sr, lo, hi, channels=args.channels, units=args.units,
+                        weighting=args.weight, kernel=args.kernel, kernel_fwhm=args.fwhm,
+                        pixscale=args.pixscale, min_coverage=args.min_coverage)
+
+    # default-exclude biased partial-coverage spaxels from the IMAGE (coverage maps kept for reversal)
+    excl = low_coverage_mask(img.nexp, args.min_coverage_frac)
+    n_excl = int((excl & np.isfinite(img.data)).sum())
+    if n_excl:
+        img.data[excl] = np.nan
+        img.meta['COVFRAC'] = float(args.min_coverage_frac)
+        logger.info('excluded %d partial-coverage spaxels (NEXP < %.2f x peak) from the image; the '
+                    'coverage/NEXP maps are kept.', n_excl, args.min_coverage_frac)
+
+    out = args.out or os.path.join(combined_dir(paths, create=True),
+                                   f'{sr.field or "field"}_coadd.fits')
+    img.write(out)
+    cov = img.coverage
+    logger.info('wrote %s  (%dx%d, max depth %d/%d exposures, max coverage %d fibres)',
+                out, img.data.shape[1], img.data.shape[0], int(img.nexp.max()),
+                img.meta['NEXPTOT'], int(cov.max()))
+    print(f'co-add: {out}')
+    if args.png:
+        png = os.path.splitext(out)[0] + '.png'
+        _write_png(img, png)
+        print(f'preview: {png}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

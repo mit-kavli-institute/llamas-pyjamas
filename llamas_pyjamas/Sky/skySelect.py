@@ -16,24 +16,58 @@ User-facing selection methods (config key ``sky_selection_method``)
                  region — a 2-D FITS *mask* or *flux image* (see ``load_sky_map``).
 ``frame``/``all`` every finite fibre.  Used when the data source is itself a
                  dedicated blank-sky exposure, so all fibres are sky.
+``manual``       an explicit, user-supplied set of sky fibres (a boolean mask or
+                 a list of live fibre indices) — the seam for future providers
+                 that define sky fibres externally (e.g. from an LSST broadband
+                 image or a hand-drawn region).  Handled by :func:`build_sky_mask`.
+
+The first-class :class:`SkyMask` (a boolean mask + provenance, with FITS
+serialisation) is the reusable, inspectable, persistable representation of a
+selection; :func:`build_sky_mask` is the single provider that produces one for
+every method, so the base 1-D model and the framework agree on what "sky" means.
 
 Public API
 ----------
+SkyMask                                              boolean mask + provenance (+ FITS I/O)
+build_sky_mask(brightness, finite, *, method, ...) -> SkyMask
 select_sky_fibres(brightness, finite, *, method, n_fibres, in_sky_region) -> bool[n]
 load_sky_map(path) -> SkyMap
 fibres_in_sky_region(benchsides, fibers, skymap, *, ra, dec, faint_percentile) -> bool[n]
 """
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Methods understood by select_sky_fibres / SkySubtractConfig.
-VALID_METHODS = ("dimmest", "middle-third", "skymap", "frame", "all")
+# Methods understood by select_sky_fibres / build_sky_mask / SkySubtractConfig.
+# 'manual' is handled by build_sky_mask (an explicit mask/id list), not by the
+# brightness-based select_sky_fibres.
+VALID_METHODS = ("stratified", "quantile", "dimmest", "middle-third",
+                 "skymap", "frame", "all", "manual")
+
+# Rank band for the 'quantile' method: fibres whose white-light brightness rank
+# (among finite fibres) falls in [QUANTILE_LO, QUANTILE_HI). Sits just above the
+# dead/vignetted low tail that 'dimmest' camps on, while staying far below any
+# object flux. ~5% of ~300 fibres => ~15 sky fibres per camera.
+QUANTILE_LO = 0.05
+QUANTILE_HI = 0.10
+
+# 'stratified' method: bin fibres by slit position (trace-y) and take the
+# faintest few per bin, so the sky model is built from fibres spanning the
+# whole slit. This removes a width bias: the plain faint selections pick the
+# low-throughput SLIT-EDGE fibres, so the pooled model carries edge-LSF and,
+# applied slit-wide, leaves ~2x larger residuals on OH lines (measured green,
+# 2026-07). Object guard: fibres brighter than STRAT_CAP_PCT (global) are
+# excluded first, so a compact object cannot enter any bin.
+STRAT_NBINS = 8        # trace-y bins across the slit
+STRAT_PER_BIN = 5      # faintest fibres kept per bin (=> ~30-40 sky fibres,
+                       # enough for robust cross-fibre outlier rejection)
+STRAT_CAP_PCT = 60.0   # exclude fibres above this global brightness percentile
 
 # A selection that leaves fewer than this many fibres is treated as degenerate
 # and falls back (mirrors the relaxation in skyMask.build_sky_fiber_mask).
@@ -49,7 +83,8 @@ MIN_SKY_FIT_FIBRES = 10
 # Core fibre selector
 # ----------------------------------------------------------------------------
 def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
-                      in_sky_region=None):
+                      in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI,
+                      fiber_y=None):
     """Return a boolean mask of the fibres to use for the sky estimate.
 
     Parameters
@@ -104,12 +139,79 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
         return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                        label="middle-third")
 
+    if method == "stratified":
+        # Faintest few per trace-y bin (spans the slit), object-capped. Needs
+        # per-fibre slit position; without it, fall back to quantile.
+        if fiber_y is None:
+            logger.warning("skySelect: method='stratified' but no fiber_y given; "
+                           "falling back to 'quantile'")
+            return select_sky_fibres(brightness, finite, method="quantile",
+                                     n_fibres=n_fibres, q_lo=q_lo, q_hi=q_hi)
+        mask = _stratified(finite, brightness, np.asarray(fiber_y, dtype=float))
+        return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
+                                       label="stratified")
+
+    if method == "quantile":
+        # Fibres whose brightness RANK among finite fibres lies in
+        # [QUANTILE_LO, QUANTILE_HI).  Unlike 'dimmest' this skips the
+        # dead/vignetted low tail while staying far below any object flux.
+        mask = _quantile_band(finite, brightness, q_lo, q_hi)
+        return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
+                                       label="quantile")
+
     # Default: dimmest-N among finite fibres.
     if method != "dimmest":
         logger.warning("skySelect: unknown method %r; using 'dimmest'", method)
     mask = _dimmest_n(finite, brightness, n_fibres)
     return _fallback_if_degenerate(mask, finite, brightness, n_fibres,
                                    label="dimmest")
+
+
+def _stratified(finite, brightness, fiber_y,
+                nbin=STRAT_NBINS, per=STRAT_PER_BIN, cap_pct=STRAT_CAP_PCT):
+    """Mask of the faintest ``per`` fibres in each of ``nbin`` trace-y bins,
+    after excluding fibres brighter than the global ``cap_pct`` percentile.
+
+    Spans the slit (removes the edge-LSF bias of the plain faint selections)
+    while the global cap keeps a compact object out of every bin.
+    """
+    n = brightness.size
+    mask = np.zeros(n, dtype=bool)
+    pool = finite & np.isfinite(fiber_y)
+    if pool.sum() == 0:
+        return mask
+    cap = np.nanpercentile(brightness[pool], cap_pct)
+    pool = pool & (brightness <= cap)
+    if pool.sum() == 0:
+        return mask
+    yv = fiber_y[pool]
+    edges = np.linspace(np.nanmin(yv), np.nanmax(yv), nbin + 1)
+    idx_pool = np.where(pool)[0]
+    for k in range(nbin):
+        lo, hi = edges[k], edges[k + 1]
+        inb = idx_pool[(fiber_y[idx_pool] >= lo) &
+                       (fiber_y[idx_pool] <= hi if k == nbin - 1
+                        else fiber_y[idx_pool] < hi)]
+        if inb.size == 0:
+            continue
+        faint = inb[np.argsort(brightness[inb])][:per]
+        mask[faint] = True
+    return mask
+
+
+def _quantile_band(finite, brightness, q_lo, q_hi):
+    """Boolean mask of finite fibres in the [q_lo, q_hi) brightness-rank band."""
+    n = brightness.size
+    idx_finite = np.where(finite)[0]
+    mask = np.zeros(n, dtype=bool)
+    nf = idx_finite.size
+    if nf == 0:
+        return mask
+    order = idx_finite[np.argsort(brightness[idx_finite])]  # ascending
+    i0 = int(np.floor(q_lo * nf))
+    i1 = max(i0 + 1, int(np.ceil(q_hi * nf)))
+    mask[order[i0:i1]] = True
+    return mask
 
 
 def _dimmest_n(finite, brightness, n_fibres):
@@ -137,6 +239,144 @@ def _fallback_if_degenerate(mask, finite, brightness, n_fibres, *, label):
     logger.warning("skySelect: '%s' degenerate (%d fibres); falling back to all "
                    "finite (%d)", label, int(mask.sum()), int(finite.sum()))
     return finite.copy()
+
+
+# ----------------------------------------------------------------------------
+# SkyMask: a first-class, persistable "which fibres are sky" object
+# ----------------------------------------------------------------------------
+@dataclass
+class SkyMask:
+    """The set of fibres treated as sky, plus how it was chosen.
+
+    A thin, reusable wrapper around the boolean mask returned by
+    :func:`select_sky_fibres`, carrying provenance so a selection can be
+    inspected, persisted (as an RSS extension), reused, and user-overridden.
+
+    Attributes
+    ----------
+    mask : np.ndarray[bool] (n_fiber,)
+        True for fibres contributing to the sky model.  **Live-indexed** (row
+        order), matching the RSS/extraction fibre arrays — not physical
+        fibremap position.
+    method : str
+        The selection method that produced it (one of :data:`VALID_METHODS`).
+    provenance : dict
+        Parameters that produced the mask (e.g. ``n_fibres``, ``source``,
+        quantile band, sky-map path).  Serialised to the FITS header as JSON.
+    """
+    mask: np.ndarray
+    method: str = "unknown"
+    provenance: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.mask = np.asarray(self.mask, dtype=bool)
+
+    @property
+    def n_sky(self) -> int:
+        """Number of sky fibres."""
+        return int(self.mask.sum())
+
+    @property
+    def n_fiber(self) -> int:
+        """Total number of fibres the mask spans."""
+        return int(self.mask.size)
+
+    def ids(self) -> np.ndarray:
+        """Live indices of the sky fibres."""
+        return np.where(self.mask)[0]
+
+    def to_hdu(self, name="SKYMASK"):
+        """Serialise to a FITS ``ImageHDU`` (uint8 mask + provenance header)."""
+        from astropy.io import fits
+        hdu = fits.ImageHDU(self.mask.astype(np.uint8), name=name)
+        h = hdu.header
+        h["SKYMETH"] = (self.method, "sky-fibre selection method")
+        h["SKYNSKY"] = (self.n_sky, "number of sky fibres")
+        h["SKYNFIB"] = (self.n_fiber, "total fibres in the mask")
+        h["SKYPROV"] = (json.dumps(self.provenance, default=str),
+                        "sky-mask selection provenance (JSON)")
+        return hdu
+
+    @classmethod
+    def from_hdu(cls, hdu):
+        """Reconstruct a :class:`SkyMask` from a FITS HDU written by :meth:`to_hdu`."""
+        mask = np.asarray(hdu.data, dtype=bool)
+        h = hdu.header
+        prov = {}
+        raw = h.get("SKYPROV")
+        if raw:
+            try:
+                prov = json.loads(raw)
+            except (ValueError, TypeError):
+                logger.warning("SkyMask.from_hdu: could not parse SKYPROV; dropping provenance")
+        return cls(mask=mask, method=h.get("SKYMETH", "unknown"), provenance=prov)
+
+
+def _as_bool_mask(explicit, n_fiber=None):
+    """Coerce an explicit selection into a boolean mask.
+
+    A **boolean** array is taken as the mask directly.  An **integer** array is
+    taken as live fibre indices, requiring ``n_fiber`` to size the mask.
+    """
+    arr = np.asarray(explicit)
+    if arr.dtype == bool:
+        return arr.copy()
+    ids = arr.astype(int)
+    if n_fiber is None:
+        raise ValueError("build_sky_mask(method='manual'): integer ids need n_fiber "
+                         "(or pass a boolean mask instead)")
+    mask = np.zeros(int(n_fiber), dtype=bool)
+    if ids.size:
+        if ids.min() < 0 or ids.max() >= n_fiber:
+            raise ValueError("build_sky_mask(method='manual'): fibre id out of range "
+                             f"[0, {n_fiber})")
+        mask[ids] = True
+    return mask
+
+
+def build_sky_mask(brightness=None, finite=None, *, method="dimmest", n_fibres=20,
+                   in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI, fiber_y=None,
+                   explicit=None, n_fiber=None, source="in-exposure") -> SkyMask:
+    """Canonical sky-fibre mask provider — the single seam both sky stages use.
+
+    For every brightness-based method this simply wraps :func:`select_sky_fibres`
+    (so the resulting mask is *identical*) and attaches provenance.  For
+    ``method='manual'`` it uses ``explicit`` (a boolean mask, or live fibre
+    indices with ``n_fiber``) directly — the hook for externally-defined sky
+    fibres (e.g. from an LSST image or a hand-drawn region).
+
+    Returns
+    -------
+    SkyMask
+    """
+    method_l = (method or "dimmest").lower()
+
+    if method_l == "manual":
+        if explicit is None:
+            raise ValueError("build_sky_mask(method='manual') requires 'explicit'")
+        nf = n_fiber
+        if nf is None and finite is not None:
+            nf = np.asarray(finite).size
+        elif nf is None and brightness is not None:
+            nf = np.asarray(brightness).size
+        mask = _as_bool_mask(explicit, n_fiber=nf)
+        prov = {"source": source, "n_requested": int(mask.sum())}
+        return SkyMask(mask=mask, method="manual", provenance=prov)
+
+    if brightness is None or finite is None:
+        raise ValueError(f"build_sky_mask(method={method_l!r}) requires brightness and finite")
+
+    mask = select_sky_fibres(brightness, finite, method=method, n_fibres=n_fibres,
+                             in_sky_region=in_sky_region, q_lo=q_lo, q_hi=q_hi,
+                             fiber_y=fiber_y)
+    prov = {"source": source, "n_fibres": int(n_fibres)}
+    if method_l == "quantile":
+        prov.update(q_lo=float(q_lo), q_hi=float(q_hi))
+    if method_l == "skymap":
+        prov["skymap"] = True
+    if method_l == "stratified":
+        prov["fiber_y"] = fiber_y is not None
+    return SkyMask(mask=mask, method=method_l, provenance=prov)
 
 
 # ----------------------------------------------------------------------------

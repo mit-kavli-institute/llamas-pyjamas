@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 import llamas_pyjamas
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+
+logger = logging.getLogger(__name__)
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(llamas_pyjamas.__file__), 'example_config.txt')
 
@@ -52,6 +55,7 @@ ROLES = {
     'red_arc': ('Red Arc', False, QtGui.QColor(248, 173, 173), BLACK),
     'green_arc': ('Green Arc', False, QtGui.QColor(168, 226, 168), BLACK),
     'blue_arc': ('Blue Arc', False, QtGui.QColor(173, 196, 250), BLACK),
+    'flux_standard': ('Flux Standard', True, QtGui.QColor(255, 224, 130), BLACK),
     'science': ('Science', True, QtGui.QColor(230, 205, 250), BLACK),
     'bias': ('Bias', True, QtGui.QColor(212, 212, 212), BLACK),
     'bad': ('BAD', True, QtGui.QColor(90, 90, 90), QtGui.QColor('white')),
@@ -75,6 +79,134 @@ KEY_TO_ROLE = {
 ARC_HEADER = '# WAVELENGTH CALIBRATION EXPOSURES (selected in the setup GUI)'
 BAD_HEADER = '# Exposures flagged as BAD data in the setup GUI (for the record; unused):'
 
+# ---------------------------------------------------------------------------
+# Processing-keyword catalog for the Configuration Options dialog.
+# Each entry: (key, kind, default, choices, help). kind in
+# {'bool','int','float','enum','str'}; default is a config-format string (bools
+# 'true'/'false'); choices only for 'enum'. File/path ROLE keys (flats, arcs,
+# science, bias, output dirs) are deliberately NOT here -- they are owned by the
+# main window's role buttons. Help text mirrors example_config.txt.
+# ---------------------------------------------------------------------------
+CONFIG_CATALOG = [
+    ('Run / Resume', [
+        ('clobber', 'bool', 'false', None, 'Force every stage from scratch (ignore existing intermediate products).'),
+        ('use_existing_traces', 'bool', 'true', None, 'Reuse existing traces on re-run instead of regenerating.'),
+        ('keep_intermediate_rss', 'bool', 'false', None, 'Keep every stage’s RSS, not just the consolidated ones.'),
+        ('save_extraction_pkl', 'bool', 'false', None, 'Keep the large per-exposure extraction pickles.'),
+        ('full_extraction_pickle', 'bool', 'false', None, 'Write full-size extraction pickle (very large).'),
+        ('terminal_verbose', 'bool', 'false', None, 'Full terminal log firehose.'),
+        ('log_retention', 'int', '10', None, 'Keep the newest N run logs.'),
+    ]),
+    ('Bias / Cosmic rays', [
+        ('remove_cosmic_rays', 'bool', 'true', None, 'Run L.A.Cosmic before extraction.'),
+        ('read_noise', 'float', '3.5', None, 'CCD read noise (e-) fallback if not in the lab table.'),
+    ]),
+    ('Extraction', [
+        ('extraction_method', 'enum', 'boxcar', ['boxcar', 'horne', 'optimal'], 'Extraction algorithm.'),
+        ('boxcar_halfwidth', 'float', '2.5', None, 'Boxcar aperture half-width (px); full aperture = 2x.'),
+        ('twilight_throughput', 'bool', 'true', None, 'Per-fibre throughput from the twilight flat vs the arc.'),
+    ]),
+    ('Edge bias', [
+        ('edge_bias_dc_correction', 'bool', 'true', None, 'Per-frame edge-DC offset correction on top of the master bias.'),
+        ('edge_bias_min_distance', 'int', '20', None, 'Distance (px) from the nearest fibre for an unilluminated stripe pixel.'),
+        ('edge_bias_min_pixels', 'int', '500', None, 'Minimum stripe pixels required, else the correction is skipped.'),
+        ('edge_bias_use_flat_mask', 'bool', 'false', None, 'Tier-2 flat-derived unillum mask (experimental).'),
+        ('edge_bias_flat_frac', 'float', '0.1', None, 'Flat-throughput fraction below which a pixel counts as unilluminated.'),
+    ]),
+    ('Flat', [
+        ('flat_field_method', 'enum', 'simple', ['simple', 'bspline'], 'Pixel-flat construction method.'),
+        ('apply_flat_field_correction', 'bool', 'true', None, 'Master switch for flat-field correction.'),
+        ('apply_pixel_flat', 'bool', 'true', None, 'Divide the 2D pixel flat into the raw frame before extraction.'),
+        ('apply_fibre_flat', 'bool', 'true', None, 'Apply the fibre-to-fibre flat on the RSS.'),
+        ('flat_clip_min', 'float', '0.90', None, 'Lower clip for the flat sensitivity map.'),
+        ('flat_clip_max', 'float', '1.10', None, 'Upper clip for the flat sensitivity map.'),
+        ('flat_filter_size', 'int', '12', None, 'Median-filter size for the lamp-envelope smoothing.'),
+        ('flat_signal_threshold_red', 'int', '5000', None, 'Red: min smooth-model ADU to apply a correction.'),
+        ('flat_signal_threshold_green', 'int', '8000', None, 'Green: min smooth-model ADU to apply a correction.'),
+        ('flat_signal_threshold_blue', 'int', '5000', None, 'Blue: min smooth-model ADU to apply a correction.'),
+        ('pixel_flat_saturation_threshold', 'int', '0', None, 'Saturation cut for flat pixels (0 = no cut).'),
+        ('require_all_flat_matches', 'bool', 'false', None, 'Require every extension to match a flat, else abort.'),
+        ('validate_flat_matching', 'bool', 'true', None, 'Validate flat/science extension matching.'),
+        ('verbose_flat_processing', 'bool', 'false', None, 'Verbose flat-processing logs.'),
+    ]),
+    ('Wavelength / Arc', [
+        ('generate_new_wavelength_soln', 'bool', 'false', None, 'Build a new wavelength solution (requires an arc_file).'),
+        ('refine_arc', 'bool', 'true', None, 'Refine the per-fibre wavelength (xshift). [standard: on]'),
+        ('refine_arc_channels', 'str', '', None, 'Channels to refine, e.g. red,green,blue (blank = all).'),
+        ('refine_arc_method', 'enum', 'perfiber', ['perfiber', '2d'], 'Arc-refinement method.'),
+        ('refine_arc_use_night_arcs', 'bool', 'true', None, 'Use night arcs for the 2D refinement.'),
+        ('arc_surface_order_x', 'int', '3', None, 'Legendre order along dispersion (2D refine).'),
+        ('arc_surface_order_fiber', 'int', '2', None, 'Legendre order across fibres (2D refine).'),
+        ('arc_perturb_order', 'int', '0', None, '0 = offset only, 1 = offset + tilt.'),
+        ('arc_perturb_min_lines', 'int', '8', None, 'Below this many lines, fall back to surface only.'),
+        ('arc_perturb_shrink_lines', 'int', '5', None, 'Shrinkage prior line count.'),
+        ('arc_use_unidentified_peaks', 'bool', 'true', None, 'Use the full peak catalog for the surface fit.'),
+        ('arc_catalog_min_sep', 'int', '8', None, 'Blend-rejection separation (px).'),
+        ('wave_frame', 'enum', 'heliocentric', ['heliocentric', 'barycentric', 'none'], 'Rest-frame velocity correction.'),
+        ('wavelength_qa', 'bool', 'true', None, 'Write the wavelength-QA report.'),
+        ('dispersion', 'float', '1.0', None, 'Dispersion scale factor.'),
+        ('arc_calib_file', 'str', '', None, 'Path to an arc calibration file (blank = package default).'),
+    ]),
+    ('Sky', [
+        ('sky_subtract', 'bool', 'true', None, 'Base 1D (b-spline) sky model + subtraction.'),
+        ('sky_selection_method', 'enum', 'stratified',
+         ['stratified', 'quantile', 'dimmest', 'middle-third', 'skymap', 'frame'], 'Sky-fibre selection method.'),
+        ('sky_n_fibres', 'int', '20', None, 'Number of faint fibres for the ‘dimmest’ selection.'),
+        ('sky_map_file', 'str', '', None, 'Mask file for the ‘skymap’ selection (blank = none).'),
+        ('sky_line_refine', 'bool', 'true', None, 'Per-line OH sky-line refinement (pkl domain). [standard: on]'),
+        ('sky_line_template', 'str', '', None, 'Optional per-(camera,slit) LSF-residual template path with {channel} (blank = skip).'),
+        ('sky_empirical_2d', 'bool', 'false', None, 'Empirical multi-dither 2D sky base (built from the field’s dithers pre-extraction; captures optics aberrations + inter-fibre scatter). The b-spline/OH/framework stages then run as the second pass on the residual. Needs >=2 dithers of the field.'),
+        ('sky_empirical_channels', 'flags', 'red,green,blue', ['blue', 'green', 'red'], 'Channels to build the empirical 2D sky for (checkbox group; unchecked channels fall back to the b-spline base sky).'),
+        ('sky_empirical_min_frames', 'int', '5', None, 'Fields thinner than this borrow nearest-in-time frames as extra blank donors.'),
+        ('sky_empirical_min_blank', 'int', '3', None, 'Min blank dithers per fibre to build its empirical sky.'),
+        ('sky_empirical_blank_frac', 'float', '0.6', None, 'Fraction of dithers (faintest, per fibre) treated as blank sky.'),
+        ('sky_pedestal', 'bool', 'true', None, 'Per-camera additive continuum-floor (scattered-light) subtraction; run-level, pre-fibre-flat. [standard: on]'),
+        ('sky_pedestal_scope', 'enum', 'template', ['template', 'slit', 'camera'], "Pedestal floor shape source. 'template' (recommended): static per-run/shipped counts/sec template x per-frame amplitude."),
+        ('sky_pedestal_template', 'str', '', None, 'Floor-template path with {channel} (blank = auto per-run counts/sec build, else shipped fallback).'),
+        ('sky_pedestal_min_exptime', 'int', '300', None, 'Skip the pedestal on exposures shorter than this (s) — negligible floor.'),
+        ('sky_framework', 'bool', 'true', None, 'Advanced post-FF RSS sky framework (master switch). [standard: on]'),
+        ('sky_method', 'enum', 'scaled', ['pca', 'scaled'], 'Framework method (PCA vs scaled-template). [standard: scaled]'),
+        ('sky_mask_method', 'enum', 'whitelight', ['whitelight', 'none'], 'Framework source masking.'),
+        ('sky_pca_ncomp', 'int', '20', None, 'PCA components removed by the framework.'),
+        ('sky_fiber_percentile', 'float', '60.0', None, 'Faint-fibre percentile treated as sky (framework).'),
+        ('sky_bright_reject_percentile', 'float', '10.0', None, 'Bright-fibre reject percentile (framework).'),
+        ('sky_skip_oh_scale', 'bool', 'false', None, 'Skip the per-fibre OH line rescaling.'),
+        ('sky_qa_plots', 'bool', 'false', None, 'Write sky-subtraction QA plots.'),
+    ]),
+    ('Cube', [
+        ('generate_cubes', 'bool', 'false', None, 'Master switch for cube construction.'),
+        ('generate_standard_cubes', 'bool', 'true', None, 'Build cubes from the FF RSS.'),
+        ('generate_skysub_cubes', 'bool', 'true', None, 'Build cubes from the sky-subtracted RSS.'),
+        ('cube_method', 'enum', 'simple', ['simple', 'crr', 'traditional'], 'Cube-construction algorithm.'),
+        ('cube_pixel_size', 'float', '0.3', None, 'Cube spatial pixel size (arcsec).'),
+        ('cube_fiber_pitch', 'float', '0.75', None, 'Fibre pitch (arcsec).'),
+        ('cube_wave_sampling', 'float', '1.0', None, 'Wavelength sampling factor.'),
+        ('cube_radius', 'float', '1.5', None, 'Interpolation radius (arcsec).'),
+        ('cube_min_weight', 'float', '0.01', None, 'Minimum interpolation weight.'),
+        ('whitelight_hex', 'bool', 'true', None, 'Hex-tile (no-interpolation) white-light render.'),
+        ('CRR_cube', 'bool', 'false', None, 'Force the CRR cube method.'),
+        ('CRR_parallel', 'bool', 'false', None, 'Run CRR in parallel.'),
+    ]),
+    ('Ray / Disk', [
+        ('ray_num_cpus', 'int', '0', None, 'Ray worker count (0 = all cores).'),
+        ('ray_object_store_mb', 'int', '8192', None, 'Ray object-store size (MB).'),
+        ('ray_task_memory_mb', 'int', '0', None, 'Per-task memory reservation (MB; 0 = none).'),
+        ('ray_temp_dir', 'str', '', None, 'Ray temp base dir (SHORT path; blank = /tmp/llamas_ray).'),
+        ('cleanup_scratch', 'bool', 'true', None, 'Remove the run’s Ray scratch dir on exit.'),
+        ('prune_ray_sessions', 'bool', 'false', None, 'Sweep stale /tmp/ray sessions at startup.'),
+        ('min_free_gb', 'int', '5', None, 'Hard floor of free disk (GB) required to start.'),
+        ('disk_estimate_factor', 'int', '5', None, 'Output-size estimate multiplier (warning tier).'),
+        ('skip_disk_check', 'bool', 'false', None, 'Bypass the pre-flight disk-space gate.'),
+        ('input_timeout_s', 'int', '15', None, 'Per-run input-reachability probe budget (s).'),
+    ]),
+    ('WCS', [
+        ('wcs_pa_offset', 'float', '1.2', None, 'PA offset added to TEL_ROT (deg) — temporary workaround.'),
+        ('wcs_mirrored', 'bool', 'true', None, 'Field is mirrored (x-axis flip) — temporary workaround.'),
+    ]),
+]
+# keys the dialog manages -> for '0 means unset' handling on write
+_ZERO_IS_UNSET = {'ray_num_cpus', 'pixel_flat_saturation_threshold'}
+
 
 def parse_config(path):
     """Parse a config file into (key -> value string, list of bad-flagged paths).
@@ -90,6 +222,9 @@ def parse_config(path):
                 bad.append(line[len('#bad:'):].strip())
             elif line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
+                # strip trailing inline comment (whitespace-preceded '#'), matching reduce.py's
+                # loader, so seeded Options values are clean numbers/paths not "0.3  # ...".
+                value = re.sub(r'\s+#.*$', '', value.strip())
                 config[key.strip()] = value.strip()
     return config, bad
 
@@ -110,7 +245,8 @@ def scan_directory(data_dir, progress_callback=None):
         if progress_callback and not progress_callback(i, len(files), os.path.basename(path)):
             break
         entry = {'path': path, 'filename': os.path.basename(path), 'object': '',
-                 'exptime': None, 'type': '', 'comment': '', 'readmode': ''}
+                 'exptime': None, 'type': '', 'comment': '', 'readmode': '',
+                 'standard': None}
         try:
             hdr = fits.getheader(path, 0)
             entry['object'] = str(hdr.get('OBJECT', '') or '')
@@ -121,6 +257,11 @@ def scan_directory(data_dir, progress_callback=None):
             comment = hdr.get('OBS-CMNT')
             entry['comment'] = '' if comment is None else str(comment)
             entry['readmode'] = str(hdr.get('READ-MDE', '') or '')
+            # A science pointing sitting on a catalogue standard is very probably an
+            # exposure of that standard -- headers cannot tell them apart, so this is
+            # the only signal. Only SCIENCE frames are checked; calibrations never are.
+            if str(hdr.get('OBS TYPE', '')).upper().startswith('SCI'):
+                entry['standard'] = _match_standard(hdr)
         except Exception as err:
             entry['type'] = 'ERR'
             entry['comment'] = f'header read failed: {err}'
@@ -128,8 +269,23 @@ def scan_directory(data_dir, progress_callback=None):
     return entries
 
 
+def _match_standard(header):
+    """Crossmatch a header's pointing against the standards catalogue.
+
+    Returns a ``(name, separation_arcsec)`` tuple, or None on no match or if the bundled
+    catalogue is unavailable -- a missing catalogue must not break directory scanning.
+    """
+    try:
+        from llamas_pyjamas.Flux.fluxStandards import load_catalog
+        match = load_catalog().match_header(header)
+    except Exception as err:                            # noqa: BLE001
+        logger.debug('standard crossmatch skipped: %s', err)
+        return None
+    return (match.name, match.separation_arcsec) if match else None
+
+
 def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
-                    template_path=TEMPLATE_PATH):
+                    template_path=TEMPLATE_PATH, overrides=None):
     """Build config-file text from a template.
 
     assignments maps role key -> path (single roles) or list of paths
@@ -138,12 +294,19 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
     falls back to its defaults. template_path may be a previously generated
     config, in which case hand-edited parameters are preserved; existing
     slow/fast_bias_file lines are kept when no replacement is supplied.
+
+    overrides maps processing-keyword name -> config-format string value (or None
+    to comment the line out). These come from the Configuration Options dialog and
+    are substituted in place (uncommenting the template line); any override key not
+    present in the template is appended. File/path role keys are NOT overridable
+    here -- those are owned by the role assignments above.
     """
     key_values = {
         # singular twilight_flat is superseded by the per-colour keys;
         # comment it out and let each colour fall back per the template rules
         'twilight_flat': None,
         'science_files': ', '.join(assignments.get('science', [])) or None,
+        'flux_standard_files': ', '.join(assignments.get('flux_standard', [])) or None,
         'trace_output_dir': os.path.join(output_dir, 'traces'),
         'extraction_output_dir': os.path.join(output_dir, 'extractions'),
         'cube_output_dir': os.path.join(output_dir, 'cubes'),
@@ -152,6 +315,10 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
     }
     for key, role in KEY_TO_ROLE.items():
         key_values[key] = assignments.get(role)
+    # processing-keyword overrides from the Options dialog (never clobber file roles)
+    for key, value in (overrides or {}).items():
+        if key not in key_values and key not in KEY_TO_ROLE:
+            key_values[key] = value
     preserve_if_unset = {'slow_bias_file', 'fast_bias_file'}
 
     with open(template_path, 'r') as f:
@@ -178,6 +345,19 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         else:
             out.append(line)
 
+    # processing overrides absent from the template: append (headed) so nothing is lost
+    if overrides:
+        appended_hdr = False
+        for key, value in overrides.items():
+            if key in substituted or value is None or key in KEY_TO_ROLE:
+                continue
+            if not appended_hdr:
+                out.append('\n#==============================================================================\n'
+                           '# PROCESSING OPTIONS (set in the setup-GUI Configuration Options dialog)\n'
+                           '#==============================================================================\n')
+                appended_hdr = True
+            out.append(f'{key} = {value}\n')
+
     # arcs assigned but absent from the template go in an appended section
     new_arcs = {f'{c}_arc_file': assignments.get(f'{c}_arc') for c in ('red', 'green', 'blue')}
     new_arcs = {k: v for k, v in new_arcs.items() if v and k not in substituted}
@@ -190,6 +370,16 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
                        '# wavelength solution set arc_file with generate_new_wavelength_soln = True.\n')
         for key, path in new_arcs.items():
             out.append(f'{key} = {path}\n')
+
+    # flux_standard_files assigned but absent from the template goes in an appended line.
+    # An existing config written before this feature has no such key for the substitution
+    # loop above to fill, so without this the standards would be silently dropped on rewrite.
+    if assignments.get('flux_standard') and 'flux_standard_files' not in substituted:
+        out.append('\n# Spectrophotometric standard-star exposures (identified in the setup '
+                   'GUI by\n# crossmatching the pointing against the bundled catalogue). '
+                   'Extracted like\n# science; used in postprocessing to build a sensitivity '
+                   'function.\n')
+        out.append('flux_standard_files = ' + ', '.join(assignments['flux_standard']) + '\n')
 
     if assignments.get('bad'):
         out.append(f'\n{BAD_HEADER}\n')
@@ -240,6 +430,175 @@ class BiasWorker(QtCore.QThread):
             self.failed.emit(traceback.format_exc())
 
 
+def _truthy(s):
+    return str(s).strip().lower() in ('true', '1', 'yes', 'on')
+
+
+class ConfigOptionsDialog(QtWidgets.QDialog):
+    """Tabbed editor for the processing keywords of the reduction config.
+
+    Seeded from the current config's active keys (``current``) falling back to the
+    catalog defaults. :meth:`values` returns ``{key: config-string or None}`` for
+    every catalog key, ready to feed ``generate_config(overrides=...)`` — None
+    (blank optional path / 0-means-unset) comments the line out.
+    """
+
+    def __init__(self, current=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Configuration Options')
+        self.resize(720, 640)
+        current = current or {}
+        self._widgets = {}          # key -> (kind, widget, choices)
+        self._helptext = {}         # key -> rich help HTML for the help panel
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        # Master/detail: category list on the left, matching panel on the right.
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        vbox.addWidget(splitter, stretch=1)
+        self._nav = QtWidgets.QListWidget()
+        self._nav.setMaximumWidth(210)
+        splitter.addWidget(self._nav)
+        self._stack = QtWidgets.QStackedWidget()
+        splitter.addWidget(self._stack)
+        splitter.setStretchFactor(1, 1)
+
+        for tab_title, specs in CONFIG_CATALOG:
+            page = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(page)
+            form.setFieldGrowthPolicy(
+                QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            for key, kind, default, choices, help_text in specs:
+                seed = current.get(key, default)
+                w = self._make_widget(kind, seed, default, choices)
+                self._helptext[key] = self._format_help(key, kind, default, choices, help_text)
+                w.setToolTip(f'{key}\n{help_text}')            # native tooltip (flaky on macOS)
+                w.setProperty('helpKey', key)                  # for the help panel below
+                w.installEventFilter(self)
+                if kind == 'flags':                            # help fires on the child checkboxes too
+                    for cb in w.findChildren(QtWidgets.QCheckBox):
+                        cb.setProperty('helpKey', key)
+                        cb.installEventFilter(self)
+                form.addRow(key, w)
+                self._widgets[key] = (kind, w, choices)
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(page)
+            self._stack.addWidget(scroll)
+            self._nav.addItem(tab_title)
+
+        self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
+        self._nav.setCurrentRow(0)
+
+        # Persistent help panel — reliable where macOS tooltips are not. Updates on
+        # field focus/hover via eventFilter.
+        self._help = QtWidgets.QLabel('Hover or click a setting to see what it controls.')
+        self._help.setWordWrap(True)
+        self._help.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._help.setMinimumHeight(74)
+        self._help.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+        self._help.setStyleSheet(
+            'QLabel { background: palette(midlight); padding: 8px; '
+            'border: 1px solid palette(mid); border-radius: 4px; }')
+        vbox.addWidget(self._help)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        vbox.addWidget(buttons)
+
+        # baseline snapshot for the changed-only diff (after all widgets are seeded)
+        self._initial = self.values()
+
+    @staticmethod
+    def _format_help(key, kind, default, choices, help_text):
+        meta = kind if kind != 'enum' else 'enum: ' + ' | '.join(choices or [])
+        deftxt = 'unset' if default in ('', None) else default
+        return (f"<b>{key}</b> &nbsp;<span style='color:gray'>({meta}, default {deftxt})</span>"
+                f"<br>{help_text}")
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Type.FocusIn, QtCore.QEvent.Type.Enter):
+            key = obj.property('helpKey')
+            if key and key in self._helptext:
+                self._help.setText(self._helptext[key])
+        return super().eventFilter(obj, event)
+
+    def changed_values(self):
+        """Return only the keys whose value differs from the seeded baseline
+        (normalized through the same widgets, so formatting never counts as a change)."""
+        final = self.values()
+        return {k: v for k, v in final.items() if v != self._initial.get(k)}
+
+    @staticmethod
+    def _make_widget(kind, seed, default, choices):
+        if kind == 'bool':
+            w = QtWidgets.QCheckBox()
+            w.setChecked(_truthy(seed))
+            return w
+        if kind == 'enum':
+            w = QtWidgets.QComboBox()
+            w.addItems(choices or [])
+            w.setCurrentText(str(seed) if str(seed) in (choices or []) else str(default))
+            return w
+        if kind == 'flags':
+            # A checkbox group over ``choices``; value is the comma-joined set of ticked labels.
+            w = QtWidgets.QWidget()
+            lay = QtWidgets.QHBoxLayout(w)
+            lay.setContentsMargins(0, 0, 0, 0)
+            on = {s.strip().lower() for s in str(seed or '').split(',') if s.strip()}
+            for ch in (choices or []):
+                cb = QtWidgets.QCheckBox(ch)
+                cb.setChecked(ch.lower() in on)
+                lay.addWidget(cb)
+            lay.addStretch(1)
+            return w
+        if kind == 'int':
+            w = QtWidgets.QSpinBox()
+            w.setRange(0, 100_000_000)
+            try:
+                w.setValue(int(float(seed)))
+            except (TypeError, ValueError):
+                w.setValue(int(float(default)))
+            return w
+        if kind == 'float':
+            w = QtWidgets.QDoubleSpinBox()
+            w.setRange(-1_000_000.0, 1_000_000.0)
+            w.setDecimals(3)
+            w.setSingleStep(0.1)
+            try:
+                w.setValue(float(seed))
+            except (TypeError, ValueError):
+                w.setValue(float(default))
+            return w
+        # str / path
+        w = QtWidgets.QLineEdit()
+        w.setText('' if seed is None else str(seed))
+        return w
+
+    def values(self):
+        """Return {key: config-string or None} for every catalog key."""
+        out = {}
+        for key, (kind, w, _choices) in self._widgets.items():
+            if kind == 'bool':
+                out[key] = 'true' if w.isChecked() else 'false'
+            elif kind == 'enum':
+                out[key] = w.currentText()
+            elif kind == 'int':
+                v = int(w.value())
+                out[key] = None if (key in _ZERO_IS_UNSET and v == 0) else str(v)
+            elif kind == 'float':
+                out[key] = ('%g' % float(w.value()))
+            elif kind == 'flags':
+                on = [cb.text() for cb in w.findChildren(QtWidgets.QCheckBox) if cb.isChecked()]
+                out[key] = ','.join(on) if on else None
+            else:  # str / path
+                t = w.text().strip()
+                out[key] = t or None
+        return out
+
+
 class ReduxSetupWindow(QtWidgets.QMainWindow):
 
     COL_FILE, COL_OBJ, COL_EXP, COL_TYPE, COL_READ, COL_CMNT, COL_ROLE = range(7)
@@ -254,7 +613,9 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         self._loaded_config_path = None
         self._bias_worker = None
         self._ds9 = None
+        self._config_overrides = {}   # processing keywords set via the Options dialog
         self._build_ui()
+        self._build_menu()
         if config_out:
             self.configEdit.setText(os.path.abspath(config_out))
         if data_dir:
@@ -334,7 +695,8 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
         miscGrid = QtWidgets.QGridLayout()
         miscGrid.addWidget(role_button('science', 'Science'), 0, 0)
-        miscGrid.addWidget(role_button('bias', 'Bias'), 1, 0)
+        miscGrid.addWidget(role_button('flux_standard', 'Flux Standard'), 1, 0)
+        miscGrid.addWidget(role_button('bias', 'Bias'), 2, 0)
         miscGrid.addWidget(role_button('bad', 'Flag Bad'), 0, 1)
         clearBtn = QtWidgets.QPushButton('Clear Role')
         clearBtn.clicked.connect(self.clear_role)
@@ -377,6 +739,59 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         self.summaryLabel = QtWidgets.QLabel()
         vbox.addWidget(self.summaryLabel)
         self.update_summary()
+
+    def _build_menu(self):
+        """Menu bar. File ▸ Configuration Options… opens the processing-keyword editor."""
+        menubar = self.menuBar()
+        # Render the menu INSIDE the window rather than in the macOS global menu bar,
+        # which is easy to miss (and flaky for `python -m` launches).
+        menubar.setNativeMenuBar(False)
+        file_menu = menubar.addMenu('&File')
+
+        load_act = QtGui.QAction('&Load Config…', self)
+        load_act.triggered.connect(self.load_config_clicked)
+        file_menu.addAction(load_act)
+
+        opts_act = QtGui.QAction('Configuration &Options…', self)
+        opts_act.setShortcut('Ctrl+,')
+        opts_act.setToolTip('Set the reduction processing keywords written into the config file')
+        opts_act.triggered.connect(self.open_config_options)
+        file_menu.addAction(opts_act)
+
+        write_act = QtGui.QAction('&Write Config', self)
+        write_act.triggered.connect(self.write_config)
+        file_menu.addAction(write_act)
+
+        file_menu.addSeparator()
+        quit_act = QtGui.QAction('&Quit', self)
+        quit_act.setShortcut('Ctrl+Q')
+        quit_act.triggered.connect(self.close)
+        file_menu.addAction(quit_act)
+
+    def open_config_options(self):
+        """Open the tabbed processing-keyword editor, seeded from the current config
+        (active keys) merged with any options already set this session."""
+        current = {}
+        cfg_path = self.configEdit.text().strip()
+        seed_path = cfg_path if cfg_path and os.path.isfile(cfg_path) else TEMPLATE_PATH
+        try:
+            parsed, _bad = parse_config(seed_path)
+            current.update(parsed)
+        except Exception:
+            logger.warning('Could not parse %s for Options seeding', seed_path, exc_info=True)
+        # options set earlier this session win over the on-disk values
+        current.update({k: v for k, v in self._config_overrides.items() if v is not None})
+
+        dlg = ConfigOptionsDialog(current=current, parent=self)
+        if dlg.exec():
+            # changed-only: accumulate just the keys the user actually changed from
+            # the seed, so the written config stays sparse (untouched keys fall back
+            # to the template/pipeline defaults).
+            self._config_overrides.update(dlg.changed_values())
+            n_set = len(self._config_overrides)
+            self.statusBar().showMessage(
+                f'Configuration options captured ({n_set} changed keyword'
+                f'{"" if n_set == 1 else "s"}) — written on Write Config.', 6000)
 
     # ------------------------------------------------------- directory scan
     def browse_directory(self):
@@ -423,6 +838,9 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         config_path = self.configEdit.text().strip()
         if os.path.isfile(config_path):
             self.load_config(config_path)
+        # Recommend standards last, filling only frames the config left unassigned, so a prior
+        # session's explicit choices always win over the automatic suggestion.
+        self.apply_standard_recommendations()
 
     def load_notes(self, data_dir):
         notes_path = os.path.join(data_dir, NOTES_FILENAME)
@@ -452,7 +870,44 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             self.table.setItem(row, self.COL_READ, QtWidgets.QTableWidgetItem(e['readmode']))
             self.table.setItem(row, self.COL_CMNT, QtWidgets.QTableWidgetItem(e['comment']))
             self.table.setItem(row, self.COL_ROLE, QtWidgets.QTableWidgetItem(''))
+            if e.get('standard'):
+                name, sep = e['standard']
+                # Annotate the Type column so the crossmatch is visible where a user looks for
+                # the frame's classification. This is independent of the role assignment, so it
+                # shows even when a loaded config has (mis)labelled the standard as science. The
+                # header's own PRODCATG type is kept in the tooltip.
+                typeItem = self.table.item(row, self.COL_TYPE)
+                typeItem.setText(f'Flux Std: {name}')
+                tip = (f'Matches flux standard {name}, {sep:.1f}" from catalogue position.\n'
+                       f'Header type: {e["type"] or "unknown"}.')
+                typeItem.setToolTip(tip)
+                self.table.item(row, self.COL_OBJ).setToolTip(tip)
         self.table.setSortingEnabled(True)
+        # Default to filename order, which for LLAMAS names (ISO date + time) is the order
+        # the frames were observed. The user can still re-sort by clicking any header.
+        self.table.sortItems(self.COL_FILE, QtCore.Qt.SortOrder.AscendingOrder)
+
+    def apply_standard_recommendations(self):
+        """Pre-assign the flux-standard role to crossmatched frames.
+
+        A recommendation, not a decision: it seeds the role so the standards are visible and
+        extracted, but the user overrides it with the role buttons or Clear Role like any other
+        assignment. Only frames with no role yet are touched, so re-scanning never clobbers a
+        choice the user already made.
+        """
+        recommended = 0
+        for e in self.entries:
+            if e.get('standard') and not self.roles.get(e['path']):
+                self.roles.setdefault(e['path'], set()).add('flux_standard')
+                recommended += 1
+        if recommended:
+            self.refresh_role_column()
+            self.update_summary()
+            names = ', '.join(sorted({e['standard'][0] for e in self.entries
+                                      if e.get('standard')}))
+            self.statusBar().showMessage(
+                f'Recommended {recommended} exposure(s) as flux standards ({names}) '
+                f'— override in the Role column if wrong')
 
     # ----------------------------------------------------------- ds9 link
     def table_context_menu(self, pos):
@@ -558,7 +1013,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
     def current_assignments(self):
         """Return dict role -> path (single roles) or list of paths (multi)."""
-        assignments = {'science': [], 'bias': [], 'bad': []}
+        assignments = {'flux_standard': [], 'science': [], 'bias': [], 'bad': []}
         for path in sorted(self.roles):
             for role in self.roles[path]:
                 if ROLES[role][1]:
@@ -620,6 +1075,13 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
                 self.roles.setdefault(rp, set()).add('science')
             else:
                 unmatched.append(f'Science: {p.strip()}')
+        standards = config.get('flux_standard_files', '')
+        for p in (x for x in standards.split(',') if x.strip()):
+            rp = resolve(p)
+            if rp:
+                self.roles.setdefault(rp, set()).add('flux_standard')
+            else:
+                unmatched.append(f'Flux Standard: {p.strip()}')
         for p in bad_paths:
             rp = resolve(p)
             if rp:
@@ -659,6 +1121,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         self.summaryLabel.setText(
             f"Assigned — Flats: {rgb('flat')}   Twilights: {rgb('twilight')}   "
             f"Arcs: {rgb('arc')}   Science: {len(a['science'])}   "
+            f"Flux std: {len(a['flux_standard'])}   "
             f"Bias: {len(a['bias'])} ({n_slow} slow / {n_fast} fast)   Bad: {len(a['bad'])}")
 
     # --------------------------------------------------------- config write
@@ -736,7 +1199,8 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             text = generate_config(assignments, output_dir,
                                    slow_bias=bias_outputs.get('SLOW') or self.prior_bias.get('SLOW'),
                                    fast_bias=bias_outputs.get('FAST') or self.prior_bias.get('FAST'),
-                                   template_path=template)
+                                   template_path=template,
+                                   overrides=self._config_overrides)
             with open(config_path, 'w') as f:
                 f.write(text)
         except Exception:

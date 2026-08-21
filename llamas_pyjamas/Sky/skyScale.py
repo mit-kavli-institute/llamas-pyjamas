@@ -57,8 +57,70 @@ def _count_lines(mask: np.ndarray) -> int:
     return int(np.sum(np.diff(mask.astype(int)) == 1) + (1 if mask[0] else 0))
 
 
+def _fit_line_model(s_line, s1, s2, d, good, order, config):
+    """Fit ``d ~ alpha*S + beta*S' + gamma*S''`` over ``good`` line pixels.
+
+    ``S`` is the line-only sky template and ``S'``/``S''`` its pixel-space
+    derivatives.  ``alpha`` is the classic amplitude residual (clipped via the
+    effective scale ``1+alpha``); ``beta``/``gamma`` absorb, respectively, an
+    along-fibre wavelength-shift (antisymmetric "P-Cygni" residual) and an
+    LSF-width mismatch (symmetric residual).  The derivative terms are damped
+    (column-relative ridge) and only kept when they reduce the line-pixel
+    residual sum-of-squares by at least ``config.scale_deriv_gate`` — so a fibre
+    whose base model is already good keeps the plain amplitude fit.
+
+    Returns ``(eff_scale, correction_full, used_deriv)`` where ``correction_full``
+    is evaluated over the whole spectrum (``S``, ``S'``, ``S''`` all ~0 off-line,
+    so the correction stays line-localised).  ``eff_scale`` is ``1+alpha``.
+    """
+    S = s_line[good]
+    d_good = d[good]
+    denom = float(np.dot(S, S))
+    if denom <= 0:
+        return None
+
+    # --- amplitude-only baseline (classic scaled sky) ---
+    alpha0 = float(np.dot(d_good, S) / denom)
+    eff0 = float(np.clip(1.0 + alpha0, config.scale_min, config.scale_max))
+    alpha0 = eff0 - 1.0
+    ssr0 = float(np.sum((d_good - alpha0 * S) ** 2))
+
+    if order < 1:
+        return eff0, alpha0 * s_line, False
+
+    # --- derivative-augmented fit ---
+    cols = [S, s1[good]]
+    if order >= 2:
+        cols.append(s2[good])
+    A = np.column_stack(cols)                      # (Ngood, k)
+    M = A.T @ A
+    b = A.T @ d_good
+    ridge = max(0.0, float(config.scale_deriv_ridge))
+    for k in range(1, A.shape[1]):                 # damp derivative cols only
+        M[k, k] += ridge * M[k, k]
+    try:
+        coef = np.linalg.solve(M, b)
+    except np.linalg.LinAlgError:
+        coef = np.linalg.lstsq(A, d_good, rcond=None)[0]
+
+    # Clip the amplitude component just like the baseline; keep deriv coeffs.
+    eff = float(np.clip(1.0 + coef[0], config.scale_min, config.scale_max))
+    coef = coef.copy()
+    coef[0] = eff - 1.0
+
+    ssr_full = float(np.sum((d_good - A @ coef) ** 2))
+    improve = (ssr0 - ssr_full) / ssr0 if ssr0 > 0 else 0.0
+    if improve < config.scale_deriv_gate:
+        return eff0, alpha0 * s_line, False        # deriv terms not worth it
+
+    corr = coef[0] * s_line + coef[1] * s1
+    if order >= 2:
+        corr = corr + coef[2] * s2
+    return eff, corr, True
+
+
 def scale_sky_per_fiber(flux: np.ndarray, sky: np.ndarray, config,
-                        sky_mask: np.ndarray = None):
+                        sky_mask: np.ndarray = None, color: str = None):
     """Refine the per-fibre OH-line residual and remove it from ``flux``.
 
     Parameters
@@ -73,6 +135,10 @@ def scale_sky_per_fiber(flux: np.ndarray, sky: np.ndarray, config,
     sky_mask : np.ndarray, optional
         Unused for fitting (each fibre is scaled against its own template) but
         accepted for interface symmetry / future use.
+    color : str, optional
+        Camera colour ('blue'/'green'/'red').  When it is listed in
+        ``config.scale_deriv_skip_colors`` the derivative augmentation is
+        disabled for this file and the classic amplitude-only fit is used.
 
     Returns
     -------
@@ -89,7 +155,11 @@ def scale_sky_per_fiber(flux: np.ndarray, sky: np.ndarray, config,
     scale = np.ones(n_fiber, dtype=float)
     correction = np.zeros((n_fiber, n_wave), dtype=np.float32)
 
+    skip = str(color).lower() in getattr(config, "scale_deriv_skip_colors", [])
+    order = 0 if skip else int(getattr(config, "scale_deriv_order", 0))
+
     n_scaled = 0
+    n_deriv = 0
     for f in range(n_fiber):
         s_full = sky[f]
         if not np.any(np.isfinite(s_full)) or np.nansum(np.abs(s_full)) == 0:
@@ -106,21 +176,22 @@ def scale_sky_per_fiber(flux: np.ndarray, sky: np.ndarray, config,
         d = np.nan_to_num(f_full, nan=0.0) - f_cont           # line-only data
         good = lines & np.isfinite(flux[f])
 
-        denom = float(np.sum(s_line[good] ** 2))
-        if denom <= 0:
+        # Pixel-space derivatives of the line template (shift/width basis).
+        s1 = np.gradient(s_line) if order >= 1 else None
+        s2 = np.gradient(s1) if order >= 2 else None
+
+        result = _fit_line_model(s_line, s1, s2, d, good, order, config)
+        if result is None:
             continue
-        alpha = float(np.sum(d[good] * s_line[good]) / denom)
+        eff, corr, used_deriv = result
 
-        # Effective scale = 1 + alpha, clipped; recover clipped alpha.
-        eff = np.clip(1.0 + alpha, config.scale_min, config.scale_max)
-        alpha = eff - 1.0
         scale[f] = eff
-
-        corr = (alpha * s_line).astype(np.float32)
-        correction[f] = corr
+        correction[f] = corr.astype(np.float32)
         n_scaled += 1
+        n_deriv += int(used_deriv)
 
     flux_scaled = flux - correction
     logger.info("skyScale: refined OH residual on %d/%d fibres "
-                "(median scale=%.3f)", n_scaled, n_fiber, float(np.median(scale)))
+                "(median scale=%.3f, deriv order=%d applied on %d fibres)",
+                n_scaled, n_fiber, float(np.median(scale)), order, n_deriv)
     return scale, correction, flux_scaled

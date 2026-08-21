@@ -8,6 +8,129 @@ from astropy import units as u
 import logging
 from datetime import datetime
 
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+from llamas_pyjamas.Utils.wcsLlamas import FIBRE_AREA_ARCSEC2
+
+logger = logging.getLogger(__name__)
+
+
+def _fibre_sky_table(fiber_ids, benchsides, primary_hdr):
+    """Plate-solved per-fibre sky coords from the (rough header) WCS.
+
+    Returns ``(ras, decs, xs, ys, prov)`` (all arrays length len(fiber_ids); prov a dict). Fibre-
+    map (x,y) come from ``FiberMap_LUT`` (NaN on a LUT miss / dead fibre); RA/DEC from a fibre-map
+    celestial WCS (``celestial_wcs`` at 0.75"/fibre-unit, CRPIX at the fibre-field centre,
+    rotation from the header). If the header has no pointing, RA/DEC are all NaN and prov.method
+    is 'none' -- x/y are still returned so a later step can re-solve. This is the ROUGH solution;
+    Phase 3 registration overwrites RA/DEC and bumps the provenance in place.
+    """
+    from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT, FIELD_XMAX, FIELD_YMAX
+    from llamas_pyjamas.Utils.wcsLlamas import (celestial_wcs, pointing_from_header,
+                                                ARCSEC_PER_FIBRE, IFU_PA_OFFSET)
+
+    n = len(fiber_ids)
+    xs = np.full(n, np.nan)
+    ys = np.full(n, np.nan)
+    for i, (bench, fid) in enumerate(zip(benchsides, fiber_ids)):
+        x, y = FiberMap_LUT(str(bench).strip(), int(fid))
+        if not (x < 0 and y < 0):                       # (-1,-1) is the LUT miss sentinel
+            xs[i], ys[i] = float(x), float(y)
+
+    ras = np.full(n, np.nan)
+    decs = np.full(n, np.nan)
+    prov = {'method': 'none', 'tier': 'none', 'refined': False,
+            'pa_offset': float('nan'), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+
+    ra, dec, pa = pointing_from_header(primary_hdr)
+    if ra is not None and dec is not None:
+        cx, cy = FIELD_XMAX / 2.0, FIELD_YMAX / 2.0     # fibre-field centre = boresight (rough)
+        wcs = celestial_wcs(ra, dec, crpix=(cx + 1.0, cy + 1.0),
+                            arcsec_per_pixel=ARCSEC_PER_FIBRE, pa_deg=pa)
+        finite = np.isfinite(xs) & np.isfinite(ys)
+        if finite.any():
+            sky = wcs.pixel_to_world(xs[finite], ys[finite])  # fibre-map (x,y) as pixel coords
+            ras[finite] = sky.ra.deg
+            decs[finite] = sky.dec.deg
+        prov = {'method': 'rough-header', 'tier': 'header', 'refined': False,
+                'pa_offset': float(IFU_PA_OFFSET), 'catalog': '', 'rms': float('nan'), 'nstars': 0}
+    return ras, decs, xs, ys, prov
+
+
+def _fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov):
+    """Build the FIBERWCS binary-table HDU (per-fibre x/y + RA/DEC + astrometry provenance)."""
+    def _num(v):                                        # FITS headers can't hold NaN
+        return float(v) if np.isfinite(v) else -1.0
+    hdu = fits.BinTableHDU.from_columns([
+        fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
+        fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
+        fits.Column(name='X_FIBERMAP', format='D', array=np.asarray(xs, dtype=float)),
+        fits.Column(name='Y_FIBERMAP', format='D', array=np.asarray(ys, dtype=float)),
+        fits.Column(name='RA', format='D', array=np.asarray(ras, dtype=float)),
+        fits.Column(name='DEC', format='D', array=np.asarray(decs, dtype=float)),
+    ])
+    h = hdu.header
+    h['EXTNAME'] = 'FIBERWCS'
+    h['WCSMETH'] = (prov['method'], 'Astrometry method (rough-header/astrometric)')
+    h['WCSTIER'] = (prov['tier'], 'Registration tier')
+    h['WCSREFIN'] = (bool(prov['refined']), 'True if refined against a catalog')
+    h['PAOFFSET'] = (_num(prov['pa_offset']), 'PA offset applied to TEL_ROT [deg]')
+    h['WCSCAT'] = (prov['catalog'], 'Reference catalog (blank if none)')
+    h['WCSRMS'] = (_num(prov['rms']), 'Astrometric residual RMS [arcsec], -1=n/a')
+    h['WCSNSTAR'] = (int(prov['nstars']), 'Stars used in the solution')
+    h['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
+    return hdu
+
+
+def apply_fibre_astrometry(hdul, ras=None, decs=None, xs=None, ys=None, prov=None):
+    """Write per-fibre astrometry onto an open RSS HDUList: fill FIBERMAP RA/DEC, (re)build the
+    FIBERWCS extension, and set FIBAREA. Reusable by generate_rss (rough, at build), the patch
+    below, and Phase-3 registration (pass a refined ras/decs/prov to overwrite in place).
+
+    If ``ras``/``decs`` are not supplied, the rough solution is computed from the primary header
+    pointing + the FIBERMAP fibre ids. Returns the provenance dict written.
+    """
+    fmap = hdul['FIBERMAP'].data
+    fiber_ids = list(fmap['FIBER_ID'])
+    benchsides = list(fmap['BENCHSIDE'])
+    if ras is None or decs is None:
+        ras, decs, xs, ys, prov = _fibre_sky_table(fiber_ids, benchsides, hdul[0].header)
+    hdul['FIBERMAP'].data['RA'][:] = np.asarray(ras, dtype=float)
+    hdul['FIBERMAP'].data['DEC'][:] = np.asarray(decs, dtype=float)
+    names = [h.name for h in hdul]
+    if 'FIBERWCS' in names:
+        del hdul[names.index('FIBERWCS')]
+    hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov))
+    hdul[0].header['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
+    return prov
+
+
+def patch_rss_astrometry(path):
+    """Patch an existing RSS file in place: fill FIBERMAP RA/DEC + (re)build FIBERWCS + FIBAREA
+    from the rough header WCS. Idempotent (re-run overwrites). Returns the provenance dict."""
+    with fits.open(path, mode='update') as hdul:
+        if 'FIBERMAP' not in [h.name for h in hdul]:
+            logger.warning('patch_rss_astrometry: %s has no FIBERMAP; skipped', path)
+            return None
+        prov = apply_fibre_astrometry(hdul)
+        hdul.flush()
+    return prov
+
+
+def skysub_extname(hdul):
+    """Name of the sky-subtracted science plane in an RSS HDUList.
+
+    Returns ``'SKYSUB'`` when present, else ``'FLUX'``. This bridges the ``FLUX -> SKYSUB``
+    rename: files written before the rename still hold ``FLUX``, files after hold ``SKYSUB``,
+    and every reader goes through here so both load. ``FLUX`` was a misleading name for the
+    sky-subtracted *instrumental* spectrum — the flux-calibrated spectrum is ``FLAM``.
+    """
+    names = {hdu.name for hdu in hdul}
+    if 'SKYSUB' in names:
+        return 'SKYSUB'
+    if 'FLUX' in names:
+        return 'FLUX'
+    raise KeyError('RSS has neither a SKYSUB nor a FLUX extension')
+
 
 class RSSgeneration:
     def __init__(self, logger=None):
@@ -27,7 +150,8 @@ class RSSgeneration:
         return
 
 
-    def generate_rss(self, extraction_file, output_file, subtract_sky=True, noflat_file=None):
+    def generate_rss(self, extraction_file, output_file, subtract_sky=True, noflat_file=None,
+                     wave_frame='heliocentric'):
         """
         Generate a row-stacked spectra (RSS) FITS file with the following structure:
         Extension 0 - PRIMARY: primary header only, no data
@@ -88,6 +212,16 @@ class RSSgeneration:
 
             self.logger.info(f"Loaded extraction file with {len(extraction_objects)} extraction objects")
 
+            # Heliocentric/barycentric wavelength-frame correction, applied here (after sky
+            # subtraction) so OH sky lines stay in the observed frame. Per-exposure and uniform
+            # across all fibres/channels; stamps VELFRAME/HELIOVEL/VELCORR into the primary
+            # header once. Returns 1.0 for calibrations or when disabled -> WAVE untouched.
+            from llamas_pyjamas.Utils.waveFrame import stamp_and_factor
+            _helio_vel, _helio_factor = stamp_and_factor(primary_hdr, wave_frame)
+            if _helio_factor != 1.0:
+                self.logger.info(f"Wavelength frame: {primary_hdr.get('VELFRAME')} "
+                                 f"v={_helio_vel:.4f} km/s, WAVE *= {_helio_factor:.8f}")
+
             # Group by channel
             channel_groups = {}
             meta_groups = {}
@@ -127,6 +261,8 @@ class RSSgeneration:
                 hdul = fits.HDUList()
                 primary_hdu = fits.PrimaryHDU(header=primary_hdr)
                 primary_hdu.header['CHANNEL'] = channel
+                primary_hdu.header['FIBAREA'] = (FIBRE_AREA_ARCSEC2,
+                                                 'Lenslet solid angle [arcsec2] (flux<->SB)')
                 hdul.append(primary_hdu)
                 
                 # Collect data for all fibers in this channel
@@ -154,27 +290,31 @@ class RSSgeneration:
                     original_n_fibers = n_fibers  # Track original count before any removals
 
                     # Get relative throughput (1D, one scalar per fiber); fall back to 1.0
+                    # The following per-object fallbacks are all expected for
+                    # several product types (flats/twilights carry no per-fibre
+                    # errors/DQ/FWHM), handled by creating defaults, and fire once
+                    # per camera — so they are INFO, not WARNING.
                     throughput = getattr(obj, 'relative_throughput', None)
                     if throughput is None or len(throughput) != n_fibers:
-                        self.logger.warning(f"Object {i}: missing or mismatched relative_throughput — no throughput correction applied")
+                        self.logger.info(f"Object {i}: missing or mismatched relative_throughput — no throughput correction applied")
                         throughput = np.ones(n_fibers, dtype=np.float32)
                     else:
                         throughput = np.array(throughput, dtype=np.float32)
                         bad_tp = ~np.isfinite(throughput) | (throughput <= 0)
                         if np.any(bad_tp):
-                            self.logger.warning(f"Object {i}: {bad_tp.sum()} fibers have invalid throughput values — setting those to 1.0")
+                            self.logger.info(f"Object {i}: {bad_tp.sum()} fibers have invalid throughput values — setting those to 1.0")
                             throughput[bad_tp] = 1.0
-                    
+
                     # Get or create error arrays
                     errors = getattr(obj, 'errors', None)
                     if errors is None or errors.shape != counts.shape:
-                        self.logger.warning(f"No valid error data for object {i}. Creating zero array.")
+                        self.logger.info(f"No valid error data for object {i}. Creating zero array.")
                         errors = np.zeros_like(counts, dtype=np.float32)
-                    
+
                     # Get or create data quality (mask) arrays
                     dq = getattr(obj, 'dq', None)
                     if dq is None or dq.shape != counts.shape:
-                        self.logger.warning(f"No valid DQ data for object {i}. Creating zero array.")
+                        self.logger.info(f"No valid DQ data for object {i}. Creating zero array.")
                         dq = np.zeros_like(counts, dtype=np.int16)
                     
                     # Get wavelength arrays with improved shape handling
@@ -183,8 +323,10 @@ class RSSgeneration:
                         self.logger.warning(f"No wavelength attribute for object {i}. Using NaN arrays.")
                         waves = np.full(counts.shape, np.nan, dtype=np.float32)
                     elif waves.shape != counts.shape:
-                        # Shape mismatch might be due to dead fiber insertion during extraction
-                        self.logger.warning(f"Object {i} wavelength shape {waves.shape} != counts shape {counts.shape}")
+                        # Shape mismatch is usually just missing dead-fibre rows and
+                        # is reconciled below; info here, warn only if it cannot be
+                        # reconciled (see below).
+                        self.logger.info(f"Object {i} wavelength shape {waves.shape} != counts shape {counts.shape}")
 
                         # Check if wavelength array is smaller (missing dead fiber rows)
                         if waves.shape[0] < counts.shape[0] and waves.shape[1] == counts.shape[1]:
@@ -216,8 +358,8 @@ class RSSgeneration:
                     
                     # Get or create FWHM arrays (may not exist in all extractions)
                     fwhm = getattr(obj, 'fwhm', None)
-                    if fwhm is None or fwhm.shape != counts.shape:
-                        self.logger.warning(f"No valid FWHM data for object {i}. Creating default array.")
+                    if (fwhm is None or fwhm.shape != counts.shape):
+                        self.logger.info(f"No valid FWHM data for object {i}. Creating default array.")
                         fwhm = np.full(counts.shape, 2.5, dtype=np.float32)  # Default FWHM of 2.5 pixels
 
                     # Get sky model array (populated by skyModel_1d; zeros if not available)
@@ -241,56 +383,18 @@ class RSSgeneration:
                             self.logger.warning(f"Sky shape {sky.shape} != counts shape {counts.shape} for object {i}. Using zeros.")
                             sky = np.zeros_like(counts, dtype=np.float32)
 
-                    # Handle dead fibers
+                    # Dead fibres are NOT removed here: the extraction now keeps
+                    # every per-fibre array LIVE-indexed (dead fibres already
+                    # absent, all arrays mutually aligned). The dead_fibers list
+                    # holds the fibremap positions and is used only to assign the
+                    # physical fibre id of each live row (below). Removing rows
+                    # here would (a) desync counts from the fibre-id list and
+                    # (b) wrongly drop a faint live fibre whose row reads as zero.
                     dead_fibers = getattr(obj, 'dead_fibers', None)
-                    removed_dead_fibers = []  # Track which fibers were actually removed
-                    if dead_fibers is not None:
-                        self.logger.info(f"Object {i} has dead fibers: {dead_fibers}")
-                        # Validate each dead fiber
-                        valid_dead_fibers = []
-                        for dead_fiber in dead_fibers:
-                            # Verify that the dead fiber index is valid
-                            if 0 <= dead_fiber < n_fibers:
-                                # Check if all values in the row are zero (or close to zero)
-                                is_zero_row = np.allclose(counts[dead_fiber], 0, atol=1e-10)
-                                if is_zero_row:
-                                    valid_dead_fibers.append(dead_fiber)
-                                    self.logger.info(f"Validated dead fiber {dead_fiber}: all zeros = True")
-                                else:
-                                    self.logger.warning(f"Dead fiber {dead_fiber} in object {i} has non-zero values - not removing")
-                            else:
-                                self.logger.warning(f"Dead fiber index {dead_fiber} is out of range for object {i} with {n_fibers} fibers")
+                    removed_dead_fibers = []
+                    if dead_fibers:
+                        self.logger.debug(f"Object {i} dead fibres (fibremap positions, live-indexed): {dead_fibers}")
 
-                        # Remove the valid dead fibers using boolean mask to avoid index shifting issues
-                        if valid_dead_fibers:
-                            self.logger.info(f"Removing confirmed dead fibers {valid_dead_fibers} from object {i}")
-
-                            # Log wavelength stats BEFORE removal for debugging
-                            self.logger.info(f"BEFORE dead fiber removal - Wavelength shape: {waves.shape}, " +
-                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
-
-                            # Create boolean mask: True for fibers to KEEP, False for fibers to REMOVE
-                            keep_mask = np.ones(n_fibers, dtype=bool)
-                            keep_mask[valid_dead_fibers] = False
-
-                            # Apply mask to all arrays simultaneously
-                            counts = counts[keep_mask]
-                            errors = errors[keep_mask]
-                            waves = waves[keep_mask]
-                            dq = dq[keep_mask]
-                            fwhm = fwhm[keep_mask]
-                            sky = sky[keep_mask]
-                            throughput = throughput[keep_mask]
-
-                            # Track which fibers were removed for fiber ID generation
-                            removed_dead_fibers = valid_dead_fibers
-
-                            # Log the final shape and wavelength stats after removal
-                            self.logger.info(f"New arrays shape after removal: {counts.shape}")
-                            self.logger.info(f"AFTER dead fiber removal - Wavelength shape: {waves.shape}, " +
-                                           f"valid range: {np.nanmin(waves):.2f}-{np.nanmax(waves):.2f}")
-                            n_fibers = counts.shape[0]  # Update fiber count
-                    
                     # Enhanced wavelength validation logging
                     if waves is not None:
                         nan_count = np.sum(np.isnan(waves))
@@ -358,21 +462,18 @@ class RSSgeneration:
 
                     benchsides.extend([benchside_str] * n_fibers)
 
-                    # Generate fiber IDs that preserve original fiber indices (skip dead fibers)
-                    if removed_dead_fibers:
-                        # Build list of alive fiber IDs by skipping dead ones
-                        fibers = []
-                        counter = 0
-                        while len(fibers) < n_fibers:
-                            if counter in removed_dead_fibers:
-                                counter += 1
-                            else:
-                                fibers.append(counter)
-                                counter += 1
+                    # Physical fibre id of each (live-indexed) row: the fibremap
+                    # positions skipping the camera's dead fibres. Derived from
+                    # the canonical dead_fibers list so it is correct whether or
+                    # not the (legacy, backward-compat) removal path above fired —
+                    # arrays are live-indexed, so removed_dead_fibers is normally
+                    # empty and sequential IDs would be wrong.
+                    _dead_for_ids = dead_fibers if dead_fibers else removed_dead_fibers
+                    if _dead_for_ids and len(_dead_for_ids) > 0:
+                        fibers = live_fibre_ids(n_fibers, _dead_for_ids)
                         fiber_ids.extend(fibers)
-                        self.logger.info(f"Object {i}: Generated fiber IDs {fibers} (skipped dead fibers {removed_dead_fibers})")
+                        self.logger.info(f"Object {i}: fibre IDs skip dead fibres {sorted(_dead_for_ids)}")
                     else:
-                        # No dead fibers removed, use sequential IDs
                         fiber_ids.extend(np.arange(n_fibers))
 
                     fiber_types.extend(fiber_type if len(fiber_type) == n_fibers else ['UNKNOWN'] * n_fibers)
@@ -383,6 +484,8 @@ class RSSgeneration:
                 counts_stack = np.vstack(all_flux)   # raw counts, always preserved
                 error_stack = np.vstack(all_errors)
                 wave_stack = np.vstack(all_waves)
+                if _helio_factor != 1.0:               # shift into the heliocentric/bary frame
+                    wave_stack = wave_stack * _helio_factor
                 dq_stack = np.vstack(all_dq)
                 fwhm_stack = np.vstack(all_fwhm)
                 sky_stack = np.vstack(all_sky)
@@ -432,14 +535,16 @@ class RSSgeneration:
                 except Exception as e:
                     self.logger.error(f"Could not determine wavelength range: {str(e)}")
                 
-                # Extension 1 - FLUX: sky-subtracted flux [NFIBER x NWAVE]
-                # FLUX = COUNTS - SKY when subtract_sky=True and sky model is present
+                # Extension 1 - SKYSUB: sky-subtracted instrumental spectrum [NFIBER x NWAVE].
+                # = COUNTS - SKY when subtract_sky=True and a sky model is present. Named SKYSUB
+                # (was FLUX) so it is not confused with the flux-calibrated FLAM extension; the
+                # units are instrumental, not physical flux, despite the BUNIT label.
                 flux_hdu = fits.ImageHDU(flux_stack, header=common_header)
-                flux_hdu.header['EXTNAME'] = 'FLUX'
+                flux_hdu.header['EXTNAME'] = 'SKYSUB'
                 flux_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 flux_hdu.header['SKYSUB'] = subtract_sky and has_sky
                 hdul.append(flux_hdu)
-                self.logger.info(f"Added FLUX extension with shape {flux_stack.shape}")
+                self.logger.info(f"Added SKYSUB extension with shape {flux_stack.shape}")
 
                 # Extension - ERROR: 1-sigma uncertainty per fiber [NFIBER x NWAVE].
                 # error_stack is already computed above; emit it so the fibre-flat stage
@@ -554,6 +659,12 @@ class RSSgeneration:
                 hdul.append(fwhm_hdu)
                 self.logger.info(f"Added FWHM extension with shape {fwhm_stack.shape}")
 
+                # Plate-solved per-fibre sky coordinates from the (rough header) WCS: fibre-map
+                # (x,y) via FiberMap_LUT -> RA/DEC via the fibre-map celestial WCS. Fills FIBERMAP
+                # RA/DEC (LVM/other-pipeline compat) and drives the dedicated FIBERWCS extension.
+                fiber_ras, fiber_decs, fiber_x, fiber_y, _sky_prov = _fibre_sky_table(
+                    fiber_ids, benchsides, primary_hdr)
+
                 # Extension 7 - FIBERMAP: binary table with fiber information
                 fibermap_cols = [
                     fits.Column(name='FIBER_ID', format='J', array=np.array(fiber_ids)),
@@ -562,11 +673,19 @@ class RSSgeneration:
                     fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
                     fits.Column(name='DEC', format='D', array=np.array(fiber_decs))
                 ]
-                
+
                 fibermap_hdu = fits.BinTableHDU.from_columns(fibermap_cols)
                 fibermap_hdu.header['EXTNAME'] = 'FIBERMAP'
                 hdul.append(fibermap_hdu)
                 self.logger.info(f"Added FIBERMAP binary table with {len(fiber_ids)} entries")
+
+                # Extension - FIBERWCS: fibre-map (x,y) + plate-solved RA/DEC + astrometry
+                # provenance. Kept separate from FIBERMAP so the astrometry can be re-solved and
+                # overwritten in place (Phase 3) without disturbing the base fibre map.
+                hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, fiber_ras, fiber_decs,
+                                          fiber_x, fiber_y, _sky_prov))
+                self.logger.info(f"Added FIBERWCS ({_sky_prov['method']}, "
+                                 f"{int(np.isfinite(fiber_ras).sum())} fibres with RA/DEC)")
                 
                 # Write to file
                 hdul.writeto(channel_output_file, overwrite=True)

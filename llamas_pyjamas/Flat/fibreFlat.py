@@ -1429,9 +1429,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             corr_lookup[ext_name] = entry
 
     with fits.open(rss_file) as hdul:
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         channel = hdul[0].header.get('CHANNEL', 'unknown').lower()
 
-        flux = hdul['FLUX'].data.copy()
+        flux = hdul[sky_plane].data.copy()
         error = hdul['ERROR'].data.copy()
         fibermap = hdul['FIBERMAP'].data
 
@@ -1545,8 +1547,8 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                                      f'corrected ({corr_method})')
         out_hdul.append(primary)
 
-        # FLUX — corrected
-        flux_hdu = fits.ImageHDU(flux, header=hdul['FLUX'].header.copy())
+        # sky-subtracted plane — corrected (EXTNAME carried through the copied header)
+        flux_hdu = fits.ImageHDU(flux, header=hdul[sky_plane].header.copy())
         flux_hdu.header['HISTORY'] = 'Fibre-to-fibre flat applied'
         out_hdul.append(flux_hdu)
 

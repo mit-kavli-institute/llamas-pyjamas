@@ -7,7 +7,7 @@ cleaning, and the full orchestrator + FITS contract.
 
 Run:
     pytest llamas_pyjamas/test_sky_framework.py -v
-    python -m unittest llamas_pyjamas.test_sky_framework
+    python -m unittest llamas_pyjamas.Tests.test_sky_framework
 """
 
 import os
@@ -19,6 +19,7 @@ from astropy.io import fits
 
 from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
 from llamas_pyjamas.Sky.skyMask import build_sky_fiber_mask, white_light
+from llamas_pyjamas.Sky.skySelect import SkyMask
 from llamas_pyjamas.Sky.skyScale import scale_sky_per_fiber, _continuum, _line_mask
 from llamas_pyjamas.Sky.skyResidual import clean_residuals
 from llamas_pyjamas.Sky.skySubtract import subtract_sky_rss
@@ -133,13 +134,19 @@ class TestSkyMask(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             truth = build_synthetic_rss(os.path.join(d, "x_RSS_green_FF.fits"), rng)
         cfg = SkySubtractConfig()
-        mask = build_sky_fiber_mask(truth["counts"], None, cfg)
+        sm = build_sky_fiber_mask(truth["counts"], None, cfg)
+        self.assertIsInstance(sm, SkyMask)              # now a first-class SkyMask
+        mask = sm.mask
         self.assertEqual(mask.dtype, np.bool_)
         # The bright object fibres (first N_OBJ) should be excluded.
         self.assertFalse(mask[:N_OBJ].any(),
                          "bright object fibres must not be selected as sky")
         # Plenty of genuine sky fibres should remain.
         self.assertGreater(mask.sum(), N_SKY // 2)
+        # Honest provenance: the broad white-light cut is labelled 'percentile'
+        # (a PCA basis), not the configured selection_method.
+        self.assertEqual(sm.method, "percentile")
+        self.assertEqual(sm.provenance.get("requested_selection"), cfg.selection_method)
 
     def test_white_light_orders_fibers(self):
         rng = np.random.default_rng(1)
@@ -165,6 +172,39 @@ class TestSkyScale(unittest.TestCase):
         self.assertLess(rms_after, rms_before,
                         "OH-line residual RMS should drop after scaling")
 
+    def test_derivative_removes_shift_and_width_residual(self):
+        """Shift ('P-Cygni') and width (pos-neg-pos) residuals are invisible to
+        amplitude-only scaling but are removed by the derivative augmentation,
+        which is disabled for blue."""
+        x = np.arange(N_WAVE)
+        sky = np.tile(_sky_template(np.random.default_rng(0)),
+                      (N_FIBER, 1)).astype(float)
+        rng = np.random.default_rng(7)
+        flux = np.zeros((N_FIBER, N_WAVE))
+        for f in range(N_FIBER):
+            # Sub-pixel shift + small width mismatch: antisymmetric + symmetric.
+            row = sum(_gaussian(x, c + 0.25, OH_AMP)          # shifted line
+                      + _gaussian(x, c, OH_AMP, sigma=2.15)   # broadened line
+                      - 2 * _gaussian(x, c, OH_AMP)           # minus base model
+                      for c in OH_CENTERS)
+            flux[f] = row + rng.normal(0.0, 0.3, N_WAVE)
+
+        cfg0 = SkySubtractConfig(method="scaled", scale_deriv_order=0)
+        cfg2 = SkySubtractConfig(method="scaled", scale_deriv_order=2)
+        line_px = _oh_pixel_mask(sky[0], cfg2)
+        rows = np.arange(N_FIBER)
+
+        _, _, f0 = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg0, color="green")
+        _, _, f2 = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg2, color="green")
+        _, _, fb = scale_sky_per_fiber(flux.copy(), sky.copy(), cfg2, color="blue")
+
+        rms0 = _line_rms(f0, line_px, rows)
+        rms2 = _line_rms(f2, line_px, rows)
+        self.assertLess(rms2, 0.8 * rms0,
+                        "derivative fit should substantially cut the residual")
+        # Blue is on the skip list -> identical to amplitude-only.
+        np.testing.assert_allclose(fb, f0, rtol=0, atol=0)
+
 
 class TestSkyResidual(unittest.TestCase):
     def test_removes_common_pattern(self):
@@ -172,7 +212,7 @@ class TestSkyResidual(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             truth = build_synthetic_rss(os.path.join(d, "x_RSS_green_FF.fits"), rng)
         cfg = SkySubtractConfig(method="pca", pca_ncomp=10)
-        sky_mask = build_sky_fiber_mask(truth["counts"], None, cfg)
+        sky_mask = build_sky_fiber_mask(truth["counts"], None, cfg).mask
         model, info = clean_residuals(truth["flux"], truth["wave"], sky_mask, cfg)
         self.assertEqual(model.shape, truth["flux"].shape)
         self.assertGreaterEqual(info["ncomp"], 1)
@@ -202,10 +242,15 @@ class TestOrchestrator(unittest.TestCase):
                 self.assertIn("SKYRESID", h)
                 self.assertIn("COUNTS", h)   # copied through
                 self.assertIn("SKY", h)
+                self.assertIn("SKYMASK", h)  # persisted sky-fibre mask
                 flux_out = h["FLUX"].data
                 self.assertEqual(flux_out.shape, truth["flux"].shape)
                 self.assertTrue(np.all(np.isfinite(flux_out)))
                 self.assertTrue(h["FLUX"].header.get("SKYSUB2"))
+                # The persisted SkyMask round-trips and matches the recorded count.
+                sm = SkyMask.from_hdu(h["SKYMASK"])
+                self.assertEqual(sm.n_sky, h["FLUX"].header["SKYNMASK"])
+                self.assertEqual(h["FLUX"].header["SKYBASIS"], sm.method)
 
             # OH residual on sky fibres should improve end-to-end.
             cfg2 = SkySubtractConfig()
