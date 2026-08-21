@@ -416,6 +416,94 @@ def test_resolve_case_c_stub_threshold(tmp_path, monkeypatch):
     assert any('below threshold' in n for n in audit2.notes)
 
 
+def _c_result(mode='FAST', confidence='HIGH', n_usable=19, prior=None):
+    votes = n_usable if mode == 'FAST' else 0
+    return {'mode': mode, 'confidence': confidence,
+            'numeric': {'votes_fast': votes, 'votes_slow': n_usable - votes,
+                        'n_neither': 0, 'n_excluded': 0, 'n_placeholder': 0,
+                        'n_usable': n_usable, 'frac': 1.0 if n_usable else 0.0,
+                        'median_margin': 100.0 if n_usable else 0.0},
+            'per_detector': [], 'warnings': [], 'prior_note': prior,
+            'bands_source': 'stub'}
+
+
+def _stub_case_c(monkeypatch, results_by_name):
+    class Stub:
+        @staticmethod
+        def assess_readmode(path, exposure_type=None, baselines_path=None):
+            return results_by_name[Path(path).name]
+        @staticmethod
+        def format_assessment(res, verbose=False):
+            return f"stub {res['confidence']}"
+    monkeypatch.setitem(sys.modules, 'readmode_assess', Stub)
+
+
+def _case_c_night(tmp_path, monkeypatch):
+    """Three files: two decided (HIGH FAST / LOW SLOW), one undecided."""
+    audits = [scan(make_mef(tmp_path / name))
+              for name in ('a_mef.fits', 'b_mef.fits', 'c_mef.fits')]
+    _stub_case_c(monkeypatch, {
+        'a_mef.fits': _c_result('FAST', 'HIGH'),
+        'b_mef.fits': _c_result('SLOW', 'LOW'),
+        'c_mef.fits': _c_result(None, 'UNDECIDED', n_usable=6)})
+    return audits
+
+
+def test_case_c_accept_all_inferred(tmp_path, monkeypatch):
+    audits = _case_c_night(tmp_path, monkeypatch)
+    opts = fei.parse_args([str(tmp_path)])
+    fei.resolve_case_c(audits, opts, fei.make_ask(scripted('a')), scripted())
+    a, b, c = audits
+    assert a.fix_for('READ-MDE').value == 'FAST' and a.fix_for('READ-MDE').approved
+    assert b.fix_for('READ-MDE').value == 'SLOW'   # LOW confidence still accepted
+    assert c.fix_for('READ-MDE') is None           # undecided: skipped, noted
+    assert any('undecided' in n for n in c.notes)
+
+
+def test_case_c_undecided_only(tmp_path, monkeypatch):
+    audits = _case_c_night(tmp_path, monkeypatch)
+    opts = fei.parse_args([str(tmp_path)])
+    # 'u' accepts the two decided files, then prompts only for the undecided
+    fei.resolve_case_c(audits, opts, fei.make_ask(scripted('u', 'f')), scripted())
+    a, b, c = audits
+    assert a.fix_for('READ-MDE').value == 'FAST'
+    assert b.fix_for('READ-MDE').value == 'SLOW'
+    fix = c.fix_for('READ-MDE')
+    assert fix is not None and fix.value == 'FAST' and fix.source == 'user input'
+
+
+def test_case_c_review_all_remaining_latch(tmp_path, monkeypatch):
+    audits = [scan(make_mef(tmp_path / n))
+              for n in ('a_mef.fits', 'b_mef.fits', 'c_mef.fits')]
+    _stub_case_c(monkeypatch, {n: _c_result('SLOW', 'HIGH')
+                               for n in ('a_mef.fits', 'b_mef.fits', 'c_mef.fits')})
+    opts = fei.parse_args([str(tmp_path)])
+    # 'r' review, then 'a' on the first file latches accept for the rest
+    fei.resolve_case_c(audits, opts, fei.make_ask(scripted('r', 'a')), scripted())
+    for a in audits:
+        fix = a.fix_for('READ-MDE')
+        assert fix is not None and fix.approved and fix.value == 'SLOW'
+
+
+def test_case_c_all_abstain_skips_file(tmp_path, monkeypatch):
+    audits = [scan(make_mef(tmp_path / 'a_mef.fits'))]
+    _stub_case_c(monkeypatch, {'a_mef.fits': _c_result(None, 'UNDECIDED',
+                                                       n_usable=0)})
+    # Interactive: no prompt at all (scripted() would raise on any prompt)
+    opts = fei.parse_args([str(tmp_path)])
+    fei.resolve_case_c(audits, opts, fei.make_ask(scripted()), scripted())
+    assert audits[0].fix_for('READ-MDE') is None
+    assert any('all detectors abstained' in n for n in audits[0].notes)
+
+    audits2 = [scan(make_mef(tmp_path / 'b_mef.fits'))]
+    _stub_case_c(monkeypatch, {'b_mef.fits': _c_result(None, 'UNDECIDED',
+                                                       n_usable=0)})
+    opts2 = fei.parse_args([str(tmp_path), '--yes'])
+    fei.resolve_case_c(audits2, opts2, fei.make_ask(scripted()), scripted())
+    assert audits2[0].fix_for('READ-MDE') is None
+    assert any('all detectors abstained' in n for n in audits2[0].notes)
+
+
 # --------------------------------------------------------------- writing
 
 def test_write_repaired_guards_and_provenance(tmp_path):
@@ -448,6 +536,41 @@ def test_write_repaired_guards_and_provenance(tmp_path):
     assert sha(src) == before
 
 
+def test_write_strips_blank_sexptime_for_gui(tmp_path):
+    """A blank SEXPTIME card must not survive into the repaired copy: the
+    unmodified reduxSetupGUI evaluates hdr.get('SEXPTIME', hdr.get('REXPTIME'))
+    and a blank card returns Undefined instead of the fallback."""
+    src_dir = tmp_path / 'input'
+    out_dir = tmp_path / 'out'
+    src_dir.mkdir(); out_dir.mkdir()
+    src = make_mef(src_dir / 'a_mef.fits', exptime='rexptime')
+    with fits.open(src, mode='update') as hdul:
+        hdul[0].header.append(fits.Card('SEXPTIME'))       # the poison card
+    audit = scan(src)
+    fei.propose_case_a(audit)
+    for f in audit.fixes:
+        f.approved = True
+    fei.finalize_fixes(audit)
+    dest = fei.write_repaired(audit, out_dir, overwrite=False, obs_log_name=None)
+    with fits.open(dest) as hdul:
+        phdr = hdul[0].header
+        assert 'SEXPTIME' not in phdr
+        assert any('blank SEXPTIME' in str(h) for h in phdr['HISTORY'])
+        # the deployed GUI's exact lookup now resolves via REXPTIME
+        assert float(phdr.get('SEXPTIME', phdr.get('REXPTIME'))) == 10.0
+
+    # a *filled* SEXPTIME card is never touched
+    src2 = make_mef(src_dir / 'b_mef.fits', exptime='rexptime')
+    with fits.open(src2, mode='update') as hdul:
+        hdul[0].header['SEXPTIME'] = 10.02
+    audit2 = scan(src2)
+    fei.propose_case_a(audit2)
+    for f in audit2.fixes:
+        f.approved = True
+    dest2 = fei.write_repaired(audit2, out_dir, overwrite=False, obs_log_name=None)
+    assert fits.getheader(dest2, 0)['SEXPTIME'] == 10.02
+
+
 def test_main_end_to_end_yes(tmp_path):
     src_dir = tmp_path / 'night'
     src_dir.mkdir()
@@ -464,6 +587,8 @@ def test_main_end_to_end_yes(tmp_path):
     with fits.open(out / written[0]) as hdul:
         phdr = hdul[0].header
         assert phdr['EXPTIME'] == 0.07
+        assert phdr['REXPTIME'] == 0.07           # created for SEXPTIME->REXPTIME
+        assert phdr['AEXPTIME'] == 0.07           # consumers (reduxSetupGUI etc.)
         assert phdr['READ-MDE'] == 'FAST'
         assert phdr['OBJECT'] == 'LDLS flat'
         assert phdr['UTC'] == '01:34:17.5'        # Case A TEL propagation

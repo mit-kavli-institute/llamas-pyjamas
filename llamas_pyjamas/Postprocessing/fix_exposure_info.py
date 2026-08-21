@@ -686,64 +686,135 @@ def resolve_case_c(audits: list[FileAudit], opts, ask, input_fn) -> None:
         return
 
     min_tier = CONFIDENCE_TIER[opts.readmode_min_confidence.upper()]
-    for a in pending + cross_check:
+
+    def _assess(a):
         row = a.chosen_log_row
         etype = (row.obs_type or row.object_name) if row is not None else None
+        return readmode_assess.assess_readmode(
+            a.path, exposure_type=etype, baselines_path=opts.baselines)
+
+    def _prior_default(result):
+        return 'SLOW' if result['prior_note'] else None
+
+    # Pre-pass: run inference on every pending file before any prompting so
+    # the whole batch can be accepted (or narrowed to the undecided ones)
+    # with a single answer.
+    assessed, undecided, failed = [], [], []
+    n_abstain = 0
+    for a in pending:
         try:
-            result = readmode_assess.assess_readmode(
-                a.path, exposure_type=etype, baselines_path=opts.baselines)
+            result = _assess(a)
         except Exception as exc:
             print(f"  {a.stem}: inference failed ({exc})")
-            if not opts.yes and a in pending:
-                _manual_readmode(a, ask, reason="inference failed")
+            failed.append(a)
+            continue
+        if result['numeric']['n_usable'] == 0:
+            # No detector cast a vote at all: there is no estimation to
+            # review, so the file is skipped rather than prompted for.
+            print(f"  {a.stem}: skipped (all detectors abstained)")
+            a.notes.append("READ-MDE not written (all detectors abstained)")
+            n_abstain += 1
+            continue
+        summary = readmode_assess.format_assessment(result, verbose=opts.verbose)
+        print(f"  {a.stem}: {summary}")
+        if result['mode'] is None:
+            if opts.yes:
+                a.notes.append("READ-MDE not written (confidence "
+                               "UNDECIDED below threshold)")
+            else:
+                undecided.append((a, result))
+        elif opts.yes:
+            if CONFIDENCE_TIER[result['confidence']] >= min_tier:
+                _set_readmode_fix(a, result['mode'], _infer_source(result))
+                print(f"    auto-accepted ({result['confidence']} >= "
+                      f"{opts.readmode_min_confidence})")
+            else:
+                a.notes.append(f"READ-MDE not written (confidence "
+                               f"{result['confidence']} below threshold)")
+        else:
+            assessed.append((a, result))
+
+    if not opts.yes:
+        for a in failed:
+            _manual_readmode(a, ask, reason="inference failed")
+
+    if assessed or undecided:
+        conf_counts: dict[str, int] = {}
+        for _, r in assessed:
+            conf_counts[r['confidence']] = conf_counts.get(r['confidence'], 0) + 1
+        conf_str = ", ".join(
+            f"{n} {c}" for c, n in sorted(conf_counts.items(),
+                                          key=lambda kv: -CONFIDENCE_TIER[kv[0]]))
+        bits = [f"{len(assessed)} inferred" + (f" ({conf_str})" if conf_str else ""),
+                f"{len(undecided)} undecided"]
+        if n_abstain:
+            bits.append(f"{n_abstain} all-abstain (skipped)")
+        print("  " + ", ".join(bits))
+        ans = ask("  Apply: [a]ccept all inferred, [u]ndecided only, "
+                  "[r]eview each, [s]kip, [q]uit", 'aursq')
+        if ans == 'q':
+            raise UserQuit
+        if ans in ('a', 'u'):
+            for a, r in assessed:
+                _set_readmode_fix(a, r['mode'], _infer_source(r))
+            if assessed:
+                print(f"      accepted {len(assessed)} inferred value(s)")
+            for a, r in undecided:
+                if ans == 'u':
+                    _manual_readmode(a, ask, reason="inference undecided",
+                                     default=_prior_default(r))
+                else:
+                    a.notes.append("READ-MDE not written (inference undecided)")
+        elif ans == 'r':
+            apply_rest = False
+            for a, r in assessed:
+                if apply_rest:
+                    _set_readmode_fix(a, r['mode'], _infer_source(r))
+                    continue
+                print(f"  {a.stem}: "
+                      f"{readmode_assess.format_assessment(r, verbose=opts.verbose)}")
+                fans = ask("    Accept [y], [a]ll remaining, reject [n], "
+                           "[e]nter mode, [s]kip, [q]uit", 'yanesq')
+                if fans == 'q':
+                    raise UserQuit
+                if fans == 'a':
+                    apply_rest = True
+                if fans in ('y', 'a'):
+                    _set_readmode_fix(a, r['mode'], _infer_source(r))
+                elif fans == 'e':
+                    _manual_readmode(a, ask, reason="user override",
+                                     default=_prior_default(r))
+            for a, r in undecided:
+                _manual_readmode(a, ask, reason="inference undecided",
+                                 default=_prior_default(r))
+        # ans == 's': skip the category, nothing accepted
+
+    for a in cross_check:
+        try:
+            result = _assess(a)
+        except Exception as exc:
+            print(f"  {a.stem}: inference failed ({exc})")
             continue
         summary = readmode_assess.format_assessment(result, verbose=opts.verbose)
         existing = a.fix_for('READ-MDE')
-        if a in cross_check:
-            if result['mode'] and existing and result['mode'] != existing.value:
-                print(f"  {a.stem}: log says {existing.value} but {summary}")
-                if opts.yes and not sys.stdin.isatty():
-                    # Batch run: the human log record wins; never abort the
-                    # whole night over one flagged disagreement.
-                    a.notes.append(
-                        f"READ-MDE disagreement: log {existing.value} kept, "
-                        f"inference said {result['mode']} ({result['confidence']})")
-                    continue
-                ans = ask("    Keep [l]og value, use [i]nferred, [s]kip card, [q]uit",
-                          'lisq')
-                if ans == 'q':
-                    raise UserQuit
-                if ans == 'i':
-                    existing.value = result['mode']
-                    existing.source = _infer_source(result)
-                elif ans == 's':
-                    existing.approved = False
-            continue
-        print(f"  {a.stem}: {summary}")
-        mode = result['mode']
-        tier = CONFIDENCE_TIER[result['confidence']]
-        if mode and opts.yes and tier >= min_tier:
-            _set_readmode_fix(a, mode, _infer_source(result))
-            print(f"    auto-accepted ({result['confidence']} >= "
-                  f"{opts.readmode_min_confidence})")
-            continue
-        if opts.yes:      # non-interactive but below threshold
-            a.notes.append(f"READ-MDE not written (confidence "
-                           f"{result['confidence']} below threshold)")
-            continue
-        if mode:
-            ans = ask("    Accept [y], reject [n], [e]nter mode, [s]kip, [q]uit",
-                      'ynesq')
+        if result['mode'] and existing and result['mode'] != existing.value:
+            print(f"  {a.stem}: log says {existing.value} but {summary}")
+            if opts.yes and not sys.stdin.isatty():
+                # Batch run: the human log record wins; never abort the
+                # whole night over one flagged disagreement.
+                a.notes.append(
+                    f"READ-MDE disagreement: log {existing.value} kept, "
+                    f"inference said {result['mode']} ({result['confidence']})")
+                continue
+            ans = ask("    Keep [l]og value, use [i]nferred, [s]kip card, [q]uit",
+                      'lisq')
             if ans == 'q':
                 raise UserQuit
-            if ans == 'y':
-                _set_readmode_fix(a, mode, _infer_source(result))
-            elif ans == 'e':
-                _manual_readmode(a, ask, reason="user override",
-                                 default='SLOW' if result['prior_note'] else None)
-        else:
-            _manual_readmode(a, ask, reason="inference undecided",
-                             default='SLOW' if result['prior_note'] else None)
+            if ans == 'i':
+                existing.value = result['mode']
+                existing.source = _infer_source(result)
+            elif ans == 's':
+                existing.approved = False
 
 
 def _infer_source(result: dict) -> str:
@@ -836,6 +907,17 @@ def write_repaired(audit: FileAudit, output_dir: Path, overwrite: bool,
                         continue      # never overwrite a filled extension value
                     set_card(hdu.header, fix.key, fix.value,
                              '[s] Image nominal exposure time')
+        # A present-but-blank SEXPTIME/AEXPTIME card poisons downstream
+        # hdr.get(key, fallback) chains: astropy returns Undefined for the
+        # blank card instead of the fallback (reduxSetupGUI reads SEXPTIME
+        # first and then fails on float(Undefined)). Convert blank -> absent
+        # in the copy; filled cards are never touched and SEXPTIME is still
+        # never fabricated.
+        for key in ('SEXPTIME', 'AEXPTIME'):
+            if card_status(phdr, key).status == 'blank':
+                del phdr[key]
+                phdr.add_history(
+                    f"fix_exposure_info.py: removed blank {key} card")
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         phdr['HIERARCH FIXEXP DATE'] = (stamp, 'fix_exposure_info run (UTC)')
         # No comment: long original filenames would push the card past 80 chars
