@@ -1,43 +1,46 @@
-# LUT (Look-Up Tables) Module
+# LUT — lookup tables and reference data
 
-This module contains essential reference data files used by the LLAMAS data reduction pipeline.
+Static reference data the pipeline reads at run time. Some of it ships with the repository; the
+large calibration products do not and must be downloaded (see the repository
+[`README.md`](../../README.md)).
 
-## Key Files
+## Fibre maps
 
-### 
+| File | Status |
+|---|---|
+| `LLAMAS_FiberMap_rev04.dat` | **Current.** What the code reads — `Flat/fibre_flat.py`, `Cube/cubeConstruct.py`, `Image/WhiteLightModule.py` |
+| `LLAMAS_FiberMap_rev02.dat` | Superseded. Kept for reference |
 
-traceLUT.json
+Columns: `bench`, `fiber`, `xindex`, `yindex`, `xpos`, `ypos`. `bench` is the bench-side label
+(`1A`…`4B`) and `fiber` restarts from 0 within each bench-side. rev04 holds **2392** fibres:
+298/300 per bench-side in the order 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B.
 
+Note that an RSS file has one row per **live** fibre, so its row count is normally below 2392 and
+varies with the number of dead fibres. Resolve rows through `FIBERMAP['BENCHSIDE']` rather than
+assuming fixed offsets — see
+[`docs/workflow/07-reference.md`](../../docs/workflow/07-reference.md#file-formats).
 
-Core reference file containing:
-- Fibre trace positions for each spectrograph arm
-- Reference wavelength calibration data
-- Used by the tracing module to:
-  - Provide initial trace positions
-  - Guide trace finding algorithms
-  - Validate identified traces
+## Wavelength calibration
 
-### `LLAMAS_FiberMap_rev02.dat`
-Fibre mapping configuration file that:
-- Maps fibre numbers to physical positions
-- Defines the relationship between:
-  - Input fibre positions at telescope focal plane
-  - Output positions on the spectrograph
-- Essential for:
-  - Reconstructing white light images
-  - Mapping extracted spectra to sky positions
-  - Understanding cross-talk between adjacent fibers
+| File | Role |
+|---|---|
+| `ThAr_MagE_lines.dat` | ThAr line list |
+| `{red,green,blue}_peaks.csv` | Per-channel peak catalogues used by `Arc/arcSurface.py` |
+| `LLAMAS_reference_arc.pkl` | **Not in the repository** — download it (git-ignored). The reference wavelength solution that `Arc/` transfers onto science extractions |
 
-## Usage
+## Trace lookup
 
-These files are automatically loaded by the pipeline:
+`traceLUT.json` is the active table; `traceLUT_orig.json` and `traceLUT_template.json` are kept
+alongside it. Dated and experiment-specific variants (`traceLUT_20241129.json`,
+`traceLUT_jan2025.json`, `traceLUT_blueflip.json`, …) are **git-ignored** and exist only in local
+working copies.
 
-```python
-# Trace LUT is loaded during trace finding
-from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
-tracer = TraceLlamas(fitsfile)  # Automatically loads traceLUT.json
+## Flux standards
 
-# Fiber mapping is used during image reconstruction
-from llamas_pyjamas.Image.imageLlamas import ImageLlamas
-imager = ImageLlamas(fitsfile)  # Automatically loads fibermap.dat
-```
+[`standards/`](standards/README.md) holds the flux-standard index and spectra used by
+`Flux/fluxStandards.py` and `Flux/sensFunc.py`. `sensfunc_breakpoints.dat` holds the sensitivity
+function's b-spline breakpoints.
+
+## Not a Python package
+
+This directory contains data only — no `__init__.py`, no modules, nothing in the API reference.

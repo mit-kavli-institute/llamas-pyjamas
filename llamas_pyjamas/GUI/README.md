@@ -1,50 +1,40 @@
-# GUI Module
+# GUI — QuickLook interface
 
-This module provides a Graphical User Interface for the LLAMAS data reduction pipeline, making it easier for users to process and visualise spectroscopic data.
+The PyQt6 QuickLook GUI: browse a night's frames, extract on demand, and inspect white-light
+images and spectra. It uses **DS9** as the image display, driven over XPA.
 
-## Core Functionality
+| File | Role |
+|---|---|
+| `obslog.py` | **Entry point.** `MainWindow`, `HeaderWindow`, `PlotWindow`, `ImageRegions` |
+| `obslog_qt.py`, `header_qt.py` | Generated Qt classes for `obslog.ui` / `headerWidget.ui` |
+| `obslog.ui`, `headerWidget.ui` | Qt Designer layouts |
+| `guiExtract.py` | The extraction the GUI drives — `GUI_extract()`, `process_trace()`, `ExtractLlamasCube()`, `select_bias_for_extension()`, `compute_detector_background()`. Also imported by `reduce.py` |
 
-The GUI module offers:
-- Interactive file selection and batch processing
-- Real-time visualisation of traces and spectra
-- Progress monitoring for reduction steps
-- Configuration parameter adjustment
-- Results preview and validation
+## Running it
 
-## Key Files
+DS9 must already be running — every pick is a click in DS9.
 
-### `llamasgui.py`
-Main GUI application containing:
-- `LlamasGUI` class: Primary GUI window
-- File handling interface
-- Processing controls
-- Visualisation widgets
-
-### `guiutils.py`
-Helper functions for the GUI including:
-- Custom widgets and dialogs
-- Data visualisation tools
-- Parameter validation
-- State management
-
-## Usage
-
-Launch the GUI application:
-
-```python
-from llamas_pyjamas.GUI.llamasgui import LlamasGUI
-
-# Create and show GUI
-gui = LlamasGUI()
-gui.show()
+```bash
+cd llamas-pyjamas/llamas_pyjamas/GUI
+conda activate myenv
+ds9 &
+python obslog.py
 ```
 
-The GUI provides an intuitive interface for:
-- Loading raw FITS files
-- Setting reduction parameters
-- Running trace identification
-- Performing spectral extraction
-- Visualising results
-- Saving processed data
+The GUI produces the same white-light images as the LLAMAS observing GUI, plus extracted spectra
+for quick inspection. Striping in those images usually means the master bias dates from well
+before the science frames — rebuild it with `../Scripts/update_bias_master.py`.
 
-Note: The GUI requires PyQt5/PySide2 and matplotlib for operation.
+For post-reduction work — registration, combining dithers, science extraction — use the
+**CubeViewer** (`python -m llamas_pyjamas.CubeViewer`), not this GUI. See
+[`docs/workflow/`](../../docs/workflow/README.md).
+
+## Background subtraction
+
+[`../Tutorials/GUI_extract_background_subtraction.md`](../Tutorials/GUI_extract_background_subtraction.md)
+covers how `compute_detector_background()` works and when to adjust it.
+
+## Note
+
+This package has no `__init__.py` and needs a display, so it is **excluded from the Sphinx API
+build** — this README is its documentation.

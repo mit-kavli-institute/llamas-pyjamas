@@ -1,51 +1,26 @@
+# Extract — optimal 1D extraction
 
-# Extract Module
+Pulls a 1-D spectrum out of every traced fibre, propagating variance alongside the flux.
 
-This module handles the spectral extraction functionality for the LLAMAS instrument. It extracts one-dimensional spectra from two-dimensional fibre traces.
+| Module | Role |
+|---|---|
+| `extractLlamas.py` | Everything. `ExtractLlamas` (the extractor), `ExtractLlamasRay` (its Ray-parallel subclass), `save_extractions` / `load_extractions` / `sort_extractions`, and `effective_aperture_pix()` |
 
-## Core Functionality
+`reduce.py` imports `ExtractLlamas` and `save_extractions` from here.
 
-The extraction module performs several key operations:
-- Optimally extracts spectra using variance-weighted algorithms
-- Handles cross-talk corrections between adjacent fibres
-- Processes both science and calibration data
-- Generates variance arrays for extracted spectra
-- Manages metadata for extracted spectra
+## Methods
 
-## Key Files
+`boxcar` is the default; `horne` / `optimal` profile-weighted extraction is available. The
+error model is method-aware — the read-noise aperture follows the extraction aperture rather than
+a fixed pixel count.
 
-### 
+## Output
 
-extractLlamas.py
+Extractions are pickled as `*_extract.pkl`, one per camera, and later consolidated into the
+per-colour RSS files. Dead fibres are **dropped**, not zero-filled, so an extraction holds one row
+per *live* fibre; `../Utils/deadfibers.py` converts between live-row and fibre-map indexing.
 
+## See also
 
-Current production version of the extraction code. Contains:
-- 
-
-ExtractLlamas
-
- class: Main class for spectral extraction
-- Core extraction algorithms and utilities
-- Optimal extraction routines
-
-### `extractLlamasMaster.py`
-Development version with planned Ray implementation for parallel processing (work in progress, not yet implemented).
-
-## Usage
-
-The extraction module is typically used as part of the LLAMAS data reduction pipeline:
-
-```python
-from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
-
-# Create extraction object
-extractor = ExtractLlamas(fitsfile)
-
-# Process data
-extractor.process_hdu_data(hdu_data, hdu_header)
-
-# Save extracted spectra
-extractor.saveSpectra()
-```
-
-Note: The parallel processing features using Ray are currently under development and not yet available for production use.
+- Pipeline context: [`docs/workflow/02-running-the-reduction.md`](../../docs/workflow/02-running-the-reduction.md)
+- API reference: <https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/api/llamas_pyjamas.Extract.html>

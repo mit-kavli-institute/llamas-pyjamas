@@ -1,47 +1,33 @@
-# File Module
+# File — FITS I/O and RSS generation
 
-This module handles file management and I/O operations for the LLAMAS data reduction pipeline.
+Reads raw LLAMAS multi-extension frames and writes the pipeline's primary data product, the
+row-stacked-spectra (RSS) file.
 
-## Core Functionality
+| Module | Role |
+|---|---|
+| `llamasIO.py` | Raw MEF reading. `llamasAllCameras` / `llamasOneCamera` wrap a frame and its extensions; `process_fits_by_color()` splits a frame by channel; `getBenchSideChannel()` resolves an extension's identity from its header |
+| `llamasRSS.py` | `RSSgeneration` — assembles extractions into one RSS per colour. Also `update_ra_dec_in_fits()`, `apply_fibre_astrometry()`, `patch_rss_astrometry()` for the per-fibre WCS |
 
-The file module performs:
-- FITS file handling and validation
-- File sorting and organization
-- Header keyword management
-- Raw data import/export
-- Directory structure maintenance
-- Data product output formatting
+`reduce.py` imports `process_fits_by_color`, `RSSgeneration` and `update_ra_dec_in_fits`.
 
-## Key Files
+## Raw frame structure
 
-### `fileLlamas.py`
-Main file handling class containing:
-- `FileLlamas` class: Core file operations
-- FITS file reading/writing
-- Header manipulation tools
-- File type identification
-- Path management utilities
-- Output formatting standards
+A raw frame has one primary header plus 24 image extensions — 8 detector positions
+(1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B) × 3 colours, cycling red → green → blue per position. **Never
+assume a fixed index for a given colour or bench-side**; read the identity from each extension's
+header, which is what `getBenchSideChannel()` is for. Frames with missing cameras are repaired by
+[`../DataModel/validate.py`](../DataModel/validate.py) before processing.
 
-## Usage
+## RSS layout
 
-```python
-from llamas_pyjamas.File.fileLlamas import FileLlamas
+One row per live fibre, per colour. Extensions: `PRIMARY`, `SKYSUB`, `ERROR`, `MASK`,
+`COUNTS`, `SKY`, `WAVE`, `FWHM`, `FIBERMAP`, `SKYRESID`, `FLAM`, `FLAM_ERR`,
+`FIBERWCS`. `FIBERWCS` is deliberately separate from `FIBERMAP` so the astrometry can be
+re-solved without touching the data.
 
-# Create file handler
-file_handler = FileLlamas()
+Full layout and the bench-side row ordering:
+[`docs/workflow/07-reference.md`](../../docs/workflow/07-reference.md#file-formats).
 
-# Sort raw files
-sorted_files = file_handler.sort_raw_files(directory)
+## See also
 
-# Read FITS file
-data, header = file_handler.read_fits(filename)
-
-# Write processed data
-file_handler.write_fits(data, header, output_file)
-
-# Validate FITS header
-is_valid = file_handler.validate_header(header)
-```
-
-The file module provides consistent file handling across the entire reduction pipeline, ensuring data integrity and proper metadata management.
+API reference: <https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/api/llamas_pyjamas.File.html>

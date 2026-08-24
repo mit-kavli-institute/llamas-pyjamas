@@ -1,48 +1,31 @@
-# Image Module
+# Image — white-light image reconstruction
 
-This module handles image processing and reconstruction for the LLAMAS instrument, specifically the white light image creation.
+Collapses the extracted spectra along wavelength and lays the fibres out on sky to make a 2-D
+white-light image. It is the fastest visual check that tracing and extraction worked.
 
-## Core Functionality
+| Module | Role |
+|---|---|
+| `WhiteLightModule.py` | The reconstruction. `WhiteLight()`, `WhiteLightFits()`, `WhiteLightFromRSS()`, `WhiteLightQuickLook()`, `WhiteLightHex()`, plus `whitelight_grid()`, `hex_tile_image()`, `FiberMap()` and `color_isolation()` |
+| `processWhiteLight.py` | Post-processing: `remove_striping()`, `quartile_bias()` |
 
-The image module provides:
-- White light image reconstruction from fibre spectra
-- Image quality assessment tools
-- FITS file manipulation and handling
-- Flat field processing
+## The output grid
 
-## Key Files
+`whitelight_grid()` derives the image extent **from the fibre map** rather than hard-coding it.
+An earlier version assumed a 53 × 53 field while the fibres only reach x ≈ 46.0, y ≈ 44.2, which
+left roughly a quarter of every frame as NaN padding beyond the last fibre.
 
-### `imageLlamas.py`
-Main image processing class containing:
-- `ImageLlamas` class: Core image processing
-- White light reconstruction algorithms
-- Image quality metrics
+Fibres are laid out in **contiguous horizontal stripes by bench-side**, ordered 1A, 2A, 3A, 4A,
+4B, 3B, 2B, 1B from the top of the field down — so a striping artefact that respects those bands
+points at a per-bench-side problem (bias level, throughput tie), not at the reconstruction.
 
-### White Light Reconstruction
-The white light reconstruction process:
-1. Takes extracted 1D spectra from each fibre
-2. Collapses the spectra along wavelength axis
-3. Maps these values back to their original spatial positions
-4. Reconstructs a 2D image showing what the telescope was pointing at
-5. Useful for:
-   - Target acquisition verification
-   - Field identification
-   - fibre positioning confirmation
-   - Quick-look assessment of data quality
+Fibre positions come from `../LUT/LLAMAS_FiberMap_rev04.dat`.
 
-## Usage
+## Striping
 
-```python
-from llamas_pyjamas.Image.imageLlamas import ImageLlamas
+Visible striping usually means the master bias was taken well away from the science date. The
+usual remedy is to rebuild it with `../Scripts/update_bias_master.py`; `remove_striping()` is
+the cosmetic fallback.
 
-# Create image object
-imager = ImageLlamas(fitsfile)
+## See also
 
-# Generate white light image
-white_light = imager.generate_white_light()
-
-# Save reconstructed image
-imager.save_white_light(output_file)
-```
-
-The white light images provide immediate visual feedback about the observation quality and pointing accuracy.
+API reference: <https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/api/llamas_pyjamas.Image.html>

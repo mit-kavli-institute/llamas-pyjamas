@@ -68,7 +68,7 @@ python simple_cube_constructor.py LLAMAS_extract_RSS_red.fits \
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--fibermap` | Auto-detect | Path to LLAMAS_FiberMap_rev04.dat |
+| `--grid-method` | `oversampled` | Output grid: `oversampled`, `native_hex` or `nearest_hex` |
 | `--output` | Auto-generate | Output FITS filename |
 | `--pixel-size` | 0.3 | Spatial pixel size in arcseconds |
 | `--fiber-pitch` | 0.75 | Fiber-to-fiber pitch in arcseconds |
@@ -79,6 +79,10 @@ python simple_cube_constructor.py LLAMAS_extract_RSS_red.fits \
 | `--dec` | 0.0 | Dec of field center (degrees) |
 | `--wave-min` | Auto | Minimum wavelength (Angstroms) |
 | `--wave-max` | Auto | Maximum wavelength (Angstroms) |
+
+> There is no `--fibermap` option. Fibre positions are read from the RSS file's own `FIBERMAP`
+> extension (matched against the packaged fibre-map LUT), so the cube always uses the positions
+> that the RSS was built with.
 
 ## Examples
 
@@ -116,11 +120,11 @@ for channel in red green blue; do
 done
 ```
 
-### 5. Custom Fiber Map and Coordinates
+### 5. Explicit field centre and grid method
 
 ```bash
 python simple_cube_constructor.py RSS_red.fits \
-    --fibermap /custom/path/fibermap.dat \
+    --grid-method native_hex \
     --ra 150.1234 \
     --dec -23.4567 \
     --output field123_red_cube.fits

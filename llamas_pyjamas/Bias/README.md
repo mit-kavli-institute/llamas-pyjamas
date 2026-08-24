@@ -1,38 +1,28 @@
-# Bias Module
+# Bias — master bias creation and subtraction
 
-This module handles bias frame processing and correction for the LLAMAS instrument.
+Removes the electronic offset from every frame. This is the first correction applied, before
+tracing, flat fielding or extraction, and it runs on science, flat, arc and standard-star frames
+alike.
 
-## Core Functionality
+LLAMAS has two detector read modes — **slow** and **fast** — and each needs its own master bias.
+The pipeline picks the one matching the frame's read mode.
 
-The bias module performs:
-- Reading and validation of bias frames
-- Creation of master bias frames
-- Bias subtraction from science data
-- Statistical analysis of bias levels
-- Overscan region processing
+| Module | Role |
+|---|---|
+| `llamasBias.py` | `BiasLlamas` — the class `reduce.py` imports. Construct with `BiasLlamas(input_data)`, then call `master_bias()` to combine the input frames |
+| `biasFirst.py` | `resolve_master_bias_file()`, `bias_correct_frame()` — read-mode resolution and per-frame subtraction |
+| `biasChecking.py` | Validation: `run_bias_checks()`, `check_calibration_biases()`, `measure_edge_dc_offset()`, plus the `BiasCheckThresholds` / `BiasCheckReport` dataclasses |
+| `biasPlots.py` | Diagnostics: `plot_bias_check_dashboard()`, `plot_bias_level_heatmap()`, `plot_interfibre_residuals()` |
 
-## Key Files
+## Required files
 
-### `biasLlamas.py`
-Main bias processing class containing:
-- `BiasLlamas` class: Core bias handling
-- Master bias creation routines
-- Bias statistics calculations
-- Overscan correction methods
+`slow_master_bias.fits` and `fast_master_bias.fits` must sit in this directory. They are not in
+the repository — see the repository [`README.md`](../../README.md) for the download location.
+Both are git-ignored.
 
-## Usage
+Beyond the master bias, a small per-frame **edge DC offset** is measured from unilluminated pixels
+and removed; that is what `measure_edge_dc_offset()` provides.
 
-```python
-from llamas_pyjamas.Bias.biasLlamas import BiasLlamas
+## See also
 
-# Create bias object
-bias = BiasLlamas(bias_files)
-
-# Generate master bias
-master_bias = bias.create_master_bias()
-
-# Apply bias correction
-corrected_data = bias.apply_bias(science_data)
-```
-
-The bias module is typically run as part of the initial data reduction steps to remove the electronic offset in the CCD readout.
+API reference: <https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/api/llamas_pyjamas.Bias.html>

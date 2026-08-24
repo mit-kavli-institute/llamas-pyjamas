@@ -2,6 +2,10 @@
 
 This document outlines the step-by-step process of how the LLAMAS pipeline transforms RSS (Row-Stacked Spectra) FITS files into 3D IFU data cubes. The process involves reading fiber data, mapping fibers to spatial positions, and constructing a 3D cube with proper wavelength and spatial axes.
 
+> **Scope.** This describes `cubeConstruct.py` (`CubeConstructor`), the *traditional* constructor
+> and the default for `cube_method`. It is one of three cube paths — see
+> [`README.md`](README.md) for how they differ and when each runs.
+
 ## Overview of the Pipeline
 
 The cube generation follows these main steps:
@@ -105,7 +109,8 @@ For each wavelength slice:
 
 ### 5. Creating World Coordinate System (WCS)
 
-The `create_wcs` method:
+WCS construction (`create_wcs()` on `SimpleCubeConstructor`; `CubeConstructor` builds its
+header inline):
 - Creates a proper 3D WCS object
 - Sets the reference pixel to the center of the cube
 - Applies proper pixel scale in degrees/pixel
@@ -114,7 +119,8 @@ The `create_wcs` method:
 
 ### 6. Saving the Cube
 
-Each channel's cube is saved to a separate FITS file using the `save_cube` method:
+Each channel's cube is saved to a separate FITS file (`save_cube()` on
+`SimpleCubeConstructor`):
 - Creates a primary HDU with the 3D cube data
 - Adds the WCS information to the header
 - Adds additional metadata (units, origin, date, etc.)

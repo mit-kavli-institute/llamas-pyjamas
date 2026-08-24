@@ -1,42 +1,66 @@
-# Flat Module
+# Flat — flat fielding
 
-This module handles flat field calibration and processing for the LLAMAS instrument.
+Two separate corrections live here, and they are easy to confuse:
 
-## Core Functionality
+1. **Pixel-to-pixel (QE) flat** — the 2-D detector response, divided out of the science frames.
+   Built from the lamp flats.
+2. **Fibre-to-fibre flat** — the relative throughput of each fibre, applied in the RSS domain
+   (`*_RSS_{color}.fits` → `*_RSS_{color}_FF.fits`).
 
-The flat module performs:
-- Processing of twilight and dome flats
-- Creation of master flat frames
-- Flat field correction of science data
-- Fiber response calibration
-- Illumination correction
+LLAMAS has **no dome flats.** The inputs are lamp flats and twilight flats. The inter-bench-side
+absolute scale is tied from the **lamp**, not the twilight — a twilight cannot break the
+degeneracy between a real sky gradient and a bench-side throughput step.
 
-## Key Files
+## What runs
 
-### `flatLlamas.py`
-Main flat processing class containing:
-- `FlatLlamas` class: Core flat handling
-- Master flat creation routines
-- Fiber throughput calculations
-- Illumination correction methods
-- Pixel-to-pixel response normalization
+| Module | Role |
+|---|---|
+| `flatLlamas.py` | Pixel flat. `process_flat_field_complete()` (the full workflow), `process_pixel_flat_simple()`, `create_master_flat()`. Both entry points are imported by `reduce.py` |
+| `flatProcessing.py` | `reduce_flat()`, `produce_flat_extractions()`, `apply_flat_field()` — flat reduction and extraction orchestration |
+| `fibreFlat.py` | Fibre-to-fibre flat. `compute_fibre_flat_lamp_only()`, `compute_fibre_flat_twilight()`, `reduce_twilight_flat()`, `apply_fibre_flat_to_rss()` — all imported by `reduce.py` |
+| `scattered2dLlamas.py` | `scattered2dLlamas()` — 2-D scattered-light model |
+| `fibre_flat.py` | Earlier fibre-flat implementation (`FibreFlatField`, `run_fibre_flat`). Re-exported by `__init__.py` but not called by `reduce.py` |
 
-## Usage
+## Running the pixel flat directly
+
+There is no command-line interface on this module; call it from Python.
 
 ```python
-from llamas_pyjamas.Flat.flatLlamas import FlatLlamas
+from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete
 
-# Create flat object
-flat = FlatLlamas(flat_files)
-
-# Generate master flat
-master_flat = flat.create_master_flat()
-
-# Apply flat field correction
-corrected_data = flat.apply_flat(science_data)
-
-# Calculate fiber throughputs
-throughputs = flat.calculate_throughputs()
+results = process_flat_field_complete(
+    red_flat_file="path/to/red_flat.fits",
+    green_flat_file="path/to/green_flat.fits",
+    blue_flat_file="path/to/blue_flat.fits",
+    arc_calib_file=None,        # defaults to LUT/LLAMAS_reference_arc.pkl
+    output_dir="./output",
+    trace_dir="./mastercalib",
+)
+print(results['processing_status'], results['pixel_map_file'])
 ```
 
-The flat module is typically run after bias correction and before spectral extraction to normalize the pixel-to-pixel variations and fibre-to-fibre throughput differences.
+**Prerequisites:** master traces (`LLAMAS_master*traces.pkl`) in the calibration directory, and
+a reference arc (`../LUT/LLAMAS_reference_arc.pkl`). Run tracing and arc calibration first.
+
+**Outputs**, written to `<output_dir>/flat/`:
+
+- `pixel_maps.fits` — one 24-extension MEF holding every detector's pixel map
+- `flat_smooth_models.fits` — the smooth per-fibre models
+- intermediate `*_extractions_flat.pkl` and `combined_flat_extractions*.pkl`
+
+The pipeline is resume-aware: if these already exist it skips the stage unless `clobber = true`.
+
+## Open reviews
+
+Two standing reviews cover the current state of this subpackage, including known gaps:
+
+- [`FLAT_FIELDING_REVIEW.md`](FLAT_FIELDING_REVIEW.md) — pixel-to-pixel QE path
+- [`THROUGHPUT_FLAT_REVIEW.md`](THROUGHPUT_FLAT_REVIEW.md) — fibre throughput path
+
+`lampThroughput.py` and `twilightTie.py` are prototypes addressing those reviews'
+recommendations. They have tests (`Test/test_lamp_throughput.py`, `Test/test_twilight_tie.py`)
+but **are not yet wired into the pipeline** — nothing imports them.
+
+## See also
+
+API reference: <https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/api/llamas_pyjamas.Flat.html>
