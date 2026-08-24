@@ -12,6 +12,7 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 
 <details>
 <summary>Citation</summary>
+
 ```bibtex
 @unpublished{Hughes2026,
   author       = {Hughes, S. and Simcoe, R. and Furesz, G. and {the LLAMAS collaboration}},
@@ -19,21 +20,28 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
   note         = {in preparation},
   year         = {2026}}
 ```
+
 </details>
 
-## Documentation
+For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
 
-**📖 <https://mit-kavli-institute.github.io/llamas-pyjamas/>** — the full documentation site, with
-the [API reference](https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/) generated from
-the code.
+## 📖 Documentation
 
-If you are reducing a night of data, start with the **[end-to-end workflow
-guide](docs/workflow/README.md)** — it walks from a directory of raw frames through to a stacked,
-dithered field, covering setup, the reduction itself, WCS registration, combining dithers and
-science products.
+Full documentation for the pipeline — installation, the reduction workflow, the CubeViewer,
+flux calibration, and dither stacking — is now available at:
 
-Installation and the auxiliary-file downloads are below; the `Tutorials/` directory holds worked
-notebooks.
+**https://mit-kavli-institute.github.io/llamas-pyjamas/**
+
+## Version 1.0 release
+
+We are preparing for a **version 1.0 release in the next few weeks**. The full pipeline
+described in the documentation is already available on the
+[`rs-dev`](https://github.com/mit-kavli-institute/llamas-pyjamas/tree/rs-dev) branch, with
+the following caveats until the release is finalised:
+
+- some remaining bugs may still be present, and
+- older data (e.g. earlier commissioning runs) may require additional processing steps —
+  see the notes below, or contact us directly.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 <details>
@@ -46,35 +54,7 @@ notebooks.
   
 </details>
 
-
-
-**If your data was observed following the 15th of Sept 2025 Blue camera failures please use the following additional steps**
-
-<details>
-<summary>Missing camera command line steps</summary>
-
-Replace the original_science.fits file with the raw science frames you wish to reduce. This module inserts dummy data in the missing camera extensions to prevent pipeline failures.
-
-## Create a corrected copy
-```bash
-python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits
-```
-
-## With verbose logging to see what's happening
-```bash
-python -m llamas_pyjamas.DataModel.validate original_science.fits -o science_fixed.fits -v
-```
-
-## Direct module execution
-```bash
-# From the validate.py directory
-python validate.py original_science.fits -o science_fixed.fits -v
-```
-
-</details>
-
-
-
+**If your data was observed following the 15th of Sept 2025 Blue camera failures please note that the pipeline handles this accordingly**
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
@@ -110,10 +90,8 @@ llamas-pyjamas/
     ├── Bias/
     │   └── slow_master_bias.fits
     │   └── fast_master_bias.fits
-    ├── Combine/
     ├── Cube/
-    ├── CubeViewer/
-    ├── DataModel/
+    ├── Docs/
     ├── Extract/
     ├── File/
     ├── Flat/
@@ -122,18 +100,16 @@ llamas-pyjamas/
     ├── Image/
     ├── LUT/
     │   └── LLAMAS_reference_arc.pkl
-    ├── Masking/
     ├── mastercalib/
     │   └── slow_master_bias.fits
     │   └── fast_master_bias.fits
     │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
-    ├── Sky/
+    ├── example_config.txt
     ├── Trace/
     ├── Tutorials/
-    ├── Utils/
-    └── example_config.txt
+    └── Utils/
 ```
 ### Reduction script
 
@@ -143,14 +119,17 @@ This config file uses paths to specify which calibration images should be used a
 
 **Science files to be reduced can be done as a batch process but will all use the same calibration files listed**
 
-Sky subtraction and flux calibration **are** part of the reduction: set `sky_framework = true` for the sky framework, and tag your standard-star exposures so the sensitivity function can be built. See the [config keys reference](docs/workflow/06-reference.md#config-keys).
+Sky subtraction and flux calibration are not currently implemented in the reduction process but will be added in future. 
 
 To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Python environment where the pipeline is installed. Then run the command `python reduce.py 'path/to/your/config.txt'` to initiate the data reduction process.
 
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
 ### QuickLook GUI
-The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_bias_master.py` file in your data directory.
+
+**Note: a new version of the LLAMAS QL is in the final development stages as will be available soon**
+
+The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
 
 To run the QL GUI, execute the following commands from the terminal:
 
