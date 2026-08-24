@@ -9,12 +9,25 @@ Pipeline stages
 
 A full reduction runs these stages, in order:
 
-1. **Bias subtraction** — build/apply a master bias for the detector read mode.
-2. **Flat fielding** — trace and normalise twilight/dome flats; optionally apply the correction.
+1. **Validate** — check the calibration files and repair frames with missing camera extensions.
+2. **Bias subtraction** — apply the master bias matching the detector read mode, plus a per-frame
+   edge DC offset measured from unilluminated pixels.
 3. **Fibre tracing** — locate and trace fibre positions across each detector.
-4. **Spectral extraction** — optimal extraction of 1D spectra from the traced fibres.
-5. **Wavelength calibration** — solve and apply a wavelength solution from arc frames.
-6. **RSS / white-light / cube construction** — assemble row-stacked spectra and data cubes.
+4. **Pixel flat** — build the 2-D detector response from the lamp flats and divide it out.
+5. **Spectral extraction** — boxcar (default) or optimal extraction of every fibre, with
+   cosmic-ray removal, and a white-light image for quick inspection.
+6. **Wavelength calibration** — transfer the ThAr arc solution onto each extraction.
+7. **Sky subtraction** — build and subtract a per-fibre sky model (``sky_subtract``).
+8. **Heliocentric correction** — shift the wavelength scale to the barycentric frame.
+9. **RSS generation** — assemble the spectra into one row-stacked-spectra file per colour.
+10. **Fibre flat** — apply the fibre-to-fibre throughput correction.
+11. **Consolidate + QA** — collapse the per-stage files into one RSS per colour and run
+    wavelength QA.
+
+LLAMAS has no dome flats: the inputs are **lamp flats and twilight flats**.
+
+Stacking multiple dithers of a field into a deep cube happens *afterwards*, interactively in the
+CubeViewer or from the command line — see the end-to-end workflow guide linked below.
 
 Configuration file
 ------------------
@@ -29,7 +42,7 @@ packaged master calibration files.
    slow_bias_file = /path/to/LLAMAS_..._CAL_mef.fits
    fast_bias_file = /path/to/LLAMAS_..._CAL_mef.fits
 
-   # Twilight / dome flats per channel
+   # Twilight flats per channel
    red_twilight_flat   = /path/to/flat_mef.fits
    green_twilight_flat = /path/to/flat_mef.fits
    blue_twilight_flat  = /path/to/flat_mef.fits
@@ -69,6 +82,10 @@ RSS files, and cubes to the configured output directories.
 Next steps
 ----------
 
+* **Read the** `end-to-end workflow guide
+  <https://github.com/mit-kavli-institute/llamas-pyjamas/blob/documentation/docs/workflow/README.md>`_
+  — a task-oriented walkthrough from a directory of raw frames to a stacked, dithered field,
+  covering registration, combining dithers and science extraction.
 * Browse the :doc:`api/modules` reference for detailed module, class, and function documentation.
 * Key entry points: :mod:`llamas_pyjamas.reduce` (orchestration),
   :mod:`llamas_pyjamas.Trace` (tracing), :mod:`llamas_pyjamas.Extract` (extraction),

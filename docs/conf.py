@@ -62,6 +62,12 @@ autodoc_mock_imports = [
     # inside functions (resource_filename), never at import time, so mocking it
     # is safe and avoids pinning a legacy setuptools in the docs build.
     'pkg_resources',
+    # matplotlib itself is installed (autodoc executes it), but its Qt backend is
+    # not usable here: with PyQt6 mocked, matplotlib/backends/qt_compat.py derives
+    # an empty version tuple from the mock and then raises ImportError on
+    # `if _version_info < (5, 12)`. Mocking just the leaf backend module keeps the
+    # CubeViewer plot panels importable.
+    'matplotlib.backends.backend_qtagg',
 ]
 
 # -- Napoleon (Google-style docstrings) --------------------------------------

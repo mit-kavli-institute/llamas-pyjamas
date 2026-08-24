@@ -13,5 +13,6 @@ Submodules
    :maxdepth: 4
 
    llamas_pyjamas.Bias.biasChecking
+   llamas_pyjamas.Bias.biasFirst
    llamas_pyjamas.Bias.biasPlots
    llamas_pyjamas.Bias.llamasBias

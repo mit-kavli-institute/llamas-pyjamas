@@ -14,4 +14,5 @@ Submodules
 
    llamas_pyjamas.Arc.arcLlamas
    llamas_pyjamas.Arc.arcLlamasMulti
+   llamas_pyjamas.Arc.arcSurface
    llamas_pyjamas.Arc.arcValidation

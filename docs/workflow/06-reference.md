@@ -160,7 +160,9 @@ quote paths**). The authoritative, annotated list is
 
 - Repository [`README.md`](../../README.md) — install, auxiliary-file downloads, QuickLook GUI.
 - [`example_config.txt`](../../llamas_pyjamas/example_config.txt) — every config key, annotated.
-- Sphinx API docs — `cd docs && make html`.
+- [Published documentation site](https://mit-kavli-institute.github.io/llamas-pyjamas/) — the
+  designed overview, with the full [API reference](https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/)
+  under `/sphinx/`. To build it locally instead: `cd docs && make html`.
 - Tutorial notebooks — [`llamas_pyjamas/Tutorials/`](../../llamas_pyjamas/Tutorials/).
 
 ⟵ [Back to overview](README.md)

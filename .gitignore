@@ -22,3 +22,6 @@ llamas_pyjamas/mastercalib
 llamas_pyjamas/LUT/LLAMAS_reference_arc.pkl
 llamas_pyjamas/LUT/LLAMAS_reference_arc_refined*.pkl
 llamas_pyjamas/LUT/LLAMAS_reference_arc_slim.pkl
+
+# Pipeline run logs at the package root
+llamas_pyjamas/logs/

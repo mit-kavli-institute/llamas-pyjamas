@@ -1,6 +1,6 @@
 """
 llamas_pyjamas.Sky.skyQA
-=======================
+========================
 Quality-assurance diagnostics for the sky-subtraction framework.
 
 Quantifies how much OH-line residual was removed by comparing the FF ``FLUX``

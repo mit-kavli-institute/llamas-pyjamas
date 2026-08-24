@@ -34,13 +34,18 @@ API coverage
 ------------
 
 The API Reference is generated automatically from the package docstrings. It covers the
-importable pipeline subpackages — ``Arc``, ``Bias``, ``Cube``, ``DataModel``,
-``Extract``, ``File``, ``Flat``, ``Image``, ``Masking``, ``QA``, ``Trace``, ``Utils`` —
-and the top-level ``config``, ``constants``, and ``reduce`` modules.
+importable pipeline subpackages — ``Arc``, ``Bias``, ``Combine``, ``Cube``, ``CubeViewer``,
+``DataModel``, ``Extract``, ``File``, ``Flat``, ``Flux``, ``Image``, ``Masking``, ``QA``,
+``Sky``, ``Trace``, ``Utils`` — and the top-level ``config``, ``constants``, and ``reduce``
+modules.
 
-The ``GUI`` package and the standalone analysis/maintenance scripts (``Flux``,
-``Postprocessing``, ``Scripts``) are **not** auto-documented: they are not structured as
-importable packages and/or require a display, so they are excluded from the build.
+Display-dependent code is not a barrier: ``PyQt6``, ``pyds9`` and the Qt matplotlib backend are
+mocked at build time, so ``CubeViewer`` is documented in full.
+
+The ``GUI``, ``Postprocessing`` and ``Scripts`` directories are **not** auto-documented — they
+have no ``__init__.py`` and are collections of standalone scripts rather than importable
+packages. The ``Tests`` package and the ``Sky/diagnosis`` investigation scripts are excluded as
+development tooling, not public API.
 
 Indices and tables
 ------------------

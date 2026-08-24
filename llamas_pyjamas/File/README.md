@@ -26,7 +26,7 @@ One row per live fibre, per colour. Extensions: `PRIMARY`, `SKYSUB`, `ERROR`, `M
 re-solved without touching the data.
 
 Full layout and the bench-side row ordering:
-[`docs/workflow/07-reference.md`](../../docs/workflow/07-reference.md#file-formats).
+[`docs/workflow/06-reference.md`](../../docs/workflow/06-reference.md#file-formats).
 
 ## See also
 

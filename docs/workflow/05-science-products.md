@@ -1,6 +1,6 @@
 # Stage 5 — Science products
 
-⟵ [Combining the dithers](04-combining-dithers.md) · [Reference ⟶](07-reference.md)
+⟵ [Combining the dithers](04-combining-dithers.md) · [Reference ⟶](06-reference.md)
 
 With a combined field open in the CubeViewer, the **Extraction** menu turns the stack into science:
 optimal point-source spectra, continuum-subtracted narrowband images, and an absolute flux scale tied
@@ -91,4 +91,4 @@ quasar — an epoch mismatch.*
 - Continuum-subtracted narrowband surface-brightness images.
 - An absolute flux scale (applied to the open cube; recorded in its header).
 
-⟵ [Combining the dithers](04-combining-dithers.md) · [Reference & troubleshooting ⟶](07-reference.md)
+⟵ [Combining the dithers](04-combining-dithers.md) · [Reference & troubleshooting ⟶](06-reference.md)

@@ -73,7 +73,7 @@ pane, and the summary bar at the bottom tallies what has been assigned.*
 The config is a simple `key = value` text file (`#` comments; comma-separated lists; **paths not
 quoted**). The keys the GUI fills — and the many optional tuning keys it leaves at their defaults —
 are documented inline in [`example_config.txt`](../../llamas_pyjamas/example_config.txt) and
-summarised in the [Reference page](07-reference.md#config-keys).
+summarised in the [Reference page](06-reference.md#config-keys).
 
 > **Minimum to proceed:** at least one *Science* frame and the three *Flat* colours. The GUI will warn
 > (but let you continue) if twilights, arcs, or bias are missing — it falls back to packaged

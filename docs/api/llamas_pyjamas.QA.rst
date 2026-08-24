@@ -14,3 +14,5 @@ Submodules
 
    llamas_pyjamas.QA.llamasQA
    llamas_pyjamas.QA.qa_flatfield
+   llamas_pyjamas.QA.qa_registration
+   llamas_pyjamas.QA.waveQA

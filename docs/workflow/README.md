@@ -43,7 +43,7 @@ CubeViewer or from the command line.
 | 3 | [Registration (WCS)](03-registration.md) | CubeViewer *WCS* menu | Gaia-anchored per-fibre RA/DEC |
 | 4 | [Combining the dithers](04-combining-dithers.md) | CubeViewer *Combine* / `combineField` | stacked cube / mosaic + depth maps |
 | 5 | [Science products](05-science-products.md) | CubeViewer *Extraction* menu | optimal spectra, narrowband, flux anchor |
-| — | [Reference & troubleshooting](07-reference.md) | — | file formats, config keys, cheat-sheet |
+| 6 | [Reference & troubleshooting](06-reference.md) | — | file formats, config keys, cheat-sheet |
 
 Read them in order the first time; afterwards each page stands alone.
 
@@ -84,4 +84,4 @@ python -m llamas_pyjamas.CubeViewer
 python -m llamas_pyjamas.Combine.combineField --dir /path/to/reduced --object J2151 --cube
 ```
 
-See [Reference & troubleshooting](07-reference.md) for the full option lists and directory layout.
+See [Reference & troubleshooting](06-reference.md) for the full option lists and directory layout.

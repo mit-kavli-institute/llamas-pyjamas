@@ -13,7 +13,7 @@ Two ways to get a WCS:
   header pointing is not reliable.
 
 Calibration (from the J1613 field, TEL_ROT=212, tied to 2 Gaia stars and confirmed vs PanSTARRS)
------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------
 * The LLAMAS field is **mirror-imaged** on sky -- the correct WCS has ``det(CD) > 0`` (:data:`IFU_MIRRORED`).
 * **The rotator keyword is the sky PA of the fibre +x axis:** image +x points at PA = TEL_ROT
   (E of N), +y at TEL_ROT-90. Implemented as a PC rotation of ``pa_deg + IFU_PA_OFFSET``.

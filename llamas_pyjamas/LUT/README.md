@@ -18,7 +18,7 @@ Columns: `bench`, `fiber`, `xindex`, `yindex`, `xpos`, `ypos`. `bench` is the be
 Note that an RSS file has one row per **live** fibre, so its row count is normally below 2392 and
 varies with the number of dead fibres. Resolve rows through `FIBERMAP['BENCHSIDE']` rather than
 assuming fixed offsets — see
-[`docs/workflow/07-reference.md`](../../docs/workflow/07-reference.md#file-formats).
+[`docs/workflow/06-reference.md`](../../docs/workflow/06-reference.md#file-formats).
 
 ## Wavelength calibration
 

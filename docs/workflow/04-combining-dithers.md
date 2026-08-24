@@ -84,7 +84,7 @@ python -m llamas_pyjamas.Combine.combineField \
 
 Useful options: `--channels`, `--band LO HI`, `--units sb|flux`, `--weight ivar|uniform|exptime`,
 `--kernel`, `--fwhm`, `--pixscale`, `--scale-transparency`, `--keep-bad-fibres`, `-o out.fits`,
-`--png`. Outputs default to `reduced/combined/`. See [Reference](07-reference.md#combinefield) for the
+`--png`. Outputs default to `reduced/combined/`. See [Reference](06-reference.md#combinefield) for the
 full list.
 
 ## What you get

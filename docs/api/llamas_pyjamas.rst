@@ -17,14 +17,18 @@ Subpackages
 
    llamas_pyjamas.Arc
    llamas_pyjamas.Bias
+   llamas_pyjamas.Combine
    llamas_pyjamas.Cube
+   llamas_pyjamas.CubeViewer
    llamas_pyjamas.DataModel
    llamas_pyjamas.Extract
    llamas_pyjamas.File
    llamas_pyjamas.Flat
+   llamas_pyjamas.Flux
    llamas_pyjamas.Image
    llamas_pyjamas.Masking
    llamas_pyjamas.QA
+   llamas_pyjamas.Sky
    llamas_pyjamas.Trace
    llamas_pyjamas.Utils
 
