@@ -56,6 +56,48 @@ Use `FLAM`/`FLAM_ERR` for flux-calibrated science; `WAVE` is per-fibre and nativ
 [stage 2](02-running-the-reduction.md#the-per-exposure-product-the-rss-file). Fibre solid angle is in
 the `FIBAREA` primary keyword (≈0.44 arcsec²); surface brightness = flux / `FIBAREA`.
 
+### Bench-side row ordering inside an RSS
+
+Rows are grouped by bench-side in a **fixed order**, identical in all three colours:
+
+    1A · 1B · 2A · 2B · 3A · 3B · 4A · 4B
+
+The nominal fibre complement, from `LUT/LLAMAS_FiberMap_rev04.dat`:
+
+| Bench-side | Fibres | Nominal row range |
+|---|---:|---:|
+| **1A** | 298 | 0 – 297 |
+| **1B** | 300 | 298 – 597 |
+| **2A** | 300 | 598 – 897 |
+| **2B** | 298 | 898 – 1195 |
+| **3A** | 298 | 1196 – 1493 |
+| **3B** | 300 | 1494 – 1793 |
+| **4A** | 300 | 1794 – 2093 |
+| **4B** | 298 | 2094 – 2391 |
+
+**Nominal total 2392 fibres.**
+
+> **Row ranges are not constant between exposures.** Extraction emits *one row per live fibre* —
+> dead fibres are dropped, not zero-filled — so a frame with three dead fibres yields 2389 rows and
+> every bench-side after the first dead one is shifted. **Always resolve rows through
+> `FIBERMAP['BENCHSIDE']` rather than hard-coding the ranges above**; treat the table as the
+> nominal layout, not as a file offset.
+
+```python
+with fits.open(rss_file) as hdul:
+    fibermap = hdul['FIBERMAP'].data
+    rows = np.where(fibermap['BENCHSIDE'] == '3B')[0]   # authoritative
+    flam = hdul['FLAM'].data[rows, :]
+    wave = hdul['WAVE'].data[rows, :]
+```
+
+`Utils/deadfibers.py` converts between the two indexings: `live_fibre_ids()` recovers each live
+row's physical fibre id, and `insert_dead_fibre_rows()` expands a live array back to fibre-map
+indexing.
+
+In the white-light image the bench-sides appear as **contiguous horizontal stripes**, running
+1A, 2A, 3A, 4A, 4B, 3B, 2B, 1B from the top of the field to the bottom.
+
 **Combined cube** (`combined/<field>_cube_{color}.fits`): `PRIMARY` (data, 3-D WCS) · `VAR` ·
 `COVERAGE` · `NEXP` · `WAVELENGTH` table. The header lists the contributing RSS files
 (`NRSSFILE`, `RSSFILn`) so opening the cube rebuilds the super-RSS for extraction.
