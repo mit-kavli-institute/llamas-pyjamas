@@ -13,10 +13,11 @@ The Bias Correction feature removes electronic offset (bias level) from CCD read
 
 ## Key Files
 - `Bias/llamasBias.py` - Main bias processing module
-  - `BiasLlamas` class: Core bias handling functionality
-  - `create_master_bias()`: Combines multiple bias frames
-  - `apply_bias_correction()`: Subtracts bias from data
-  - Statistical analysis and validation tools
+  - `BiasLlamas` class: core bias handling; constructed with `BiasLlamas(input_data)`
+  - `master_bias()`: combines the input bias frames into a master bias
+- `Bias/biasChecking.py` - master-bias validation
+- `Bias/biasPlots.py` - diagnostic plots
+- `Bias/biasFirst.py` - first-frame / read-mode helpers
 
 ## Data Structures
 - **Master Bias Frame**: 2D array with combined bias pattern
@@ -31,17 +32,9 @@ The Bias Correction feature removes electronic offset (bias level) from CCD read
 ```python
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 
-# Create bias processor
-bias_processor = BiasLlamas(bias_file_list)
-
-# Generate master bias
-master_bias = bias_processor.create_master_bias()
-
-# Apply correction to data
-corrected_data = bias_processor.apply_bias_correction(raw_data)
-
-# Get bias statistics
-stats = bias_processor.get_bias_statistics()
+# Create bias processor and build the master bias
+bias_processor = BiasLlamas(input_data)
+bias_processor.master_bias()
 ```
 
 ## Pipeline Integration

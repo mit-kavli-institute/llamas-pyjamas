@@ -1,45 +1,44 @@
-# Claude Code Documentation
+# Feature notes
 
-This directory contains comprehensive feature documentation for the LLAMAS pipeline, specifically designed for use with Claude Code (claude.ai/code). Each file provides detailed technical information about a major pipeline feature.
+Narrative, feature-oriented notes on the LLAMAS pipeline, written to give a quick conceptual
+overview of each major stage. They describe *what a stage does and why*, which the auto-generated
+API reference does not.
 
-## Purpose
+**These are reference material, not current documentation.** They were written between 2025 and
+mid-2026 and are not kept in step with the code. Where a note disagrees with the code, the code
+wins. For current material see:
 
-These documentation files are created to help Claude Code understand and work with the LLAMAS pipeline features quickly and effectively. Each document contains:
+- the published site — <https://mit-kavli-institute.github.io/llamas-pyjamas/>
+- the end-to-end workflow guide — [`docs/workflow/`](../../docs/workflow/README.md)
+- the API reference — [`docs/`](../../docs/) (Sphinx), published under `/sphinx/`
 
-- Overview and core functionality
-- Key files and data structures  
-- Usage patterns and code examples
-- Pipeline integration details
-- Configuration options and dependencies
-- Performance notes and quality metrics
+## Contents
 
-## Feature Documentation
+### Core reduction
+- `FIBER_TRACING.md` — fibre position identification and mapping
+- `SPECTRUM_EXTRACTION.md` — 1D extraction, optimal and boxcar
+- `WAVELENGTH_CALIBRATION.md` — pixel→wavelength from ThAr arcs
+- `FLAT_FIELD_PROCESSING.md` — pixel-to-pixel sensitivity and per-fibre normalisation
+- `BIAS_CORRECTION.md` — electronic offset removal
 
-### Core Data Reduction Features
-- **FIBER_TRACING.md** - Fiber position identification and mapping
-- **SPECTRUM_EXTRACTION.md** - 1D spectrum extraction with optimal/boxcar methods
-- **WAVELENGTH_CALIBRATION.md** - Pixel-to-wavelength conversion using arc lamps
-- **FLAT_FIELD_PROCESSING.md** - Pixel-to-pixel sensitivity corrections with per-fiber normalization
-- **BIAS_CORRECTION.md** - Electronic offset removal from CCD readout
+### Data products
+- `RSS_FILE_GENERATION.md` — row-stacked-spectra FITS creation
+- `CUBE_CONSTRUCTION.md` — 3D cube construction, including the CRR method
+- `WHITE_LIGHT_IMAGING.md` — 2D image reconstruction from spectra
 
-### Data Product Generation
-- **RSS_FILE_GENERATION.md** - Row-Stacked Spectra FITS file creation
-- **CUBE_CONSTRUCTION.md** - 3D data cube construction with advanced CRR method
-- **WHITE_LIGHT_IMAGING.md** - 2D image reconstruction from spectroscopic data
+### Quality and throughput
+- `QUALITY_ASSURANCE.md` — QA visualisation and validation
+- `THROUGHPUT_ANALYSIS.md` — system efficiency and flux-calibration calculations
 
-### Data Validation and Quality Control
-- **DATA_VALIDATION.md** - FITS structure validation, missing extension handling, trace fallback mechanisms
-- **QUALITY_ASSURANCE.md** - Comprehensive QA visualization and validation
-- **THROUGHPUT_ANALYSIS.md** - System efficiency and flux calibration calculations
+### Interface
+- `GUI_INTERFACE.md` — the interactive extraction GUI
 
-### User Interface and Utilities
-- **GUI_INTERFACE.md** - Interactive graphical interface for pipeline operations
-- **POSTPROCESSING_UTILS.md** - Standalone FITS arithmetic and quick white light preview tools
+## Which of these still earn their keep
 
-## Usage
+`GUI_INTERFACE.md` and `THROUGHPUT_ANALYSIS.md` cover `GUI/` and `Flux/`, which are **excluded
+from the Sphinx API build** — for those two, this is the only prose documentation that exists.
+`CUBE_CONSTRUCTION.md` is the only explanation of *why* covariance-regularised reconstruction is
+used (see [`../papers/Liu_2020_AJ_159_22.pdf`](../papers/Liu_2020_AJ_159_22.pdf)).
 
-These files are referenced from the main `CLAUDE.md` file in the repository root and provide the detailed context needed for Claude Code to work effectively with each pipeline feature.
-
-## Maintenance
-
-When adding new features to the pipeline, create corresponding documentation files in this directory following the established format and update the references in `CLAUDE.md`.
+The rest overlap the Sphinx API reference and the per-module `README.md` files, and should be
+read as background rather than as instructions.

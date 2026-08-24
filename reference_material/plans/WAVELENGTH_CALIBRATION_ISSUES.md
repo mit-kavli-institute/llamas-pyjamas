@@ -47,7 +47,7 @@
 
 ### Problem Description
 
-The `arcTransfer()` function ([Arc/arcLlamas.py:365-426](../../Arc/arcLlamas.py)) blindly copies wavelength calibration data from arc lamp extractions to science/flat field extractions without any quality validation:
+The `arcTransfer()` function ([Arc/arcLlamas.py:365-426](../../llamas_pyjamas/Arc/arcLlamas.py)) blindly copies wavelength calibration data from arc lamp extractions to science/flat field extractions without any quality validation:
 
 ```python
 # Line 422-424: No validation before or after this copy
@@ -61,7 +61,7 @@ for ifiber in range(min_nfibers):
 
 #### 3A: Line Matching Failed
 
-**Location**: [Arc/arcLlamas.py:333-335](../../Arc/arcLlamas.py#L333-L335)
+**Location**: [Arc/arcLlamas.py:333-335](../../llamas_pyjamas/Arc/arcLlamas.py#L333-L335)
 
 ```python
 if (len(final_fitx) == 0):
@@ -81,7 +81,7 @@ if (len(final_fitx) == 0):
 
 #### 3B: Poor Fit Quality
 
-**Location**: [Arc/arcLlamas.py:345-347](../../Arc/arcLlamas.py#L345-L347)
+**Location**: [Arc/arcLlamas.py:345-347](../../llamas_pyjamas/Arc/arcLlamas.py#L345-L347)
 
 ```python
 rms = np.std(final_fitwv - final_arcfit.eval(final_fitx))
@@ -100,7 +100,7 @@ ax2.set_title(f'RMS = {rms:.2f} A')
 
 #### 3C: Extrapolation Beyond Calibration Range
 
-**Location**: [Arc/arcLlamas.py:358](../../Arc/arcLlamas.py#L358)
+**Location**: [Arc/arcLlamas.py:358](../../llamas_pyjamas/Arc/arcLlamas.py#L358)
 
 ```python
 arcspec_shifted[extension].wave[ifiber, :] = final_arcfit.eval(x)
@@ -118,7 +118,7 @@ arcspec_shifted[extension].wave[ifiber, :] = final_arcfit.eval(x)
 
 #### 3D: NaN Propagation
 
-**Location**: [Arc/arcLlamas.py:132-136](../../Arc/arcLlamas.py#L132-L136)
+**Location**: [Arc/arcLlamas.py:132-136](../../llamas_pyjamas/Arc/arcLlamas.py#L132-L136)
 
 ```python
 if (success == 1):
@@ -282,7 +282,7 @@ def validate_wavelength_solution(extraction_obj, channel, fiber_idx):
 
 **Recommendation**: Skip this solution initially. Only add after Solution 3.1 and 3.3 are tested and working.
 
-**Location**: OPTIONAL modifications to `arcSolve()` in [Arc/arcLlamas.py:336](../../Arc/arcLlamas.py#L336)
+**Location**: OPTIONAL modifications to `arcSolve()` in [Arc/arcLlamas.py:336](../../llamas_pyjamas/Arc/arcLlamas.py#L336)
 
 **Option A: Add quality checks that store metadata but don't stop execution**
 
@@ -328,7 +328,7 @@ Simply don't modify `arcSolve()` at all. All validation happens in `arcTransfer(
 
 #### Solution 3.3: Integrate Validation into arcTransfer
 
-**Location**: Modify `arcTransfer()` in [Arc/arcLlamas.py:420-424](../../Arc/arcLlamas.py#L420-L424)
+**Location**: Modify `arcTransfer()` in [Arc/arcLlamas.py:420-424](../../llamas_pyjamas/Arc/arcLlamas.py#L420-L424)
 
 **This is the MAIN change** - adds validation before transferring wavelength data.
 
@@ -413,7 +413,7 @@ if validation_results['n_fibers_invalid'] > 0:
 
 **Recommendation**: Skip this initially. Only add if you want historical quality tracking.
 
-**Location**: OPTIONAL modification to `arcSolve()` around [Arc/arcLlamas.py:362](../../Arc/arcLlamas.py#L362)
+**Location**: OPTIONAL modification to `arcSolve()` around [Arc/arcLlamas.py:362](../../llamas_pyjamas/Arc/arcLlamas.py#L362)
 
 ```python
 # OPTIONAL: Add import at top of arcLlamas.py
@@ -473,7 +473,7 @@ for ifiber in range(min_nfibers):
 
 #### 4A: Different Trace Files Used
 
-**Location**: [Flat/flatProcessing.py:144](../../Flat/flatProcessing.py#L144)
+**Location**: [Flat/flatProcessing.py:144](../../llamas_pyjamas/Flat/flatProcessing.py#L144)
 
 ```python
 # Flat field extraction uses one set of traces
@@ -503,7 +503,7 @@ trace_v2.pkl:  Fiber 0 → y-pixels [11-16]  # Off by 1 pixel
 
 #### 4B: Dead Fiber Handling
 
-**Location**: [Extract/extractLlamas.py:143-148](../../Extract/extractLlamas.py#L143-L148)
+**Location**: [Extract/extractLlamas.py:143-148](../../llamas_pyjamas/Extract/extractLlamas.py#L143-L148)
 
 ```python
 if 'dead_fibers' in self.LUT and benchside in self.LUT['dead_fibers']:
@@ -552,13 +552,13 @@ Arc trace:   fibers sorted by IFU spaxel ID (different spatial order)
 
 #### 4D: Trace Attribute Removed by Sanitization
 
-**Location**: [Flat/flatLlamas.py:353](../../Flat/flatLlamas.py#L353)
+**Location**: [Flat/flatLlamas.py:353](../../llamas_pyjamas/Flat/flatLlamas.py#L353)
 
 ```python
 sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated)
 ```
 
-**Location of sanitization**: [Flat/flatLlamas.py:62-98](../../Flat/flatLlamas.py#L62-L98)
+**Location of sanitization**: [Flat/flatLlamas.py:62-98](../../llamas_pyjamas/Flat/flatLlamas.py#L62-L98)
 
 ```python
 for extraction in extractions:
@@ -581,7 +581,7 @@ for extraction in extractions:
 
 #### Solution 4.1: Add Physical Fiber ID Tracking
 
-**Location**: Modify `ExtractLlamas.__init__()` in [Extract/extractLlamas.py:77-126](../../Extract/extractLlamas.py#L77-L126)
+**Location**: Modify `ExtractLlamas.__init__()` in [Extract/extractLlamas.py:77-126](../../llamas_pyjamas/Extract/extractLlamas.py#L77-L126)
 
 ```python
 # Add after line 126 (self.fiberid initialization)
@@ -636,7 +636,7 @@ else:
 
 #### Solution 4.2: Add Fiber ID Matching to arcTransfer
 
-**Location**: Replace transfer loop in [Arc/arcLlamas.py:420-424](../../Arc/arcLlamas.py#L420-L424)
+**Location**: Replace transfer loop in [Arc/arcLlamas.py:420-424](../../llamas_pyjamas/Arc/arcLlamas.py#L420-L424)
 
 ```python
 # BEFORE FIBER LOOP: Check if fiber IDs are available
@@ -918,7 +918,7 @@ def arcTransfer(scidict, arcdict):
 
 #### Solution 4.4: Preserve Trace Metadata Through Sanitization
 
-**Location**: Modify `sanitize_extraction_dict_for_pickling()` in [Flat/flatLlamas.py:62-98](../../Flat/flatLlamas.py#L62-L98)
+**Location**: Modify `sanitize_extraction_dict_for_pickling()` in [Flat/flatLlamas.py:62-98](../../llamas_pyjamas/Flat/flatLlamas.py#L62-L98)
 
 ```python
 def sanitize_extraction_dict_for_pickling(extraction_dict):
@@ -1450,10 +1450,10 @@ if not SKIP_VALIDATION:
 
 ## References
 
-- Current implementation: [Arc/arcLlamas.py](../../Arc/arcLlamas.py)
-- Extraction code: [Extract/extractLlamas.py](../../Extract/extractLlamas.py)
-- Flat field processing: [Flat/flatLlamas.py](../../Flat/flatLlamas.py)
-- Pipeline orchestration: [reduce.py](../../reduce.py)
+- Current implementation: [Arc/arcLlamas.py](../../llamas_pyjamas/Arc/arcLlamas.py)
+- Extraction code: [Extract/extractLlamas.py](../../llamas_pyjamas/Extract/extractLlamas.py)
+- Flat field processing: [Flat/flatLlamas.py](../../llamas_pyjamas/Flat/flatLlamas.py)
+- Pipeline orchestration: [reduce.py](../../llamas_pyjamas/reduce.py)
 
 ---
 
