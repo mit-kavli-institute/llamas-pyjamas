@@ -21,7 +21,19 @@ EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
 ```
 </details>
 
-For instructions on installation, compilation, and runtime, please see below and the files in the Tutorials directory. Instructions will be kept as up to date as possible as the pipeline develops.
+## Documentation
+
+**📖 <https://mit-kavli-institute.github.io/llamas-pyjamas/>** — the full documentation site, with
+the [API reference](https://mit-kavli-institute.github.io/llamas-pyjamas/sphinx/) generated from
+the code.
+
+If you are reducing a night of data, start with the **[end-to-end workflow
+guide](docs/workflow/README.md)** — it walks from a directory of raw frames through to a stacked,
+dithered field, covering setup, the reduction itself, WCS registration, combining dithers and
+science products.
+
+Installation and the auxiliary-file downloads are below; the `Tutorials/` directory holds worked
+notebooks.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 <details>
@@ -98,8 +110,10 @@ llamas-pyjamas/
     ├── Bias/
     │   └── slow_master_bias.fits
     │   └── fast_master_bias.fits
+    ├── Combine/
     ├── Cube/
-    ├── Docs/
+    ├── CubeViewer/
+    ├── DataModel/
     ├── Extract/
     ├── File/
     ├── Flat/
@@ -108,16 +122,18 @@ llamas-pyjamas/
     ├── Image/
     ├── LUT/
     │   └── LLAMAS_reference_arc.pkl
+    ├── Masking/
     ├── mastercalib/
     │   └── slow_master_bias.fits
     │   └── fast_master_bias.fits
     │   └── LLAMAS*trace.pkl files
     ├── Postprocessing/
     ├── QA/
-    ├── example_config.txt
+    ├── Sky/
     ├── Trace/
     ├── Tutorials/
-    └── Utils/
+    ├── Utils/
+    └── example_config.txt
 ```
 ### Reduction script
 
@@ -127,14 +143,14 @@ This config file uses paths to specify which calibration images should be used a
 
 **Science files to be reduced can be done as a batch process but will all use the same calibration files listed**
 
-Sky subtraction and flux calibration are not currently implemented in the reduction process but will be added in future. 
+Sky subtraction and flux calibration **are** part of the reduction: set `sky_framework = true` for the sky framework, and tag your standard-star exposures so the sensitivity function can be built. See the [config keys reference](docs/workflow/06-reference.md#config-keys).
 
 To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Python environment where the pipeline is installed. Then run the command `python reduce.py 'path/to/your/config.txt'` to initiate the data reduction process.
 
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
 ### QuickLook GUI
-The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
+The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_bias_master.py` file in your data directory.
 
 To run the QL GUI, execute the following commands from the terminal:
 
