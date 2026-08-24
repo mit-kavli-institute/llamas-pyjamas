@@ -8,13 +8,13 @@ of decisions and of bugs that were found and fixed. They are filed by the month 
 > keys, modules or functions that have since been renamed, reversed or deleted. For anything you
 > intend to *run*, use the published site
 > (<https://mit-kavli-institute.github.io/llamas-pyjamas/>), the workflow guide in
-> [`docs/workflow/`](../../docs/workflow/README.md), or the code itself.
+> [`docs/workflow/`](../../workflow/README.md), or the code itself.
 
 ## Contents
 
 ### `2025-09/`
 - **`BUILD_INSTRUCTIONS.md`** — how the Sphinx docs were built at the time. Superseded by
-  [`docs/README.md`](../../docs/README.md); the theme has since changed from `sphinx-rtd-theme`
+  [`docs/README.md`](../../README.md); the theme has since changed from `sphinx-rtd-theme`
   to `furo`, the Python floor moved to 3.11+, and deployment is via GitHub Pages, not
   Read the Docs.
 

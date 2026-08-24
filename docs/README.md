@@ -6,6 +6,10 @@ automatically from the package's Google-style docstrings.
 This directory contains **only source files**. Build artefacts (`_build/`) are
 git-ignored and must never be committed.
 
+The one exception is [`reference_material/`](reference_material/README.md) — archived material
+kept here for tidiness rather than at the repo root. It is excluded from the build via
+`exclude_patterns` in `conf.py` and never reaches the published site.
+
 ## Building locally
 
 ```bash

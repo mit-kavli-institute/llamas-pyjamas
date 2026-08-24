@@ -9,8 +9,8 @@ mid-2026 and are not kept in step with the code. Where a note disagrees with the
 wins. For current material see:
 
 - the published site — <https://mit-kavli-institute.github.io/llamas-pyjamas/>
-- the end-to-end workflow guide — [`docs/workflow/`](../../docs/workflow/README.md)
-- the API reference — [`docs/`](../../docs/) (Sphinx), published under `/sphinx/`
+- the end-to-end workflow guide — [`docs/workflow/`](../../workflow/README.md)
+- the API reference — [`docs/`](../..) (Sphinx), published under `/sphinx/`
 
 ## Contents
 

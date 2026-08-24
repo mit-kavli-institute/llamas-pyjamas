@@ -271,9 +271,9 @@ CRR_parallel = True  # Use parallelization
 ## Documentation
 
 See also:
-- [Cube/SIMPLE_CUBE_README.md](../../../llamas_pyjamas/Cube/SIMPLE_CUBE_README.md) - Detailed documentation
+- [Cube/SIMPLE_CUBE_README.md](../../../../llamas_pyjamas/Cube/SIMPLE_CUBE_README.md) - Detailed documentation
 - `Cube/QUICK_START.md` - Quick start guide
-- [Cube/simple_cube_constructor.py](../../../llamas_pyjamas/Cube/simple_cube_constructor.py) - Source code
+- [Cube/simple_cube_constructor.py](../../../../llamas_pyjamas/Cube/simple_cube_constructor.py) - Source code
 
 ## Contact
 

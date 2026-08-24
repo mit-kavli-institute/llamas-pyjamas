@@ -29,7 +29,21 @@ extensions = [
     'sphinx_autodoc_typehints',
 ]
 
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# 'reference_material' is archived/superseded material that lives under docs/ for
+# tidiness but is deliberately NOT part of the build. Excluding the bare directory
+# name prunes it from Sphinx's os.walk entirely, so the 14 stray .rst files in
+# reference_material/old_sphinx_source/ are never discovered as documents — without
+# this they would be built and published under /sphinx/, duplicating ~32 autodoc
+# targets and resurrecting modules that are excluded from sphinx-apidoc on purpose.
+# The '/**' entry is belt-and-braces, and future-proofs the archived .md files
+# against a later myst_parser addition. Do not remove either entry.
+exclude_patterns = [
+    '_build',
+    'Thumbs.db',
+    '.DS_Store',
+    'reference_material',
+    'reference_material/**',
+]
 source_suffix = '.rst'
 master_doc = 'index'
 

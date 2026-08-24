@@ -14,7 +14,7 @@ I've created a dual flat fielding system for your LLAMAS pipeline that allows yo
      - `MultiDetectorFlatField`: Main processing class
    - ~750 lines of well-documented code
 
-2. **[llamas_pyjamas/reduce.py](../../../llamas_pyjamas/reduce.py)** (MODIFIED)
+2. **[llamas_pyjamas/reduce.py](../../../../llamas_pyjamas/reduce.py)** (MODIFIED)
    - Added `flat_method` parameter to `process_flat_field_calibration()` (line 184)
    - Implemented method selection logic (lines 212-247)
    - Passes configuration flag through the pipeline (line 1060)
@@ -308,8 +308,8 @@ Normalized Flat Field (FITS per detector)
 
 ### Key Code Locations
 - PypeIt implementation: `flatLlamas_pypeit.py`
-- Standard implementation: [flatLlamas.py](../../../llamas_pyjamas/Flat/flatLlamas.py)
-- Pipeline integration: [reduce.py](../../../llamas_pyjamas/reduce.py) (lines 183-258, 1052-1061)
+- Standard implementation: [flatLlamas.py](../../../../llamas_pyjamas/Flat/flatLlamas.py)
+- Pipeline integration: [reduce.py](../../../../llamas_pyjamas/reduce.py) (lines 183-258, 1052-1061)
 
 ### External References
 - PypeIt Documentation: https://pypeit.readthedocs.io/

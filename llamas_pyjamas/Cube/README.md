@@ -44,7 +44,7 @@ Fibre positions come from the RSS file's own `FIBERMAP` extension, matched again
 `../LUT/LLAMAS_FiberMap_rev04.dat`.
 
 The CRR method implements Liu et al. (2020), AJ 159, 22 — the paper is in
-[`reference_material/papers/`](../../reference_material/papers/Liu_2020_AJ_159_22.pdf), and every
+[`docs/reference_material/papers/`](../../docs/reference_material/papers/Liu_2020_AJ_159_22.pdf), and every
 CRR cube carries `CUBEREF = 'Liu et al. (2020)'` in its header.
 
 ## Detailed docs

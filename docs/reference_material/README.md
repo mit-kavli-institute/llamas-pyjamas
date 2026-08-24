@@ -1,14 +1,19 @@
 # Reference Material
 
-Supporting documentation and reference material for `llamas-pyjamas` that is **not** part of the
-Sphinx documentation build and **not** current documentation. Nothing in here is used by any
-build, and nothing in the package links to it.
+Superseded and archival material for `llamas-pyjamas`. **Not current documentation**, and not
+part of the published site.
+
+> **This directory sits inside the Sphinx source tree but is excluded from the build.**
+> `docs/conf.py` lists `reference_material` in `exclude_patterns`, which prunes it from Sphinx's
+> source discovery. That entry is load-bearing: `old_sphinx_source/` holds 14 `.rst` files that
+> Sphinx would otherwise build and publish under `/sphinx/`, duplicating the real API reference.
+> Do not remove it.
 
 Current documentation lives in three places:
 
 - **Published site** — <https://mit-kavli-institute.github.io/llamas-pyjamas/>
-- **End-to-end workflow guide** — [`../docs/workflow/`](../docs/workflow/README.md)
-- **API reference** — [`../docs/`](../docs/) (Sphinx), published under `/sphinx/`
+- **End-to-end workflow guide** — [`docs/workflow/`](../workflow/README.md)
+- **API reference** — [`docs/`](..) (Sphinx), published under `/sphinx/`
 
 ## Contents
 
@@ -38,14 +43,14 @@ Current documentation lives in three places:
   `CUBEREF = 'Liu et al. (2020)'` into every CRR cube header.
 
 - **`notebooks/`** — `llamas_pyjamas_demo.ipynb`, an early demo notebook. Superseded by
-  [`../llamas_pyjamas/Tutorials/llamas_extraction_demo.ipynb`](../llamas_pyjamas/Tutorials/llamas_extraction_demo.ipynb),
+  [`../llamas_pyjamas/Tutorials/llamas_extraction_demo.ipynb`](../../llamas_pyjamas/Tutorials/llamas_extraction_demo.ipynb),
   which uses the production tracing and extraction path rather than the deprecated one.
 
 - **`resources/`** — `Extraction routine.pdf` (a 2024 working note on the extraction routine) and
   `Llamas Template.docx` (an empty document-control template).
 
 - **`old_sphinx_source/`** — The previous hand-written Sphinx source (`conf.py`, `*.rst`).
-  **Superseded** by the rebuilt `../docs/` project and used by no build. Kept for reference; note
+  **Superseded** by the rebuilt `docs/` project and excluded from the build. Kept for reference; note
   it is wrong in several places (Python 3.8, PyQt5, `sphinx_rtd_theme`, and a `sys.path` depth
   that would not import the package).
 
