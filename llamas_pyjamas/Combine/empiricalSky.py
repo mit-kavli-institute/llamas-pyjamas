@@ -50,13 +50,18 @@ def frame_sky_level(counts, mask=None):
     return float(np.nanmedian(b)) if b.size else np.nan
 
 
-def build_empirical_sky(stack, masks, min_blank=MIN_BLANK, blank_frac=BLANK_FRAC):
+def build_empirical_sky(stack, masks, wave=None, min_blank=MIN_BLANK, blank_frac=BLANK_FRAC):
     """Build the per-(dither,fibre) empirical sky from a stacked field.
 
     Parameters
     ----------
     stack : (ndith, nfib, nwave) COUNTS, aligned by FIBER_ID across dithers.
     masks : (ndith, nfib, nwave) or None.
+    wave  : (ndith, nfib, nwave) per-fibre wavelength grids. When given, each blank dither is
+            RESAMPLED onto the TARGET frame's per-fibre grid before combining, so OH lines align
+            (each frame has its own refineSkyX wavecal) and the same-fibre LSF/aberration is
+            preserved — essential for sky-LINE subtraction. When None, stacks by pixel index (lines
+            smear; continuum only).
 
     Returns
     -------
@@ -68,48 +73,46 @@ def build_empirical_sky(stack, masks, min_blank=MIN_BLANK, blank_frac=BLANK_FRAC
     stack = np.asarray(stack, float)
     ndith, nfib, nwave = stack.shape
     S = np.array([frame_sky_level(stack[d], None if masks is None else masks[d]) for d in range(ndith)])
-    Sref = np.nanmedian(S[np.isfinite(S)]) if np.isfinite(S).any() else 1.0
     S_safe = np.where(np.isfinite(S) & (S > 0), S, np.nan)
 
-    # per-fibre continuum per dither -> rank to pick the faintest (blank) dithers
     b = np.full((ndith, nfib), np.nan)
     for d in range(ndith):
         b[d] = _fibre_continuum(stack[d], None if masks is None else masks[d])
 
-    n_blank_target = max(int(min_blank), int(round(blank_frac * ndith)))
-    n_blank_target = min(n_blank_target, ndith)
-
+    n_blank_target = min(max(int(min_blank), int(round(blank_frac * ndith))), ndith)
     emp_sky = np.full_like(stack, np.nan)
     nblank = np.zeros(nfib, dtype=int)
     for i in range(nfib):
         bi = b[:, i]
         order = np.argsort(np.where(np.isfinite(bi), bi, np.inf))   # faintest first
-        blank = order[:n_blank_target]
-        blank = [d for d in blank if np.isfinite(bi[d]) and np.isfinite(S_safe[d])]
+        blank = [d for d in order[:n_blank_target] if np.isfinite(bi[d]) and np.isfinite(S_safe[d])]
         if len(blank) < min_blank:
             continue                                                # fallback (leave NaN)
         nblank[i] = len(blank)
         blank_set = set(blank)
-        # normalized sky samples per blank dither (C scaled to the reference level)
-        norm = {d: stack[d, i] * (Sref / S_safe[d]) for d in blank}
-        full_shape = np.nanmedian(np.stack(list(norm.values())), axis=0)   # (nwave,) @ Sref
-        for d in range(ndith):
-            scale = (S_safe[d] / Sref) if np.isfinite(S_safe[d]) else 1.0
-            # LEAVE-ONE-OUT: never build a frame's sky from itself (would self-subtract its noise).
-            if d in blank_set and len(blank) > min_blank:
-                loo = np.stack([norm[dd] for dd in blank if dd != d])
-                shape = np.nanmedian(loo, axis=0)
-            else:
-                shape = full_shape                                  # on-source frames aren't in the set
-            emp_sky[d, i] = shape * scale
-    logger.info("empiricalSky: built for %d/%d fibres (>=%d blank dithers of %d)",
-                int((nblank >= min_blank).sum()), nfib, min_blank, ndith)
+        for t in range(ndith):
+            # LEAVE-ONE-OUT: never build a frame's sky from itself.
+            use = [d for d in blank if d != t] if t in blank_set else list(blank)
+            if len(use) < min_blank:
+                use = list(blank)                               # keep coverage if LOO too thin
+            if not use:
+                continue
+            samples = []
+            for d in use:
+                sd = stack[d, i]
+                if wave is not None:                            # resample onto target t's grid -> align OH lines
+                    sd = np.interp(wave[t, i], wave[d, i], sd, left=np.nan, right=np.nan)
+                samples.append(sd * (S_safe[t] / S_safe[d]))    # overall per-frame sky-level scaling
+            emp_sky[t, i] = np.nanmedian(np.stack(samples), axis=0)
+    logger.info("empiricalSky: built for %d/%d fibres (>=%d blank of %d dithers, wave_aligned=%s)",
+                int((nblank >= min_blank).sum()), nfib, min_blank, ndith, wave is not None)
     return emp_sky, nblank, S
 
 
 def _load_field(rss_files):
-    """Load a field's per-dither COUNTS/MASK aligned by FIBER_ID. Returns (files, stack, masks, fids)."""
-    counts, masks, fids0 = [], [], None
+    """Load a field's per-dither COUNTS/MASK/WAVE aligned by FIBER_ID.
+    Returns (files, stack, masks, wave, fids). wave is None if any frame lacks a WAVE ext."""
+    counts, masks, waves, fids0 = [], [], [], None
     used = []
     for f in rss_files:
         with fits.open(f) as h:
@@ -124,18 +127,22 @@ def _load_field(rss_files):
                 continue
             counts.append(np.asarray(h['COUNTS'].data, float))
             masks.append(np.asarray(h['MASK'].data) if 'MASK' in h else np.zeros_like(counts[-1]))
+            waves.append(np.asarray(h['WAVE'].data, float) if 'WAVE' in h else None)
             used.append(f)
     if len(used) < 2:
         raise ValueError(f"empiricalSky: need >=2 aligned dithers, got {len(used)}")
-    return used, np.stack(counts), np.stack(masks), fids0
+    wave = np.stack(waves) if all(w is not None for w in waves) else None
+    if wave is None:
+        logger.warning("empiricalSky: a frame lacks WAVE; falling back to index stacking (lines will smear)")
+    return used, np.stack(counts), np.stack(masks), wave, fids0
 
 
 def subtract_empirical_sky(rss_files, out_suffix='_EMPSKY', min_blank=MIN_BLANK, blank_frac=BLANK_FRAC):
     """Build + subtract the empirical sky for one field/channel. rss_files are a field's per-dither
     single-channel _FF RSS. Writes <in>_EMPSKY.fits per dither (SKY=empirical, SKYSUB=COUNTS-SKY;
     fibres without enough blank dithers keep the input SKY). Returns the written paths."""
-    used, stack, masks, _ = _load_field(rss_files)
-    emp_sky, nblank, S = build_empirical_sky(stack, masks, min_blank, blank_frac)
+    used, stack, masks, wave, _ = _load_field(rss_files)
+    emp_sky, nblank, S = build_empirical_sky(stack, masks, wave, min_blank, blank_frac)
     written = []
     for d, f in enumerate(used):
         with fits.open(f) as h:
