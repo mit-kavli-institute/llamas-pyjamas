@@ -28,7 +28,7 @@ flux calibration, and dither stacking — is now available at:
 
 ## Version 1.0 release
 
-We have now officially released **version 1.0 ** of the LLAMAS data reduction pipeline. 
+We have now officially released ** version 1.0 ** of the LLAMAS data reduction pipeline. 
 
 Older data (e.g. earlier commissioning runs) may require additional processing steps —see the notes below, or contact us directly.
 
