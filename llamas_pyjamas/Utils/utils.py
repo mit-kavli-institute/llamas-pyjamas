@@ -161,6 +161,31 @@ def setup_logger(name, log_filename=None):
     return logger
 
 
+EXPTIME_KEYS = ('SEXPTIME', 'CEXPTIME', 'DEXPTIME', 'EXPTIME', 'INTTIME', 'REXPTIME')
+
+
+def exposure_time(header, default=None):
+    """Best-available exposure time (seconds) from a FITS header.
+
+    Prefers the ACTUAL exposure (SEXPTIME = measured shutter-open time, then
+    CEXPTIME) and falls back through the generic keys to REXPTIME (the *requested*
+    exposure time) for older data where SEXPTIME/CEXPTIME were never written — in
+    that regime REXPTIME is the only record and must be trusted. Returns the first
+    keyword present with a finite, positive value (HIERARCH-aware); ``default``
+    otherwise.
+    """
+    for key in EXPTIME_KEYS:
+        for k in (key, 'HIERARCH ' + key):
+            if header is not None and k in header:
+                try:
+                    v = float(header[k])
+                except (TypeError, ValueError):
+                    v = None
+                if v is not None and v > 0:
+                    return v
+    return default
+
+
 def check_header(fits_file, color=None, bench=None, side=None) -> bool:
     """
     Check the FITS file header for color, bench, and side values.

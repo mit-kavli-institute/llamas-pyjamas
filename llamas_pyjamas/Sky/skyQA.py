@@ -55,12 +55,13 @@ def sky_subtraction_qa(ff_fits, skysub_fits, sky_mask, config):
     Returns a dict with ``rms_before``, ``rms_after``, ``improvement`` (ratio),
     and ``figure`` (path or None).
     """
+    from llamas_pyjamas.File.llamasRSS import skysub_extname
     with fits.open(ff_fits) as h:
-        flux_before = np.array(h["FLUX"].data, dtype=float)
+        flux_before = np.array(h[skysub_extname(h)].data, dtype=float)
         sky = np.array(h["SKY"].data, dtype=float) if "SKY" in h else np.zeros_like(flux_before)
         wave = np.array(h["WAVE"].data, dtype=float) if "WAVE" in h else None
     with fits.open(skysub_fits) as h:
-        flux_after = np.array(h["FLUX"].data, dtype=float)
+        flux_after = np.array(h[skysub_extname(h)].data, dtype=float)
 
     line_px = _oh_line_pixels(sky, sky_mask, config)
     rms_before = _line_rms(flux_before, line_px, sky_mask)

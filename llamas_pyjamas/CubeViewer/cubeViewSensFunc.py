@@ -1,0 +1,343 @@
+"""
+Interactive sensitivity-function fitting for CubeViewer.
+
+When a loaded RSS is a spectrophotometric standard (identified by the Phase I crossmatch on its
+header), the user defines an aperture on the star in DS9 the same way as for any spectrum, then
+opens this dialog to turn the aperture's summed counts into a sensitivity function.
+
+Two modes, both driven by the same core (:mod:`llamas_pyjamas.Flux.sensFunc`):
+
+* **Auto** — open the dialog and the fit is already there, using the default telluric + stellar
+  masks and a span-derived breakpoint spacing. "Let it rip"; just Save.
+* **Interactive** — drag on the plot to add a mask region, toggle the default masks, and change
+  the breakpoint spacing / spline order; the fit and residuals redraw live before you Save.
+
+The fit follows the instrument, not the star, so the default masks exclude telluric bands and
+the broad Balmer/He lines of the hot standards; drawing over a residual the defaults missed is
+the manual escape hatch.
+
+Classes
+-------
+SensFuncModel   Headless fit state — spectra, masks, params -> SensFunc (testable without Qt)
+SensFuncDialog  The Qt dialog around the model
+"""
+
+import logging
+import os
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+from matplotlib.widgets import SpanSelector
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_COLOURS, CHANNEL_ORDER
+from llamas_pyjamas.Flux.sensFunc import (
+    DEFAULT_NORD,
+    DEFAULT_SIGMA,
+    DEFAULT_THROUGHPUT_FLOOR,
+    TELLURIC_BANDS,
+    SensFunc,
+    default_masks,
+    fit_channel_sens,
+    load_refine_regions,
+    save_refine_regions,
+    sensitivity_ratio,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SensFuncModel:
+    """Headless sensitivity-fit state, independent of Qt so it can be unit-tested.
+
+    Holds the observed aperture spectra, the reference spectrum, and the editable fit controls
+    (masks, breakpoint spacing, order). :meth:`build` produces a :class:`SensFunc` from the
+    current state; the dialog just edits the state and redraws.
+    """
+
+    spectra: Dict[str, Tuple[np.ndarray, np.ndarray]]     # channel -> (wave, flux)
+    exptime: float
+    ref_wave: np.ndarray
+    ref_flux: np.ndarray
+    standard_name: str = ''
+    airmass: Optional[float] = None
+    use_default_masks: bool = True             # stellar (Balmer/He) hard masks
+    mask_tellurics: bool = False               # hard-mask telluric bands (off: handled by S/N)
+    added_regions: List[Tuple[float, float]] = field(default_factory=list)
+    # b-spline refine regions (finer knots for the fixed blaze features). Seeded from the
+    # bundled instrument set; edits here can be saved back as the new instrument default.
+    refine_regions: List[Tuple[float, float]] = field(default_factory=load_refine_regions)
+    bkspace: Optional[float] = None
+    nord: int = DEFAULT_NORD
+    sigma: float = DEFAULT_SIGMA
+    throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR
+    weighted: bool = True
+
+    def regions(self) -> List[Tuple[float, float]]:
+        """Effective hard-exclusion regions: stellar defaults, optional tellurics, user spans."""
+        base = list(default_masks(include_telluric=False)) if self.use_default_masks else []
+        if self.mask_tellurics:
+            base += list(TELLURIC_BANDS)
+        return base + list(self.added_regions)
+
+    def raw(self, channel: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Raw ratio (wave, sens, valid) for a channel."""
+        wave, flux = self.spectra[channel]
+        return sensitivity_ratio(wave, flux, self.exptime, self.ref_wave, self.ref_flux)
+
+    def fit_channel(self, channel: str):
+        """Fit one channel with the current controls. Returns (wave, raw, fit, good) or None."""
+        wave, flux = self.spectra[channel]
+        return fit_channel_sens(wave, flux, self.exptime, self.ref_wave, self.ref_flux,
+                                self.regions(), bkspace=self.bkspace, nord=self.nord,
+                                sigma=self.sigma, throughput_floor=self.throughput_floor,
+                                weighted=self.weighted, refine_regions=self.refine_regions)
+
+    def build(self, meta: Optional[Dict] = None) -> SensFunc:
+        """Produce a SensFunc from the current state (same core as the auto path)."""
+        from llamas_pyjamas.Flux.sensFunc import build_sensfunc
+        full_meta = {'standard': self.standard_name, 'naper': len(self.spectra)}
+        full_meta.update(meta or {})
+        return build_sensfunc(self.spectra, self.exptime, self.ref_wave, self.ref_flux,
+                              regions=self.regions(), bkspace=self.bkspace,
+                              nord=self.nord, sigma=self.sigma, airmass=self.airmass,
+                              throughput_floor=self.throughput_floor, weighted=self.weighted,
+                              refine_regions=self.refine_regions, meta=full_meta)
+
+    def save_breakpoints(self) -> str:
+        """Persist the current refine regions as the bundled instrument default."""
+        return save_refine_regions(self.refine_regions)
+
+
+class SensFuncDialog(QDialog):
+    """Interactive fit dialog around a :class:`SensFuncModel`."""
+
+    def __init__(self, model: SensFuncModel, default_path: str = '',
+                 parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.model = model
+        self.default_path = default_path
+        self.saved_path: Optional[str] = None
+        self.setWindowTitle(f'Sensitivity function — {model.standard_name or "standard"}')
+        self.resize(950, 640)
+
+        self.figure = Figure(figsize=(9, 6), constrained_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.ax_sens = self.figure.add_subplot(2, 1, 1)
+        self.ax_resid = self.figure.add_subplot(2, 1, 2, sharex=self.ax_sens)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(self._build_controls())
+        layout.addWidget(self.canvas, stretch=1)
+        layout.addWidget(self.toolbar)
+        layout.addLayout(self._build_buttons())
+
+        # One span selector per channel axis would overlap; a single selector on the sens axis
+        # adds a mask across whatever channels cover that wavelength.
+        self._span = SpanSelector(self.ax_sens, self._on_span, 'horizontal', useblit=True,
+                                  props=dict(alpha=0.2, facecolor='red'), interactive=False)
+        self._refit_and_draw()
+
+    def _build_controls(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        self.default_masks_box = QCheckBox('Mask stellar lines')
+        self.default_masks_box.setChecked(self.model.use_default_masks)
+        self.default_masks_box.setToolTip("Hard-mask the standard's broad Balmer/He lines "
+                                          '(deep dips S/N weighting cannot down-weight)')
+        self.default_masks_box.toggled.connect(self._on_masks_changed)
+        row.addWidget(self.default_masks_box)
+
+        self.telluric_box = QCheckBox('Mask tellurics')
+        self.telluric_box.setChecked(self.model.mask_tellurics)
+        self.telluric_box.setToolTip('Hard-mask telluric bands. Off by default: the S/N '
+                                     'weighting already down-weights them, and hard-masking '
+                                     'the red band truncates coverage there.')
+        self.telluric_box.toggled.connect(self._on_masks_changed)
+        row.addWidget(self.telluric_box)
+
+        self.weight_box = QCheckBox('S/N weight')
+        self.weight_box.setChecked(self.model.weighted)
+        self.weight_box.setToolTip('Weight the fit by counts so the well-exposed middle of '
+                                   'each channel drives the shape and the noisy edges follow')
+        self.weight_box.toggled.connect(self._on_params)
+        row.addWidget(self.weight_box)
+
+        row.addSpacing(12)
+        row.addWidget(QLabel('Floor %'))
+        self.floor_spin = QDoubleSpinBox()
+        self.floor_spin.setRange(0.0, 50.0)
+        self.floor_spin.setSingleStep(1.0)
+        self.floor_spin.setDecimals(0)
+        self.floor_spin.setValue(self.model.throughput_floor * 100.0)
+        self.floor_spin.setToolTip('Drop points below this fraction of each channel peak '
+                                   '(the dichroic-rolloff edges). 0 keeps everything.')
+        self.floor_spin.valueChanged.connect(self._on_params)
+        row.addWidget(self.floor_spin)
+
+        row.addSpacing(12)
+        row.addWidget(QLabel('Breakpoint (Å)'))
+        self.bkspace_spin = QDoubleSpinBox()
+        self.bkspace_spin.setRange(20.0, 2000.0)
+        self.bkspace_spin.setSingleStep(25.0)
+        self.bkspace_spin.setSpecialValueText('auto')
+        self.bkspace_spin.setValue(self.model.bkspace or 20.0)   # 20 == special 'auto'
+        self.bkspace_spin.setToolTip('B-spline breakpoint spacing; larger = smoother. '
+                                     'Lowest value = auto (span/20).')
+        self.bkspace_spin.valueChanged.connect(self._on_params)
+        row.addWidget(self.bkspace_spin)
+
+        row.addWidget(QLabel('Order'))
+        self.nord_spin = QSpinBox()
+        self.nord_spin.setRange(1, 5)
+        self.nord_spin.setValue(self.model.nord)
+        self.nord_spin.valueChanged.connect(self._on_params)
+        row.addWidget(self.nord_spin)
+
+        row.addSpacing(12)
+        row.addWidget(QLabel('Drag adds:'))
+        self.drag_combo = QComboBox()
+        self.drag_combo.addItems(['Mask', 'Breakpoints'])
+        self.drag_combo.setToolTip('What a drag on the plot does: add a fit mask, or add a '
+                                   'refine region (denser knots for the blaze).')
+        row.addWidget(self.drag_combo)
+
+        self.clear_button = QPushButton('Clear added')
+        self.clear_button.setToolTip('Clear the masks and refine regions added this session')
+        self.clear_button.clicked.connect(self._clear_added)
+        row.addWidget(self.clear_button)
+        row.addStretch(1)
+        return row
+
+    def _build_buttons(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        self.status = QLabel('')
+        row.addWidget(self.status, stretch=1)
+        # The blaze knots are an instrument property: save them once as the shipped default so
+        # every night's fit uses them without the user having to redo anything.
+        save_bk = QPushButton('Save breakpoints as default')
+        save_bk.setToolTip('Persist the current refine regions as the instrument default '
+                           '(used automatically for all future fits)')
+        save_bk.clicked.connect(self._save_breakpoints)
+        row.addWidget(save_bk)
+        save = QPushButton('Save sensfunc…')
+        save.clicked.connect(self._save)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        row.addWidget(save)
+        row.addWidget(cancel)
+        return row
+
+    # ---- interaction ----
+    def _on_span(self, xmin: float, xmax: float) -> None:
+        if xmax - xmin < 1.0:            # ignore stray clicks
+            return
+        target = (self.model.refine_regions if self.drag_combo.currentText() == 'Breakpoints'
+                  else self.model.added_regions)
+        target.append((float(xmin), float(xmax)))
+        self._refit_and_draw()
+
+    def _on_masks_changed(self) -> None:
+        self.model.use_default_masks = self.default_masks_box.isChecked()
+        self.model.mask_tellurics = self.telluric_box.isChecked()
+        self._refit_and_draw()
+
+    def _on_params(self) -> None:
+        v = self.bkspace_spin.value()
+        self.model.bkspace = None if v <= self.bkspace_spin.minimum() else v
+        self.model.nord = self.nord_spin.value()
+        self.model.weighted = self.weight_box.isChecked()
+        self.model.throughput_floor = self.floor_spin.value() / 100.0
+        self._refit_and_draw()
+
+    def _clear_added(self) -> None:
+        # Clears both masks and refine regions for the current session. The saved instrument
+        # defaults are untouched on disk; reopen the dialog to restore them.
+        self.model.added_regions.clear()
+        self.model.refine_regions.clear()
+        self._refit_and_draw()
+
+    def _save_breakpoints(self) -> None:
+        reply = QMessageBox.question(
+            self, 'Save breakpoints',
+            f'Save the {len(self.model.refine_regions)} refine region(s) as the instrument '
+            'default?\n\nThey will be used automatically for all future sensitivity fits '
+            '(the blaze is fixed, so this is normally done once).',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        path = self.model.save_breakpoints()
+        self.status.setText(f'Saved {len(self.model.refine_regions)} refine region(s) to '
+                            f'{os.path.basename(path)}')
+
+    # ---- draw ----
+    def _refit_and_draw(self) -> None:
+        self.ax_sens.clear()
+        self.ax_resid.clear()
+        fitted = 0
+        for channel in CHANNEL_ORDER:
+            if channel not in self.model.spectra:
+                continue
+            colour = CHANNEL_COLOURS.get(channel, '#444')
+            result = self.model.fit_channel(channel)
+            if result is None:
+                continue
+            wave, raw, fit, good = result
+            self.ax_sens.plot(wave[good], raw[good], '.', ms=2, color=colour, alpha=0.35)
+            self.ax_sens.plot(wave, fit, '-', color=colour, lw=1.4, label=channel)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                resid = (raw - fit) / fit
+            self.ax_resid.plot(wave[good], resid[good], '.', ms=2, color=colour, alpha=0.4)
+            fitted += 1
+
+        for low, high in self.model.regions():          # fit masks (grey)
+            self.ax_sens.axvspan(low, high, color='grey', alpha=0.12)
+        for low, high in self.model.refine_regions:      # refine regions (blue)
+            for ax in (self.ax_sens, self.ax_resid):
+                ax.axvspan(low, high, color='tab:blue', alpha=0.10)
+
+        self.ax_sens.set_ylabel('S = F$_{ref}$ / (counts/s)')
+        self.ax_sens.set_yscale('log')
+        if fitted:
+            self.ax_sens.legend(loc='upper right', fontsize='small')
+        self.ax_resid.axhline(0.0, color='k', lw=0.5)
+        self.ax_resid.set_ylim(-0.5, 0.5)
+        self.ax_resid.set_ylabel('(raw − fit)/fit')
+        self.ax_resid.set_xlabel('Wavelength (Å)')
+        self.status.setText(
+            f'{fitted} channel(s) fitted | {len(self.model.added_regions)} mask(s) | '
+            f'{len(self.model.refine_regions)} refine region(s)'
+            if fitted else 'No channel could be fitted — check the aperture / masks')
+        self.canvas.draw_idle()
+
+    def _save(self) -> None:
+        try:
+            sensfunc = self.model.build()
+        except ValueError as exc:
+            QMessageBox.warning(self, 'Sensitivity function', f'Could not build: {exc}')
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Save sensitivity function', self.default_path, 'FITS files (*.fits)')
+        if not path:
+            return
+        sensfunc.save(path)
+        self.saved_path = path
+        self.accept()

@@ -40,6 +40,15 @@ from llamas_pyjamas.Sky.skyResidual import clean_residuals
 logger = logging.getLogger(__name__)
 
 
+def _color_from_name(path):
+    """Infer camera colour from a ``..._RSS_{color}_FF...`` filename."""
+    name = os.path.basename(path).lower()
+    for c in ("blue", "green", "red"):
+        if f"_rss_{c}_" in name or f"_{c}_ff" in name:
+            return c
+    return None
+
+
 def _get_data(hdul, extname):
     """Return a float64 copy of an extension's data, or None if absent."""
     try:
@@ -71,13 +80,16 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
         base, ext = os.path.splitext(ff_fits)
         output_file = f"{base}_SKYSUB{ext}"
 
-    logger.info("skySubtract: %s -> %s",
-                os.path.basename(ff_fits), os.path.basename(output_file))
+    color = _color_from_name(ff_fits)
+    logger.info("skySubtract: %s -> %s (color=%s)",
+                os.path.basename(ff_fits), os.path.basename(output_file), color)
 
     with fits.open(ff_fits) as hdul:
-        flux = _get_data(hdul, "FLUX")
+        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
+        flux = _get_data(hdul, sky_plane)
         if flux is None:
-            raise ValueError(f"{ff_fits}: no FLUX extension")
+            raise ValueError(f"{ff_fits}: no sky-subtracted ({sky_plane}) extension")
         sky = _get_data(hdul, "SKY")
         counts = _get_data(hdul, "COUNTS")
         wave = _get_data(hdul, "WAVE")
@@ -94,42 +106,62 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
             raise ValueError(f"{ff_fits}: no WAVE extension (needed for PCA)")
         wl_source = counts if counts is not None else flux
 
-        # 1. Source masking.
+        # 1. Source masking -> a first-class SkyMask (boolean mask + provenance).
         sky_mask = build_sky_fiber_mask(wl_source, fibermap, config)
+        mask = sky_mask.mask
 
-        # 2. Per-fibre OH scaling (in FLUX space).
-        scale, scale_corr, flux1 = scale_sky_per_fiber(flux, sky, config,
-                                                       sky_mask=sky_mask)
+        # 2. Per-fibre OH scaling (in FLUX space). NB scale_sky_per_fiber does not
+        #    use the mask (each fibre is scaled against its own template); only the
+        #    PCA stage below consumes it. Skipped when the pkl-domain sky_line_refine
+        #    already did the OH refinement (config.skip_oh_scale) — avoids double-correction.
+        if getattr(config, "skip_oh_scale", False):
+            scale = np.ones(flux.shape[0], dtype=float)
+            scale_corr = np.zeros_like(flux)
+            flux1 = flux
+            logger.info("skySubtract: RSS-domain OH scaling skipped (pkl-domain sky_line_refine active)")
+        else:
+            scale, scale_corr, flux1 = scale_sky_per_fiber(flux, sky, config,
+                                                           sky_mask=mask,
+                                                           color=color)
 
         # 3. PCA residual cleaning (optional).
         if config.run_pca:
-            residual_model, pca_info = clean_residuals(flux1, wave, sky_mask, config)
+            residual_model, pca_info = clean_residuals(flux1, wave, mask, config)
         else:
             residual_model = np.zeros_like(flux1)
-            pca_info = {"ncomp": 0, "n_basis": int(sky_mask.sum())}
+            pca_info = {"ncomp": 0, "n_basis": int(mask.sum())}
 
         flux_out = (flux1 - residual_model).astype(np.float32)
         total_removed = (scale_corr + residual_model).astype(np.float32)
 
         # --- assemble output, copying every input extension ---
         out = fits.HDUList([h.copy() for h in hdul])
-        out["FLUX"].data = flux_out
-        out["FLUX"].header["SKYSUB2"] = (True, "Sky framework refinement applied")
+        out[sky_plane].data = flux_out
+        out[sky_plane].header["SKYSUB2"] = (True, "Sky framework refinement applied")
         for key, val in config.to_header_dict().items():
-            out["FLUX"].header[key] = val
-        out["FLUX"].header["SKYNMASK"] = (int(sky_mask.sum()),
-                                          "N sky fibres used")
-        out["FLUX"].header["SKYNBAS"] = (int(pca_info.get("n_basis", 0)),
-                                         "N PCA basis fibres")
-        out["FLUX"].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
-                                          "N PCA components removed")
+            out[sky_plane].header[key] = val
+        out[sky_plane].header["SKYNMASK"] = (int(mask.sum()),
+                                             "N sky fibres used")
+        out[sky_plane].header["SKYNBAS"] = (int(pca_info.get("n_basis", 0)),
+                                            "N PCA basis fibres")
+        out[sky_plane].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
+                                             "N PCA components removed")
+        # Honest basis provenance: how the mask above was actually chosen. This
+        # can differ from SKYSEL (config.selection_method): SKYSEL drives the base
+        # B-spline model, while this mask is the framework's (broad) PCA basis.
+        out[sky_plane].header["SKYBASIS"] = (sky_mask.method,
+                                             "framework mask method (cf. SKYSEL)")
 
-        # Traceability: total residual removed from the FF FLUX.
-        resid_hdu = fits.ImageHDU(total_removed, header=out["FLUX"].header.copy())
+        # Traceability: total residual removed from the sky-subtracted plane.
+        resid_hdu = fits.ImageHDU(total_removed, header=out[sky_plane].header.copy())
         resid_hdu.header["EXTNAME"] = "SKYRESID"
         resid_hdu.header["COMMENT"] = ("Total removed from FF FLUX: "
                                        "OH scaling + PCA residual")
         out.append(resid_hdu)
+
+        # Persist the sky-fibre mask (boolean + provenance) so the selection is
+        # inspectable and reusable downstream.
+        out.append(sky_mask.to_hdu())
 
         out.writeto(output_file, overwrite=True)
 
@@ -138,7 +170,7 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
     if config.qa_plots:
         try:
             from llamas_pyjamas.Sky.skyQA import sky_subtraction_qa
-            sky_subtraction_qa(ff_fits, output_file, sky_mask, config)
+            sky_subtraction_qa(ff_fits, output_file, mask, config)
         except Exception as e:  # QA must never break the pipeline
             logger.warning("skySubtract: QA failed (%s)", e)
 

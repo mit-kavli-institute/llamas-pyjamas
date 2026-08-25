@@ -10,12 +10,15 @@ user must generate a mask to exclude sources from the sky estimation."*
 
 Public API
 ----------
-build_sky_fiber_mask(counts, fibermap, config) -> np.ndarray[bool]
-    True where a fibre is treated as sky-dominated.
+build_sky_fiber_mask(counts, fibermap, config) -> SkyMask
+    A :class:`~llamas_pyjamas.Sky.skySelect.SkyMask` (boolean mask + provenance)
+    of the fibres treated as sky-dominated.
 """
 
 import logging
 import numpy as np
+
+from llamas_pyjamas.Sky.skySelect import SkyMask, build_sky_mask
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +85,9 @@ def _skymap_mask(wl, finite, fibermap, config, n_fiber):
     return mask
 
 
-def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
-    """Boolean mask of sky-dominated fibres for one colour.
+def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> SkyMask:
+    """:class:`SkyMask` of the sky-dominated fibres for one colour (the framework's
+    PCA-basis / OH-anchor mask).
 
     Selection logic
     ---------------
@@ -96,6 +100,17 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
        fibres).
     3. ``mask_method == 'none'`` returns every finite fibre.
 
+    Honest provenance
+    -----------------
+    The white-light cut is a **broad** basis chosen for the PCA eigenstage (a
+    narrow ``stratified``/``dimmest`` set would be too few for a stable basis),
+    so the returned :class:`SkyMask` records ``method='percentile'`` with the
+    *requested* ``config.selection_method`` kept in the provenance.  It does NOT
+    claim to be ``stratified``: the configured selection drives the **base**
+    B-spline model (``skyModel_1d``), not this basis.  Note the OH-scaling stage
+    (``skyScale.scale_sky_per_fiber``) does not use this mask at all; only the
+    PCA stage (``skyResidual.clean_residuals``, ``run_pca``) does.
+
     Parameters
     ----------
     counts : np.ndarray
@@ -106,8 +121,7 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
-        ``(n_fiber,)`` boolean; True => sky-dominated.
+    SkyMask
     """
     n_fiber = counts.shape[0]
     wl = white_light(counts)
@@ -115,7 +129,7 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
 
     if config.mask_method == "none":
         logger.info("skyMask: mask_method='none' — using all %d finite fibres", finite.sum())
-        return finite
+        return SkyMask(finite, method="all", provenance={"mask_method": "none"})
 
     # 1. Explicit sky fibres from FIBER_TYPE, if available and informative.
     if fibermap is not None and "FIBER_TYPE" in getattr(fibermap, "names", []):
@@ -125,7 +139,8 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
             if is_sky.any():
                 mask = is_sky & finite
                 logger.info("skyMask: %d fibres flagged FIBER_TYPE='sky'", mask.sum())
-                return mask
+                return SkyMask(mask, method="fiber_type",
+                               provenance={"source": "FIBERMAP FIBER_TYPE"})
             # else: no sky-typed fibres -> fall through to brightness cut
 
     # 2. Selection method (kept consistent with the base model skyModel_1d).
@@ -134,36 +149,43 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> np.ndarray:
     #    PCA stage needs — a fixed dimmest-N would be too few for the eigenbasis).
     sm = getattr(config, "selection_method", "dimmest")
     if sm == "middle-third":
-        from llamas_pyjamas.Sky.skySelect import select_sky_fibres
-        mask = select_sky_fibres(wl, finite, method="middle-third")
-        logger.info("skyMask: middle-third selected %d/%d fibres", mask.sum(), n_fiber)
-        return mask
+        smask = build_sky_mask(wl, finite, method="middle-third", source="framework-basis")
+        logger.info("skyMask: middle-third selected %d/%d fibres", smask.n_sky, n_fiber)
+        return smask
     if sm == "skymap":
-        mask = _skymap_mask(wl, finite, fibermap, config, n_fiber)
-        if mask is not None:
-            return mask
+        region_mask = _skymap_mask(wl, finite, fibermap, config, n_fiber)
+        if region_mask is not None:
+            return SkyMask(region_mask, method="skymap",
+                           provenance={"sky_map_file": getattr(config, "sky_map_file", None)})
         logger.warning("skyMask: skymap unavailable; falling back to white-light cut")
     elif sm == "frame":
         logger.info("skyMask: selection_method='frame' — the dedicated sky frame "
                     "drives the base SKY template; the framework PCA basis still "
                     "masks the science RSS by faint white-light percentile")
 
-    # 3. White-light brightness cut.
+    # 3. White-light brightness cut (broad PCA basis; NOT the base model's selection).
     good_wl = wl[finite]
     if good_wl.size == 0:
         logger.warning("skyMask: no finite fibres; returning all-False mask")
-        return np.zeros(n_fiber, dtype=bool)
+        return SkyMask(np.zeros(n_fiber, dtype=bool), method="percentile",
+                       provenance={"requested_selection": sm, "degenerate": True})
 
     hi = np.percentile(good_wl, config.sky_fiber_percentile)
     lo = np.percentile(good_wl, config.bright_reject_percentile)
     mask = finite & (wl <= hi) & (wl >= lo)
 
+    relaxed = False
     if mask.sum() < 3:
         # Degenerate (e.g. nearly flat field) — relax to everything finite.
         logger.warning("skyMask: brightness cut left %d fibres; relaxing to all "
                        "finite (%d)", mask.sum(), finite.sum())
         mask = finite
+        relaxed = True
 
     logger.info("skyMask: %d/%d fibres selected as sky "
                 "(white-light in [%.3g, %.3g])", mask.sum(), n_fiber, lo, hi)
-    return mask
+    return SkyMask(mask, method="percentile",
+                   provenance={"requested_selection": sm,
+                               "sky_fiber_percentile": float(config.sky_fiber_percentile),
+                               "bright_reject_percentile": float(config.bright_reject_percentile),
+                               "relaxed_to_finite": relaxed})

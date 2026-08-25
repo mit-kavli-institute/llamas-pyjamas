@@ -6,11 +6,12 @@ from astropy.io import fits
 from lacosmic import remove_cosmics
 
 from llamas_pyjamas.constants import LACOSMIC_DEFAULTS, LACOSMIC_COLOR_OVERRIDES, gain_noise_lookup
+from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger("llamas_pyjamas")
 
 
-def clean_cosmic_rays(data, color=None, bench=None, side=None):
+def clean_cosmic_rays(data, color=None, bench=None, side=None, header=None):
     """Clean cosmic rays from a 2D detector image using L.A.Cosmic.
 
     Parameters
@@ -23,6 +24,13 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
         Bench identifier ('1', '2', '3', '4').
     side : str, optional
         Side identifier ('A', 'B').
+    header : astropy.io.fits.Header, optional
+        Extension header.  When provided, the L.A.Cosmic gain/read-noise are
+        resolved from the lab-characterisation CSV keyed on the CAMSN serial
+        (via :func:`props_for_header`) — the SAME source the extraction error
+        model uses — so CR detection and the ivar share one gain/RN table.
+        Falls back to the legacy ``gain_noise_lookup`` (color/bench/side) when
+        no header is given.
 
     Returns
     -------
@@ -40,7 +48,15 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None):
             return data.copy(), np.zeros(data.shape, dtype=bool)
         params.update(color_overrides)
 
-    if color is not None and bench is not None and side is not None:
+    # Prefer the serial-keyed lab CSV (single source of truth, matches the error
+    # model); fall back to the legacy color/bench/side lookup.
+    if header is not None:
+        gain, readnoise, src = props_for_header(
+            header, params['effective_gain'], params['readnoise'])
+        params['effective_gain'] = gain
+        params['readnoise'] = readnoise
+        logger.debug(f"L.A.Cosmic gain/RN from {src}: gain={gain}, RN={readnoise}")
+    elif color is not None and bench is not None and side is not None:
         key = (color.lower(), str(bench), str(side).upper())
         detector_props = gain_noise_lookup.get(key)
         if detector_props:

@@ -20,6 +20,18 @@
 # Set clobber = true to force EVERY stage (including trace regeneration) to run
 # from scratch, ignoring any existing products. Default: false.
 # clobber = false
+#
+# Extraction pkls are large (~GB each) intermediate products; the RSS carries
+# everything downstream needs. By default they are removed once the RSS is written.
+# Set save_extraction_pkl = true to keep them at full size for deep inspection
+# (most users never need them). The RSS, not the pkl, is the resume anchor.
+# save_extraction_pkl = false
+#
+# The extract / fibre-flat (_FF) / sky-subtracted (_FF_SKYSUB) stages each leave an RSS file
+# per channel (up to three). By default, after cubes are built, these are consolidated to one
+# per channel -- the most-corrected, renamed to a clean {base}_RSS_{color}.fits with all
+# planes as extensions. Set keep_intermediate_rss = true to keep every stage's file.
+# keep_intermediate_rss = false
 
 #==============================================================================
 # BIAS CALIBRATION
@@ -47,6 +59,48 @@ remove_cosmic_rays = True
 # Optional: custom output directory for cosmic ray mask FITS files
 # If not set, masks are saved to {extraction_output_dir}/masks/
 #mask_output_dir = /path/to/custom/mask/output
+
+#==============================================================================
+# BIAS-FIRST PREPROCESSING (always on, not configurable)
+#==============================================================================
+# Bias subtraction is ALWAYS the first data operation applied to every frame
+# (science, arc, flat, twilight, sky): the mode-appropriate (FAST/SLOW)
+# 2D master bias plus the per-frame edge DC offset (see below) are removed
+# up front and the corrected frames written to {output_dir}/bias_corrected/.
+# All later stages (flat division, tracing, extraction) then operate on
+# pedestal-free signal and skip their internal bias handling via the BIASSUB
+# header stamp. There is no switch for this: dividing a flat into a frame
+# that still carries its ~500 DN bias pedestal is unphysical and imprints
+# the pixel flat's percent-level spectral features as tens-of-DN fake
+# emission lines (spurious "sky lines", worst in the blue).
+
+#==============================================================================
+# EXTRACTION METHOD
+#==============================================================================
+# Applies to EVERY extraction in the run (science, arc, flat, twilight, sky) so
+# that the per-fibre throughput calibration and the science share one method.
+#
+# boxcar (default): trace-following aperture with FRACTIONAL pixel weights at
+#   the aperture edges (continuous across half-pixel trace crossings).
+#   Validated frame-to-frame per-fibre flux stability 0.98-0.99.
+# horne: true Horne (1986) optimal extraction on the bspline fibre profiles —
+#   variance-weighted, flux-conserving, mask-aware, and populates real
+#   per-pixel errors (counts_err). Stability at the raw-frame ceiling on all
+#   cameras (0.97-1.00). Will become the default once its S/N is tuned
+#   (the profile window currently clips the wings at +/-2 px).
+# optimal: legacy profile-weighted mean. Not flux conserving; unstable in the
+#   pipeline on cameras with blended profiles — comparison only.
+extraction_method = boxcar
+# Boxcar aperture half-width in pixels (total aperture = 2x this). 2.5 px keeps
+# the aperture on the target fibre at the ~6.9 px fibre pitch; the legacy 4.5 px
+# window reached the neighbouring fibres' cores.
+boxcar_halfwidth = 2.5
+
+# Per-fibre relative throughput from the twilight (sky) flat extraction instead
+# of the arc-carried lamp values (default true; requires a twilight flat). The
+# twilight matches the sky's illumination geometry and is extracted with the
+# same method as the science. Set false to revert to arc-carried values.
+twilight_throughput = true
 
 #==============================================================================
 # EDGE BIAS (DC OFFSET) CORRECTION
@@ -115,6 +169,11 @@ science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/L
 #example of a list of science files to batch process
 #science_files = path/to/file1.fits, path/to/file2.fits, path/to/file3.fits
 
+#spectrophotometric standard-star exposures (identified in the setup GUI by crossmatching the
+#pointing against the bundled ESO/Oke catalogue). Extracted identically to science frames; used
+#in postprocessing to build a sensitivity function. Comma-separated, same format as science_files.
+#flux_standard_files = path/to/standard_mef.fits
+
 #optional output directories for the trace generation and extraction files
 #If these directories do not already exist they will be created at the time of processing
 
@@ -177,9 +236,99 @@ ray_num_cpus = 8
 # log_retention: keep only the newest N llamas_pipeline_*.log files (default 10).
 # log_retention = 10
 #
+# terminal_verbose: terminal output mode (default false). When false (curated),
+# the ~hundreds of per-stage print/info lines go ONLY to the log file and the
+# terminal shows a compact live summary — one line per pipeline phase with an
+# emoji, a tick and elapsed time on completion, a spinner on the active phase,
+# and a [k/N] counter as it loops over science frames; genuine WARNING/ERROR
+# messages still print (and are logged). Set true to restore the full firehose
+# on the terminal for debugging. Everything is always written to the log file
+# regardless.
+# terminal_verbose = false
+#
 # To reclaim scratch left by OLDER runs (before this fix, or after a hard kill), run:
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch           # preview (dry run)
 #   python -m llamas_pyjamas.Utils.clean_ray_scratch --yes     # actually delete
+
+#==============================================================================
+# ARC XSHIFT REFINEMENT
+#==============================================================================
+# Refine the per-fibre xshift (wavelength-alignment map) beyond the default
+# cross-correlation quadratic. Off by default.
+refine_arc = true               # [standard setup] per-fibre xshift refinement
+# Channels to refine (default all): e.g. red,green
+# refine_arc_channels = red,green,blue
+#
+# Method (when refine_arc = true):
+#   perfiber (default) - existing refineArcX: independent per-fibre cubic on
+#                        ~15-26 identified catalog lines. Data-starved; known
+#                        to degrade edge consistency.
+#   2d                 - hybrid model (Arc/arcSurface.py): robust 2D Legendre
+#                        surface xshift(x, fibre) per camera fit to the FULL
+#                        peak catalog pooled over all fibres, plus a small
+#                        shrinkage-regularized per-fibre perturbation. Designed
+#                        to fix the edge curvature mis-tracking that drives
+#                        sky-subtraction residuals.
+# refine_arc_method = 2d
+#
+# Night-arc line source (2d method): when {red,green,blue}_arc_file point to
+# same-night arc exposures, the 2d method extracts them (into {output_dir}/arcs,
+# resume-aware) and measures line centroids on THOSE spectra, so the solution
+# aligns to the observation epoch instead of the packaged reference arc's
+# (per-camera epoch offsets up to ~3 px were measured on may26 data). The
+# packaged arc still provides line IDs and the xshift->wavelength map.
+# refine_arc_use_night_arcs = true
+#
+# 2d-method tuning (defaults shown; all optional):
+# arc_surface_order_x = 3          # Legendre order along dispersion (x)
+# arc_surface_order_fiber = 2      # Legendre order across fibres
+# arc_perturb_order = 0            # 0 = per-fibre offset, 1 = offset + tilt
+# arc_perturb_min_lines = 8        # fewer matched lines => surface only
+# arc_perturb_shrink_lines = 5     # shrinkage prior (equivalent lines)
+# arc_use_unidentified_peaks = true  # use full catalog for the surface
+# arc_catalog_min_sep = 8          # px; unidentified peaks with a closer
+#                                  # catalog neighbour are dropped as blends
+#                                  # (identified lines always kept)
+
+#==============================================================================
+# WAVELENGTH / XSHIFT QA
+#==============================================================================
+# Per-run QA of the wavelength calibration: xshift curvature structure per
+# camera, arc-line fit residuals (when refine_arc runs), and post-sky-subtraction
+# residuals at OH sky lines. Writes ONE self-contained HTML report (all figures
+# embedded) plus a machine-readable CSV scorecard per science frame, so runs can
+# be diffed against a baseline when the calibration algorithms change.
+#
+# Enable/disable (default: true). QA failures never abort a reduction.
+wavelength_qa = true
+#
+# Wavelength reference frame for science and standard-star spectra. The arc solution is a
+# vacuum scale in the observed (topocentric) frame; this shifts the RSS WAVE into the
+# heliocentric (or barycentric) rest frame by WAVE *= sqrt((1+v/c)/(1-v/c)). Applied per
+# exposure at RSS assembly (after sky subtraction, so OH sky lines are unaffected) and only to
+# OBS TYPE science frames. The applied velocity is recorded in the header (VELFRAME, HELIOVEL
+# in km/s, VELCORR the factor) and is reversible -- divide WAVE by VELCORR to recover the
+# observed frame (e.g. for telluric correction, whose bands must stay topocentric).
+# One of: heliocentric (default), barycentric, none.
+wave_frame = heliocentric
+#
+# Celestial-WCS calibration (TEMPORARY telescope-rotator workaround). The white-light images and
+# cubes get an RA/DEC WCS from the header pointing + rotator angle. Calibrated against Gaia/
+# PanSTARRS on the J1613 field: the LLAMAS field is mirror-imaged (det>0) and the fibre +x axis
+# points at sky PA = TEL_ROT + wcs_pa_offset. These are PROVISIONAL (one rotator angle; sign of
+# the TEL_ROT dependence unconfirmed) and are the hook for the eventual telescope-side fix:
+# set wcs_pa_offset = 0 (and adjust wcs_mirrored) once the TCS reports a correct sky PA.
+# PA(+x fibre axis) = TEL_ROT + wcs_pa_offset (calibrated against Gaia on 3 fields; the rotator
+# angle essentially IS the sky PA, slope +1). Defaults: wcs_pa_offset = 1.2, wcs_mirrored = true.
+# wcs_pa_offset = 1.2
+# wcs_mirrored = true
+# Output directory for QA reports (default: {output_dir}/QA).
+# qa_output_dir = /path/to/QA
+#
+# QA can also be run standalone on existing products, without a pipeline run:
+#   python -m llamas_pyjamas.QA.waveQA <..._sky1d_extractions.pkl> \
+#       --qa-dir /path/to/QA --label baseline
+# (add --pngs to also write individual PNG files)
 
 #==============================================================================
 # SKY SUBTRACTION FRAMEWORK
@@ -190,11 +339,18 @@ sky_subtract = True
 
 # Which fibres/regions build the sky model. This drives BOTH the base model
 # (skyModel_1d) and, for consistency, the advanced framework's PCA basis below.
-#   dimmest       (default) the sky_n_fibres faintest fibres per camera.
+#   stratified    (default) the faintest few fibres in each of several trace-y
+#                 bins, so the sky model is built from fibres spanning the whole
+#                 slit. The plain-faint methods pick the low-throughput SLIT-EDGE
+#                 fibres, so their pooled model carries edge-LSF and leaves ~2x
+#                 larger residuals on OH lines (measured green). A global
+#                 brightness cap first removes any compact object.
+#   quantile      the 5-10th brightness-percentile fibres (skips the dead tail).
+#   dimmest       the sky_n_fibres faintest fibres per camera.
 #   middle-third  legacy: the central third of fibres ranked by brightness.
 #   skymap        fibres falling in a user sky region -> set sky_map_file.
 #   frame         build from dedicated blank-sky exposures -> set sky_frame_files.
-sky_selection_method = dimmest
+sky_selection_method = stratified
 # Number of faint fibres for the 'dimmest' method (default 20).
 # sky_n_fibres = 20
 # For sky_selection_method = skymap: a 2-D FITS marking sky regions. Either a
@@ -206,21 +362,92 @@ sky_selection_method = dimmest
 # (If several are listed, only the first is used for now.)
 # sky_frame_files = /path/to/sky1_mef.fits, /path/to/sky2_mef.fits
 
+# Per-camera additive continuum PEDESTAL (sky-refine Phase 3a; EXPERIMENTAL, default OFF).
+# After the base sky model, subtract a smooth per-camera continuum floor measured from the faintest
+# (blank) fibres -- targets the additive residual that co-adds into stacked-image striping, in the
+# counts domain before flux calibration. It is a CONTINUUM term (narrow line emission such as Lya is
+# preserved). CAUTION: could subtract real diffuse continuum emission; validate before trusting.
+sky_pedestal = true                   # [standard setup] per-camera continuum-floor (scattered-light)
+#                                     # subtraction. Run-level (post-extraction, pre-fibre-flat): the
+#                                     # floor template is built from the whole run in COUNTS/SEC (or a
+#                                     # config/shipped template). Regenerated per run unless clobber.
+sky_pedestal_scope = template         # 'template': RECOMMENDED — static per-camera floor shape from a
+#                                     # calibration built across many frames/fields (see
+#                                     # Sky/skyFloorTemplate.py) x one amplitude fitted per frame; the
+#                                     # shape comes from OTHER fields so it cannot absorb real diffuse
+#                                     # emission in the target. 'slit': per-frame per-fibre profile,
+#                                     # smooth along the slit. 'camera': one constant per camera
+#                                     # (falsified for the striping; comparison only)
+# sky_pedestal_template = /path/to/floor_template_{channel}.fits   # OPTIONAL: explicit template.
+#                                     # If unset (recommended), the pipeline auto-builds a per-run
+#                                     # counts/sec template from this run's frames (floor_template_cps_
+#                                     # {channel}.fits), falling back to the shipped package template.
+# sky_pedestal_min_exptime = 300      # skip the pedestal on shorter exposures (standards): almost no
+#                                     # accumulated sky -> negligible floor + noise-dominated amplitude
+# sky_pedestal_window = 51            # continuum median-filter width in wavelength (pixels)
+# sky_pedestal_slit_window = 15       # scope=slit: local-linear fit half-width along the slit (fibres)
+# sky_pedestal_blank_pct = 60         # scope=slit: blank = faintest this-% of live fibres
+# sky_pedestal_nfibres = 40           # scope=camera: blank fibres per camera used to measure the floor
+# sky_pedestal_clip_negative = False  # clip the pedestal at >= 0
+# sky_pedestal_edge_refine = True     # scope=template: also remove the residual per-fibre continuum
+#                                     # offset -> flattens the benchside striping (green white-light
+#                                     # core RMS ~-20% on flux-cal'd cubes; blue/red minor). A per-fibre
+#                                     # DC (constant-in-lambda) shift: preserves line fluxes/EWs/profiles
+#                                     # and diffuse LINE emission (e.g. Lya); point sources untouched.
+#                                     # ASSUMES the IFU is >~60% blank sky. TURN OFF (False) when sky is
+#                                     # measured from dedicated blank-sky exposures for source-filled
+#                                     # fields -- it would then absorb genuine diffuse continuum.
+# sky_pedestal_edge_window = 4        # edge-refine running-median half-width (fibres)
+
+# --- Empirical multi-dither 2D sky (Combine/empiricalSky2D.py) ---
+# Opt-in. Builds the sky from the field's own dithers on the bias+flat-corrected 2D frames
+# (pre-extraction), so per-fibre optics aberrations + inter-fibre scattered light that the b-spline
+# cannot see are matched pixel-for-pixel from each fibre's BLANK dithers, then extracted with the
+# pipeline aperture and seeded as the base SKY. The stages below (sky_subtract b-spline in RESIDUAL
+# mode, sky_line_refine, sky_framework) then run as the second pass on the residual and ADD to it —
+# each still independently toggleable. COUNTS stays raw; SKY = empirical + postprocess corrections.
+# Requires >=2 dithers of the same field (grouped by OBJECT + pointing).
+sky_empirical_2d = false              # master switch for the empirical 2D sky base
+# sky_empirical_channels = red,green,blue   # channels to build the empirical sky for
+# sky_empirical_min_frames = 5        # fields thinner than this borrow nearest-in-time frames as blank donors
+# sky_empirical_min_blank = 3         # min blank dithers per fibre to build its empirical sky
+# sky_empirical_blank_frac = 0.6      # fraction of dithers (faintest, per fibre) treated as blank sky
+
+# --- pkl-domain (xshift) OH sky-line refinement (Sky/skyLineRefine.py) ---
+sky_line_refine = true                # [standard setup] per-line OH refinement in the pkl/xshift domain (removes the
+#                                     # wavelength-domain arc-solution shift artifact the RSS framework
+#                                     # re-encodes). When True the RSS-domain framework OH scaling is
+#                                     # auto-skipped (sky_skip_oh_scale) to avoid double-correction.
+# sky_line_template = /path/to/calib/line_template_{channel}.fits   # optional static per-(camera,slit)
+#                                     # LSF-residual template ({channel} -> green/red/blue); fit with a
+#                                     # per-line amplitude on top of the per-line refine. Omit to skip.
+# sky_skip_oh_scale =                 # override: skip the RSS-domain OH scaling (defaults to sky_line_refine)
+
 # Advanced sky-subtraction framework (post fibre-flat, per-colour). When True it
 # reads the *_FF.fits files, applies source masking -> per-fibre OH scaling ->
 # PCA/ZAP residual cleaning, and writes *_FF_SKYSUB.fits (consumed by the
 # generate_skysub_cubes stage below). Default off.
-sky_framework = False
-# sky_method = pca            # 'pca' (full) or 'scaled' (OH scaling only)
+sky_framework = true          # [standard setup] advanced post-FF RSS sky framework
+sky_method = scaled           # [standard setup] 'pca' (full) or 'scaled' (OH scaling only)
 # sky_pca_ncomp = 20          # PCA residual components removed
 # sky_mask_method = whitelight
 # sky_qa_plots = False        # write *_skyQA.png before/after OH-residual diagnostics
 
+# White-light image render (auto-generated per exposure alongside the RSS). true (default)
+# renders each fibre as a flat hexagonal tile of its raw flux -- no interpolation, dead fibres
+# left as holes; false resamples onto a rectangular grid. Either way the image now carries a
+# celestial (RA/DEC) WCS from the header pointing, and the file is named
+# {exposure_id}_whitelight_fullpipeline.fits (the _fullpipeline marker keeps it distinct from the
+# telescope quicklook's {timestamp}_whitelight.fits, which is left untouched).
+whitelight_hex = true
+
 #==============================================================================
 # CUBE CONSTRUCTION PARAMETERS
 #==============================================================================
-# Enable/disable cube generation (set to False if only 2D RSS products needed)
-generate_cubes = True
+# Enable/disable cube generation. Default off: the 2D RSS products carry the science, and
+# cubes (large, ~366 MB each) can be built on demand in CubeViewer. Set true to have the
+# pipeline write cube_{color}(_skysub).fits for every science frame.
+generate_cubes = False
 
 # Two independent cube sets are built by default (both require generate_cubes = True):
 #   generate_standard_cubes -> cubes from the fibre-flat RSS  -> ..._cube_{color}.fits

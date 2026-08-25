@@ -128,12 +128,13 @@ class SimpleCubeConstructor:
             # telescope pointing (F6) instead of a (0,0) placeholder.
             self.primary_header = hdul[0].header.copy()
 
-            # Load main data
-            if 'FLUX' in hdul:
-                self.flux = hdul['FLUX'].data
-                print(f"  FLUX: {self.flux.shape}")
+            # Load main data (sky-subtracted plane: SKYSUB, or FLUX pre-rename)
+            from llamas_pyjamas.File.llamasRSS import skysub_extname
+            if 'SKYSUB' in hdul or 'FLUX' in hdul:
+                self.flux = hdul[skysub_extname(hdul)].data
+                print(f"  {skysub_extname(hdul)}: {self.flux.shape}")
             else:
-                raise ValueError("No FLUX extension found in RSS file")
+                raise ValueError("No SKYSUB/FLUX extension found in RSS file")
 
             if 'WAVE' in hdul:
                 self.wave = hdul['WAVE'].data
@@ -699,6 +700,11 @@ class SimpleCubeConstructor:
 
         wcs = WCS(naxis=3)
 
+        # LLAMAS sky convention (see Utils.wcsLlamas): mirrored field (det>0) and a rotator
+        # offset added to the header PA, so the cube matches the white-light / CubeViewer WCS.
+        from llamas_pyjamas.Utils.wcsLlamas import IFU_MIRRORED, IFU_PA_OFFSET
+        _col_sign = 1.0 if IFU_MIRRORED else -1.0   # mirrored => det(CD)>0
+
         nx = len(self.x_grid) if hasattr(self, 'x_grid') and self.x_grid is not None else self.cube.shape[2]
         ny = len(self.y_grid) if hasattr(self, 'y_grid') and self.y_grid is not None else self.cube.shape[1]
 
@@ -710,7 +716,7 @@ class SimpleCubeConstructor:
 
             wcs.wcs.crpix = [nx / 2.0, ny / 2.0, 1]
             wcs.wcs.crval = [ra_center, dec_center, self.wave_grid[0]]
-            wcs.wcs.cdelt = [-col_scale, row_scale, self.wave_grid[1] - self.wave_grid[0]]
+            wcs.wcs.cdelt = [_col_sign * col_scale, row_scale, self.wave_grid[1] - self.wave_grid[0]]
             wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
             wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
 
@@ -720,7 +726,7 @@ class SimpleCubeConstructor:
 
             wcs.wcs.crpix = [nx / 2.0, ny / 2.0, 1]
             wcs.wcs.crval = [ra_center, dec_center, self.wave_grid[0]]
-            wcs.wcs.cdelt = [-pixel_scale, pixel_scale, self.wave_grid[1] - self.wave_grid[0]]
+            wcs.wcs.cdelt = [_col_sign * pixel_scale, pixel_scale, self.wave_grid[1] - self.wave_grid[0]]
             wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
             wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
 
@@ -729,17 +735,19 @@ class SimpleCubeConstructor:
 
             wcs.wcs.crpix = [nx / 2.0, ny / 2.0, 1]
             wcs.wcs.crval = [ra_center, dec_center, self.wave_grid[0]]
-            wcs.wcs.cdelt = [-pixel_scale, pixel_scale, self.wave_grid[1] - self.wave_grid[0]]
+            wcs.wcs.cdelt = [_col_sign * pixel_scale, pixel_scale, self.wave_grid[1] - self.wave_grid[0]]
             wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
             wcs.wcs.cunit = ['deg', 'deg', 'Angstrom']
 
-        # F6: apply on-sky field rotation as a PC matrix in the spatial plane.
-        if rotation_deg:
-            theta = np.radians(rotation_deg)
-            c, s = np.cos(theta), np.sin(theta)
-            wcs.wcs.pc = np.array([[c, -s, 0.0],
-                                   [s,  c, 0.0],
-                                   [0.0, 0.0, 1.0]])
+        # PC rotation so the fibre +x axis lands at sky PA = rotation_deg + IFU_PA_OFFSET
+        # (matches Utils.wcsLlamas.celestial_wcs). For the mirrored frame PA(+x) = 90 - theta,
+        # hence theta = 90 - pa. Applied even when rotation_deg is 0.
+        pa_x = rotation_deg + IFU_PA_OFFSET
+        theta = np.radians((90.0 - pa_x) if IFU_MIRRORED else (pa_x - 90.0))
+        c, s = np.cos(theta), np.sin(theta)
+        wcs.wcs.pc = np.array([[c, -s, 0.0],
+                               [s,  c, 0.0],
+                               [0.0, 0.0, 1.0]])
 
         self.wcs = wcs
 
