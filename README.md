@@ -2,12 +2,6 @@
 
 This repository contains Data Reduction Pipeline tools for the LLAMAS Integral Field Spectrometer
 
-It is being updated frequently as the instrument comes online.
-
-THIS IS AN IN-PROGRESS DEVELOPMENT PIPELINE.  IT IS MADE AVAILABLE TO THE PUBLIC IN READ-ONLY FORMAT
-FOR OBSERVATION PLANNING AND EXECUTION, BUT NO WARRANTY IS MADE REGARDING INSTALLATION OR 
-EXECUTION UNTIL INSTRUMENT COMMISSIONING IS COMPLETE.
-
 **Users of this pipeline are requested to cite Hughes et al. (in prep)**.
 
 <details>
@@ -34,14 +28,11 @@ flux calibration, and dither stacking — is now available at:
 
 ## Version 1.0 release
 
-We are preparing for a **version 1.0 release in the next few weeks**. The full pipeline
-described in the documentation is already available on the
-[`rs-dev`](https://github.com/mit-kavli-institute/llamas-pyjamas/tree/rs-dev) branch, with
-the following caveats until the release is finalised:
+We have now officially released **version 1.0 ** of the LLAMAS data reduction pipeline. It is
+described in the documentation available on the
+[`rs-dev`](https://github.com/mit-kavli-institute/llamas-pyjamas/tree/rs-dev) branch
 
-- some remaining bugs may still be present, and
-- older data (e.g. earlier commissioning runs) may require additional processing steps —
-  see the notes below, or contact us directly.
+Older data (e.g. earlier commissioning runs) may require additional processing steps —see the notes below, or contact us directly.
 
 **If you are reducing data from the Nov/Dec 2024 commissioning run, please contact me directly at slhughes@mit.edu for additional support to reduce your observations**
 <details>
@@ -55,6 +46,8 @@ the following caveats until the release is finalised:
 </details>
 
 **If your data was observed following the 15th of Sept 2025 Blue camera failures please note that the pipeline handles this accordingly**
+
+If your data has missing header information, you can run the `Postprocessing/fix_exposure_info.py` script to produce copies of your files with modified headers. Your observing log file can be fed into this script to aid the process.
 
 Information regarding updates will be sent via email to those interested in using the mailing list below.
 
@@ -119,26 +112,7 @@ This config file uses paths to specify which calibration images should be used a
 
 **Science files to be reduced can be done as a batch process but will all use the same calibration files listed**
 
-Sky subtraction and flux calibration are not currently implemented in the reduction process but will be added in future. 
-
 To run the script, first `cd llamas-pyjamas/llamas_pyjamas` and activate your Python environment where the pipeline is installed. Then run the command `python reduce.py 'path/to/your/config.txt'` to initiate the data reduction process.
 
 The speed of reduction will vary depending on your machine specifications. If errors occur, there are log files produced within the Utils folder that can be helpful for diagnosing issues.
 
-### QuickLook GUI
-
-**Note: a new version of the LLAMAS QL is in the final development stages as will be available soon**
-
-The QuickLook GUI is used to produce whitelight images using the master calibration files. This is the same as the images produced via the LLAMAS observing GUI, except that it also provides extracted spectra for quick inspection. Striation in these whitelight images may appear if the date master bias fits files were taken is significantly different to the date of your science expsores. In this case, it is recommended to run the `Scripts/update_master_bias.py` file in your data directory.
-
-To run the QL GUI, execute the following commands from the terminal:
-
-```
-cd llamas-pyjamas/llamas_pyjamas/GUI/
-conda activate myenv
-ds9 &
-python obslog.py
-```
-
-### QuickLook Demo files
-To test run the quick look pipeline on data, we have provided a standard star raw image, flat field images, and a bias image to create an extracted WhiteLight image. https://mit-kavli.box.com/s/k7s3bmwu98q3iljm4djpzidxj7qg26cl
