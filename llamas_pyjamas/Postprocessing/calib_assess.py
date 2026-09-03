@@ -358,9 +358,10 @@ def flat_extension_metrics(data: np.ndarray, benchside: str) -> dict:
                        f"pipeline prominence cut)")
         reasons.append(detail)
     elif n_peaks > expected:
-        # The pipeline recovers small over-counts by dropping the most
-        # isolated extra peak(s) (traceLlamasMaster drop_spacing_outliers);
-        # a large excess means ghosts/scattered light and is not safe.
+        # The pipeline recovers small over-counts by matching the comb against
+        # the fibremap and dropping whatever lands off a live slit slot
+        # (traceLlamasMaster resolve_trace_slots); a large excess means
+        # ghosts/scattered light and is not safe.
         excess = n_peaks - expected
         if excess <= 3:
             notes.append(f"{excess} extra peak(s) - pipeline drops spacing "

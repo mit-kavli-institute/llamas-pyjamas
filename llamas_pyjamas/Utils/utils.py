@@ -677,6 +677,11 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
     the wrong number of fibers, it automatically copies the corresponding mastercalib
     trace as a fallback, allowing the pipeline to continue with a hybrid trace set.
 
+    A camera that failed to trace writes no file at all, so it is also checked for
+    explicitly: any of the 24 (channel, bench, side) cameras with no pickle in
+    ``trace_dir`` gets a mastercalib fallback too. Callers therefore need
+    ``trace_dir`` to be a COMPLETE trace set, not one channel's worth.
+
     Args:
         trace_dir: User trace directory to validate
         mastercalib_dir: Mastercalib directory for fallback traces
@@ -685,6 +690,7 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
         dict: {
             'valid_traces': [(channel, bench, side, filepath), ...],
             'invalid_traces': [(channel, bench, side, expected, actual), ...],
+            'missing_traces': [(channel, bench, side), ...],
             'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
             'all_valid': bool
         }
@@ -757,11 +763,38 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
             logger.error(f"Error validating trace file {pkl_file}: {e}")
             continue
 
-    all_valid = len(invalid_traces) == 0
+    # A camera whose tracing FAILED outright writes no pickle at all, so the loop
+    # above -- which only walks existing files -- never sees it and no fallback is
+    # copied. That is how a failed camera ends up as a block of blank fibres in the
+    # RSS instead of mastercalib data (blue 1A and 4A, 2026-08-31: 598 empty rows).
+    # Now that an unresolvable comb fails the camera rather than guessing, this path
+    # matters more, so cover the missing cameras explicitly.
+    present = {(ch, b, sd) for ch, b, sd, _ in valid_traces}
+    present |= {(ch, b, sd) for ch, b, sd, *_ in invalid_traces}
+    missing_traces = []
+    for channel in ('red', 'green', 'blue'):
+        for bench in ('1', '2', '3', '4'):
+            for side in ('A', 'B'):
+                if (channel, bench, side) in present:
+                    continue
+                missing_traces.append((channel, bench, side))
+                logger.warning(f"✗ {channel}{bench}{side}: no trace file produced")
+                try:
+                    copied_path = copy_mastercalib_trace(
+                        channel, bench, side, mastercalib_dir, trace_dir)
+                    fallback_used.append((channel, bench, side,
+                                          os.path.join(mastercalib_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'),
+                                          copied_path))
+                    logger.info(f"✓ Copied mastercalib fallback for missing {channel}{bench}{side}")
+                except FileNotFoundError as e:
+                    logger.error(f"✗ No mastercalib fallback for missing {channel}{bench}{side}: {e}")
+
+    all_valid = len(invalid_traces) == 0 and len(missing_traces) == 0
 
     return {
         'valid_traces': valid_traces,
         'invalid_traces': invalid_traces,
+        'missing_traces': missing_traces,
         'fallback_used': fallback_used,
         'all_valid': all_valid
     }

@@ -2285,12 +2285,19 @@ def main(config_path):
                     invalid_count = len(validation_results['invalid_traces'])
                     fallback_count = len(validation_results['fallback_used'])
 
+                    missing_count = len(validation_results.get('missing_traces', []))
+
                     print(f"⚠️  Found {invalid_count} trace(s) with incorrect fiber counts")
+                    if missing_count:
+                        print(f"⚠️  {missing_count} camera(s) produced no trace at all")
                     print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
 
                     # Print details about invalid traces
                     for channel, bench, side, expected, actual in validation_results['invalid_traces']:
                         print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+
+                    for channel, bench, side in validation_results.get('missing_traces', []):
+                        print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
 
                     # Print details about fallbacks used
                     for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
@@ -2351,12 +2358,19 @@ def main(config_path):
                 invalid_count = len(validation_results['invalid_traces'])
                 fallback_count = len(validation_results['fallback_used'])
 
+                missing_count = len(validation_results.get('missing_traces', []))
+
                 print(f"⚠️  Found {invalid_count} generated trace(s) with incorrect fiber counts")
+                if missing_count:
+                    print(f"⚠️  {missing_count} camera(s) produced no trace at all")
                 print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
 
                 # Print details about invalid traces
                 for channel, bench, side, expected, actual in validation_results['invalid_traces']:
                     print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+
+                for channel, bench, side in validation_results.get('missing_traces', []):
+                    print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
 
                 # Print details about fallbacks used
                 for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:

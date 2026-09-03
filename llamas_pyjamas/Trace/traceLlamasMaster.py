@@ -45,6 +45,7 @@ import multiprocessing
 import argparse
 import cloudpickle
 from scipy.signal import find_peaks
+from scipy.ndimage import median_filter
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
 import pkg_resources
 from pathlib import Path
@@ -55,6 +56,16 @@ from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError
 
 logger = logging.getLogger(__name__)
+
+
+class TraceCombError(RuntimeError):
+    """The traced fibre comb cannot be matched to the fibremap unambiguously.
+
+    Raised instead of guessing which trace to discard. A camera that raises this
+    is failed outright so the mastercalib fallback takes over, because a wrong
+    guess silently renumbers every fibre after it and lands their flux on the
+    wrong sky position -- far worse than a missing camera.
+    """
 
 
 LOG = []
@@ -243,53 +254,96 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
 
 
 
-def drop_spacing_outliers(indices, mid_positions, expected_count, benchside='') -> np.ndarray:
-    """Trim ``indices`` to ``expected_count`` by removing the most ISOLATED traces.
+def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
+                        benchside='') -> tuple:
+    """Assign every trace its physical slit slot, and drop whatever sits off the comb.
 
-    Fibres form an evenly spaced comb (pitch ~6.5 px), so every real trace --
-    including the one at either end of the slit -- has a neighbour about one
-    pitch away.  A spurious peak (detector-edge artifact) sits several pitches
-    from anything else.  Repeatedly dropping the trace with the largest
-    nearest-neighbour distance therefore removes ghosts and never the genuine
-    end fibre.
+    The pseudo-slit is a regular comb: consecutive fibre slots are one pitch apart
+    and a dead fibre simply leaves its slot empty. Walking the detector positions
+    in units of the LOCAL pitch therefore recovers each trace's slot number up to
+    a constant offset, and the set of slots that should carry a trace is fixed by
+    the fibremap: every slot except the known dead ones. Anything landing outside
+    that set is spurious and is what gets dropped.
 
-    This replaces an earlier rule that trimmed by distance to the detector edge.
-    That rule dropped the REAL end-of-slit fibre and kept the ghost whenever the
-    ghost happened to sit marginally further from the opposite edge (3B: real
-    fibre at y=44.9 vs ghost at y=1997.3 -> edge scores 44.9 vs 50.7), which
-    shifted every fibre index by one for the whole bench.
+    This replaces trimming by spacing isolation alone. That rule works only when
+    the spurious peak sits several pitches from anything else; it cannot see a
+    ghost that sits ON the comb -- which is exactly the 2A case, where dead fibre
+    299 leaks a faint peak at the regular pitch at the end of the slit. Spacing
+    then has nothing to grab, so the trim fell through to an arbitrary choice and
+    discarded a live mid-slit fibre instead, shifting every fibre after it by one
+    lenslet. Peak height is not a reliable discriminator either: on an
+    under-exposed flat the comb is noise-dominated and the faintest peak is not
+    the ghost.
+
+    Args:
+        indices: candidate trace row indices into ``mid_positions``.
+        mid_positions: detector row of every trace at the centre column.
+        expected_count: number of LIVE fibres for this benchside.
+        dead_fibers: fibremap positions of the dead fibres (from traceLUT.json).
+        benchside: label, for messages.
+
+    Returns:
+        (keep, slots): ``keep`` indexes ``mid_positions`` in ascending detector
+        order; ``slots`` gives each kept trace's fibremap position.
+
+    Raises:
+        TraceCombError: if the comb cannot be matched to the fibremap. The caller
+            should fail the camera rather than proceed with a guess.
     """
-    keep = [int(i) for i in np.asarray(indices).ravel()]
-    excess = len(keep) - int(expected_count)
+    idx = np.asarray(indices, dtype=int).ravel()
+    pos = np.asarray([mid_positions[i] for i in idx], dtype=float)
+    if pos.size < 2:
+        raise TraceCombError(f"{benchside}: only {pos.size} trace(s) to resolve")
+    order = np.argsort(pos)
+    idx, pos = idx[order], pos[order]
 
-    for _ in range(max(0, excess)):
-        pos = np.asarray([mid_positions[i] for i in keep], dtype=float)
-        order = np.argsort(pos)
-        p = pos[order]
-        if p.size < 2:
-            break
-        gaps = np.diff(p)
-        pitch = float(np.median(gaps))
-        # distance to the nearest neighbour on either side
-        nn = np.minimum(np.concatenate(([np.inf], gaps)),
-                        np.concatenate((gaps, [np.inf])))
-        worst = int(np.argmax(nn))
-        ratio = nn[worst] / pitch if pitch > 0 else float('nan')
-        if ratio < 1.5:
-            # No clear ghost: the comb is regular but still over-count. Dropping
-            # any trace here is a guess, so say so rather than silently shifting.
-            logger.warning(
-                "traceLlamas %s: %d traces vs %d expected but no isolated "
-                "outlier (worst neighbour gap %.1fx pitch) -- trim is ambiguous",
-                benchside, len(keep), int(expected_count), ratio)
-        else:
-            logger.info(
-                "traceLlamas %s: dropping isolated trace at y=%.1f "
-                "(nearest neighbour %.1f px = %.1fx pitch %.2f) as a ghost",
-                benchside, p[worst], nn[worst], ratio, pitch)
-        keep.remove(keep[order[worst]])
+    dead = sorted({int(d) for d in (dead_fibers or ())})
+    n_slots = int(expected_count) + len(dead)
+    live = np.array([s for s in range(n_slots) if s not in set(dead)], dtype=int)
 
-    return np.sort(np.asarray(keep, dtype=int))
+    # Relative slot of each trace. A running MEDIAN of the gaps tracks the slow
+    # pitch drift across the detector (~1% end to end, i.e. several slots over a
+    # full benchside if ignored) while staying immune to an isolated ghost gap.
+    gaps = np.diff(pos)
+    pitch = median_filter(gaps, size=21, mode='nearest')
+    pitch = np.where(pitch > 0, pitch, np.median(gaps))
+    rel = np.concatenate(([0], np.cumsum(np.rint(gaps / pitch).astype(int))))
+
+    # Anchor the comb: pick the integer offset putting the most traces on live slots.
+    is_live = np.zeros(n_slots + 1, dtype=bool)
+    is_live[live] = True
+    best_a, best_n = 0, -1
+    for a in range(-int(rel.max()) - 2, n_slots + 2):
+        s = rel + a
+        n_good = int(np.count_nonzero(((s >= 0) & (s < n_slots))
+                                      & is_live[np.clip(s, 0, n_slots)]))
+        if n_good > best_n:
+            best_a, best_n = a, n_good
+
+    slots = rel + best_a
+    on_comb = ((slots >= 0) & (slots < n_slots)) & is_live[np.clip(slots, 0, n_slots)]
+    bad = np.flatnonzero(~on_comb)
+    excess = len(idx) - int(expected_count)
+
+    if len(bad) != max(excess, 0):
+        raise TraceCombError(
+            f"{benchside}: {len(idx)} traces, {int(expected_count)} expected, but "
+            f"{len(bad)} land off the fibremap's live slots (rows "
+            f"{[round(float(pos[b])) for b in bad[:6]]}) -- a fibre was missed or a "
+            f"ghost traced, so the comb cannot be trimmed without guessing")
+
+    keep, kept_slots = np.delete(idx, bad), np.delete(slots, bad)
+    if not np.array_equal(kept_slots, live):
+        first = int(np.argmax(kept_slots != live))
+        raise TraceCombError(
+            f"{benchside}: resolved slots do not match the fibremap live set; first "
+            f"mismatch at trace {first} (slot {kept_slots[first]}, expected {live[first]})")
+
+    if len(bad):
+        logger.info("traceLlamas %s: dropped %d trace(s) off the fibremap comb at "
+                    "detector row(s) %s (dead-fibre leakage or ghost)", benchside,
+                    len(bad), [round(float(pos[b])) for b in bad])
+    return keep, kept_slots
 
 
 def validate_trace_comb(mid_positions, benchside, dead_fibers=None,
@@ -870,20 +924,27 @@ class TraceLlamas:
             valid_edge_indices = np.where((safe_mid_positions >= min_edge_distance) & 
                                           (safe_mid_positions <= (self.naxis2 - min_edge_distance)))[0]
 
+            dead_here = (self.dead_fibres or {}).get(self.benchside, [])
+
             if len(valid_edge_indices) < expected_count:
+                # Short count: keep what we have. The wrong nfibers is caught by
+                # Utils.validate_and_fix_trace_fibres, which swaps in the
+                # mastercalib trace for this camera.
                 print(f"Only {len(valid_edge_indices)} traces pass the edge criteria for {self.benchside}")
-                # Decide how to handle this situation. For example, you might use all valid edges:
                 keep_indices = valid_edge_indices
+                short_count = True
             else:
-                # Trim any excess by removing SPACING OUTLIERS (ghost peaks), never
-                # by distance to the detector edge: a real end-of-slit fibre still
-                # has a neighbour one pitch away, while a ghost sits several
-                # pitches from anything. The old edge-distance rule sacrificed the
-                # real end fibre to keep a ghost on 3B/4A, shifting every fibre
-                # index by one for the whole bench.
-                keep_indices = drop_spacing_outliers(
+                # Trim the excess by matching the comb against the FIBREMAP: every
+                # trace must land on a live slit slot. Spacing isolation alone
+                # cannot see a ghost that sits ON the comb -- 2A's dead fibre 299
+                # leaks a peak at the regular pitch at the end of the slit -- and
+                # the old rule then discarded an arbitrary trace, which on
+                # 2025-03-05 was a live mid-slit fibre (blue slot 126, green/red
+                # slot 169) and on 2026-08-31 was red 2A's slot-0 fibre.
+                keep_indices, _kept_slots = resolve_trace_slots(
                     valid_edge_indices, safe_mid_positions, expected_count,
-                    benchside=self.benchside)
+                    dead_fibers=dead_here, benchside=self.benchside)
+                short_count = False
 
             # Now filter the trace arrays using the final indices.
             self.traces = self.traces[keep_indices]
@@ -892,13 +953,16 @@ class TraceLlamas:
             self.nfibers = len(self.traces)
             print(f"Filtered to {self.nfibers} traces for {self.benchside} after edge trimming.")
 
-            # A mis-trimmed comb misindexes every fibre after the gap and puts its
-            # flux at the wrong sky position, so check it explicitly rather than
-            # trusting the count alone (the 3B/4A off-by-one kept nfibers=300).
-            validate_trace_comb(
+            # HARD check, not a warning: a mis-trimmed comb misindexes every fibre
+            # after the gap and puts its flux on the wrong lenslet, and that is
+            # invisible downstream because the fibre COUNT is still right. Fail the
+            # camera so the mastercalib fallback takes over.
+            self.comb_ok = validate_trace_comb(
                 self.traces[:, mid_x], self.benchside,
-                dead_fibers=(self.dead_fibres or {}).get(self.benchside, []),
-                expected_count=expected_count)
+                dead_fibers=dead_here, expected_count=expected_count)
+            if not self.comb_ok and not short_count:
+                raise TraceCombError(
+                    f"{self.benchside}: traced comb failed validation after trimming")
                  
 
         except Exception as e:
@@ -1082,13 +1146,22 @@ class TraceRay(TraceLlamas):
             super().saveTraces(filename, newpath=outpath)
         else:
             super().saveTraces(filename)
-        
-        
-        
-        
-            
-        
+
         elapsed_time = time.time() - start_time
+
+        # Ray workers are separate processes, so logger output from tracing never
+        # reaches the pipeline's log file -- which is why the comb warnings for the
+        # 2A mis-trim were never seen. Hand the diagnostics back to the driver
+        # instead of relying on log forwarding.
+        result.update({
+            'benchside': f'{self.bench}{self.side}',
+            'channel': self.channel,
+            'nfibers': int(self.nfibers),
+            'comb_ok': bool(getattr(self, 'comb_ok', True)),
+            'elapsed': round(elapsed_time, 1),
+            'filename': filename,
+        })
+        return result
 
 def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR,
                     slow_bias: str = None, fast_bias: str = None,
@@ -1188,7 +1261,31 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         result = ray.get(done_id[0])
         results.append(result)
         completed += 1
-        
+
+    # Surface the per-camera trace outcome in the DRIVER's log. Without this the
+    # comb diagnostics stay inside the Ray workers and a silently mis-trimmed or
+    # failed camera is invisible in the pipeline log.
+    n_failed = 0
+    for res in results:
+        if not isinstance(res, dict):
+            logger.warning("traceLlamas: a worker returned no result (%r)", res)
+            n_failed += 1
+            continue
+        cam = res.get('benchside') or f"{res.get('bench', '?')}{res.get('side', '?')}"
+        cam = f"{cam} {res.get('channel', '??')}"
+        if res.get('status') == 'success':
+            logger.info("traceLlamas %s: %d fibres traced, comb_ok=%s (%.0fs)", cam,
+                        res.get('nfibers', -1), res.get('comb_ok'), res.get('elapsed', 0))
+            if not res.get('comb_ok', True):
+                n_failed += 1
+        else:
+            n_failed += 1
+            logger.error("traceLlamas %s FAILED -- no trace written, this camera will "
+                         "fall back to mastercalib: %s", cam, res.get('error'))
+    if n_failed:
+        logger.warning("traceLlamas: %d of %d cameras did not produce a usable trace",
+                       n_failed, total_jobs)
+
     print(f"\nAll {total_jobs} jobs complete")
     print(f"Final CPU Usage: {psutil.cpu_percent(percpu=True)}%")
 
