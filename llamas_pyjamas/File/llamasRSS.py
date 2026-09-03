@@ -575,17 +575,14 @@ class RSSgeneration:
                         if nf_sky is None or nf_sky.shape != nf_counts.shape:
                             nf_sky = np.zeros_like(nf_counts)
 
-                        # Remove dead fibers to match the row layout of the main FLUX extension
-                        dead_fibers = getattr(nf_obj, 'dead_fibers', None)
-                        if dead_fibers:
-                            valid_dead = [d for d in dead_fibers
-                                          if 0 <= d < n_nf and np.allclose(nf_counts[d], 0, atol=1e-10)]
-                            if valid_dead:
-                                keep = np.ones(n_nf, dtype=bool)
-                                keep[valid_dead] = False
-                                nf_counts = nf_counts[keep]
-                                nf_sky    = nf_sky[keep]
-                                nf_tp     = nf_tp[keep]
+                        # Dead fibres are NOT removed here, for the same reason as in
+                        # the main path above: the extraction is LIVE-indexed, so the
+                        # dead fibres are already absent and the row layout already
+                        # matches FLUX. The old block treated dead_fibers (which holds
+                        # FIBREMAP positions) as row indices and dropped whichever row
+                        # happened to read as zero -- which, while extractLlamas was
+                        # blanking live row 270/49, silently desynced NOFLAT from
+                        # SKYSUB by one row per affected camera.
 
                         nf_tp2d = nf_tp[:, np.newaxis]
                         nf_flux = (nf_counts - nf_sky) / nf_tp2d

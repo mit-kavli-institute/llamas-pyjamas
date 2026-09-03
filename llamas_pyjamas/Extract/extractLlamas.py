@@ -215,15 +215,19 @@ class ExtractLlamas:
                 logger.warning(f"Error accessing dead fibers in LUT: {e}")
 
 
+            # NOTE: dead fibres are NOT skipped here. `ifiber` is a LIVE row index
+            # (0..nfibers-1) but self.dead_fibers holds FIBREMAP positions, so the
+            # old membership test zeroed the wrong rows: for 2A (nfibers=298, dead
+            # [270, 299]) it blanked live row 270, which live_fibre_ids maps to
+            # physical fibre 271 -- a working fibre -- while 299 was out of range
+            # and did nothing; for 2B it blanked physical fibre 50 instead of 49.
+            # The genuinely dead fibres never produced a trace, so they are already
+            # absent from every per-fibre array; there is nothing to skip. The
+            # fibremap expansion happens once at RSS generation (see the note after
+            # this loop). self.dead_fibers is kept for that step.
             for ifiber in range(trace.nfibers):
                 extracted = np.zeros(self.trace.naxis1)
-                # print fiber, and list of dead fibers, print also bench and color
-                logger.info(self.dead_fibers)
-                logger.info(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
-                if ifiber in self.dead_fibers:
-                    logger.info(f"Skipping dead fiber # {ifiber}")
-                    self.counts[ifiber,:] = extracted
-                    continue
+                logger.debug(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
 
                 if method == 'horne':
                     # Horne (1986) optimal extraction: variance-weighted,
