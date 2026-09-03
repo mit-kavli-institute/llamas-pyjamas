@@ -57,6 +57,30 @@ def test_ra_dec_from_header_missing_or_bad():
     assert ra_dec_from_header({'RA': 1.0, 'DEC': None}) == (None, None)
 
 
+def test_ra_dec_from_header_sexagesimal_from_tel_block():
+    # A header repaired by Postprocessing.fix_exposure_info carries the TEL block's SEXAGESIMAL
+    # strings in RA/DEC. float() cannot read those, and returning (None, None) silently greyed
+    # out the sensitivity-function action on the mar25 GD108 exposures -- the standard is found
+    # by crossmatch, so an unreadable pointing reads as "not a standard".
+    hdr = {'RA': '10:00:47.03', 'DEC': '-7:33:28.9',
+           'TEL RA': '10:00:47.03', 'TEL DEC': '-7:33:28.9'}
+    ra, dec = ra_dec_from_header(hdr)
+    assert ra is not None and dec is not None
+    assert np.isclose(ra, 150.195958, atol=1e-4)
+    assert np.isclose(dec, -7.558028, atol=1e-4)
+
+
+def test_sexagesimal_header_resolves_to_gd108():
+    # End to end against the committed bundle: the mar25 pointing must land on GD108, inside the
+    # 30 arcsec radius, with a reference spectrum -- the exact condition the GUI action gates on.
+    hdr = {'RA': '10:00:47.03', 'DEC': '-7:33:28.9',
+           'TEL RA': '10:00:47.03', 'TEL DEC': '-7:33:28.9'}
+    match = load_catalog().match_header(hdr)
+    assert match is not None and match.name == 'GD108'
+    assert match.separation_arcsec < 30.0
+    assert match.standard.has_spectrum
+
+
 def test_match_returns_none_on_missing_coords():
     assert _MINI.match(None, None) is None
     assert _MINI.match(np.nan, np.nan) is None

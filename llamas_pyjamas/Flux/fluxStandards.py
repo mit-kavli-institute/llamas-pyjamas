@@ -141,16 +141,22 @@ class StandardsCatalog:
 def ra_dec_from_header(header):
     """Decimal RA/Dec (degrees) from a LLAMAS primary header, or (None, None).
 
-    LLAMAS writes the pointing as decimal degrees in ``RA``/``DEC`` (ICRS). The sexagesimal
-    ``RA-HMS``/``TEL RA`` keys carry the same information; the decimal keys are used directly to
-    avoid a parse.
+    Native LLAMAS writes the pointing as decimal degrees in ``RA``/``DEC`` (ICRS), but a header
+    repaired by :mod:`llamas_pyjamas.Postprocessing.fix_exposure_info` may carry the SEXAGESIMAL
+    string copied from ``TEL RA``/``TEL DEC`` instead -- the card comment still says "decimal deg"
+    while the value reads ``'10:00:47.03'``. Taking ``float()`` of that raises, and this returning
+    (None, None) is what silently greys out "Build Sensitivity Function" on such data: the standard
+    is identified by CROSSMATCH, so an unparseable pointing means no standard, whatever OBJECT says.
+
+    So defer to :func:`llamas_pyjamas.Utils.wcsLlamas.pointing_from_header`, which already handles
+    both forms (decimal first, then ``TEL RA``/``TEL DEC`` as hourangle/deg) and is what gives the
+    RSS fibre WCS the right coordinates on the same files.
     """
-    ra = header.get('RA')
-    dec = header.get('DEC')
-    try:
-        ra = float(ra)
-        dec = float(dec)
-    except (TypeError, ValueError):
+    if header is None:
+        return None, None
+    from llamas_pyjamas.Utils.wcsLlamas import pointing_from_header
+    ra, dec, _pa = pointing_from_header(header)
+    if ra is None or dec is None:
         return None, None
     if not (np.isfinite(ra) and np.isfinite(dec)):
         return None, None

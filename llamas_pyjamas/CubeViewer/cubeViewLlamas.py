@@ -65,6 +65,12 @@ from llamas_pyjamas.CubeViewer.cubeViewSpecPlot import SpectrumPanel
 logger = logging.getLogger(__name__)
 
 
+def _pointing_missing(header) -> bool:
+    """True when the standards matcher cannot read a pointing out of this header."""
+    from llamas_pyjamas.Flux.fluxStandards import ra_dec_from_header
+    return ra_dec_from_header(header) == (None, None)
+
+
 class CombineOptionsDialog(QDialog):
     """Collect the spatial-combine options before stacking a field into a cube.
 
@@ -702,12 +708,21 @@ class CubeViewerWindow(QMainWindow):
         """Return (primary_header, StandardMatch|None) for the loaded file."""
         try:
             from astropy.io import fits
-            from llamas_pyjamas.Flux.fluxStandards import load_catalog
+            from llamas_pyjamas.Flux.fluxStandards import load_catalog, ra_dec_from_header
             header = fits.getheader(path, 0)
+            # Warn, don't whisper: the standard is identified by CROSSMATCH, so a header the
+            # matcher cannot read means the sensfunc action greys out with no visible reason.
+            # This was silent at DEBUG while the entry point logs at INFO.
+            if ra_dec_from_header(header) == (None, None):
+                logger.warning(
+                    'no usable pointing in %s (RA=%r DEC=%r): cannot tell whether this is a '
+                    'flux standard, so the sensitivity-function action stays disabled',
+                    os.path.basename(path), header.get('RA'), header.get('DEC'))
             match = load_catalog().match_header(header)
             return header, match
         except Exception as exc:                       # noqa: BLE001
-            logger.debug('standard identification skipped: %s', exc)
+            logger.warning('standard identification skipped for %s: %s',
+                           os.path.basename(path), exc)
             return None, None
 
     def _update_sensfunc_action(self) -> None:
@@ -717,6 +732,11 @@ class CubeViewerWindow(QMainWindow):
             tip = f'{self._standard.name} has no bundled reference spectrum'
         elif is_std:
             tip = f'Build a sensitivity function from the aperture on {self._standard.name}'
+        elif self._header is not None and _pointing_missing(self._header):
+            # Distinguish "not a standard" from "we could not even read the pointing" --
+            # the second is a header problem, not a statement about the target.
+            tip = ('No usable RA/DEC in this header, so the standard crossmatch could not run. '
+                   'Enabled only when the loaded file is a recognised flux standard.')
         else:
             tip = 'Enabled only when the loaded file is a recognised flux standard'
         self.sensfunc_action.setToolTip(tip)
