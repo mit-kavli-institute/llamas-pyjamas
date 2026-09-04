@@ -38,7 +38,7 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
+from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger, find_trace_pickle
 from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
@@ -295,21 +295,21 @@ def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, plac
             if cam_channel != channel.lower():
                 continue
 
-            # Determine mastercalib trace filename
-            master_trace_file = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
-            master_trace_path = os.path.join(CALIB_DIR, master_trace_file)
-
             # Target filename (user trace naming convention)
             user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
             user_trace_path = os.path.join(trace_dir, user_trace_file)
 
-            # Copy mastercalib trace to user trace directory
-            if os.path.exists(master_trace_path):
+            # Copy mastercalib trace to user trace directory. The bundle ships the
+            # unprefixed name while locally generated master traces carry
+            # "LLAMAS_master_", so accept either.
+            try:
+                master_trace_path = find_trace_pickle(channel, bench, side, CALIB_DIR)
+            except FileNotFoundError as exc:
+                print(f"  ✗ WARNING: {exc}")
+            else:
                 shutil.copy2(master_trace_path, user_trace_path)
                 print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
                 traces_copied += 1
-            else:
-                print(f"  ✗ WARNING: Mastercalib trace not found: {master_trace_file}")
 
     return traces_copied
 

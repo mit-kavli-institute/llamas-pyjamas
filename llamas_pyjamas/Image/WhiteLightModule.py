@@ -24,6 +24,7 @@ from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import cKDTree
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+from llamas_pyjamas.Utils.utils import find_trace_pickle
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
@@ -1296,12 +1297,14 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                 data = data - residual_bg
                 logger.info(f"Extension {i} ({benchside} {color}): FAST residual bg = {residual_bg:.2f}")
 
-            # Determine the corresponding trace file based on benchside and color
-            #LLAMAS_master_blue_1_A_traces.pkl
-            trace_filename = f"LLAMAS_master_{color}_{bench}_{side}_traces.pkl"
-            trace_filepath = os.path.join(CALIB_DIR, trace_filename)
-            if not os.path.exists(trace_filepath):
-                logger.info(f"Trace file {trace_filepath} not found for {benchside} {color}. Skipping extension.")
+            # Determine the corresponding trace file based on benchside and color.
+            # Accept both shipped forms: the mastercalib bundle uses
+            # LLAMAS_blue_1_A_traces.pkl, locally generated master traces use
+            # LLAMAS_master_blue_1_A_traces.pkl.
+            try:
+                trace_filepath = find_trace_pickle(color, bench, side, CALIB_DIR)
+            except FileNotFoundError as exc:
+                logger.info(f"{exc} for {benchside} {color}. Skipping extension.")
                 continue
 
             with open(trace_filepath, "rb") as f:
