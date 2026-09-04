@@ -254,6 +254,57 @@ def check_fibre_number(fibre_number: int, benchside: str) -> bool:
 
 
 
+def camera_from_header(hdr) -> tuple:
+    """(channel, bench, side) for an HDU header, in either keyword convention."""
+    if 'COLOR' not in hdr:
+        camname = hdr['CAM_NAME']
+        return (camname.split('_')[1].lower(),
+                str(camname.split('_')[0][0]), str(camname.split('_')[0][1]))
+    return str(hdr['COLOR']).lower(), str(hdr['BENCH']), str(hdr['SIDE'])
+
+
+def clear_stale_traces(headers, outpath, is_master_calib=False) -> list:
+    """Delete the trace pickles about to be regenerated, and report which.
+
+    A camera that fails to trace writes no pickle at all -- ``TraceRay`` returns
+    before ``saveTraces`` -- so the PREVIOUS run's file survives in ``outpath``.
+    ``validate_and_fix_trace_fibres`` only checks the fibre COUNT, so a stale,
+    misregistered trace with the right count is then accepted as valid and the
+    mastercalib fallback never engages: on a re-run the failure is invisible.
+    Clearing the targets first makes "no trace written" show up as a missing file.
+
+    ``CALIB_DIR`` is never touched. ``run_ray_tracing`` defaults to
+    ``outpath=CALIB_DIR`` with ``is_master_calib=True``, so without that guard a
+    bare CLI invocation would delete the shipped mastercalib set before tracing
+    and leave nothing behind if tracing then failed.
+
+    Args:
+        headers: iterable of HDU headers for the cameras about to be traced.
+        outpath: directory the trace pickles are written to.
+        is_master_calib: selects the ``LLAMAS_master_`` output naming.
+
+    Returns:
+        list: basenames actually removed.
+    """
+    removed = []
+    if not outpath or os.path.abspath(outpath) == os.path.abspath(CALIB_DIR):
+        return removed
+    for hdr in headers:
+        try:
+            channel, bench, side = camera_from_header(hdr)
+        except (KeyError, IndexError):
+            continue
+        name = (f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl' if is_master_calib
+                else f'LLAMAS_{channel}_{bench}_{side}_traces.pkl')
+        stale = os.path.join(outpath, name)
+        if os.path.exists(stale):
+            os.remove(stale)
+            removed.append(name)
+            logger.info("traceLlamas %s%s %s: removed stale trace before "
+                        "regenerating (%s)", bench, side, channel, name)
+    return removed
+
+
 def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
                         benchside='') -> tuple:
     """Assign every trace its physical slit slot, and drop whatever sits off the comb.
@@ -304,40 +355,103 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
     # Relative slot of each trace. A running MEDIAN of the gaps tracks the slow
     # pitch drift across the detector (~1% end to end, i.e. several slots over a
     # full benchside if ignored) while staying immune to an isolated ghost gap.
+    #
+    # The running median must be fed gaps with the outliers taken OUT. Feeding it
+    # the raw gaps looks safe -- a median shrugs off one bad value -- but only in
+    # the INTERIOR. At either end, mode='nearest' pads the window with the edge
+    # value, so for the last gap the window is ~10 real gaps plus 11 copies of
+    # the outlier itself and the median IS the outlier. The ghost then measures
+    # one pitch wide and is absorbed into the comb as an ordinary neighbour,
+    # which pushes rel.max() one past the slit, makes two anchor offsets score
+    # equally, and drops a live fibre at the far end instead of the ghost --
+    # shifting the whole benchside by one lenslet (green 3B, 2026-08-31: a ghost
+    # 4.2x pitch past the slit end measured as 1.0x, +6.47 px on all 300 fibres).
+    # Interpolating the pitch across outliers keeps the drift tracking intact,
+    # and the raw gaps still supply the numerator, so a genuine dead-fibre gap is
+    # still counted as the two slots it is.
     gaps = np.diff(pos)
-    pitch = median_filter(gaps, size=21, mode='nearest')
-    pitch = np.where(pitch > 0, pitch, np.median(gaps))
-    rel = np.concatenate(([0], np.cumsum(np.rint(gaps / pitch).astype(int))))
+    p0 = float(np.median(gaps))
+    single = (gaps > 0.5 * p0) & (gaps < 1.5 * p0)
+    if single.sum() >= 3:
+        pitch_ref = np.interp(np.arange(gaps.size), np.flatnonzero(single), gaps[single])
+    else:
+        pitch_ref = np.full_like(gaps, p0)
+    pitch = median_filter(pitch_ref, size=21, mode='nearest')
+    pitch = np.where(pitch > 0, pitch, p0)
 
-    # Anchor the comb: pick the integer offset putting the most traces on live slots.
+    steps = gaps / pitch
+    resid = np.abs(steps - np.rint(steps))
+    if resid.size and float(resid.max()) > 0.25:
+        w = int(np.argmax(resid))
+        logger.warning("traceLlamas %s: gap above row %.0f is %.2f x the local pitch "
+                       "-- the comb does not quantise cleanly there",
+                       benchside, pos[w], steps[w])
+    rel = np.concatenate(([0], np.cumsum(np.rint(steps).astype(int))))
+    dup = np.flatnonzero(np.diff(rel) < 1)
+    if dup.size:
+        raise TraceCombError(
+            f"{benchside}: {dup.size} pair(s) of traces resolve to the same slit slot "
+            f"(rows {[round(float(pos[i + 1])) for i in dup[:6]]}) -- a fibre was "
+            f"detected twice")
+
+    # Anchor the comb: the integer offset putting the most traces on live slots.
+    #
+    # When the live set has no dead-fibre holes -- every benchside except 2A and
+    # 2B -- several offsets can score identically, and the offset decides WHICH
+    # trace is discarded. Tied offsets are RIGID RELABELLINGS of one another, so
+    # detector positions alone cannot separate them: a comb model has a free zero
+    # point, which makes fitted residuals, longest-contiguous-run and spacing
+    # isolation all invariant under the shift. Picking one by scan order decides
+    # fibre registration on the ~1% pitch drift between the first and last gap,
+    # i.e. on noise -- that is how green 3B lost a live fibre at y=38.7 and kept a
+    # ghost. Refuse instead, per this function's contract, and let mastercalib
+    # supply the camera. The only real discriminator is an absolute prior on the
+    # row of slot 0 (stable to ~1.4 px against a 6.5 px pitch); that would have to
+    # come from mastercalib and is deliberately not wired in here.
     is_live = np.zeros(n_slots + 1, dtype=bool)
     is_live[live] = True
-    best_a, best_n = 0, -1
-    for a in range(-int(rel.max()) - 2, n_slots + 2):
+    offsets = np.arange(-int(rel.max()) - 2, n_slots + 2)
+
+    def _off_comb(a):
         s = rel + a
-        n_good = int(np.count_nonzero(((s >= 0) & (s < n_slots))
-                                      & is_live[np.clip(s, 0, n_slots)]))
-        if n_good > best_n:
-            best_a, best_n = a, n_good
+        on = ((s >= 0) & (s < n_slots)) & is_live[np.clip(s, 0, n_slots)]
+        return s, np.flatnonzero(~on)
 
-    slots = rel + best_a
-    on_comb = ((slots >= 0) & (slots < n_slots)) & is_live[np.clip(slots, 0, n_slots)]
-    bad = np.flatnonzero(~on_comb)
-    excess = len(idx) - int(expected_count)
+    scores = np.array([len(rel) - len(_off_comb(int(a))[1]) for a in offsets])
+    excess = max(len(idx) - int(expected_count), 0)
 
-    if len(bad) != max(excess, 0):
-        raise TraceCombError(
-            f"{benchside}: {len(idx)} traces, {int(expected_count)} expected, but "
-            f"{len(bad)} land off the fibremap's live slots (rows "
-            f"{[round(float(pos[b])) for b in bad[:6]]}) -- a fibre was missed or a "
-            f"ghost traced, so the comb cannot be trimmed without guessing")
+    solutions = []
+    for a in offsets[scores == scores.max()]:
+        s, b = _off_comb(int(a))
+        if len(b) == excess and np.array_equal(np.delete(s, b), live):
+            solutions.append((int(a), b))
 
-    keep, kept_slots = np.delete(idx, bad), np.delete(slots, bad)
-    if not np.array_equal(kept_slots, live):
+    if not solutions:
+        # No offset yields an acceptable comb. Report against the best-scoring one.
+        slots, bad = _off_comb(int(offsets[int(np.argmax(scores))]))
+        if len(bad) != excess:
+            raise TraceCombError(
+                f"{benchside}: {len(idx)} traces, {int(expected_count)} expected, but "
+                f"{len(bad)} land off the fibremap's live slots (rows "
+                f"{[round(float(pos[b])) for b in bad[:6]]}) -- a fibre was missed or a "
+                f"ghost traced, so the comb cannot be trimmed without guessing")
+        kept_slots = np.delete(slots, bad)
         first = int(np.argmax(kept_slots != live))
         raise TraceCombError(
             f"{benchside}: resolved slots do not match the fibremap live set; first "
             f"mismatch at trace {first} (slot {kept_slots[first]}, expected {live[first]})")
+
+    if len({tuple(b.tolist()) for _, b in solutions}) > 1:
+        raise TraceCombError(
+            f"{benchside}: the comb fits the fibremap equally well at {len(solutions)} "
+            f"different slot offsets, which disagree about which trace to discard "
+            f"(candidates: {[[round(float(pos[i])) for i in b] for _, b in solutions][:4]})"
+            f" -- the registration is a coin flip here, so the camera is failed rather "
+            f"than guessed")
+
+    best_a, bad = solutions[0]
+    slots = rel + best_a
+    keep, kept_slots = np.delete(idx, bad), np.delete(slots, bad)
 
     if len(bad):
         logger.info("traceLlamas %s: dropped %d trace(s) off the fibremap comb at "
@@ -1221,6 +1335,10 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
             if hdu.data is not None
             and (skip_extension_indices is None or idx not in skip_extension_indices)
         ]
+
+    # Remove the pickles we are about to regenerate, so a camera that now fails to
+    # trace cannot silently keep last run's (possibly misregistered) file.
+    clear_stale_traces([hdr for _, hdr in hdus], outpath, is_master_calib)
 
     hdu_processors = [TraceRay.remote(fitsfile) for _ in range(len(hdus))]
     print(f"\nProcessing {len(hdus)} HDUs with {NUMBER_OF_CORES} cores")

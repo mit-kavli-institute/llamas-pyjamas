@@ -626,6 +626,38 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
+def find_trace_pickle(channel: str, bench: str, side: str, directory: str) -> str:
+    """Locate a camera's trace pickle, accepting both shipped filename forms.
+
+    The mastercalib bundle names its files ``LLAMAS_{channel}_{bench}_{side}_traces.pkl``,
+    while traces written by ``run_ray_tracing(is_master_calib=True)`` carry a
+    ``LLAMAS_master_`` prefix. Both are in circulation, so every lookup has to try
+    both -- checking only the prefixed form made the fallback unreachable against a
+    stock mastercalib directory, which is how a camera that failed to trace ended up
+    as blank fibres in the RSS instead of mastercalib data.
+
+    Args:
+        channel: Colour channel (red/green/blue).
+        bench: Bench number.
+        side: Side letter (A/B).
+        directory: Directory to search.
+
+    Returns:
+        str: Path to the trace pickle.
+
+    Raises:
+        FileNotFoundError: If neither filename form is present.
+    """
+    names = (f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl',
+             f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl')
+    for name in names:
+        path = os.path.join(directory, name)
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        f"No trace file for {channel}{bench}{side} in {directory}; tried {names}")
+
+
 def copy_mastercalib_trace(channel: str, bench: str, side: str,
                           mastercalib_dir: str, target_dir: str) -> str:
     """
@@ -650,12 +682,8 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
     """
     import shutil
 
-    # Find mastercalib trace
-    mastercalib_filename = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
-    mastercalib_path = os.path.join(mastercalib_dir, mastercalib_filename)
-
-    if not os.path.exists(mastercalib_path):
-        raise FileNotFoundError(f"Mastercalib trace not found: {mastercalib_path}")
+    # Find mastercalib trace under either shipped filename form.
+    mastercalib_path = find_trace_pickle(channel, bench, side, mastercalib_dir)
 
     # Copy to target directory using USER naming convention (without "master_" prefix)
     # This replaces the invalid user trace file
@@ -754,7 +782,9 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
                         channel, bench, side,
                         mastercalib_dir, trace_dir
                     )
-                    fallback_used.append((channel, bench, side, os.path.join(mastercalib_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'), copied_path))
+                    fallback_used.append((channel, bench, side,
+                                          find_trace_pickle(channel, bench, side, mastercalib_dir),
+                                          copied_path))
                     logger.info(f"✓ Copied mastercalib fallback for {channel}{bench}{side}")
                 except FileNotFoundError as e:
                     logger.error(f"✗ Could not find mastercalib fallback for {channel}{bench}{side}: {e}")
@@ -783,7 +813,7 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
                     copied_path = copy_mastercalib_trace(
                         channel, bench, side, mastercalib_dir, trace_dir)
                     fallback_used.append((channel, bench, side,
-                                          os.path.join(mastercalib_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'),
+                                          find_trace_pickle(channel, bench, side, mastercalib_dir),
                                           copied_path))
                     logger.info(f"✓ Copied mastercalib fallback for missing {channel}{bench}{side}")
                 except FileNotFoundError as e:
