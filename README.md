@@ -26,6 +26,11 @@ flux calibration, and dither stacking — is now available at:
 
 **https://mit-kavli-institute.github.io/llamas-pyjamas/**
 
+Tutorial videos for how to reduce your data can be found here:
+**https://mit-kavli.box.com/s/4b6lqeyje4lj0ltjrymifqeebsb00nnl**
+**https://mit-kavli.box.com/s/t8sc3et6z1gfcr7hd3kj19plclb1rba9**
+
+
 ## Version 1.0 release
 
 We have now officially released **version 1.0** of the LLAMAS data reduction pipeline. 
