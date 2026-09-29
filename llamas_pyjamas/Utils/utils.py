@@ -830,6 +830,45 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
     }
 
 
+def build_trace_fingerprints(mastercalib_dir: str = CALIB_DIR, out: str = None) -> dict:
+    """
+    Build the per-camera fibre throughput fingerprints used to register traces.
+
+    For every ``LLAMAS_master_{channel}_{bench}_{side}_traces.pkl`` in
+    ``mastercalib_dir``, measures the flat flux of each trace at the centre column
+    and stores its normalised fibre-to-fibre pattern in detector (= live-slot)
+    order. traceLlamasMaster uses it to break slot-offset ties and to reject a
+    comb numbered whole slots off. Only regenerate from a trace set whose fibre
+    registration has been verified: every future trace is checked against it.
+
+    Args:
+        mastercalib_dir (str): Directory holding the verified master trace pickles.
+        out (str): Output JSON path. Defaults to LUT/trace_fingerprints.json.
+
+    Returns:
+        dict: ``{channel: {benchside: [pattern per live slot]}}``.
+    """
+    from llamas_pyjamas.Trace.traceLlamasMaster import (
+        measure_trace_heights, normalise_trace_heights, TRACE_FINGERPRINT_FILE)
+
+    out = out or TRACE_FINGERPRINT_FILE
+    fingerprints = {}
+    for pkl in sorted(glob.glob(os.path.join(mastercalib_dir, 'LLAMAS_master_*_traces.pkl'))):
+        with open(pkl, 'rb') as f:
+            traceobj = pickle.load(f)
+        col = traceobj.naxis1 // 2
+        rows = np.sort(traceobj.traces[:, col])
+        pattern = normalise_trace_heights(measure_trace_heights(traceobj.data, rows, col))
+        fingerprints.setdefault(traceobj.channel.lower(), {})[
+            f"{traceobj.bench}{traceobj.side}"] = [round(float(v), 4) for v in pattern]
+        print(f"{os.path.basename(pkl)}: {len(rows)} fibres")
+
+    with open(out, 'w') as f:
+        json.dump(fingerprints, f, indent=1)
+    print(f"Wrote {sum(len(v) for v in fingerprints.values())} camera fingerprints to {out}")
+    return fingerprints
+
+
 def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
     """
     Checks if all trace files have the correct number of fibers for their benchside.

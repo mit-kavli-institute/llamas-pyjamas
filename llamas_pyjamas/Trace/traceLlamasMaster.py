@@ -53,7 +53,7 @@ import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
-from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError
+from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, BiasCameraMissingError, generate_fallback_bias_hdu
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,14 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
                 )
                 return hdu
 
+    # Every extension identifies its camera, yet none matched: the camera is
+    # simply absent from this bias file. The index lookup below would only return
+    # a neighbouring camera, so say so directly.
+    if len(bias_hdus) > 1 and all(
+            ('COLOR' in h.header and 'BENCH' in h.header and 'SIDE' in h.header)
+            or 'CAM_NAME' in h.header for h in bias_hdus[1:]):
+        raise BiasCameraMissingError(dir, target_bench, target_side, target_color)
+
     # Fall back to standard index lookup if header match fails
     try:
         bias_idx = idx_lookup.get((target_color, target_bench, target_side))
@@ -204,11 +212,11 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
     matched_side = hdr.get('SIDE', '').upper() if 'SIDE' in hdr else None
 
     if matched_color != target_color or matched_bench != target_bench or matched_side != target_side:
-        raise ValueError(
+        logger.warning(
             f"Bias index lookup returned wrong camera for {target_bench}{target_side} {target_color}: "
-            f"got {matched_bench}{matched_side} {matched_color} at index {bias_idx}. "
-            f"The bias file may have missing extensions — validate it first."
+            f"got {matched_bench}{matched_side} {matched_color} at index {bias_idx}"
         )
+        raise BiasCameraMissingError(dir, target_bench, target_side, target_color)
 
     return bias_hdu
 
@@ -306,7 +314,7 @@ def clear_stale_traces(headers, outpath, is_master_calib=False) -> list:
 
 
 def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
-                        benchside='') -> tuple:
+                        benchside='', heights=None, fingerprint=None) -> tuple:
     """Assign every trace its physical slit slot, and drop whatever sits off the comb.
 
     The pseudo-slit is a regular comb: consecutive fibre slots are one pitch apart
@@ -332,6 +340,11 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
         expected_count: number of LIVE fibres for this benchside.
         dead_fibers: fibremap positions of the dead fibres (from traceLUT.json).
         benchside: label, for messages.
+        heights: optional flat flux of every trace, aligned with ``mid_positions``
+            (see ``measure_trace_heights``). Used with ``fingerprint`` only.
+        fingerprint: optional reference throughput pattern for this camera, one
+            value per live slot (from LUT/trace_fingerprints.json). When given,
+            it breaks ties between slot offsets that positions cannot separate.
 
     Returns:
         (keep, slots): ``keep`` indexes ``mid_positions`` in ascending detector
@@ -441,6 +454,35 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
             f"{benchside}: resolved slots do not match the fibremap live set; first "
             f"mismatch at trace {first} (slot {kept_slots[first]}, expected {live[first]})")
 
+    if len({tuple(b.tolist()) for _, b in solutions}) > 1 and \
+            heights is not None and fingerprint is not None:
+        # Positions cannot break this tie, but the fibres can: each one's flat
+        # throughput is a fixed property of that fibre, so the pattern of fluxes
+        # along the slit is a fingerprint of which slot is which. It is immune to
+        # the whole detector moving (blue 1A/4A shifted 29-39 px between 2025 and
+        # 2026 and still match at lag 0), which rules out a row-position prior.
+        # The discarded candidate is a near-zero ghost, so the right choice
+        # correlates strongly and the wrong one is one slot off (r < 0).
+        ref = np.asarray(fingerprint, dtype=float)
+        hts = np.asarray(heights, dtype=float)
+        rs = []
+        for _, b in solutions:
+            kept = normalise_trace_heights(hts[np.delete(idx, b)])
+            rs.append(float(np.corrcoef(kept, ref)[0, 1]) if kept.size == ref.size
+                      else np.nan)
+        rs = np.asarray(rs)
+        ranked = np.argsort(np.where(np.isfinite(rs), rs, -np.inf))[::-1]
+        r_best, r_next = rs[ranked[0]], rs[ranked[1]]
+        if np.isfinite(r_best) and r_best >= 0.6 and \
+                (not np.isfinite(r_next) or r_best - r_next >= 0.3):
+            logger.info("traceLlamas %s: %d tied slot offsets resolved by the "
+                        "throughput fingerprint (r=%.2f vs next %.2f)", benchside,
+                        len(solutions), r_best, r_next)
+            solutions = [solutions[ranked[0]]]
+        else:
+            logger.warning("traceLlamas %s: fingerprint cannot break the slot tie "
+                           "(r=%s)", benchside, np.round(rs, 2).tolist())
+
     if len({tuple(b.tolist()) for _, b in solutions}) > 1:
         raise TraceCombError(
             f"{benchside}: the comb fits the fibremap equally well at {len(solutions)} "
@@ -458,6 +500,175 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
                     "detector row(s) %s (dead-fibre leakage or ghost)", benchside,
                     len(bad), [round(float(pos[b])) for b in bad])
     return keep, kept_slots
+
+
+def track_comb_step(comb, prev, prevprev=None, pitch=6.4, accept=1.0,
+                    halfwidth=2, max_step=1.0, step_valid=None) -> Tuple[np.ndarray, np.ndarray]:
+    """Advance every fibre's centroid by one tracing column.
+
+    The old walk re-centroided each fibre around ``int(previous)`` and accepted
+    any step under 1.5 px. That lets a faint fibre between saturated neighbours
+    creep ~0.3 px per step toward the bright wing (the valley-subtracted comb
+    goes negative there) until it sits on the neighbour one pitch away: 30
+    fibres on blue 4A 2026-09-29, ~224 across the set. Here:
+
+    * the guess continues the local tilt (median step of neighbouring fibres)
+      and the window is centred on it ROUNDED, not truncated;
+    * weights are the non-negative part of the comb;
+    * a step is accepted only within ``accept`` px of the guess, otherwise the
+      guess (not a frozen position) is carried and the point marked invalid;
+    * a fibre that has collapsed to within half a pitch of a neighbour is
+      marked invalid and reset to its guess.
+
+    Args:
+        comb: valley-subtracted cross-section at this column.
+        prev: positions at the previous column (one per fibre).
+        prevprev: positions two columns back, for the slope; None at the start.
+        pitch: median fibre spacing (px).
+        step_valid: bool per fibre, True where both ``prev`` and ``prevprev``
+            were measured centroids; only those steps inform the tilt.
+
+    Returns:
+        (positions, valid): new positions and a bool mask of trustworthy ones.
+    """
+    comb = np.asarray(comb, dtype=float)
+    prev = np.asarray(prev, dtype=float)
+    if prevprev is None:
+        guess = prev
+    else:
+        # Neighbouring fibres share the local tilt, so take the step from the
+        # median of ~17 neighbours rather than each fibre's own last step: a
+        # per-fibre slope turns one noisy centroid into a permanent slope, and a
+        # carried prediction then runs away linearly. Real steps are < 0.6 px.
+        # Only MEASURED steps count: predictions feeding predictions let a whole
+        # neighbourhood drift together (blue 4A bottom rows ran 67 px off).
+        raw = prev - np.asarray(prevprev, dtype=float)
+        ok = np.ones(prev.size, bool) if step_valid is None else np.asarray(step_valid, bool)
+        ok &= np.isfinite(raw) & (np.abs(raw) <= max_step)
+        step = np.zeros(prev.size)
+        if ok.any():
+            idx = np.flatnonzero(ok)
+            for i in range(prev.size):
+                near = idx[np.abs(idx - i) <= 8]
+                step[i] = np.median(raw[near]) if near.size >= 3 else np.median(raw[ok])
+        guess = prev + step
+    pos = guess.copy()
+    valid = np.zeros(prev.size, dtype=bool)
+    n = comb.size
+    for i, g in enumerate(guess):
+        if not np.isfinite(g):
+            continue
+        c0 = int(round(g))
+        lo, hi = max(c0 - halfwidth, 0), min(c0 + halfwidth + 1, n)
+        if hi <= lo:
+            continue
+        w = np.clip(np.nan_to_num(comb[lo:hi]), 0, None)
+        if w.sum() <= 0:
+            continue
+        c = float(np.sum(w * np.arange(lo, hi)) / w.sum())
+        if abs(c - g) < accept:
+            pos[i], valid[i] = c, True
+
+    # Neighbour guard: two traces within half a pitch are on the same fibre.
+    if pos.size > 1:
+        gap = np.diff(pos)
+        close = np.zeros(pos.size, dtype=bool)
+        close[1:] |= gap < 0.5 * pitch
+        close[:-1] |= gap < 0.5 * pitch
+        pos[close], valid[close] = guess[close], False
+    return pos, valid
+
+
+TRACE_FINGERPRINT_FILE = os.path.join(LUT_DIR, 'trace_fingerprints.json')
+
+
+def measure_trace_heights(data, rows, col, halfwidth=20) -> np.ndarray:
+    """Flat flux of each trace at detector ``rows`` around column ``col``.
+
+    Median over +-``halfwidth`` columns (rejects cosmics and bad columns), then
+    the maximum within +-1 row of each trace centre.
+    """
+    col = int(col)
+    prof = np.median(np.asarray(data, dtype=float)[:, max(col - halfwidth, 0):col + halfwidth], axis=1)
+    out = np.full(len(rows), np.nan)
+    for i, r in enumerate(np.asarray(rows, dtype=float)):
+        if np.isfinite(r) and 0 <= r < prof.size:
+            c = int(round(r))
+            out[i] = np.nanmax(prof[max(c - 1, 0):c + 2])
+    return out
+
+
+def normalise_trace_heights(heights, size=31) -> np.ndarray:
+    """Fibre-to-fibre throughput pattern: flux over a running median, z-scored.
+
+    Dividing out the running median removes the slow illumination/vignetting
+    profile, which varies between flats, and leaves the per-fibre throughput,
+    which does not.
+    """
+    h = np.asarray(heights, dtype=float)
+    h = np.where(np.isfinite(h), h, np.nanmedian(h))
+    smooth = median_filter(h, size=size, mode='nearest')
+    r = h / np.where(smooth > 0, smooth, 1.0)
+    sd = r.std()
+    return (r - r.mean()) / sd if sd > 0 else r - r.mean()
+
+
+def load_trace_fingerprints(path=TRACE_FINGERPRINT_FILE) -> dict:
+    """``{channel: {benchside: [pattern per live slot]}}``, or {} if absent."""
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def fingerprint_lag_scan(heights, fingerprint, max_lag=4) -> dict:
+    """Correlation of a traced comb's throughput pattern with the reference at
+    slot lags -max_lag..+max_lag. Lag 0 winning means the fibres are numbered
+    as in the reference; a win at lag k means every fibre is k slots off."""
+    a = normalise_trace_heights(heights)
+    ref = np.asarray(fingerprint, dtype=float)
+    out = {}
+    for lag in range(-max_lag, max_lag + 1):
+        if lag >= 0:
+            u, v = ref[lag:], a[:len(a) - lag]
+        else:
+            u, v = ref[:lag], a[-lag:]
+        n = min(len(u), len(v))
+        out[lag] = float(np.corrcoef(u[:n], v[:n])[0, 1]) if n > 10 else np.nan
+    return out
+
+
+def check_fingerprint_registration(heights, fingerprint, benchside='',
+                                   r_min=0.5, margin=0.1) -> Optional[float]:
+    """Raise TraceCombError if the comb matches the reference best at a non-zero
+    slot lag, i.e. the whole bench is numbered one or more lenslets off.
+
+    Only a CONFIDENT mismatch fails (r >= r_min and beating lag 0 by >= margin):
+    a noise-dominated flat correlates weakly at every lag and is left to the
+    positional checks rather than failed on noise. Returns r at lag 0.
+    """
+    ref = np.asarray(fingerprint, dtype=float)
+    if len(heights) != ref.size:
+        logger.warning("traceLlamas %s: %d traces vs %d-slot fingerprint -- "
+                       "registration check skipped", benchside, len(heights), ref.size)
+        return None
+    scan = fingerprint_lag_scan(heights, ref)
+    r0 = scan[0]
+    lag, r = max(((k, v) for k, v in scan.items() if k != 0 and np.isfinite(v)),
+                 key=lambda kv: kv[1], default=(0, np.nan))
+    if np.isfinite(r) and r >= r_min and r - (r0 if np.isfinite(r0) else -1) >= margin:
+        raise TraceCombError(
+            f"{benchside}: fibre throughput matches the reference best at a slot "
+            f"lag of {lag:+d} (r={r:.2f} vs {r0:.2f} at lag 0) -- every fibre is "
+            f"numbered {abs(lag)} lenslet(s) off")
+    if not (np.isfinite(r0) and r0 >= r_min):
+        logger.warning("traceLlamas %s: weak fingerprint match at lag 0 (r=%.2f) -- "
+                       "registration not independently confirmed", benchside, r0)
+    else:
+        logger.info("traceLlamas %s: fingerprint registration OK (r=%.2f at lag 0)",
+                    benchside, r0)
+    return r0
 
 
 def validate_trace_comb(mid_positions, benchside, dead_fibers=None,
@@ -528,7 +739,7 @@ def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
 
 class TraceLlamas:
 
-    _EXCLUDED_FROM_PICKLE = ['hdr', 'dead_fibres', 'LUT', 'mph', 'first_peaks', 'first_pkht', 'xmax', 'xmin', 'benchside', 'peak_properties']
+    _EXCLUDED_FROM_PICKLE = ['hdr', 'dead_fibres', 'LUT', 'mph', 'first_peaks', 'first_pkht', 'xmax', 'xmin', 'benchside', 'peak_properties', 'fingerprints']
 
     """
     A class used to trace and process fiber data from FITS files.
@@ -589,7 +800,8 @@ class TraceLlamas:
                 self.LUT = LUT
         
         self.dead_fibres = LUT['dead_fibers']
-        
+        self.fingerprints = load_trace_fingerprints()
+
 
         # 1A    298 (Green) / 298 Blue
         # 1B    300 (Green) / 300 Blue
@@ -847,6 +1059,9 @@ class TraceLlamas:
         
         try:
             self.bspline_ssets = []
+            self.bias_pending = False
+            self.bias_source = 'master_bias'
+            self.bias_level = None
 
             self.hdr = hdu_header
             self.data = hdu_data.astype(float)
@@ -889,12 +1104,23 @@ class TraceLlamas:
                     bias_file = os.path.join(BIAS_DIR, 'slow_master_bias.fits')
                 print(f'Bias file: {bias_file}')
                 #### fix the directory here!
-                bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+                try:
+                    bias = _grab_bias_hdu(bench=self.bench, side=self.side, color=self.channel, dir=bias_file)
+                except BiasCameraMissingError as e:
+                    # The comb is valley-subtracted and profileFit removes its own
+                    # background, so the pedestal cannot move the traces. Trace on
+                    # the raw frame and let TraceRay take the level from this
+                    # camera's own inter-fibre gaps once fiberimg exists.
+                    logger.warning(f"{e} -- tracing without it; bias level will be "
+                                   f"measured from the inter-fibre gaps")
+                    bias = None
+                    self.bias_pending = True
 
-                #should we be using the whole bias or just an overscan region?
-                bias_data = np.median(bias.data[20:50])
+                if bias is not None:
+                    #should we be using the whole bias or just an overscan region?
+                    bias_data = np.median(bias.data[20:50])
 
-                self.data = self.data - bias_data
+                    self.data = self.data - bias_data
 
             self.comb = self.find_comb(rownum=self.naxis1/2)
             
@@ -923,76 +1149,32 @@ class TraceLlamas:
             logger.info(f"NFibers = {self.nfibers}")
 
 
-            ######## Fit combs from the midpoint forward ########
+            ######## Walk the comb from the midpoint outwards ########
+            # Each column is centroided around a slope-continued guess from the
+            # previous two (track_comb_step); points that fail are carried as
+            # predictions and masked out of the fit below, so a fibre can no
+            # longer creep onto its neighbour and drag its fitted trace with it.
             mid_index = int(n_tracefit / 2)
-            tt = xtrace[mid_index:]
-            for itrace, thisx in enumerate(tt):
-                thiscomb = self.find_comb(thisx)
+            valid = np.zeros(shape=(self.nfibers, n_tracefit), dtype=bool)
+            start = np.asarray(self.updated_peaks, dtype=float)
+            pitch = float(np.median(np.diff(np.sort(start)))) if start.size > 1 else 6.4
+            forward = list(range(mid_index, n_tracefit))
+            backward = list(range(mid_index - 1, -1, -1))
+            for cols in (forward, backward):
+                prev, prevprev = start, None
+                prev_ok = np.ones(start.size, bool)
+                step_ok = None
+                for icol in cols:
+                    thiscomb = self.find_comb(xtrace[icol])
+                    pos, ok = track_comb_step(thiscomb, prev, prevprev, pitch=pitch,
+                                              step_valid=step_ok)
+                    tracearr[:, icol], valid[:, icol] = pos, ok
+                    step_ok = ok & prev_ok
+                    prevprev, prev, prev_ok = prev, pos, ok
 
-                if itrace == 0:
-                    
-                    peaks = np.array(self.updated_peaks)
-                else:
-                    peaks = tracearr[:,mid_index+itrace-1].astype(int)
-
-                for ifiber, pk_guess in enumerate(peaks):
-    
-                    
-                    if ifiber >= self.nfibers:
-                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}")
-                        continue
-                    
-                    #if the guess is too close to the edge, skip
-                    ###Shouldn't this not be needed if we exclude peaks too close to the edge?
-                    if pk_guess -2 < 0:
-                        print('Peak guess too close condition hit')
-                        continue
-                    
-                    #taking the weighted sum  
-                    pk_centroid = \
-                        np.nansum(np.multiply(thiscomb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
-                        / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
-
-                    #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 1.5):
-                        tracearr[ifiber,mid_index+itrace] = pk_centroid
-                    else:
-                        tracearr[ifiber,mid_index+itrace] = pk_guess
-
-                    
-
-
-            ######### Now go back and fit from the midpoint backward ######
-            for itrace, thisx in enumerate(reversed(xtrace[0:mid_index])):
-                thiscomb = self.find_comb(thisx)
-
-                if itrace == 0:
-                    peaks = np.array(self.updated_peaks)
-                else:
-                    peaks = tracearr[:,mid_index-itrace+1].astype(int)
-
-                for ifiber, pk_guess in enumerate(peaks):
-                    if ifiber >= self.nfibers:
-                        logger.warning(f"ifiber {ifiber} exceeds nfibers {self.nfibers} for channel {self.channel} Bench {self.bench} side {self.side}, skipping")
-                        continue
-                    
-                    #if the guess is too close to the edge, skip
-                    ###Shouldn't this not be needed if we exclude peaks too close to the edge?
-                    if pk_guess -2 < 0:
-                        print('Peak guess too close condition hit')
-                        continue
-                    
-                    #taking the weighted sum  
-                    pk_centroid = \
-                        np.nansum(np.multiply(thiscomb[pk_guess-2:pk_guess+3],pk_guess-2+np.arange(5))) \
-                        / np.nansum(thiscomb[pk_guess-2:pk_guess+3])
-
-                    #if the updated peak diverges too far from the peak guess then use the peak guess
-                    if (np.abs(pk_centroid-pk_guess) < 1.5):
-                        tracearr[ifiber,mid_index-itrace-1] = pk_centroid
-                    else:
-                        tracearr[ifiber,mid_index-itrace-1] = pk_guess
-
+            self.n_invalid_centroids = int((~valid).sum())
+            logger.info(f"{self.benchside} {self.channel}: {self.n_invalid_centroids} of "
+                        f"{valid.size} centroids masked from the trace fit")
 
             #defines the coordinates of the trace along the x axis
             self.xtracefit = np.outer(np.ones(self.nfibers),xtrace)
@@ -1000,7 +1182,12 @@ class TraceLlamas:
             self.tracearr  = tracearr
             #defines the traces by fitting a spline along the x axis
             
-            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, maxdev=0.3)
+            # Fit measured centroids only; carried predictions never enter the fit.
+            # A fibre with almost no measured points keeps its full weight rather
+            # than an unconstrained fit (the comb check then judges it).
+            invvar = valid.astype(float)
+            invvar[valid.sum(axis=1) < 5] = 1.0
+            self.tset      = pydl.xy2traceset(self.xtracefit, self.tracearr, invvar=invvar, maxdev=0.3)
             
             x2          = np.outer(np.ones(self.nfibers),np.arange(self.naxis1))
             #interpolates the traces to give an x,y position for each fiber along the naxis
@@ -1008,7 +1195,8 @@ class TraceLlamas:
             self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
             
             # --- Point 2: Enforce monotonic ordering of traces ---
-            min_gap = 6  # minimum gap in pixels between adjacent fiber traces £was prev 6
+            # Only catch genuine crossings; a fixed 6 px squeezed the real 6.0-6.4 px pitch.
+            min_gap = 0.75 * pitch  # minimum gap in pixels between adjacent fiber traces
             add_gap = 2
             for col in range(self.traces.shape[1]):
                 for i in range(1, self.nfibers):
@@ -1039,14 +1227,18 @@ class TraceLlamas:
                                           (safe_mid_positions <= (self.naxis2 - min_edge_distance)))[0]
 
             dead_here = (self.dead_fibres or {}).get(self.benchside, [])
+            fingerprint = (getattr(self, 'fingerprints', None) or {}) \
+                .get(self.channel.lower(), {}).get(self.benchside)
+            heights = measure_trace_heights(self.data, safe_mid_positions, mid_x)
 
             if len(valid_edge_indices) < expected_count:
-                # Short count: keep what we have. The wrong nfibers is caught by
-                # Utils.validate_and_fix_trace_fibres, which swaps in the
-                # mastercalib trace for this camera.
-                print(f"Only {len(valid_edge_indices)} traces pass the edge criteria for {self.benchside}")
-                keep_indices = valid_edge_indices
-                short_count = True
+                # Short count: a fibre was missed, so every trace index after it
+                # is unknowable. Fail the camera rather than write a pickle with
+                # the wrong fibre count; validate_and_fix_trace_fibres supplies
+                # the mastercalib trace for a missing camera.
+                raise TraceCombError(
+                    f"{self.benchside}: only {len(valid_edge_indices)} traces pass the "
+                    f"edge criteria, {expected_count} expected -- a fibre was missed")
             else:
                 # Trim the excess by matching the comb against the FIBREMAP: every
                 # trace must land on a live slit slot. Spacing isolation alone
@@ -1057,8 +1249,8 @@ class TraceLlamas:
                 # slot 169) and on 2026-08-31 was red 2A's slot-0 fibre.
                 keep_indices, _kept_slots = resolve_trace_slots(
                     valid_edge_indices, safe_mid_positions, expected_count,
-                    dead_fibers=dead_here, benchside=self.benchside)
-                short_count = False
+                    dead_fibers=dead_here, benchside=self.benchside,
+                    heights=heights, fingerprint=fingerprint)
 
             # Now filter the trace arrays using the final indices.
             self.traces = self.traces[keep_indices]
@@ -1074,9 +1266,17 @@ class TraceLlamas:
             self.comb_ok = validate_trace_comb(
                 self.traces[:, mid_x], self.benchside,
                 dead_fibers=dead_here, expected_count=expected_count)
-            if not self.comb_ok and not short_count:
+            if not self.comb_ok:
                 raise TraceCombError(
                     f"{self.benchside}: traced comb failed validation after trimming")
+
+            # Independent registration check: a whole bench numbered N slots off
+            # passes every positional test (right count, regular comb), so compare
+            # the fibre throughput pattern against the reference camera.
+            self.fingerprint_r = None
+            if fingerprint is not None:
+                self.fingerprint_r = check_fingerprint_registration(
+                    heights[keep_indices], fingerprint, benchside=self.benchside)
                  
 
         except Exception as e:
@@ -1095,6 +1295,45 @@ class TraceLlamas:
         result = {"status": "success"}
         return result
     
+    def apply_pending_bias(self, margin=13, edge=4, min_rows=10) -> None:
+        """Subtract a bias level measured from this camera's own off-slit rows.
+
+        Used when the master bias has no extension for this camera
+        (``bias_pending``). Call after tracing: the traces and profiles are
+        unaffected by a constant level (comb valleys and the profileFit
+        background both remove it), only the stored ``data`` changes.
+
+        On a lamp flat the inter-fibre gaps are not dark (fibre wings and
+        scattered light put them at thousands of DN), and the fixed rows 30-50
+        of ``generate_fallback_bias_hdu`` can hold a fibre (blue 1A's first
+        trace sits at row 40). So take the median of the rows beyond both slit
+        ends, ``margin`` px (~2 pitches) clear of the outermost traces and
+        ``edge`` rows in from the detector edge. On 2026-09-29 this reads
+        160-305 DN above the true FAST pedestal (scattered lamp light), against
+        up to 620 DN for rows 30-50. Falls back to generate_fallback_bias_hdu
+        when too few off-slit rows exist.
+        """
+        if not getattr(self, 'bias_pending', False):
+            return
+        ny = self.data.shape[0]
+        lo = int(np.floor(np.nanmin(self.traces))) - margin
+        hi = int(np.ceil(np.nanmax(self.traces))) + margin
+        rows = list(range(edge, max(lo, edge))) + list(range(min(hi, ny - edge), ny - edge))
+        if len(rows) >= min_rows:
+            self.bias_level = float(np.nanmedian(self.data[rows]))
+            self.bias_source = 'offslit_rows'
+            detail = f"{len(rows)} rows clear of the slit"
+        else:
+            fb = generate_fallback_bias_hdu(self.data, tracer=self)
+            self.bias_level = float(fb.header['BIASLVL'])
+            self.bias_source = str(fb.header['BIASSRC'])
+            detail = f"only {len(rows)} off-slit rows; generate_fallback_bias_hdu"
+        self.data = self.data - self.bias_level
+        self.bias_pending = False
+        logger.warning("traceLlamas %s%s %s: master bias missing this camera; "
+                       "subtracted %.1f DN from %s (%s)", self.bench, self.side,
+                       self.channel, self.bias_level, self.bias_source, detail)
+
     def profileFit(self)-> Tuple[np.ndarray, ...]:
         """
         Fits the spatial profile of fibers in the data.
@@ -1244,6 +1483,7 @@ class TraceRay(TraceLlamas):
             return result
 
         self.fiberimg, self.profimg, self.bpmask = super().profileFit()
+        self.apply_pending_bias()
         
         origfile = self.fitsfile.split('.fits')[0]
         color = self.channel.lower()
@@ -1272,6 +1512,10 @@ class TraceRay(TraceLlamas):
             'channel': self.channel,
             'nfibers': int(self.nfibers),
             'comb_ok': bool(getattr(self, 'comb_ok', True)),
+            'fingerprint_r': getattr(self, 'fingerprint_r', None),
+            'bias_source': getattr(self, 'bias_source', None),
+            'n_invalid_centroids': getattr(self, 'n_invalid_centroids', None),
+            'bias_level': getattr(self, 'bias_level', None),
             'elapsed': round(elapsed_time, 1),
             'filename': filename,
         })
@@ -1392,8 +1636,15 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         cam = res.get('benchside') or f"{res.get('bench', '?')}{res.get('side', '?')}"
         cam = f"{cam} {res.get('channel', '??')}"
         if res.get('status') == 'success':
-            logger.info("traceLlamas %s: %d fibres traced, comb_ok=%s (%.0fs)", cam,
-                        res.get('nfibers', -1), res.get('comb_ok'), res.get('elapsed', 0))
+            r_fp = res.get('fingerprint_r')
+            logger.info("traceLlamas %s: %d fibres traced, comb_ok=%s, fingerprint r=%s, "
+                        "%s centroids masked (%.0fs)", cam, res.get('nfibers', -1),
+                        res.get('comb_ok'), 'n/a' if r_fp is None else f"{r_fp:.2f}",
+                        res.get('n_invalid_centroids'), res.get('elapsed', 0))
+            if res.get('bias_source') not in (None, 'master_bias'):
+                logger.warning("traceLlamas %s: not in the master bias -- subtracted "
+                               "%.1f DN measured from the frame (%s)", cam,
+                               res.get('bias_level') or 0.0, res.get('bias_source'))
             if not res.get('comb_ok', True):
                 n_failed += 1
         else:

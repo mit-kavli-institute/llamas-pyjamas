@@ -66,6 +66,28 @@ class BiasReadModeError(ValueError):
         )
 
 
+class BiasCameraMissingError(BiasNotFoundError):
+    """
+    Raised when a master-bias file is readable but has no extension for the
+    requested camera (e.g. the 2026-01-06 FAST master lacks blue 1A and 4A).
+
+    Subclasses BiasNotFoundError so every caller that already falls back to
+    ``generate_fallback_bias_hdu`` for a missing bias does so here too.
+
+    Attributes
+    ----------
+    path : str
+    bench, side, color : str
+    """
+    def __init__(self, path: str, bench: str, side: str, color: str):
+        self.bench, self.side, self.color = str(bench), str(side), str(color)
+        super().__init__(
+            path,
+            f"Master bias '{path}' has no extension for {bench}{side} {color}; "
+            f"the file is missing this camera."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Fallback HDU generator
 # ---------------------------------------------------------------------------

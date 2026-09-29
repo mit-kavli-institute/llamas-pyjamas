@@ -12,7 +12,9 @@ isolation has nothing to grab. Runnable with pytest or as a plain script
 import numpy as np
 import pytest
 
-from llamas_pyjamas.Trace.traceLlamasMaster import resolve_trace_slots, TraceCombError
+from llamas_pyjamas.Trace.traceLlamasMaster import (
+    resolve_trace_slots, TraceCombError, normalise_trace_heights,
+    check_fingerprint_registration)
 
 PITCH = 6.45
 BASE = 60.0
@@ -156,6 +158,70 @@ def test_dead_fibre_at_the_end_leaves_no_gap():
     assert len(keep) == 298
     np.testing.assert_array_equal(resolved,
                                   [s for s in range(300) if s not in (270, 299)])
+
+
+def throughput(n, seed=0):
+    """A realistic flat: slow illumination profile times a per-fibre throughput."""
+    rng = np.random.default_rng(seed)
+    x = np.arange(n)
+    return 1e4 * (1.0 - 0.3 * ((x - n / 2) / n) ** 2) * rng.uniform(0.7, 1.1, n)
+
+
+def test_fingerprint_breaks_the_one_pitch_tie():
+    """Green 3A / blue 3B, 2026-09-29: the coin-flip geometry, now with fluxes.
+
+    The ghost past the slit end is ~1% of a fibre. Dropping it keeps the reference
+    throughput pattern; dropping live slot 0 shifts it by one fibre.
+    """
+    flux = throughput(298)
+    pos = comb(list(range(299)))
+    heights = np.append(flux, 0.01 * np.median(flux))
+    fingerprint = normalise_trace_heights(flux)
+    keep, resolved = resolve_trace_slots(np.arange(299), pos, 298, (), '3A',
+                                         heights=heights, fingerprint=fingerprint)
+    np.testing.assert_array_equal(resolved, list(range(298)))
+    assert_dropped(keep, 299, [298])
+
+
+def test_fingerprint_breaks_the_tie_below_the_slit():
+    flux = throughput(300, seed=1)
+    pos = comb(list(range(301)))
+    heights = np.insert(flux, 0, 0.01 * np.median(flux))
+    keep, _ = resolve_trace_slots(np.arange(301), pos, 300, (), '3B', heights=heights,
+                                  fingerprint=normalise_trace_heights(flux))
+    assert_dropped(keep, 301, [0])
+
+
+def test_unrelated_fingerprint_still_refuses():
+    # A reference that matches neither option must not pick one.
+    flux = throughput(298)
+    heights = np.append(flux, 0.01 * np.median(flux))
+    unrelated = normalise_trace_heights(throughput(298, seed=7))
+    with pytest.raises(TraceCombError, match='coin flip'):
+        resolve_trace_slots(np.arange(299), comb(list(range(299))), 298, (), '1A',
+                            heights=heights, fingerprint=unrelated)
+
+
+def test_fingerprint_registration_accepts_lag_zero():
+    flux = throughput(300, seed=2)
+    r0 = check_fingerprint_registration(flux, normalise_trace_heights(flux), '4A')
+    assert r0 > 0.99
+
+
+def test_fingerprint_registration_rejects_a_bench_one_slot_off():
+    # Right count, regular comb, every fibre one lenslet off: the positional checks
+    # cannot see this; the throughput pattern can.
+    flux = throughput(301, seed=3)
+    ref = normalise_trace_heights(flux[:300])
+    with pytest.raises(TraceCombError, match='slot lag of'):
+        check_fingerprint_registration(flux[1:], ref, '4A')
+
+
+def test_noisy_flat_is_not_failed_on_noise():
+    # No throughput signal at all: weak r at every lag must warn, not fail.
+    rng = np.random.default_rng(4)
+    ref = normalise_trace_heights(throughput(300, seed=5))
+    check_fingerprint_registration(rng.normal(1e4, 1, 300), ref, '4A')
 
 
 if __name__ == '__main__':
