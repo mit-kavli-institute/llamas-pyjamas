@@ -1,18 +1,17 @@
 """
 Build the quick-look fibre-image cache used for observer pointing checks.
 
-QuickWhiteLightCube (Image/WhiteLightModule.py) currently unpickles all 24
-master trace objects (mastercalib/LLAMAS_master_{color}_{bench}_{side}_traces.pkl,
-~117 MB each, ~2.8 GB total) but only needs each detector's fibre-label image
-(`fiberimg`, 2048x2048, -1 = no fibre, 0..nfibers-1 = fibre index) plus
-nfibers, bench, side and channel. This script extracts just those into one
-small compressed .npz file (fiberimg stored as int16), so a quick-look run can
-skip the pickles entirely.
+QuickWhiteLightCube (Image/WhiteLightModule.py) only needs each detector's
+fibre-label image (`fiberimg`, 2048x2048, -1 = no fibre, 0..nfibers-1 = fibre
+index) plus nfibers, bench, side and channel, not the full master trace objects
+(mastercalib/LLAMAS_master_{color}_{bench}_{side}_traces.pkl, ~117 MB each,
+~2.8 GB total). This script extracts just those into one small compressed .npz
+file (fiberimg stored as int16), so a quick-look run can skip the pickles.
 
-This cache is intentionally NOT yet wired into QuickWhiteLightCube: new master
-traces are about to be delivered, and the cache should be generated from those.
-Rerun this script whenever the master traces change; use
-quicklook_cache_is_fresh() to detect a stale cache.
+QuickWhiteLightCube uses the cache whenever quicklook_cache_is_fresh() says it
+matches the pickles, and falls back to the pickles (with one warning) otherwise.
+Rerun this script with --force whenever the master traces change. mastercalib/ is
+not in git, so each machine builds its own copy (~6 s).
 
 Usage:
     python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg \
@@ -169,9 +168,12 @@ def quicklook_cache_is_fresh(path, calib_dir=CALIB_DIR):
     True if the cache exists and matches the master trace pickles in calib_dir:
     every recorded pickle still exists with the same size and mtime, and no
     pickle has appeared that the cache does not cover.
+
+    The reasons are logged at INFO (up to one line per pickle); callers report a
+    stale cache once.
     """
     if not os.path.exists(path):
-        logger.warning(f"Quick-look cache {path} not found")
+        logger.info(f"Quick-look cache {path} not found")
         return False
     with np.load(path) as npz:
         recorded = _read_meta(npz)['detectors']
@@ -180,10 +182,10 @@ def quicklook_cache_is_fresh(path, calib_dir=CALIB_DIR):
     for key, info in recorded.items():
         pkl_path = os.path.join(calib_dir, info['source'])
         if not os.path.exists(pkl_path):
-            logger.warning(f"Quick-look cache stale: {info['source']} no longer exists")
+            logger.info(f"Quick-look cache stale: {info['source']} no longer exists")
             fresh = False
         elif _file_stamp(pkl_path) != (info['size'], info['mtime']):
-            logger.warning(f"Quick-look cache stale: {info['source']} has changed")
+            logger.info(f"Quick-look cache stale: {info['source']} has changed")
             fresh = False
 
     recorded_sources = {info['source'] for info in recorded.values()}
@@ -192,7 +194,7 @@ def quicklook_cache_is_fresh(path, calib_dir=CALIB_DIR):
             for side in SIDES:
                 fname = trace_filename(color, bench, side)
                 if fname not in recorded_sources and os.path.exists(os.path.join(calib_dir, fname)):
-                    logger.warning(f"Quick-look cache stale: {fname} is not in the cache")
+                    logger.info(f"Quick-look cache stale: {fname} is not in the cache")
                     fresh = False
     return fresh
 

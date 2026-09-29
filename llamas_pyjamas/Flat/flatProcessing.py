@@ -5,7 +5,6 @@ import argparse
 import ray
 from llamas_pyjamas.Utils.rayManager import init_ray
 import psutil
-import pkg_resources
 from pathlib import Path
 import logging
 import llamas_pyjamas

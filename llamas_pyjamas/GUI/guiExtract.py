@@ -13,7 +13,6 @@ import ray, multiprocessing, psutil
 from llamas_pyjamas.Utils.rayManager import init_ray
 import traceback
 
-import pkg_resources
 from pathlib import Path
 
 import llamas_pyjamas

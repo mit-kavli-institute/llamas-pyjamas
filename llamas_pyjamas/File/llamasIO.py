@@ -14,6 +14,7 @@ Classes:
 Functions:
     getBenchSideChannel: Retrieves data for a specific bench, side, and channel from a FITS file.
     process_fits_by_color: Processes FITS data with color-based image transformations.
+    trim_and_orient: The same scaling, trimming and orientation for one streamed extension.
     update_ra_dec_in_header: Converts telescope coordinates to decimal degrees in FITS headers.
 
 Example:
@@ -27,6 +28,9 @@ Example:
             print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
 import logging
+import re
+
+import numpy as np
 from astropy.io import fits # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -225,7 +229,53 @@ def process_fits_by_color(fits_file, output_file=None, write=True):
 
     except Exception as e:
         print(f"Error processing FITS file: {e}")
-        return None, None  
+        return None, None
+
+
+def trim_and_orient(raw, header, dtype=np.float32):
+    """Scale, trim and orient one detector exactly as process_fits_by_color does.
+
+    For streaming readers that only need one detector at a time: open the file with
+    ``fits.open(path, do_not_scale_image_data=True)`` and pass each extension's
+    stored values. Casting once to ``dtype`` and applying BSCALE/BZERO here is
+    ~4x faster than astropy's pseudo-integer scaling followed by a second cast.
+
+    Args:
+        raw: Stored (unscaled) image values of the extension.
+        header: The extension header (BSCALE, BZERO, DATASEC, COLOR or CAM_NAME).
+        dtype: Output dtype. float32 is exact for 16-bit detector data.
+
+    Returns:
+        numpy.ndarray: The scaled, DATASEC-trimmed and colour-oriented image.
+    """
+    data = raw.astype(dtype)
+    bscale = header.get('BSCALE', 1)
+    bzero = header.get('BZERO', 0)
+    if bscale != 1:
+        data *= data.dtype.type(bscale)
+    if bzero:
+        data += data.dtype.type(bzero)
+
+    match = re.match(r'\[(\d+):(\d+),\s*(\d+):(\d+)\]', header.get('DATASEC', ''))
+    if match:
+        x1, x2, y1, y2 = map(int, match.groups())
+        if x2 <= data.shape[1] and y2 <= data.shape[0]:
+            data = data[y1 - 1:y2, x1 - 1:x2]
+        else:
+            logger.warning(f"DATASEC {header['DATASEC']} exceeds data dimensions {data.shape}")
+
+    if 'COLOR' in header:
+        color = header['COLOR'].lower()
+    elif 'CAM_NAME' in header:
+        color = header['CAM_NAME'].split('_')[1].lower()
+    else:
+        color = None
+
+    if color == 'blue':
+        data = np.flipud(np.fliplr(data))
+    elif color == 'green':
+        data = np.fliplr(data)
+    return data
     
     
     
