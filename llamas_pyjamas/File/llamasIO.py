@@ -119,7 +119,7 @@ def getBenchSideChannel(fitsfile: str, bench: str, side: str, channel: str)-> No
                     return(hdu.data)
                 
 
-def process_fits_by_color(fits_file, output_file=None):
+def process_fits_by_color(fits_file, output_file=None, write=True):
     """Process a FITS file and transform image data based on color attribute.
 
     The function applies the following transformations:
@@ -131,6 +131,10 @@ def process_fits_by_color(fits_file, output_file=None):
         fits_file: Path to the FITS file.
         output_file: Path to save the processed FITS file. If None, defaults to
                      input filename with '_trimmed' suffix.
+        write: If False, return the processed HDUs without writing anything to
+               disk (the returned path is then None). Callers that only need the
+               in-memory data (e.g. the quick-look white light, the bias cache)
+               should pass False to avoid a ~200 MB write per call.
 
     Returns:
         tuple: (HDUList, str) containing the processed HDU list and output file path,
@@ -203,6 +207,9 @@ def process_fits_by_color(fits_file, output_file=None):
 
 
                 result_hdus.append(hdu)
+
+        if not write:
+            return result_hdus, None
 
         # Determine output filename
         if output_file is None:

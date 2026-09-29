@@ -40,7 +40,7 @@ import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
-from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
+from llamas_pyjamas.DataModel.validate import validate_for_gui
 from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
 
 from matplotlib.patches import RegularPolygon
@@ -72,6 +72,13 @@ def _lattice_pitch(x, y) -> float:
     d, _ = cKDTree(pts).query(pts, k=2)
     return float(np.median(d[:, 1]))
 
+
+# (benchside, fibre) -> (xpos, ypos). Built once: filtering the astropy Table per
+# fibre (FiberMap_LUT is called ~7000 times per white light) cost over a second.
+# setdefault keeps the first matching row, as the old Table lookup did.
+FIBERMAP_XY = {}
+for _row in fibermap_lut:
+    FIBERMAP_XY.setdefault((str(_row['bench']), int(_row['fiber'])), (_row['xpos'], _row['ypos']))
 
 # Fibre lattice spacing from the (static) map: exactly 1.0 -- every fibre has all
 # six neighbours at unit distance, rows sqrt(3)/2 apart, alternate rows offset 0.5.
@@ -793,17 +800,8 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
     return(x_final, y_final)
 
 def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
-
-    #if (np.logical_and(bench == '2B',fiber >= 49)):
-    #    fiber += 1
-    
-    fiber_row = fibermap_lut[np.logical_and(fibermap_lut['bench']==bench, \
-                                            fibermap_lut['fiber']==fiber)]
-    #breakpoint()
-    try:
-        return(fiber_row['xpos'][0],fiber_row['ypos'][0])
-    except:
-        return(-1,-1)
+    """(xpos, ypos) of a physical fibre on a benchside, or (-1, -1) if not in the map."""
+    return FIBERMAP_XY.get((bench, fiber), (-1, -1))
 
 def plot_fibermap(outpath: str)-> None:
     """
@@ -1014,6 +1012,100 @@ def rerun():
 
 ######### Testing qucik whitelight
 
+def _load_dead_fiber_lut() -> dict:
+    """Dead physical fibres per benchside from traceLUT.json (same source as extractLlamas)."""
+    try:
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+            return json.load(f).get('dead_fibers', {})
+    except Exception as e:
+        logger.warning(f'Could not load dead fiber definitions from traceLUT.json: {e}')
+        return {}
+
+
+def _detector_fibre_fluxes(trace_obj, data, dead_fiber_lut: dict):
+    """Summed flux and IFU position of every traced fibre on one detector.
+
+    Sums ``data`` over each fibre's pixels in ``trace_obj.fiberimg`` (NaNs ignored,
+    like ``np.nansum``) in a single ``np.bincount`` pass, rather than building a
+    full-frame mask per fibre. Fibres with no pixels, or not in the fibre map,
+    are skipped.
+
+    Returns
+    -------
+    (x, y, flux) : lists, in trace-fibre order
+    """
+    benchside = f'{trace_obj.bench}{trace_obj.side}'
+    nfib = trace_obj.nfibers
+
+    # Get the sorted list of dead physical fiber indices for this bench
+    dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
+    if dead_fibers:
+        logger.info(f'Bench {benchside}: {nfib} traced fibers, '
+                    f'dead physical fibers: {dead_fibers}')
+
+    # Build the trace-index → physical-fiber-number mapping.
+    # The trace object has nfibers entries (e.g. 297 for 2B) because dead
+    # fibers were never detected during tracing.  We need to re-insert the
+    # gaps so that trace index i maps to the correct physical fiber number
+    # that the FiberMap LUT expects.
+    #
+    # Example for 2B (dead fiber 49, nfibers=297):
+    #   trace 0-48  → physical 0-48
+    #   trace 49-296 → physical 50-297
+    trace_to_physical = []
+    physical = 0
+    dead_set = set(dead_fibers)
+    for trace_idx in range(nfib):
+        while physical in dead_set:
+            physical += 1
+        trace_to_physical.append(physical)
+        physical += 1
+
+    # Per-fibre pixel counts and sums in one pass. fiberimg is -1 off-fibre;
+    # labels >= nfibers were never summed before either. Only NaNs are zeroed so
+    # an inf still propagates, exactly as np.nansum does.
+    fiberimg = trace_obj.fiberimg
+    in_fibre = (fiberimg >= 0) & (fiberimg < nfib)
+    labels = fiberimg[in_fibre].astype(np.intp, copy=False)   # bincount needs ints
+    values = data[in_fibre]
+    values = np.where(np.isnan(values), 0.0, values)
+    npix = np.bincount(labels, minlength=nfib)
+    sums = np.bincount(labels, weights=values, minlength=nfib)
+
+    xdata, ydata, flux = [], [], []
+    for ifib in range(nfib):
+        physical_fiber = trace_to_physical[ifib]
+        if npix[ifib] == 0:
+            logger.info(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
+                        f'on bench {benchside}: no pixels in fiberimg')
+            continue
+
+        # Map physical fiber number to IFU position
+        x, y = FiberMap_LUT(benchside, physical_fiber)
+        if x == -1 and y == -1:
+            continue  # Skip if fiber mapping not found
+
+        xdata.append(x)
+        ydata.append(y)
+        flux.append(sums[ifib])
+
+    return xdata, ydata, flux
+
+
+def _render_whitelight(xdata, ydata, flux, hex_tiles: bool = False, pix_per_unit: int = 10):
+    """White-light image from per-fibre fluxes: hexagonal tiles or the shared grid."""
+    # Dead fibers are simply absent from the interpolation inputs;
+    # LinearNDInterpolator will naturally fill those positions from neighbours.
+    if hex_tiles:
+        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
+    else:
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux,
+                                                 fill_value=np.nan)
+        x_grid, y_grid = whitelight_grid()
+        whitelight = flux_interpolator(x_grid, y_grid)
+    return whitelight
+
+
 def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
                     hex_tiles: bool = False, pix_per_unit: int = 10):
     """
@@ -1026,7 +1118,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
     data_list : list
         A list of data arrays corresponding to each trace object.
     metadata : list, optional
-        Optional metadata for each trace/data pair.
+        Optional metadata for each trace/data pair (unused; kept for compatibility).
     ds9plot : bool, optional
         If True, display the resulting white light image using DS9. Default is False.
     
@@ -1039,94 +1131,17 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
         - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
         - flux (numpy.ndarray): The flux values for each fiber.
     """
+    dead_fiber_lut = _load_dead_fiber_lut()
 
-    xdata = np.array([])
-    ydata = np.array([])
-    flux = np.array([])
+    xdata, ydata, flux = [], [], []
+    for trace_obj, data in zip(trace_list, data_list):
+        x, y, f = _detector_fibre_fluxes(trace_obj, data, dead_fiber_lut)
+        xdata.extend(x)
+        ydata.extend(y)
+        flux.extend(f)
+    xdata, ydata, flux = np.array(xdata, dtype=float), np.array(ydata, dtype=float), np.array(flux, dtype=float)
 
-    # Load dead fiber definitions from the canonical LUT (same source as extractLlamas)
-    try:
-        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
-            trace_lut = json.load(f)
-        dead_fiber_lut = trace_lut.get('dead_fibers', {})
-    except Exception as e:
-        logger.warning(f'Could not load dead fiber definitions from traceLUT.json: {e}')
-        dead_fiber_lut = {}
-
-    for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
-        # Get bench and side information
-        bench = trace_obj.bench
-        side = trace_obj.side
-        benchside = f'{bench}{side}'
-
-        # Get the sorted list of dead physical fiber indices for this bench
-        dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
-
-        if dead_fibers:
-            logger.info(f'Bench {benchside}: {trace_obj.nfibers} traced fibers, '
-                        f'dead physical fibers: {dead_fibers}')
-
-        # Build the trace-index → physical-fiber-number mapping.
-        # The trace object has nfibers entries (e.g. 297 for 2B) because dead
-        # fibers were never detected during tracing.  We need to re-insert the
-        # gaps so that trace index i maps to the correct physical fiber number
-        # that the FiberMap LUT expects.
-        #
-        # Example for 2B (dead fiber 49, nfibers=297):
-        #   trace 0-48  → physical 0-48
-        #   trace 49-296 → physical 50-297
-        trace_to_physical = []
-        physical = 0
-        dead_set = set(dead_fibers)
-        for trace_idx in range(trace_obj.nfibers):
-            while physical in dead_set:
-                physical += 1
-            trace_to_physical.append(physical)
-            physical += 1
-
-        # Process each fiber using the corrected mapping
-        for ifib in range(trace_obj.nfibers):
-            physical_fiber = trace_to_physical[ifib]
-
-            # Get fiber mask from the trace object
-            fiber_mask = trace_obj.fiberimg == ifib
-
-            if not np.any(fiber_mask):
-                logger.info(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
-                            f'on bench {benchside}: no pixels in fiberimg')
-                continue
-
-            # Map physical fiber number to IFU position
-            try:
-                x, y = FiberMap_LUT(benchside, physical_fiber)
-                if x == -1 and y == -1:
-                    continue  # Skip if fiber mapping not found
-            except Exception as e:
-                logger.info(f'Physical fiber {physical_fiber} (trace {ifib}) '
-                            f'not found in fiber map for bench {benchside}')
-                logger.error(traceback.format_exc())
-                continue
-
-            # Sum the flux directly from masked values in the data
-            thisflux = np.nansum(data[fiber_mask])
-
-            # Record the position and flux
-            flux = np.append(flux, thisflux)
-            xdata = np.append(xdata, x)
-            ydata = np.append(ydata, y)
-
-    # Create interpolated image using only valid fibers
-    # Dead fibers are simply absent from the interpolation inputs;
-    # LinearNDInterpolator will naturally fill those positions from neighbours.
-    # Generate white light image: either flat hexagonal fibre tiles (no
-    # interpolation) or the default resampling onto the shared rectangular grid.
-    if hex_tiles:
-        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
-    else:
-        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux,
-                                                 fill_value=np.nan)
-        x_grid, y_grid = whitelight_grid()
-        whitelight = flux_interpolator(x_grid, y_grid)
+    whitelight = _render_whitelight(xdata, ydata, flux, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
 
     # Optional DS9 plot
     if ds9plot:
@@ -1188,13 +1203,9 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
         # Validate and create GUI version if needed (preserves original file)
         science_file = validate_for_gui(science_file)
 
-        # Open the science FITS file and create the output HDU list
-        science_hdul, _ = process_fits_by_color(science_file) #fits.open(science_file)
-
-        # Identify placeholder extensions (missing cameras)
-        placeholder_indices = get_placeholder_extension_indices(science_file)
-        if placeholder_indices:
-            logger.info(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
+        # Trim/orient the science frame in memory; write=False avoids a ~200 MB
+        # *_trimmed.fits next to the observer's data on every run.
+        science_hdul, _ = process_fits_by_color(science_file, write=False)
 
         primary_hdr = science_hdul[0].header
 
@@ -1249,17 +1260,11 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
         hdul = fits.HDUList([primary_hdu])
 
-        blue_traces = []
-        green_traces = []
-        red_traces = []
-
-        blue_data = []
-        green_data = []
-        red_data = []
-
-        blue_meta = []
-        green_meta = []
-        red_meta = []
+        # Per-colour fibre (x, y, flux), filled one detector at a time so that each
+        # trace object (~110 MB) and float frame is released before the next is
+        # loaded. None means no detector of that colour was processed.
+        fibre_fluxes = {'blue': None, 'green': None, 'red': None}
+        dead_fiber_lut = _load_dead_fiber_lut()
 
         # Loop over each extension (skip primary) to process data
         for i, ext in enumerate(science_hdul[1:], start=1):
@@ -1307,36 +1312,26 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             with open(trace_filepath, "rb") as f:
                 trace_obj = pickle.load(f)
 
-            # Build trace and data lists for QuickWhiteLight processing
-            metadata = {'channel': color, 'bench': bench, 'side': side}
-            if color == 'blue':
-                blue_traces.append(trace_obj)
-                blue_data.append(data)
-                blue_meta.append(metadata)
-            elif color == 'green':
-                green_traces.append(trace_obj)
-                green_data.append(data)
-                green_meta.append(metadata)
-            elif color == 'red':
-                red_traces.append(trace_obj)
-                red_data.append(data)
-                red_meta.append(metadata)
-            
-            # After processing all science_hdul extensions, generate white light images for each color
+            if color in fibre_fluxes:
+                x, y, f = _detector_fibre_fluxes(trace_obj, data, dead_fiber_lut)
+                if fibre_fluxes[color] is None:
+                    fibre_fluxes[color] = ([], [], [])
+                for acc, vals in zip(fibre_fluxes[color], (x, y, f)):
+                    acc.extend(vals)
+            del trace_obj, data
 
+        # After processing all science_hdul extensions, generate white light images for each color
         whitelight_results = {}
-        for col, traces_list, data_list, meta_list in [
-            ('blue', blue_traces, blue_data, blue_meta),
-            ('green', green_traces, green_data, green_meta),
-            ('red', red_traces, red_data, red_meta)
-        ]:
-            if traces_list and data_list:
-                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot,
-                                                         hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
-                whitelight_results[col] = (wl, xdata, ydata, flux)
-            else:
+        for col in ['blue', 'green', 'red']:
+            if fibre_fluxes[col] is None:
                 logger.info(f"No data found for {col} color.")
                 whitelight_results[col] = (None, None, None, None)
+                continue
+            xdata, ydata, flux = (np.array(v, dtype=float) for v in fibre_fluxes[col])
+            wl = _render_whitelight(xdata, ydata, flux, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
+            if ds9plot:
+                plot_ds9(wl)
+            whitelight_results[col] = (wl, xdata, ydata, flux)
 
         for color in ['blue', 'green', 'red']:
             wl, xdata, ydata, flux = whitelight_results[color]
