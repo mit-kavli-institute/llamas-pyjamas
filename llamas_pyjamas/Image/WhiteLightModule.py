@@ -1217,31 +1217,44 @@ def estimate_residual_bias(data, fiberimg, min_distance=20, edge_trim=2, min_pix
         edge_trim: outermost detector rows to ignore at top and bottom
         min_pixels: fewer clean pixels than this -> fall back to rows 5-50
 
+    A single constant is used because the inter-fibre pixels are not dark enough
+    to measure a row-dependent level (they carry fibre wings and scattered light,
+    and FAST read noise swamps low percentiles). When both ends have clean rows,
+    the top-minus-bottom difference is returned so callers can flag a bias
+    gradient, which only a fresh master bias can remove.
+
     Returns:
-        tuple: (level, npix, source), where level is the DC level to subtract
-        and source is 'edges', 'placeholder' (constant data; level is that
-        constant) or 'rows5-50' (fallback).
+        tuple: (level, npix, source, gradient), where level is the DC level to
+        subtract, source is 'edges', 'placeholder' (constant data; level is that
+        constant) or 'rows5-50' (fallback), and gradient is the top-minus-bottom
+        clean-row level in DN, or None when one end has no clean rows.
     """
     nrows = data.shape[0]
     fibre_rows = np.flatnonzero((fiberimg >= 0).any(axis=1))
     if fibre_rows.size:
-        clean = np.r_[edge_trim:max(fibre_rows[0] - min_distance, edge_trim),
-                      min(fibre_rows[-1] + min_distance + 1, nrows - edge_trim):nrows - edge_trim]
+        bottom = np.arange(edge_trim, max(fibre_rows[0] - min_distance, edge_trim))
+        top = np.arange(min(fibre_rows[-1] + min_distance + 1, nrows - edge_trim), nrows - edge_trim)
     else:
-        clean = np.arange(edge_trim, nrows - edge_trim)
+        bottom, top = np.arange(edge_trim, nrows - edge_trim), np.arange(0)
+    clean = np.r_[bottom, top]
     vals = data[clean].ravel().astype(np.float64)   # float64 statistics for float32 frames
 
     if vals.size < min_pixels:
         logger.warning(f"Only {vals.size} clean edge pixels (< {min_pixels}); "
                        f"falling back to rows 5-50 for the residual bias")
-        return float(compute_residual_background(data)), 0, 'rows5-50'
+        return float(compute_residual_background(data)), 0, 'rows5-50', None
 
     # Constant data = placeholder camera; remove the constant so it stays at zero.
     if np.nanmin(vals) == np.nanmax(vals):
-        return float(vals[0]), vals.size, 'placeholder'
+        return float(vals[0]), vals.size, 'placeholder', None
 
     mean, _, _ = sigma_clipped_stats(vals, sigma=3, maxiters=5)
-    return float(mean), vals.size, 'edges'
+    gradient = None
+    if bottom.size and top.size:
+        ends = [sigma_clipped_stats(data[rows].ravel().astype(np.float64), sigma=3, maxiters=5)[0]
+                for rows in (bottom, top)]
+        gradient = float(ends[1] - ends[0])
+    return float(mean), vals.size, 'edges', gradient
 
 
 def _detector_id(header):
@@ -1394,6 +1407,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
         dead_fiber_lut = _load_dead_fiber_lut()
         stale_limit = BiasCheckThresholds().max_residual_median
         stale_detectors = []
+        gradient_detectors = []
         placeholder_bias = []
 
         # Both files are memory-mapped and read one detector at a time as float32
@@ -1446,9 +1460,12 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             # unilluminated rows outside the fibre stack. This absorbs the drift an
             # out-of-date master bias leaves, which otherwise shows up as bench-side
             # stripes in the white light. It is removed per fibre (offset * npix).
-            residual_bias, npix, source = estimate_residual_bias(data, fiberimg)
+            residual_bias, npix, source, gradient = estimate_residual_bias(data, fiberimg)
             logger.info(f"{benchside} {color}: residual bias = {residual_bias:.2f} DN "
-                        f"({source}, {npix} px)")
+                        f"({source}, {npix} px, top-bottom "
+                        f"{'n/a' if gradient is None else f'{gradient:+.1f}'})")
+            if gradient is not None and abs(gradient) > stale_limit:
+                gradient_detectors.append((f'{color}{benchside}', gradient))
             primary_hdu.header[f'RB{color[:1].upper()}{bench}{side}'] = (
                 round(residual_bias, 3), f'Residual bias {benchside} {color} (DN, {source})')
             # A placeholder bias leaves the full pedestal (~1000 DN), which says nothing
@@ -1482,6 +1499,12 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                 named = f"{len(stale_detectors)} detectors (largest {largest}; all in RB* keys)"
             logger.warning(f"Residual bias > {stale_limit:g} DN on {named}: "
                            f"{os.path.basename(masterbiasfile)} may be out of date (corrected)")
+        if gradient_detectors:
+            # A constant cannot remove a top-to-bottom gradient; that needs a new master bias.
+            named = ', '.join(f'{name} ({g:+.1f})' for name, g in gradient_detectors)
+            logger.warning(f"Bias gradient > {stale_limit:g} DN top-to-bottom on {named}: "
+                           f"{os.path.basename(masterbiasfile)} no longer matches the bias structure; "
+                           f"expect a stripe across that bench-side until it is remade")
 
         # After processing all science_hdul extensions, generate white light images for each color
         whitelight_results = {}

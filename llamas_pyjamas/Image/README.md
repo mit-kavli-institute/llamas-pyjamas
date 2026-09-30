@@ -98,7 +98,17 @@ The primary header records:
    - Constant (placeholder) master-bias extensions are listed in `BIASPH` and logged at INFO. They
      are left out of the stale-bias warning, because their ~1000 DN residual is the whole pedestal,
      not drift.
+   - **Bias gradient.** When the clean rows at the bottom and top of a detector differ by more than
+     5 DN, a second warning names the detector. A constant cannot fix that, so the bench-side will
+     show a stripe until the master bias is remade. Seen on red4A and green4A in a 2026-09-26 FAST
+     frame (−14 and +11 DN top-to-bottom), where the earlier frames showed none, so the bias
+     structure has changed.
    - Placeholder science cameras stay at zero.
+
+   **Why not a row-dependent background?** Measuring the level between the fibres was tried and
+   rejected: the inter-fibre pixels carry fibre wings and scattered light (a per-row mean removes
+   10–90% of the fibre flux), and low percentiles are biased by the FAST read noise (σ ≈ 10 DN).
+   Only the rows outside the fibre stack are clean, and they give one number per end.
 
 The residual level is removed per fibre (`offset × npix`) rather than from every pixel. The step
 costs about 0.1 s per frame.
@@ -170,5 +180,13 @@ python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg [--calib-dir DI
   identical output and ~1 s slower. It prints one warning with the rebuild command.
 - **Rebuild with `--force` whenever the master traces change.** The quick look never rebuilds the
   cache itself.
+- **Both trace filename forms are accepted** (`LLAMAS_master_{c}_{b}_{s}_traces.pkl` and
+  `LLAMAS_{c}_{b}_{s}_traces.pkl`), through `Utils/utils.find_trace_pickle`, in the cache builder,
+  the freshness check and the pickle fallback.
+- **Trace pickles need the code that wrote them.** The 2026-09-29 master traces reference
+  `llamas_pyjamas.Bias.BiasCameraMissingError`, which only exists from the `sensfunc-standard-match`
+  branch onwards; on older code `pickle.load` fails with `AttributeError`, in the cache builder and
+  in the quick look alike. Check with
+  `python -c "import pickle; pickle.load(open('llamas_pyjamas/mastercalib/LLAMAS_master_red_1_A_traces.pkl','rb'))"`.
 - **Build it once on each machine:** `mastercalib/` is not in git, so every machine that runs the
   quick look, including the instrument-control machine, needs its own copy.

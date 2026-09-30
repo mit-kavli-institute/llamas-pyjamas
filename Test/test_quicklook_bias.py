@@ -31,7 +31,7 @@ def _frame(fiberimg, offset, sky=400.0, seed=0):
 @pytest.mark.parametrize("offset", [0.0, 7.4, -3.6])
 def test_recovers_offset_with_sky_in_fibres(offset):
     fiberimg = _fiberimg(40, 2000)
-    level, npix, source = estimate_residual_bias(_frame(fiberimg, offset), fiberimg)
+    level, npix, source, _ = estimate_residual_bias(_frame(fiberimg, offset), fiberimg)
     assert source == 'edges'
     assert npix > 0
     # Sub-DN precision despite integer data; the sky in the fibres must not leak in.
@@ -40,7 +40,7 @@ def test_recovers_offset_with_sky_in_fibres(offset):
 
 def test_fibres_touching_one_edge_uses_other_edge():
     fiberimg = _fiberimg(0, 1990)
-    level, npix, source = estimate_residual_bias(_frame(fiberimg, 5.2), fiberimg)
+    level, npix, source, _ = estimate_residual_bias(_frame(fiberimg, 5.2), fiberimg)
     assert source == 'edges'
     last_fibre_row = np.flatnonzero((fiberimg >= 0).any(axis=1))[-1]
     assert npix == (2048 - 2 - (last_fibre_row + 20 + 1)) * 2048
@@ -50,14 +50,24 @@ def test_fibres_touching_one_edge_uses_other_edge():
 def test_placeholder_is_zeroed():
     fiberimg = _fiberimg(40, 2000)
     data = np.full(SHAPE, -1.0)
-    level, _, source = estimate_residual_bias(data, fiberimg)
+    level, _, source, _ = estimate_residual_bias(data, fiberimg)
     assert source == 'placeholder'
     assert np.all(data - level == 0)
 
 
+def test_reports_top_bottom_gradient():
+    fiberimg = _fiberimg(200, 1850)
+    data = _frame(fiberimg, 0.0)
+    data[:200] -= 4.0          # all bottom clean rows sit 4 DN below the top ones
+    level, _, source, gradient = estimate_residual_bias(data, fiberimg)
+    assert source == 'edges'
+    assert gradient == pytest.approx(4.0, abs=0.15)
+    assert -4.0 < level < 0.0
+
+
 def test_falls_back_without_clean_rows():
     fiberimg = _fiberimg(0, 2047)
-    level, npix, source = estimate_residual_bias(_frame(fiberimg, 3.0), fiberimg)
+    level, npix, source, _ = estimate_residual_bias(_frame(fiberimg, 3.0), fiberimg)
     assert source == 'rows5-50'
     assert npix == 0
     assert np.isfinite(level)
