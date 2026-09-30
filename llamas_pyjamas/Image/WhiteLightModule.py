@@ -28,6 +28,7 @@ from llamas_pyjamas.Utils.utils import find_trace_pickle
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
+from astropy.stats import sigma_clipped_stats
 from astropy.table import Table
 import os
 import json
@@ -40,9 +41,11 @@ from typing import Tuple
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
-from llamas_pyjamas.File.llamasIO import process_fits_by_color
-from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
-from llamas_pyjamas.Trace.traceLlamasMaster import _grab_bias_hdu
+from llamas_pyjamas.File.llamasIO import trim_and_orient
+from llamas_pyjamas.DataModel.validate import validate_for_gui
+from llamas_pyjamas.Bias.biasChecking import BiasCheckThresholds
+from llamas_pyjamas.Postprocessing.build_quicklook_fiberimg import (
+    DEFAULT_OUT as QUICKLOOK_CACHE, load_quicklook_fiberimg, quicklook_cache_is_fresh)
 
 from matplotlib.patches import RegularPolygon
 import matplotlib.cm as cm
@@ -51,6 +54,10 @@ from matplotlib.colors import Normalize
 
 
 logger = logging.getLogger(__name__)
+
+# Colour order of the image/table extensions in the quick-look white light file
+# (extension 1 = RED, ..., BLUE last).
+QUICKLOOK_COLOR_ORDER = ('red', 'green', 'blue')
 
 orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
@@ -73,6 +80,13 @@ def _lattice_pitch(x, y) -> float:
     d, _ = cKDTree(pts).query(pts, k=2)
     return float(np.median(d[:, 1]))
 
+
+# (benchside, fibre) -> (xpos, ypos). Built once: filtering the astropy Table per
+# fibre (FiberMap_LUT is called ~7000 times per white light) cost over a second.
+# setdefault keeps the first matching row, as the old Table lookup did.
+FIBERMAP_XY = {}
+for _row in fibermap_lut:
+    FIBERMAP_XY.setdefault((str(_row['bench']), int(_row['fiber'])), (_row['xpos'], _row['ypos']))
 
 # Fibre lattice spacing from the (static) map: exactly 1.0 -- every fibre has all
 # six neighbours at unit distance, rows sqrt(3)/2 apart, alternate rows offset 0.5.
@@ -794,17 +808,8 @@ def FiberMap(bench: str, infiber: int)-> Tuple[float, float]:
     return(x_final, y_final)
 
 def FiberMap_LUT(bench: str, fiber: int)-> Tuple[float, float]:
-
-    #if (np.logical_and(bench == '2B',fiber >= 49)):
-    #    fiber += 1
-    
-    fiber_row = fibermap_lut[np.logical_and(fibermap_lut['bench']==bench, \
-                                            fibermap_lut['fiber']==fiber)]
-    #breakpoint()
-    try:
-        return(fiber_row['xpos'][0],fiber_row['ypos'][0])
-    except:
-        return(-1,-1)
+    """(xpos, ypos) of a physical fibre on a benchside, or (-1, -1) if not in the map."""
+    return FIBERMAP_XY.get((bench, fiber), (-1, -1))
 
 def plot_fibermap(outpath: str)-> None:
     """
@@ -1015,6 +1020,116 @@ def rerun():
 
 ######### Testing qucik whitelight
 
+def _load_dead_fiber_lut() -> dict:
+    """Dead physical fibres per benchside from traceLUT.json (same source as extractLlamas)."""
+    try:
+        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+            return json.load(f).get('dead_fibers', {})
+    except Exception as e:
+        logger.warning(f'Could not load dead fiber definitions from traceLUT.json: {e}')
+        return {}
+
+
+def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber_lut: dict,
+                           offset: float = 0.0):
+    """Summed flux and IFU position of every traced fibre on one detector.
+
+    Sums ``data - offset`` over each fibre's pixels in ``fiberimg`` (-1 = no fibre;
+    NaNs ignored, like ``np.nansum``), accumulating in float64. Fibres are
+    horizontal bands, so the raveled label image is ~10k runs of one label: each
+    run is summed with ``np.add.reduceat`` and the runs are binned per fibre,
+    which is ~4x faster than a per-pixel ``np.bincount``. ``offset`` (e.g. the
+    residual bias) is removed per fibre as ``offset * npix`` rather than from
+    every pixel. Fibres with no pixels, or not in the fibre map, are skipped.
+
+    Parameters
+    ----------
+    fiberimg : 2D int array, the detector's fibre-label image (trace or quick-look cache)
+    nfib : number of traced fibres; labels >= nfib are ignored
+    benchside : e.g. '2B', for the dead-fibre and fibre-map lookups
+    data : 2D bias-subtracted frame, same shape and orientation as fiberimg
+    dead_fiber_lut : dead physical fibres per benchside (_load_dead_fiber_lut)
+    offset : constant level to subtract from every pixel
+
+    Returns
+    -------
+    (x, y, flux) : lists, in trace-fibre order
+    """
+    # Get the sorted list of dead physical fiber indices for this bench
+    dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
+    if dead_fibers:
+        logger.info(f'Bench {benchside}: {nfib} traced fibers, '
+                    f'dead physical fibers: {dead_fibers}')
+
+    # Build the trace-index → physical-fiber-number mapping.
+    # The trace object has nfibers entries (e.g. 297 for 2B) because dead
+    # fibers were never detected during tracing.  We need to re-insert the
+    # gaps so that trace index i maps to the correct physical fiber number
+    # that the FiberMap LUT expects.
+    #
+    # Example for 2B (dead fiber 49, nfibers=297):
+    #   trace 0-48  → physical 0-48
+    #   trace 49-296 → physical 50-297
+    trace_to_physical = []
+    physical = 0
+    dead_set = set(dead_fibers)
+    for trace_idx in range(nfib):
+        while physical in dead_set:
+            physical += 1
+        trace_to_physical.append(physical)
+        physical += 1
+
+    # Per-fibre pixel counts and sums. fiberimg is -1 off-fibre; labels >= nfib
+    # are ignored. Only NaNs are zeroed so an inf still propagates, as np.nansum
+    # does; a NaN pixel contributes nothing, so the offset is applied per pixel
+    # on that (rare) path.
+    labels = fiberimg.ravel()
+    values = data.ravel()
+    if np.isnan(values).any():
+        values = np.where(np.isnan(values), 0.0, values.astype(np.float64) - offset)
+        offset = 0.0
+    starts = np.r_[0, np.flatnonzero(labels[1:] != labels[:-1]) + 1]
+    run_labels = labels[starts]
+    run_npix = np.diff(np.r_[starts, labels.size])
+    run_sums = np.add.reduceat(values, starts, dtype=np.float64)
+    keep = (run_labels >= 0) & (run_labels < nfib)
+    npix = np.bincount(run_labels[keep], weights=run_npix[keep], minlength=nfib)
+    sums = np.bincount(run_labels[keep], weights=run_sums[keep], minlength=nfib) - offset * npix
+
+    xdata, ydata, flux = [], [], []
+    for ifib in range(nfib):
+        physical_fiber = trace_to_physical[ifib]
+        if npix[ifib] == 0:
+            logger.debug(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
+                         f'on bench {benchside}: no pixels in fiberimg')
+            continue
+
+        # Map physical fiber number to IFU position
+        x, y = FiberMap_LUT(benchside, physical_fiber)
+        if x == -1 and y == -1:
+            continue  # Skip if fiber mapping not found
+
+        xdata.append(x)
+        ydata.append(y)
+        flux.append(sums[ifib])
+
+    return xdata, ydata, flux
+
+
+def _render_whitelight(xdata, ydata, flux, hex_tiles: bool = False, pix_per_unit: int = 10):
+    """White-light image from per-fibre fluxes: hexagonal tiles or the shared grid."""
+    # Dead fibers are simply absent from the interpolation inputs;
+    # LinearNDInterpolator will naturally fill those positions from neighbours.
+    if hex_tiles:
+        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
+    else:
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux,
+                                                 fill_value=np.nan)
+        x_grid, y_grid = whitelight_grid()
+        whitelight = flux_interpolator(x_grid, y_grid)
+    return whitelight
+
+
 def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
                     hex_tiles: bool = False, pix_per_unit: int = 10):
     """
@@ -1027,7 +1142,7 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
     data_list : list
         A list of data arrays corresponding to each trace object.
     metadata : list, optional
-        Optional metadata for each trace/data pair.
+        Optional metadata for each trace/data pair (unused; kept for compatibility).
     ds9plot : bool, optional
         If True, display the resulting white light image using DS9. Default is False.
     
@@ -1040,94 +1155,18 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
         - ydata (numpy.ndarray): The y-coordinates of the fiber positions.
         - flux (numpy.ndarray): The flux values for each fiber.
     """
+    dead_fiber_lut = _load_dead_fiber_lut()
 
-    xdata = np.array([])
-    ydata = np.array([])
-    flux = np.array([])
+    xdata, ydata, flux = [], [], []
+    for trace_obj, data in zip(trace_list, data_list):
+        x, y, f = _detector_fibre_fluxes(trace_obj.fiberimg, trace_obj.nfibers,
+                                         f'{trace_obj.bench}{trace_obj.side}', data, dead_fiber_lut)
+        xdata.extend(x)
+        ydata.extend(y)
+        flux.extend(f)
+    xdata, ydata, flux = np.array(xdata, dtype=float), np.array(ydata, dtype=float), np.array(flux, dtype=float)
 
-    # Load dead fiber definitions from the canonical LUT (same source as extractLlamas)
-    try:
-        with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
-            trace_lut = json.load(f)
-        dead_fiber_lut = trace_lut.get('dead_fibers', {})
-    except Exception as e:
-        logger.warning(f'Could not load dead fiber definitions from traceLUT.json: {e}')
-        dead_fiber_lut = {}
-
-    for trace_obj, data, meta in zip(trace_list, data_list, metadata if metadata else [None]*len(trace_list)):
-        # Get bench and side information
-        bench = trace_obj.bench
-        side = trace_obj.side
-        benchside = f'{bench}{side}'
-
-        # Get the sorted list of dead physical fiber indices for this bench
-        dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
-
-        if dead_fibers:
-            logger.info(f'Bench {benchside}: {trace_obj.nfibers} traced fibers, '
-                        f'dead physical fibers: {dead_fibers}')
-
-        # Build the trace-index → physical-fiber-number mapping.
-        # The trace object has nfibers entries (e.g. 297 for 2B) because dead
-        # fibers were never detected during tracing.  We need to re-insert the
-        # gaps so that trace index i maps to the correct physical fiber number
-        # that the FiberMap LUT expects.
-        #
-        # Example for 2B (dead fiber 49, nfibers=297):
-        #   trace 0-48  → physical 0-48
-        #   trace 49-296 → physical 50-297
-        trace_to_physical = []
-        physical = 0
-        dead_set = set(dead_fibers)
-        for trace_idx in range(trace_obj.nfibers):
-            while physical in dead_set:
-                physical += 1
-            trace_to_physical.append(physical)
-            physical += 1
-
-        # Process each fiber using the corrected mapping
-        for ifib in range(trace_obj.nfibers):
-            physical_fiber = trace_to_physical[ifib]
-
-            # Get fiber mask from the trace object
-            fiber_mask = trace_obj.fiberimg == ifib
-
-            if not np.any(fiber_mask):
-                logger.info(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
-                            f'on bench {benchside}: no pixels in fiberimg')
-                continue
-
-            # Map physical fiber number to IFU position
-            try:
-                x, y = FiberMap_LUT(benchside, physical_fiber)
-                if x == -1 and y == -1:
-                    continue  # Skip if fiber mapping not found
-            except Exception as e:
-                logger.info(f'Physical fiber {physical_fiber} (trace {ifib}) '
-                            f'not found in fiber map for bench {benchside}')
-                logger.error(traceback.format_exc())
-                continue
-
-            # Sum the flux directly from masked values in the data
-            thisflux = np.nansum(data[fiber_mask])
-
-            # Record the position and flux
-            flux = np.append(flux, thisflux)
-            xdata = np.append(xdata, x)
-            ydata = np.append(ydata, y)
-
-    # Create interpolated image using only valid fibers
-    # Dead fibers are simply absent from the interpolation inputs;
-    # LinearNDInterpolator will naturally fill those positions from neighbours.
-    # Generate white light image: either flat hexagonal fibre tiles (no
-    # interpolation) or the default resampling onto the shared rectangular grid.
-    if hex_tiles:
-        whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
-    else:
-        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux,
-                                                 fill_value=np.nan)
-        x_grid, y_grid = whitelight_grid()
-        whitelight = flux_interpolator(x_grid, y_grid)
+    whitelight = _render_whitelight(xdata, ydata, flux, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
 
     # Optional DS9 plot
     if ds9plot:
@@ -1156,48 +1195,119 @@ def compute_residual_background(data, regions=((5, 20), (20, 50), (30, 50))):
     return np.median(medians)
 
 
+def estimate_residual_bias(data, fiberimg, min_distance=20, edge_trim=2, min_pixels=2000):
+    """Measure the residual DC bias left after master-bias subtraction.
+
+    Uses the unilluminated rows outside the fibre stack: every row more than
+    ``min_distance`` rows below the first or above the last fibre row of
+    ``fiberimg`` (both ends), skipping the ``edge_trim`` outermost detector rows.
+    This is the row-wise equivalent of the pipeline's edge-DC stripes
+    (Bias/biasChecking.build_topbottom_stripe_mask) without its full-frame
+    distance transform. Fixed rows such as 5-50 are not used because the fibre
+    stack starts as low as row ~11, so they pick up sky.
+
+    The level is a 3-sigma-clipped mean rather than a median: raw and master-bias
+    values are integers, so a median is quantised to 1 DN, and 1 DN per pixel
+    over the thousands of pixels in each fibre is a visible bench-side step.
+
+    Parameters:
+        data: 2D bias-subtracted frame (trimmed/oriented like ``fiberimg``)
+        fiberimg: 2D fibre-label image from the trace (-1 = no fibre)
+        min_distance: rows to leave between the fibre stack and the clean rows
+        edge_trim: outermost detector rows to ignore at top and bottom
+        min_pixels: fewer clean pixels than this -> fall back to rows 5-50
+
+    Returns:
+        tuple: (level, npix, source), where level is the DC level to subtract
+        and source is 'edges', 'placeholder' (constant data; level is that
+        constant) or 'rows5-50' (fallback).
+    """
+    nrows = data.shape[0]
+    fibre_rows = np.flatnonzero((fiberimg >= 0).any(axis=1))
+    if fibre_rows.size:
+        clean = np.r_[edge_trim:max(fibre_rows[0] - min_distance, edge_trim),
+                      min(fibre_rows[-1] + min_distance + 1, nrows - edge_trim):nrows - edge_trim]
+    else:
+        clean = np.arange(edge_trim, nrows - edge_trim)
+    vals = data[clean].ravel().astype(np.float64)   # float64 statistics for float32 frames
+
+    if vals.size < min_pixels:
+        logger.warning(f"Only {vals.size} clean edge pixels (< {min_pixels}); "
+                       f"falling back to rows 5-50 for the residual bias")
+        return float(compute_residual_background(data)), 0, 'rows5-50'
+
+    # Constant data = placeholder camera; remove the constant so it stays at zero.
+    if np.nanmin(vals) == np.nanmax(vals):
+        return float(vals[0]), vals.size, 'placeholder'
+
+    mean, _, _ = sigma_clipped_stats(vals, sigma=3, maxiters=5)
+    return float(mean), vals.size, 'edges'
+
+
+def _detector_id(header):
+    """(color, bench, side) of an extension from COLOR/BENCH/SIDE, else CAM_NAME
+    (e.g. '1A_Red'); None if neither identifies the detector."""
+    if 'COLOR' in header:
+        return (str(header['COLOR']).lower(), str(header.get('BENCH', '')),
+                str(header.get('SIDE', '')).upper())
+    parts = str(header.get('CAM_NAME', '')).split('_')
+    if len(parts) >= 2 and len(parts[0]) >= 2:
+        return parts[1].lower(), parts[0][0], parts[0][1].upper()
+    return None
+
+
+def _detector_hdus(hdul):
+    """{(color, bench, side): HDU} for the image extensions of an open MEF, matched
+    by header rather than position (robust to missing or reordered cameras)."""
+    hdus = {}
+    for hdu in hdul[1:]:
+        key = _detector_id(hdu.header)
+        if key is not None:
+            hdus[key] = hdu
+    return hdus
+
+
 def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                         outfile: str = None, use_dir: str = None,
                         hex_tiles: bool = False, pix_per_unit: int = 10) -> str:
         """
-        Generates a cube FITS file with quick-look white light images for each color.
-        The function groups the mastercalib dictionary by color (keys: blue, green, red),
-        calls QuickWhiteLight for each color group, and creates an HDU for the image and an
-        associated binary table HDU with fiber positions and flux data.
-        
+        Generates a FITS file with quick-look white light images for each color
+        straight from a raw science frame, using the master traces in CALIB_DIR.
+        Fibre labels come from the quick-look cache
+        (mastercalib/LLAMAS_quicklook_fiberimg.npz, see
+        Postprocessing/build_quicklook_fiberimg.py) when it matches the master trace
+        pickles, and from the pickles otherwise.
+
+        Each detector is bias subtracted with the READ-MDE-matched master bias, then
+        its residual DC level (measured in the unilluminated rows outside the fibre
+        stack, see estimate_residual_bias) is subtracted in every read mode; the
+        per-detector levels are written to the primary header as RB{C}{bench}{side}
+        (e.g. RBR1A) and a warning is logged if any exceed 5 DN (stale master bias).
+        Detectors whose master bias is a constant placeholder are listed in BIASPH.
+
+        Output extensions, in order: RED, RED_TAB, GREEN, GREEN_TAB, BLUE, BLUE_TAB
+        (colours with no data are omitted). Each *_TAB holds the fibre XDATA, YDATA
+        and FLUX used to build the image.
+
         Parameters:
-            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key, 
-                the value should be a dict with the following entries:
-                    'traces'   - list of trace objects,
-                    'data'     - list of corresponding data arrays,
-                    'metadata' - (optional) list of metadata dictionaries.
-            ds9plot (bool, optional): If True, display each generated white light image using DS9.
-                                        Default is True.
-            outfile (str, optional): Output FITS file name. If None, a file name is generated
-                                     with the current timestamp.
-        
+            science_file (str): Raw LLAMAS science MEF.
+            bias (str, optional): Master bias to use instead of the READ-MDE default.
+            ds9plot (bool, optional): If True, display each white light image in DS9.
+            outfile (str, optional): Output file name; default <science>_quickwhitelight.fits.
+            use_dir (str, optional): Output directory; default OUTPUT_DIR. Ignored when
+                outfile is an absolute path.
+            hex_tiles (bool, optional): Render fibres as hexagonal tiles instead of
+                interpolating onto the rectangular grid.
+            pix_per_unit (int, optional): Hex tile resolution (pixels per fibre-map unit).
+
         Returns:
-            str: The file path of the created quick-look white light cube FITS file.
+            str: The file path of the created quick-look white light FITS file.
         """
-
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-        # Assuming DATA_DIR is defined and mastercalib is a subdirectory under DATA_DIR
-
-        trace_objs = []
 
         # Validate and create GUI version if needed (preserves original file)
         science_file = validate_for_gui(science_file)
 
-        # Open the science FITS file and create the output HDU list
-        science_hdul, _ = process_fits_by_color(science_file) #fits.open(science_file)
-
-        # Identify placeholder extensions (missing cameras)
-        placeholder_indices = get_placeholder_extension_indices(science_file)
-        if placeholder_indices:
-            logger.info(f"Detected {len(placeholder_indices)} placeholder extensions (missing cameras)")
-
-        primary_hdr = science_hdul[0].header
+        primary_hdr = fits.getheader(science_file, 0)
 
         # Determine bias file based on READ-MDE header keyword
         read_mode = primary_hdr.get('READ-MDE', None)
@@ -1243,105 +1353,150 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
 
         logger.info(f"Bias file is {masterbiasfile}")
 
+        # A bias taken in the other read mode leaves a large 2D pedestal, so prefer
+        # the mode-matched master bias when one exists.
+        bias_mode = str(fits.getheader(masterbiasfile, 0).get('READ-MDE', '')).strip().upper()
+        if read_mode in ('FAST', 'SLOW') and bias_mode and bias_mode != read_mode:
+            matched_bias = os.path.join(BIAS_DIR, f'{read_mode.lower()}_master_bias.fits')
+            if os.path.isfile(matched_bias):
+                logger.warning(f"Bias {masterbiasfile} is {bias_mode} mode but the frame is {read_mode}; "
+                               f"using {matched_bias} instead")
+                masterbiasfile = matched_bias
+            else:
+                logger.warning(f"Bias {masterbiasfile} is {bias_mode} mode but the frame is {read_mode}, "
+                               f"and no {matched_bias} exists; using it anyway")
+
         # Validate bias file structure (add placeholders for missing cameras)
         masterbiasfile = validate_for_gui(masterbiasfile)
 
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
+        primary_hdu.header['READMODE'] = (read_mode or 'UNKNOWN', 'READ-MDE of the science frame')
+        primary_hdu.header['BIASFILE'] = (os.path.basename(masterbiasfile), 'Master bias subtracted')
+        primary_hdu.header['RBMETHOD'] = ('edge rows, 3-sigma clipped mean',
+                                          'Residual bias (RB*) estimator')
         hdul = fits.HDUList([primary_hdu])
 
-        blue_traces = []
-        green_traces = []
-        red_traces = []
+        # Fibre labels: the small quick-look cache if it matches the master trace
+        # pickles, otherwise the pickles themselves (~1 s slower in total).
+        if quicklook_cache_is_fresh(QUICKLOOK_CACHE):
+            fibre_labels = load_quicklook_fiberimg(QUICKLOOK_CACHE)
+        else:
+            fibre_labels = None
+            logger.warning("Quick-look fibre-label cache is missing or out of date; reading the master "
+                           "trace pickles instead (slower). Rebuild it with: python -m "
+                           "llamas_pyjamas.Postprocessing.build_quicklook_fiberimg --force")
 
-        blue_data = []
-        green_data = []
-        red_data = []
+        # Per-colour fibre (x, y, flux), filled one detector at a time so that each
+        # frame (and trace object, on the pickle path) is released before the next
+        # is read. None means no detector of that colour was processed.
+        fibre_fluxes = {color: None for color in QUICKLOOK_COLOR_ORDER}
+        dead_fiber_lut = _load_dead_fiber_lut()
+        stale_limit = BiasCheckThresholds().max_residual_median
+        stale_detectors = []
+        placeholder_bias = []
 
-        blue_meta = []
-        green_meta = []
-        red_meta = []
+        # Both files are memory-mapped and read one detector at a time as float32
+        # (exact for 16-bit data), rather than scaling and copying all 48 HDUs up front.
+        science_hdul = fits.open(science_file, do_not_scale_image_data=True)
+        bias_hdul = fits.open(masterbiasfile, do_not_scale_image_data=True)
+        bias_hdus = _detector_hdus(bias_hdul)
 
-        # Loop over each extension (skip primary) to process data
-        for i, ext in enumerate(science_hdul[1:], start=1):
-            # Parse color/bench/side from header BEFORE bias subtraction
-            if 'COLOR' in ext.header:
-                header = ext.header
-                color = header.get('COLOR', '').lower()
-                bench = header.get('BENCH', '')
-                side = header.get('SIDE', '')
-                benchside = f'{bench}{side}'
-            else:
-                header = ext.header
-                # Parse the CAM_NAME to determine color, bench, and side
-                cam_name = header.get('CAM_NAME', '')
-                if cam_name:
-                    # Example format: '1A_Red' -> bench='1', side='A', color='red'
-                    parts = cam_name.split('_')
-                    if len(parts) >= 2:
-                        benchside = parts[0]
-                        color = parts[1].lower()  # Convert 'Red' to 'red'
-                        if len(benchside) >= 2:
-                            bench = benchside[0]
-                            side = benchside[1]
-
-            print(f'Processing extension {i}: {benchside} {color}')
-
-            # Step 1: Full 2D bias subtraction matched by header keywords (COLOR/BENCH/SIDE)
-            bias_hdu = _grab_bias_hdu(bench=bench, side=side, color=color, dir=masterbiasfile)
-            data = ext.data.astype(float) - bias_hdu.data
-
-            # Step 2 (FAST only): compute average from (science - bias) frame, then subtract it
-            if read_mode == 'FAST':
-                residual_bg = compute_residual_background(data)
-                data = data - residual_bg
-                logger.info(f"Extension {i} ({benchside} {color}): FAST residual bg = {residual_bg:.2f}")
-
-            # Determine the corresponding trace file based on benchside and color.
-            # Accept both shipped forms: the mastercalib bundle uses
-            # LLAMAS_blue_1_A_traces.pkl, locally generated master traces use
-            # LLAMAS_master_blue_1_A_traces.pkl.
-            try:
-                trace_filepath = find_trace_pickle(color, bench, side, CALIB_DIR)
-            except FileNotFoundError as exc:
-                logger.info(f"{exc} for {benchside} {color}. Skipping extension.")
+        for ext in science_hdul[1:]:
+            detector = _detector_id(ext.header)
+            if detector is None or ext.data is None:
+                logger.warning(f"Skipping extension {ext.name}: no image or no COLOR/CAM_NAME")
                 continue
+            color, bench, side = detector
+            benchside = f'{bench}{side}'
 
-            with open(trace_filepath, "rb") as f:
-                trace_obj = pickle.load(f)
-
-            # Build trace and data lists for QuickWhiteLight processing
-            metadata = {'channel': color, 'bench': bench, 'side': side}
-            if color == 'blue':
-                blue_traces.append(trace_obj)
-                blue_data.append(data)
-                blue_meta.append(metadata)
-            elif color == 'green':
-                green_traces.append(trace_obj)
-                green_data.append(data)
-                green_meta.append(metadata)
-            elif color == 'red':
-                red_traces.append(trace_obj)
-                red_data.append(data)
-                red_meta.append(metadata)
-            
-            # After processing all science_hdul extensions, generate white light images for each color
-
-        whitelight_results = {}
-        for col, traces_list, data_list, meta_list in [
-            ('blue', blue_traces, blue_data, blue_meta),
-            ('green', green_traces, green_data, green_meta),
-            ('red', red_traces, red_data, red_meta)
-        ]:
-            if traces_list and data_list:
-                wl, xdata, ydata, flux = QuickWhiteLight(traces_list, data_list, meta_list, ds9plot=ds9plot,
-                                                         hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
-                whitelight_results[col] = (wl, xdata, ydata, flux)
+            if fibre_labels is not None:
+                entry = fibre_labels.get(detector)
+                if entry is None:
+                    logger.info(f"No master trace for {benchside} {color}. Skipping extension.")
+                    continue
+                fiberimg, nfib = entry['fiberimg'], entry['nfibers']
             else:
+                # Accept both shipped forms: LLAMAS_{c}_{b}_{s}_traces.pkl (mastercalib
+                # bundle) and LLAMAS_master_{c}_{b}_{s}_traces.pkl (locally generated).
+                try:
+                    trace_filepath = find_trace_pickle(color, bench, side, CALIB_DIR)
+                except FileNotFoundError as exc:
+                    logger.info(f"{exc} for {benchside} {color}. Skipping extension.")
+                    continue
+                with open(trace_filepath, "rb") as f:
+                    trace_obj = pickle.load(f)
+                fiberimg, nfib = trace_obj.fiberimg, trace_obj.nfibers
+                del trace_obj
+
+            # Step 1: full 2D master-bias subtraction, matched by COLOR/BENCH/SIDE
+            bias_ext = bias_hdus.get(detector)
+            if bias_ext is None or bias_ext.data is None:
+                raise ValueError(f"No master bias extension for {benchside} {color} in {masterbiasfile}")
+            bias_data = trim_and_orient(bias_ext.data, bias_ext.header)
+            if bias_data.min() == bias_data.max():
+                placeholder_bias.append(f'{color}{benchside}')
+                logger.info(f"Master bias for {benchside} {color} is a constant placeholder; "
+                            f"this detector only gets the DC residual correction")
+            data = trim_and_orient(ext.data, ext.header)
+            data -= bias_data
+            del bias_data
+
+            # Step 2 (all read modes): the residual DC level measured in the
+            # unilluminated rows outside the fibre stack. This absorbs the drift an
+            # out-of-date master bias leaves, which otherwise shows up as bench-side
+            # stripes in the white light. It is removed per fibre (offset * npix).
+            residual_bias, npix, source = estimate_residual_bias(data, fiberimg)
+            logger.info(f"{benchside} {color}: residual bias = {residual_bias:.2f} DN "
+                        f"({source}, {npix} px)")
+            primary_hdu.header[f'RB{color[:1].upper()}{bench}{side}'] = (
+                round(residual_bias, 3), f'Residual bias {benchside} {color} (DN, {source})')
+            # A placeholder bias leaves the full pedestal (~1000 DN), which says nothing
+            # about staleness; those detectors are reported in BIASPH instead.
+            if (source != 'placeholder' and f'{color}{benchside}' not in placeholder_bias
+                    and abs(residual_bias) > stale_limit):
+                stale_detectors.append((f'{color}{benchside}', residual_bias))
+
+            if color in fibre_fluxes:
+                x, y, f = _detector_fibre_fluxes(fiberimg, nfib, benchside, data, dead_fiber_lut,
+                                                 offset=residual_bias)
+                if fibre_fluxes[color] is None:
+                    fibre_fluxes[color] = ([], [], [])
+                for acc, vals in zip(fibre_fluxes[color], (x, y, f)):
+                    acc.extend(vals)
+            del data
+
+        science_hdul.close()
+        bias_hdul.close()
+
+        if placeholder_bias:
+            primary_hdu.header['BIASPH'] = (','.join(placeholder_bias),
+                                            'Constant (placeholder) master-bias extensions')
+        if stale_detectors:
+            # Name up to three detectors; the full set is in the RB* header keys.
+            stale_detectors.sort(key=lambda d: -abs(d[1]))
+            if len(stale_detectors) <= 3:
+                named = ', '.join(f'{name} ({level:+.1f})' for name, level in stale_detectors)
+            else:
+                largest = ', '.join(f'{name} {level:+.1f}' for name, level in stale_detectors[:3])
+                named = f"{len(stale_detectors)} detectors (largest {largest}; all in RB* keys)"
+            logger.warning(f"Residual bias > {stale_limit:g} DN on {named}: "
+                           f"{os.path.basename(masterbiasfile)} may be out of date (corrected)")
+
+        # After processing all science_hdul extensions, generate white light images for each color
+        whitelight_results = {}
+        for col in QUICKLOOK_COLOR_ORDER:
+            if fibre_fluxes[col] is None:
                 logger.info(f"No data found for {col} color.")
                 whitelight_results[col] = (None, None, None, None)
+                continue
+            xdata, ydata, flux = (np.array(v, dtype=float) for v in fibre_fluxes[col])
+            wl = _render_whitelight(xdata, ydata, flux, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
+            if ds9plot:
+                plot_ds9(wl)
+            whitelight_results[col] = (wl, xdata, ydata, flux)
 
-        for color in ['blue', 'green', 'red']:
+        for color in QUICKLOOK_COLOR_ORDER:
             wl, xdata, ydata, flux = whitelight_results[color]
             if wl is None:
                 continue
@@ -1359,11 +1514,7 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                 fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
             ], name=f'{color.upper()}_TAB')
             hdul.append(tab_hdu)
-         
-        
-        science_hdul.close()
 
-        
         # Determine output file name
         if outfile is None:
             filename = os.path.basename(science_file)

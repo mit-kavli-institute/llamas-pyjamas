@@ -1,4 +1,6 @@
 import argparse
+import logging
+
 from llamas_pyjamas.Image.WhiteLightModule import QuickWhiteLightCube
 
 
@@ -18,7 +20,7 @@ def main():
         default=False,
         help="Whether to plot the results in ds9 (default: False)"
     )
-    
+
     parser.add_argument(
         "--bias",
         type=str,
@@ -51,7 +53,18 @@ def main():
              "10 px wide (~460x442). Ignored without --hex (default: 10)"
     )
 
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        default=False,
+        help="Also print per-detector details (bias file, residual bias levels, "
+             "fibre-label source). By default only warnings and the output path are shown."
+    )
+
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     # Call the function QuickWhiteLightCube with the provided science file
     QuickWhiteLightCube(args.science_file, bias=args.bias, ds9plot=args.plot,

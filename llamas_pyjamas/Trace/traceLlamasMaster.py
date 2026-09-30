@@ -21,7 +21,6 @@ Example:
 """
 import os
 import sys
-import tempfile
 from   astropy.io import fits
 import scipy
 import numpy as np
@@ -39,7 +38,7 @@ from pypeit.bspline.bspline import bspline
 import pickle, h5py
 import logging
 import ray
-from llamas_pyjamas.Utils.rayManager import get_ray_temp_dir, init_ray
+from llamas_pyjamas.Utils.rayManager import init_ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
@@ -47,7 +46,6 @@ import cloudpickle
 from scipy.signal import find_peaks
 from scipy.ndimage import median_filter
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
-import pkg_resources
 from pathlib import Path
 import rpdb
 
@@ -90,14 +88,7 @@ def _load_bias_hdus_cached(path):
     hit = _BIAS_HDU_CACHE.get(key)
     if hit is not None and hit[0] == mt:
         return hit[1]
-    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
-                                          dir=get_ray_temp_dir())
-    os.close(_tmp_fd)
-    try:
-        bias_hdus, _ = process_fits_by_color(path, output_file=_tmp_path)
-    finally:
-        if os.path.exists(_tmp_path):
-            os.remove(_tmp_path)
+    bias_hdus, _ = process_fits_by_color(path, write=False)
     if bias_hdus is not None:
         _BIAS_HDU_CACHE[key] = (mt, bias_hdus)
     return bias_hdus

@@ -93,7 +93,9 @@ def get_existing_cameras(fits_file: str) -> List[Tuple[str, str, str, int]]:
     try:
         with fits.open(fits_file) as hdul:
             for i, hdu in enumerate(hdul[1:], start=1):  # Skip primary HDU
-                if hdu.data is None:
+                # Header-only emptiness test: touching hdu.data here would read
+                # every detector frame just to check that it exists.
+                if hdu.header.get('NAXIS', 0) == 0:
                     continue
 
                 # Extract camera metadata from header
