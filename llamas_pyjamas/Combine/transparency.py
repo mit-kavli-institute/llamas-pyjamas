@@ -132,6 +132,18 @@ def transparency_scales(super_rss, *, sources: Optional[Sequence[SkyCoord]] = No
     per_source = np.array([[flux_by_exp[e][s] for e in range(super_rss.n_exposures)]
                            for s in range(n_src)], dtype=float)   # (n_src, n_exp)
 
+    # A half-IFU-masked exposure (IFUMASK = T) sees only part of each aperture, so its flux would
+    # bias both its own scale and the reference: treat it as having no reference flux, which
+    # leaves it unscaled (1.0) and out of the reference median.
+    from llamas_pyjamas.Utils.ifuMask import file_is_half_masked
+    half_masked = np.array([file_is_half_masked(e.path) for e in super_rss.exposures], dtype=bool)
+    if half_masked.any():
+        per_source[:, half_masked] = 0.0
+        logger.warning('transparency: %d half-IFU-masked exposure(s) excluded and left unscaled: %s',
+                       int(half_masked.sum()),
+                       ', '.join(e.exposure_id for e, m in zip(super_rss.exposures, half_masked)
+                                 if m))
+
     max_scale = float(max_scale)
     lo_r, hi_r = 1.0 / max_scale, max_scale
     scales = {}

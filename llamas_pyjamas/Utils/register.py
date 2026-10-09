@@ -32,6 +32,7 @@ import astropy.units as u
 from astropy.io import fits
 
 from llamas_pyjamas.Utils.centroid import fibre_centroid
+from llamas_pyjamas.Utils.ifuMask import rss_blocked_rows
 from llamas_pyjamas.Utils.wcsLlamas import (ARCSEC_PER_FIBRE, IFU_PA_OFFSET, celestial_wcs,
                                             fit_wcs_from_stars, pointing_from_header,
                                             register_pointing)
@@ -91,14 +92,22 @@ def query_gaia(ra_deg, dec_deg, radius_arcsec=45.0, mag_limit=20.5, timeout=60, 
 
 
 def per_fibre_flux(hdul, band=None):
-    """Per-fibre collapsed flux from an RSS HDUList (SKYSUB summed over `band` (lo,hi) A)."""
+    """Per-fibre collapsed flux from an RSS HDUList (SKYSUB summed over `band` (lo,hi) A).
+
+    Fibres behind a half-IFU mask come back NaN (not a misleading 0), so source detection and
+    centroiding -- which drop non-finite fluxes -- never see the dark half or its edge.
+    """
     from llamas_pyjamas.File.llamasRSS import skysub_extname
     flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
     wave = np.asarray(hdul['WAVE'].data, dtype=float)
     if band is not None:
         lo, hi = band
         flux = np.where((wave >= lo) & (wave <= hi), flux, np.nan)
-    return np.nansum(flux, axis=1)
+    out = np.nansum(flux, axis=1)
+    blocked = rss_blocked_rows(hdul, n_rows=out.shape[0])
+    if blocked.shape[0] == out.shape[0] and blocked.any():
+        out[blocked] = np.nan
+    return out
 
 
 def _fibre_xy(fiber_ids, benchsides):

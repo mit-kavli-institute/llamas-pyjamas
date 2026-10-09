@@ -47,6 +47,7 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 warnings.filterwarnings('ignore', category=VerifyWarning)
 
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.Utils.ifuMask import rss_blocked_rows, stamp_items
 
 # LLAMAS IFU geometry constants
 LLAMAS_FOV = 35.0          # Field of view in arcseconds
@@ -93,6 +94,7 @@ class SimpleCubeConstructor:
         self.wave = None
         self.mask = None
         self.fwhm = None
+        self.ifu_blocked = None   # per RSS row: behind the half-IFU mask (Utils/ifuMask)
 
         # Fiber identity from RSS FIBERMAP extension
         self.benchside = None
@@ -161,6 +163,12 @@ class SimpleCubeConstructor:
                 print(f"  FWHM: {self.fwhm.shape}")
             else:
                 self.fwhm = None
+
+            # Half-IFU mask flag (MASK bit 4 already keeps these fibres out of the resampling;
+            # the flag is also needed to blank the blocked half of the oversampled grid).
+            self.ifu_blocked = rss_blocked_rows(hdul, n_rows=self.flux.shape[0])
+            if self.ifu_blocked.any():
+                print(f"  Half-IFU mask: {int(self.ifu_blocked.sum())} blocked fibres")
 
             # Load FIBERMAP extension (critical for correct fiber mapping)
             if 'FIBERMAP' in hdul:
@@ -563,7 +571,28 @@ class SimpleCubeConstructor:
             if self.cube_var is not None:
                 self.cube_var[nonzero, out_y, out_x] = combined_var[nonzero] / (combined_weight[nonzero]**2)
 
+        self._blank_ifu_masked_half(tree, output_coords, ny, nx)
         self._print_cube_stats()
+
+    def _blank_ifu_masked_half(self, tree, output_coords, ny, nx):
+        """Half-IFU mask: NaN every output pixel whose nearest fibre (of ALL fibres) is blocked,
+        and every pixel no fibre contributed to, so the blocked half is NaN with a clean edge
+        rather than 0 or kernel-extrapolated values. No-op for unmasked frames.
+
+        (The native/nearest-hex grids need nothing: blocked fibres resample to None there.)
+        """
+        if self.ifu_blocked is None or not np.any(self.ifu_blocked):
+            return
+        fibre_blocked = np.asarray(self.ifu_blocked, dtype=bool)[self.fiber_indices]
+        _, nearest = tree.query(output_coords)
+        behind_mask = fibre_blocked[nearest].reshape(ny, nx)
+        self.cube[:, behind_mask] = np.nan
+        empty = self.cube_weight == 0
+        self.cube[empty] = np.nan
+        if self.cube_var is not None:
+            self.cube_var[:, behind_mask] = np.nan
+            self.cube_var[empty] = np.nan
+        print(f"  Half-IFU mask: {int(behind_mask.sum())} spaxels nearest a blocked fibre set to NaN")
 
     def _construct_cube_native_hex(self):
         """Construct cube by placing each fiber directly into its hex grid position."""
@@ -785,6 +814,9 @@ class SimpleCubeConstructor:
         primary.header['FIBPITCH'] = (self.fiber_pitch, 'Fiber pitch (arcsec)')
         primary.header['WAVESAMP'] = (self.wave_sampling, 'Wavelength sampling factor')
         primary.header['GRIDMETH'] = (self.grid_method, 'Spatial grid method')
+        # Half-IFU mask provenance carried from the RSS (IFUM* stamps, NIFUMSK)
+        for key, value in stamp_items(getattr(self, 'primary_header', None)).items():
+            primary.header[key] = value
 
         # IFU geometry
         primary.header['FOV'] = (LLAMAS_FOV, 'Field of view (arcsec)')

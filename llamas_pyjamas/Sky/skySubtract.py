@@ -34,6 +34,7 @@ from astropy.io import fits
 
 from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
 from llamas_pyjamas.Sky.skyMask import build_sky_fiber_mask
+from llamas_pyjamas.Utils.ifuMask import rss_blocked_rows
 from llamas_pyjamas.Sky.skyScale import scale_sky_per_fiber
 from llamas_pyjamas.Sky.skyResidual import clean_residuals
 
@@ -133,6 +134,11 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         flux_out = (flux1 - residual_model).astype(np.float32)
         total_removed = (scale_corr + residual_model).astype(np.float32)
+        # Half-IFU mask: blocked rows carry no sky, so the framework leaves them as they came in.
+        blocked = rss_blocked_rows(hdul, n_rows=flux.shape[0])
+        if blocked.shape[0] == flux.shape[0] and blocked.any():
+            flux_out[blocked] = flux[blocked]
+            total_removed[blocked] = 0.0
 
         # --- assemble output, copying every input extension ---
         out = fits.HDUList([h.copy() for h in hdul])

@@ -38,6 +38,7 @@ import logging
 
 # Import LLAMAS modules
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.Utils.ifuMask import MASK_IFU_BLOCKED, rss_blocked_rows
 from llamas_pyjamas.Image.processWhiteLight import quartile_bias, remove_striping
 from llamas_pyjamas.config import OUTPUT_DIR, LUT_DIR
 
@@ -1117,7 +1118,29 @@ class CubeConstructor:
 
             self.spatial_grid_x = np.linspace(x_min, x_max, n_x)
             self.spatial_grid_y = np.linspace(y_min, y_max, n_y)
-    
+
+        # Half-IFU mask (Utils/ifuMask): blocked fibres stay out of the fill, and every spaxel
+        # whose nearest fibre on the sky (of ALL fibres; isotropic distance, unlike the fill's
+        # rescaled griddata metric) is blocked is set to NaN afterwards, so the blocked half is
+        # blank rather than copies of the boundary fibres. The grid above was built from all
+        # fibres, so the WCS is unchanged.
+        ifu_blank = None
+        blocked_rows = rss_blocked_rows(table_data, n_rows=n_fibers)
+        if not blocked_rows.any() and channels[channel].get('dq') is not None:
+            _dq = np.asarray(channels[channel]['dq'])
+            if _dq.ndim == 2 and _dq.shape[0] == n_fibers:
+                blocked_rows = np.any((_dq.astype(np.int64) & int(MASK_IFU_BLOCKED)) != 0, axis=1)
+        if blocked_rows.shape[0] == n_fibers and blocked_rows.any():
+            from scipy.spatial import cKDTree
+            _xi, _yi = np.meshgrid(self.spatial_grid_x, self.spatial_grid_y)
+            _pts = np.array([(x, y) for _, x, y in fiber_positions])
+            _flag = np.array([blocked_rows[i] for i, _, _ in fiber_positions], dtype=bool)
+            _, _nn = cKDTree(_pts).query(np.column_stack([_xi.ravel(), _yi.ravel()]))
+            ifu_blank = _flag[_nn].reshape(_xi.shape)
+            fiber_positions = [p for p in fiber_positions if not blocked_rows[p[0]]]
+            self.logger.info(f"Half-IFU mask: {int(_flag.sum())} blocked fibres left out of "
+                             f"channel {channel}; {int(ifu_blank.sum())} spaxels blanked")
+
         # Initialize cube with NaNs
         cube_shape = (len(self.wavelength_grid), len(self.spatial_grid_y), len(self.spatial_grid_x))
         self.cube_data = np.full(cube_shape, np.nan)
@@ -1260,6 +1283,8 @@ class CubeConstructor:
                     # Place the spectrum point in the cube
                     self.cube_data[w_idx, y_idx, x_idx] = value
     
+        if ifu_blank is not None:
+            self.cube_data[:, ifu_blank] = np.nan
         self.logger.info(f"Cube for channel {channel} constructed successfully with spatial interpolation")
         return self.cube_data
         

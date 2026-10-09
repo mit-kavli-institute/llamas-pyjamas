@@ -84,7 +84,7 @@ MIN_SKY_FIT_FIBRES = 10
 # ----------------------------------------------------------------------------
 def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
                       in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI,
-                      fiber_y=None):
+                      fiber_y=None, allowed=None):
     """Return a boolean mask of the fibres to use for the sky estimate.
 
     Parameters
@@ -101,6 +101,11 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
     in_sky_region : array_like[bool] (n_fiber,), optional
         Required for ``'skymap'`` — True where the fibre sits in the user's sky
         region (from :func:`fibres_in_sky_region`).
+    allowed : array_like[bool] (n_fiber,), optional
+        Hard restriction on the candidate pool (e.g. the open half of a half-IFU
+        mask, see :mod:`llamas_pyjamas.Utils.ifuMask`): every method, including
+        'middle-third' and the degenerate-selection fallbacks, selects only
+        allowed fibres. ``None`` (default) leaves the behaviour unchanged.
 
     Returns
     -------
@@ -111,6 +116,24 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
     finite = np.asarray(finite, dtype=bool)
     n = brightness.size
     method = (method or "dimmest").lower()
+
+    if allowed is not None:
+        allowed = np.asarray(allowed, dtype=bool)
+        if method == "middle-third":
+            # middle-third ranks ALL fibres (it ignores ``finite``), so rank the
+            # allowed subset on its own and map the selection back.
+            idx = np.where(allowed)[0]
+            mask = np.zeros(n, dtype=bool)
+            if idx.size:
+                sub = select_sky_fibres(brightness[idx], finite[idx], method=method,
+                                        n_fibres=n_fibres)
+                mask[idx[sub]] = True
+            return mask
+        region = None if in_sky_region is None else np.asarray(in_sky_region, dtype=bool)
+        mask = select_sky_fibres(brightness, finite & allowed, method=method,
+                                 n_fibres=n_fibres, in_sky_region=region, q_lo=q_lo,
+                                 q_hi=q_hi, fiber_y=fiber_y)
+        return mask & allowed
 
     if method in ("frame", "all"):
         return _fallback_if_degenerate(finite.copy(), finite, brightness, n_fibres,
@@ -336,14 +359,16 @@ def _as_bool_mask(explicit, n_fiber=None):
 
 def build_sky_mask(brightness=None, finite=None, *, method="dimmest", n_fibres=20,
                    in_sky_region=None, q_lo=QUANTILE_LO, q_hi=QUANTILE_HI, fiber_y=None,
-                   explicit=None, n_fiber=None, source="in-exposure") -> SkyMask:
+                   explicit=None, n_fiber=None, source="in-exposure",
+                   allowed=None) -> SkyMask:
     """Canonical sky-fibre mask provider — the single seam both sky stages use.
 
     For every brightness-based method this simply wraps :func:`select_sky_fibres`
     (so the resulting mask is *identical*) and attaches provenance.  For
     ``method='manual'`` it uses ``explicit`` (a boolean mask, or live fibre
     indices with ``n_fiber``) directly — the hook for externally-defined sky
-    fibres (e.g. from an LSST image or a hand-drawn region).
+    fibres (e.g. from an LSST image or a hand-drawn region).  ``allowed``
+    restricts every method to those fibres (see :func:`select_sky_fibres`).
 
     Returns
     -------
@@ -360,6 +385,8 @@ def build_sky_mask(brightness=None, finite=None, *, method="dimmest", n_fibres=2
         elif nf is None and brightness is not None:
             nf = np.asarray(brightness).size
         mask = _as_bool_mask(explicit, n_fiber=nf)
+        if allowed is not None:
+            mask = mask & np.asarray(allowed, dtype=bool)
         prov = {"source": source, "n_requested": int(mask.sum())}
         return SkyMask(mask=mask, method="manual", provenance=prov)
 
@@ -368,8 +395,10 @@ def build_sky_mask(brightness=None, finite=None, *, method="dimmest", n_fibres=2
 
     mask = select_sky_fibres(brightness, finite, method=method, n_fibres=n_fibres,
                              in_sky_region=in_sky_region, q_lo=q_lo, q_hi=q_hi,
-                             fiber_y=fiber_y)
+                             fiber_y=fiber_y, allowed=allowed)
     prov = {"source": source, "n_fibres": int(n_fibres)}
+    if allowed is not None:
+        prov["n_allowed"] = int(np.asarray(allowed, dtype=bool).sum())
     if method_l == "quantile":
         prov.update(q_lo=float(q_lo), q_hi=float(q_hi))
     if method_l == "skymap":

@@ -470,11 +470,15 @@ def apply_pedestal_file(sky1d_file, config):
     return out
 
 
-def _rss_blank_mask(counts_cam, pct):
+def _rss_blank_mask(counts_cam, pct, exclude=None):
     """Array-based blank-fibre mask for one camera's RSS block: faintest ``pct`` percent of live
-    fibres (brightness = summed counts; RSS carries no throughput, matching the pkl tp-absent path)."""
+    fibres (brightness = summed counts; RSS carries no throughput, matching the pkl tp-absent path).
+    ``exclude`` (bool per row) removes fibres from the pool first -- the fibres behind a half-IFU
+    mask, which would otherwise be the faintest and so all of the "blank" set."""
     bright = np.nansum(np.asarray(counts_cam, float), axis=1)
     finite = np.isfinite(bright) & (bright != 0)
+    if exclude is not None:
+        finite &= ~np.asarray(exclude, dtype=bool)
     if not finite.any():
         return finite
     cut = np.nanpercentile(bright[finite], float(pct))
@@ -497,6 +501,7 @@ def apply_pedestal_rss(rss_file, config, template_path=None):
     from astropy.io import fits
     from llamas_pyjamas.Utils.utils import exposure_time
     from llamas_pyjamas.Sky.skyFloorTemplate import load_template, read_template_bunit
+    from llamas_pyjamas.Utils.ifuMask import rss_blocked_rows
 
     base = os.path.basename(rss_file)
     channel = next((c for c in ('red', 'green', 'blue') if f'_RSS_{c}' in base or f'_{c}.fits' in base), None)
@@ -527,6 +532,9 @@ def apply_pedestal_rss(rss_file, config, template_path=None):
         skysub = np.asarray(h['SKYSUB'].data, float)
         bs = np.array([str(b).strip() for b in h['FIBERMAP'].data['BENCHSIDE']])
         exptime = exposure_time(hdr, default=0.0)
+        # Half-IFU mask: blocked fibres are neither blank candidates nor corrected (their SKY
+        # stays 0 -- no sky photons reach them; see Utils/ifuMask).
+        ifu_blocked = rss_blocked_rows(h, n_rows=counts.shape[0])
 
         # template-scope: resolve + load the per-camera templates (graceful fallback)
         tpl, bunit = {}, 'counts'
@@ -547,7 +555,8 @@ def apply_pedestal_rss(rss_file, config, template_path=None):
             if not np.any(np.isfinite(c_cam)) or np.nanmax(np.abs(np.nan_to_num(c_cam))) == 0:
                 continue
             s_cam = sky[sel]
-            blank = _rss_blank_mask(c_cam, blank_pct)
+            blk_cam = ifu_blocked[sel]
+            blank = _rss_blank_mask(c_cam, blank_pct, exclude=blk_cam if blk_cam.any() else None)
             if scope == 'template':
                 T = tpl.get(cam)
                 if T is None or T.shape[0] != c_cam.shape[0]:
@@ -563,11 +572,20 @@ def apply_pedestal_rss(rss_file, config, template_path=None):
             else:
                 ped = estimate_pedestal(c_cam, s_cam, blank, cont_window=win, clip_negative=clip)
                 ped = ped[None, :]
-            sky[sel] = s_cam + ped
-            skysub[sel] = skysub[sel] - ped
+            if blk_cam.any():
+                # apply to the open-half rows only; blocked rows keep SKY = 0
+                app = sel[~blk_cam]
+                ped_rows = np.broadcast_to(ped, c_cam.shape)[~blk_cam]
+                sky[app] = sky[app] + ped_rows
+                skysub[app] = skysub[app] - ped_rows
+            else:
+                sky[sel] = s_cam + ped
+                skysub[sel] = skysub[sel] - ped
             if scope == 'template' and bool(config.get("sky_pedestal_edge_refine", True)):
                 er = edge_refine_profile(c_cam, sky[sel], blank,
                                          window=int(config.get("sky_pedestal_edge_window", EDGE_WINDOW)))
+                if blk_cam.any():
+                    er = np.where(blk_cam, 0.0, er)
                 sky[sel] = sky[sel] + er[:, None]
                 skysub[sel] = skysub[sel] - er[:, None]
             n_cam += 1

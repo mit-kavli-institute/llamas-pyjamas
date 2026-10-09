@@ -19,6 +19,7 @@ import logging
 import numpy as np
 
 from llamas_pyjamas.Sky.skySelect import SkyMask, build_sky_mask
+from llamas_pyjamas.Utils.ifuMask import rss_blocked_rows
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,15 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> SkyMask:
     n_fiber = counts.shape[0]
     wl = white_light(counts)
     finite = np.isfinite(wl) & (wl > -np.inf)
+    # Half-IFU mask: fibres behind the mask (FIBERMAP IFU_BLOCKED) are never sky. Every path below
+    # starts from `finite`; middle-third (which ranks all fibres) gets the restriction explicitly.
+    blocked = rss_blocked_rows(fibermap, n_rows=n_fiber)
+    if blocked.shape[0] != n_fiber:
+        blocked = np.zeros(n_fiber, dtype=bool)
+    if blocked.any():
+        finite &= ~blocked
+        logger.info("skyMask: %d half-IFU-masked fibres excluded from the sky basis",
+                    int(blocked.sum()))
 
     if config.mask_method == "none":
         logger.info("skyMask: mask_method='none' — using all %d finite fibres", finite.sum())
@@ -149,7 +159,8 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> SkyMask:
     #    PCA stage needs — a fixed dimmest-N would be too few for the eigenbasis).
     sm = getattr(config, "selection_method", "dimmest")
     if sm == "middle-third":
-        smask = build_sky_mask(wl, finite, method="middle-third", source="framework-basis")
+        smask = build_sky_mask(wl, finite, method="middle-third", source="framework-basis",
+                               allowed=~blocked if blocked.any() else None)
         logger.info("skyMask: middle-third selected %d/%d fibres", smask.n_sky, n_fiber)
         return smask
     if sm == "skymap":

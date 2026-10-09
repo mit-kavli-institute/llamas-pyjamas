@@ -27,6 +27,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 import llamas_pyjamas
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+from llamas_pyjamas.Utils.ifuMask import BLOCKED_HALF, CLOSED_STATE, read_mask_state
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,9 @@ CONFIG_CATALOG = [
         ('arc_calib_file', 'str', '', None, 'Path to an arc calibration file (blank = package default).'),
     ]),
     ('Sky', [
+        ('IFU_mask', 'bool', 'false', None, 'Half-IFU mask in for frames whose header lacks the '
+         'mask state (older data): the sky is then built from the open half, decided per frame '
+         'from the data. Frames whose header says TOP/BOTTOM are always handled.'),
         ('sky_subtract', 'bool', 'true', None, 'Base 1D (b-spline) sky model + subtraction.'),
         ('sky_selection_method', 'enum', 'stratified',
          ['stratified', 'quantile', 'dimmest', 'middle-third', 'skymap', 'frame'], 'Sky-fibre selection method.'),
@@ -246,7 +250,7 @@ def scan_directory(data_dir, progress_callback=None):
             break
         entry = {'path': path, 'filename': os.path.basename(path), 'object': '',
                  'exptime': None, 'type': '', 'comment': '', 'readmode': '',
-                 'standard': None}
+                 'standard': None, 'ifumask': ''}
         try:
             hdr = fits.getheader(path, 0)
             entry['object'] = str(hdr.get('OBJECT', '') or '')
@@ -257,6 +261,7 @@ def scan_directory(data_dir, progress_callback=None):
             comment = hdr.get('OBS-CMNT')
             entry['comment'] = '' if comment is None else str(comment)
             entry['readmode'] = str(hdr.get('READ-MDE', '') or '')
+            entry['ifumask'] = read_mask_state(hdr)      # FRONTEND IFU MASK-STATE ('' = blank)
             # A science pointing sitting on a catalogue standard is very probably an
             # exposure of that standard -- headers cannot tell them apart, so this is
             # the only signal. Only SCIENCE frames are checked; calibrations never are.
@@ -601,7 +606,7 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
 
 class ReduxSetupWindow(QtWidgets.QMainWindow):
 
-    COL_FILE, COL_OBJ, COL_EXP, COL_TYPE, COL_READ, COL_CMNT, COL_ROLE = range(7)
+    COL_FILE, COL_OBJ, COL_EXP, COL_TYPE, COL_READ, COL_MASK, COL_CMNT, COL_ROLE = range(8)
 
     def __init__(self, data_dir=None, config_out=None):
         super().__init__()
@@ -648,9 +653,10 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         tableBox = QtWidgets.QWidget()
         tableLayout = QtWidgets.QVBoxLayout(tableBox)
         tableLayout.setContentsMargins(0, 0, 0, 0)
-        self.table = QtWidgets.QTableWidget(0, 7)
+        self.table = QtWidgets.QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ['Filename', 'Object', 'Exp (s)', 'Type', 'Readout', 'Observer Comments', 'Role'])
+            ['Filename', 'Object', 'Exp (s)', 'Type', 'Readout', 'IFU mask', 'Observer Comments',
+             'Role'])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -663,6 +669,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         self.table.setColumnWidth(self.COL_EXP, 70)
         self.table.setColumnWidth(self.COL_TYPE, 110)
         self.table.setColumnWidth(self.COL_READ, 70)
+        self.table.setColumnWidth(self.COL_MASK, 70)
         self.table.setColumnWidth(self.COL_CMNT, 300)
         self.table.setColumnWidth(self.COL_ROLE, 110)
         self.table.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -868,6 +875,15 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             self.table.setItem(row, self.COL_EXP, expItem)
             self.table.setItem(row, self.COL_TYPE, QtWidgets.QTableWidgetItem(e['type']))
             self.table.setItem(row, self.COL_READ, QtWidgets.QTableWidgetItem(e['readmode']))
+            maskItem = QtWidgets.QTableWidgetItem(e.get('ifumask', ''))
+            if e.get('ifumask') in BLOCKED_HALF:
+                maskItem.setToolTip('Half-IFU mask in: the pipeline builds the sky from the open '
+                                    'half and flags the blocked fibres automatically.')
+            elif e.get('ifumask') == CLOSED_STATE:
+                maskItem.setToolTip('Mask covers the whole field of view: normal for biases, darks '
+                                    'and lamp calibrations; fatal for science, standards, sky frames '
+                                    'and twilights.')
+            self.table.setItem(row, self.COL_MASK, maskItem)
             self.table.setItem(row, self.COL_CMNT, QtWidgets.QTableWidgetItem(e['comment']))
             self.table.setItem(row, self.COL_ROLE, QtWidgets.QTableWidgetItem(''))
             if e.get('standard'):

@@ -362,6 +362,22 @@ sky_selection_method = stratified
 # (If several are listed, only the first is used for now.)
 # sky_frame_files = /path/to/sky1_mef.fits, /path/to/sky2_mef.fits
 
+# Half-IFU mask. Every input's header keyword HIERARCH FRONTEND IFU MASK-STATE is checked
+# before reduction starts:
+#   TOP / BOTTOM  half the field is masked: handled automatically. The sky is built from the
+#                 open half only, and the blocked fibres are flagged (RSS MASK bit 4, FIBERMAP
+#                 IFU_BLOCKED) and left out of the cubes and registration.
+#   EMPTY         full field.
+#   HOME          the mask covers the whole field. This is normal for biases, darks and lamp
+#                 calibrations; the run stops if a science, standard, sky or twilight frame
+#                 reports it.
+# With only half the field open, an extended target that fills it leaves no blank sky: use
+# sky_selection_method = frame (or skymap) for such fields.
+# Older data leave the keyword blank. For those frames, set IFU_mask = true if the mask was in:
+# each frame's blocked half is then decided from its data (frames that turn out unmasked are
+# left alone). It has no effect on frames whose header reports a state.
+# IFU_mask = false
+
 # Per-camera additive continuum PEDESTAL (sky-refine Phase 3a; EXPERIMENTAL, default OFF).
 # After the base sky model, subtract a smooth per-camera continuum floor measured from the faintest
 # (blank) fibres -- targets the additive residual that co-adds into stacked-image striping, in the

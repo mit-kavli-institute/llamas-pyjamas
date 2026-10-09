@@ -40,6 +40,7 @@ import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
 from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
+from llamas_pyjamas.Utils import ifuMask
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
@@ -585,6 +586,12 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
         raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
 
     corr_extractions, _ = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    # Half-IFU mask: stamp the sky frame's own decision, so the 'frame'-mode sky pool is the open
+    # half of THIS frame (Utils/ifuMask).
+    _sky_dec = ifuMask.decide_for_frame(sky_primary_hdr, corr_extractions['extractions'], config,
+                                        role='sky_frame')
+    ifuMask.log_decision(_sky_dec, os.path.basename(orig_sky_file))
+    ifuMask.stamp_header(sky_primary_hdr, _sky_dec)
     base_name = os.path.splitext(os.path.basename(extracted))[0]
     sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
     save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
@@ -1599,7 +1606,8 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 saved_paths = constructor.save_channel_cubes(
                     channel_cubes,
                     output_prefix=os.path.join(output_dir, f"{base_name}{name_suffix}"),
-                    header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling},
+                    header_info={'ORIGIN': 'LLAMAS Pipeline', 'SPAXELSZ': spatial_sampling,
+                                 **ifuMask.stamp_items_from_file(rss_file)},
                     spatial_sampling=spatial_sampling
                 )
                 
@@ -1675,6 +1683,37 @@ def _has_rss_product(extraction_dir, stem):
                 and '_RSS' in f and '_FF' not in f):
             return True
     return False
+
+
+def _ifu_mask_resume_conflicts(rows, extraction_dir):
+    """Science/standard frames whose existing RSS was reduced under a different half-IFU mask
+    request than the current one, as ``[(file, old_request, new_request)]``.
+
+    Every stage resumes on file existence, so without this a frame reduced before the mask
+    handling existed (or with ``IFU_mask`` toggled since) would silently keep its old sky.
+    """
+    if not os.path.isdir(extraction_dir):
+        return []
+    rss_files = sorted(f for f in os.listdir(extraction_dir)
+                       if f.endswith('.fits') and '_RSS' in f)
+    no_handling = (ifuMask.REQ_NONE, ifuMask.REQ_FORCEOFF)
+    out = []
+    for r in rows:
+        if r.role not in ('science', 'standard'):
+            continue
+        stem = _science_stem(r.path)
+        existing = [f for f in rss_files if stem in f]
+        if not existing:
+            continue
+        try:
+            old = str(fits.getval(os.path.join(extraction_dir, existing[0]), 'IFUMREQ', 0)).strip()
+        except KeyError:
+            old = ifuMask.REQ_NONE              # reduced before the mask stamps existed
+        except Exception:
+            continue
+        if old != r.request and not (old in no_handling and r.request in no_handling):
+            out.append((os.path.basename(r.path), old, r.request))
+    return out
 
 
 #: RSS correction-stage suffixes, least to most corrected. The consolidator keeps the most
@@ -2022,6 +2061,29 @@ def main(config_path):
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
 
+    # ── Half-IFU mask pre-flight (Utils/ifuMask) ─────────────────────────────
+    # Read every input's FRONTEND IFU MASK-STATE before any processing. HOME (the mask covers the
+    # whole field of view) is fatal for inputs that need sky light -- science, standards, sky
+    # frames, twilights -- and normal for lamp calibrations. TOP/BOTTOM switch the half-mask
+    # workflow on automatically; IFU_mask covers older data whose header is blank, and the hidden
+    # IFU_mask_force_off / IFU_mask_half refine that.
+    _preflight_log = logging.getLogger('llamas_pyjamas.preflight')
+    _ifu_mask_cfg, _ifu_force_off, _ = ifuMask.config_switches(config)
+    _ifu_rows = ifuMask.assess_inputs(config, _ifu_mask_cfg, _ifu_force_off)
+    _ifu_summary, _ifu_warnings, _ifu_table = ifuMask.preflight_report(
+        _ifu_rows, _ifu_mask_cfg, _ifu_force_off)
+    _preflight_log.info("IFU mask pre-flight (role, state, request, file):\n%s",
+                        "\n".join(_ifu_table))
+    _ifu_failures = ifuMask.closed_mask_failures(_ifu_rows)
+    if _ifu_failures:
+        _preflight_log.error(ifuMask.format_closed_failure(_ifu_failures))
+        _restore_terminal(ok=False)
+        _sys.exit(1)
+    for _w in _ifu_warnings:
+        _preflight_log.warning(_w)
+    _preflight_log.info(_ifu_summary)
+    reporter.note(_ifu_summary)
+
     # Resolve master bias files — user overrides take priority, otherwise use package defaults.
     # Missing extensions are handled per-detector in process_trace() via inter-fibre fallback;
     # validate_for_gui() is NOT applied to bias files to avoid creating *_GUI_version.fits
@@ -2171,6 +2233,19 @@ def main(config_path):
         config['extraction_output_dir'] = extraction_path
     else:
         extraction_path = config['extraction_output_dir']
+
+    # Half-IFU mask resume guard: products from a different mask request must be rebuilt.
+    if resume:
+        _ifu_stale = _ifu_mask_resume_conflicts(_ifu_rows, extraction_path)
+        if _ifu_stale:
+            _w = max(len(f) for f, _, _ in _ifu_stale)
+            _preflight_log.error(
+                f"IFU mask handling changed for {len(_ifu_stale)} frame(s) reduced earlier "
+                f"(existing RSS request -> now):\n"
+                + "\n".join(f"  {f:<{_w}}  {old} -> {new}" for f, old, new in _ifu_stale)
+                + "\nRe-run with clobber = true to rebuild them with the new mask handling.")
+            _restore_terminal(ok=False)
+            _sys.exit(1)
 
     # Per-frame edge-bias (DC offset) settings, threaded into every extraction so
     # science and flats are corrected identically. See build_edge_bias_config.
@@ -2798,8 +2873,17 @@ def main(config_path):
                 if isinstance(_ech, str):
                     _ech = tuple(c.strip().lower() for c in _ech.split(',') if c.strip())
                 _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+                # Half-masked frames neither get nor donate an empirical sky (their blocked
+                # fibres carry none); they keep the mask-aware b-spline base sky.
+                _e2_inputs = [f for f in science_files_to_process
+                              if ifuMask.request_for(ifuMask.read_mask_state(fits.getheader(f, 0)),
+                                                     _ifu_mask_cfg, _ifu_force_off)
+                              not in (ifuMask.REQ_HEADER, ifuMask.REQ_CONFIG)]
+                if len(_e2_inputs) < len(science_files_to_process):
+                    print(f"Empirical 2D sky: {len(science_files_to_process) - len(_e2_inputs)} "
+                          f"half-masked frame(s) excluded (b-spline base sky only)")
                 _fields = _e2.group_fields(
-                    science_files_to_process,
+                    _e2_inputs,
                     min_frames=int(config.get('sky_empirical_min_frames', _e2.MIN_FIELD_FRAMES)))
                 for _fld in _fields:
                     _members = _fld['members']
@@ -2982,6 +3066,13 @@ def main(config_path):
             with fits.open(orig_science_file) as _sci_hdul:
                 primary_hdr = _sci_hdul[0].header.copy()
 
+            # Half-IFU mask: final per-frame decision (header + config request, refined by the
+            # data check on the extracted halves), stamped into the pickle header. refineSkyX,
+            # skyModel_1d and the RSS writer act on the stamp (Utils/ifuMask).
+            _mask_dec = ifuMask.decide_for_frame(primary_hdr, corr_extraction_list, config)
+            ifuMask.log_decision(_mask_dec, _frame_label(orig_science_file))
+            ifuMask.stamp_header(primary_hdr, _mask_dec)
+
             # Save the corrected extractions using the current file's base name
             base_name = os.path.splitext(os.path.basename(correction_path))[0]
             savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
@@ -3005,7 +3096,7 @@ def main(config_path):
             # rather than modelling the full sky. Seeded AFTER refineSkyX (which only touches the
             # xshift<->wave mapping, not the native-column .counts/.sky the seed lives on).
             _use_empirical = False
-            if config.get('sky_empirical_2d', False):
+            if config.get('sky_empirical_2d', False) and not _mask_dec.masked:
                 _emp_pkl = os.path.join(
                     extraction_path, f"{_science_stem(orig_science_file)}_empsky2d.pkl")
                 if os.path.exists(_emp_pkl):

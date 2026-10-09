@@ -7,6 +7,8 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Extract.extractLlamas import save_extractions
 import llamas_pyjamas.Arc.arcLlamas as arc
 import llamas_pyjamas.Sky.skySelect as skySelect
+from llamas_pyjamas.Utils import ifuMask
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 from pypeit.core.fitting import iterfit, robust_fit
@@ -66,6 +68,9 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
     scispec  = scidict['extractions']
     metadata = scidict['metadata']
     hdr      = scidict['primary_header']
+    # Half-IFU mask: with every other trace dark, the template must come from open fibres only
+    # and blocked fibres have no sky lines to refine (stamp written by reduce.py; see Utils/ifuMask).
+    mask_dec = ifuMask.decision_from_header(hdr)
 
     x = np.arange(2048, dtype=float)
 
@@ -90,10 +95,20 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
             # ---- Build template from ref_fiber ± fiber_half_width ----
             t_lo  = max(0, ref_fiber - fiber_half_width)
             t_hi  = min(nfibers, ref_fiber + fiber_half_width + 1)
+            template_rows = range(t_lo, t_hi)
+            blocked_rows = None
+            if mask_dec is not None and mask_dec.masked:
+                phys = live_fibre_ids(nfibers, getattr(scispec[fits_ext], 'dead_fibers', None) or [])
+                blocked_rows = ifuMask.blocked_mask(f"{bench}{side}", phys, mask_dec.blocked)
+                open_rows = np.where(ifuMask.sky_pool_mask(f"{bench}{side}", phys,
+                                                           mask_dec.blocked))[0]
+                # the same number of template fibres, taken from the open half nearest ref_fiber
+                template_rows = np.sort(open_rows[np.argsort(np.abs(open_rows - ref_fiber),
+                                                             kind='stable')[:t_hi - t_lo]])
             template_xshift = np.array([])
             template_counts = np.array([])
 
-            for tf in range(t_lo, t_hi):
+            for tf in template_rows:
                 xs = scispec[fits_ext].xshift[tf, :]
                 ct = np.nan_to_num(scispec[fits_ext].counts[tf, :], nan=0.0,
                                    posinf=0.0, neginf=0.0)
@@ -132,6 +147,8 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
             n_fallback = 0
 
             for ifiber in range(nfibers):
+                if blocked_rows is not None and blocked_rows[ifiber]:
+                    continue                       # behind the half-IFU mask: no sky lines
                 spec        = np.nan_to_num(scispec[fits_ext].counts[ifiber, :],
                                             nan=0.0, posinf=0.0, neginf=0.0)
                 quad_xshift = scispec[fits_ext].xshift[ifiber, :]
@@ -311,6 +328,16 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
     sky = sky_wvcal['extractions']
     sky_metadata = sky_wvcal['metadata']
 
+    # Half-IFU mask: the sky fibres must come from the open half of the frame that PROVIDES them
+    # (the dedicated sky frame in 'frame' mode). The decision is the stamp reduce.py writes into
+    # the pickle header (Utils/ifuMask); unstamped pickles keep today's behaviour exactly.
+    sky_mask_dec = ifuMask.decision_from_header(sky_dict.get('primary_header'))
+    if sky_mask_dec is not None and sky_mask_dec.masked:
+        print(f"Half-IFU mask: sky fibres restricted to the open half "
+              f"({sky_mask_dec.blocked} blocked, {sky_mask_dec.source})")
+        logger.info("skyModel_1d: half-IFU mask, %s blocked (%s); sky pool = open half",
+                    sky_mask_dec.blocked, sky_mask_dec.source)
+
     # Find the brightest fibers in the std star spectrum
 
 
@@ -406,6 +433,17 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         # picking dead/zero fibres).
         usable = finite_any & (counts > 0)
 
+        # Half-IFU mask: restrict every selection (and the broadening below) to the open half,
+        # minus the fibres next to the mask edge. `fiber` is a LIVE row index; the halves are
+        # defined on physical fibre ids.
+        allowed = None
+        if sky_mask_dec is not None and sky_mask_dec.masked:
+            allowed = ifuMask.sky_pool_mask(
+                f"{bench}{side}", live_fibre_ids(n_fibers, cam_dead_fibers),
+                sky_mask_dec.blocked)
+            print(f"  {channel} {bench}{side}: open-half sky pool {int((usable & allowed).sum())} "
+                  f"of {int(usable.sum())} usable fibres")
+
         # Choose the sky fibres for this camera via the configured method.
         # 'skymap' maps each fibre's spatial position into the user sky map;
         # every other method ranks/selects on the white-light brightness.
@@ -415,7 +453,6 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
             # `fiber` is a LIVE row index (0..n-1); FiberMap_LUT (via
             # fibres_in_sky_region) needs the physical fibremap position, which
             # differs after the first dead fibre. Map live -> physical.
-            from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
             phys_fiber = np.asarray(live_fibre_ids(n_fibers, cam_dead_fibers),
                                     dtype=int)
             in_region = skySelect.fibres_in_sky_region(benchsides_cam, phys_fiber,
@@ -436,15 +473,18 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
         # here; persisting the base selection is a later step.
         sel_mask = skySelect.build_sky_mask(
             counts, usable, method=selection_method,
-            n_fibres=n_sky_fibres, in_sky_region=in_region, fiber_y=fiber_y).mask
+            n_fibres=n_sky_fibres, in_sky_region=in_region, fiber_y=fiber_y,
+            allowed=allowed).mask
 
         # Min-fibre floor for 'dimmest'/'quantile': low-signal cameras (e.g. faint
         # blue) may have very few positive fibres, leaving a fit built from 1-2
         # fibres. Broaden to the middle-third of finite fibres for a sturdier fit.
+        pool_any = finite_any if allowed is None else (finite_any & allowed)
         if (selection_method in ('dimmest', 'quantile', 'stratified')
                 and sel_mask.sum() < skySelect.MIN_SKY_FIT_FIBRES
-                and finite_any.sum() >= skySelect.MIN_SKY_FIBRES):
-            broadened = skySelect.select_sky_fibres(counts, finite_any, method='middle-third')
+                and pool_any.sum() >= skySelect.MIN_SKY_FIBRES):
+            broadened = skySelect.select_sky_fibres(counts, finite_any, method='middle-third',
+                                                    allowed=allowed)
             if broadened.sum() > sel_mask.sum():
                 print(f"  Low-signal camera {channel} {bench}{side}: broadening dimmest "
                       f"({int(sel_mask.sum())}) -> middle-third ({int(broadened.sum())} fibres)")

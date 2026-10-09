@@ -10,6 +10,8 @@ from datetime import datetime
 
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 from llamas_pyjamas.Utils.wcsLlamas import FIBRE_AREA_ARCSEC2
+from llamas_pyjamas.Utils.ifuMask import (blocked_mask, decision_from_header, FIBERMAP_COLUMN,
+                                          MASK_IFU_BLOCKED)
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +211,10 @@ class RSSgeneration:
             primary_hdr = _data.get('primary_header')
             extraction_objects = _data['extractions']
             _metadata = _data['metadata']
+            # Half-IFU mask decision stamped by reduce.py (None for unstamped/calibration pickles).
+            _mask_dec = decision_from_header(primary_hdr)
+            _ifu_blocked_half = _mask_dec.blocked if (_mask_dec is not None
+                                                      and _mask_dec.masked) else None
 
             self.logger.info(f"Loaded extraction file with {len(extraction_objects)} extraction objects")
 
@@ -490,6 +496,28 @@ class RSSgeneration:
                 fwhm_stack = np.vstack(all_fwhm)
                 sky_stack = np.vstack(all_sky)
 
+                # Half-IFU mask: no sky photons reach the blocked fibres, so they keep SKY = 0
+                # (SKYSUB = their scattered light, not -sky) and carry MASK bit 4 plus the
+                # FIBERMAP IFU_BLOCKED flag, which every downstream consumer drops. This is the
+                # final word on their sky whatever earlier stages wrote into .sky.
+                ifu_blocked = np.zeros(sky_stack.shape[0], dtype=bool)
+                if _ifu_blocked_half is not None:
+                    _blk = blocked_mask(benchsides, fiber_ids, _ifu_blocked_half)
+                    if _blk.shape[0] == sky_stack.shape[0]:
+                        ifu_blocked = _blk
+                        sky_stack[ifu_blocked] = 0.0
+                        if dq_stack.dtype.kind not in 'iu':
+                            dq_stack = dq_stack.astype(np.int16)
+                        dq_stack[ifu_blocked] |= MASK_IFU_BLOCKED
+                        self.logger.info(f"Half-IFU mask: {int(ifu_blocked.sum())} {channel} "
+                                         f"fibres flagged ({_ifu_blocked_half} blocked)")
+                    else:
+                        self.logger.warning(f"Half-IFU mask: fibre map ({_blk.shape[0]}) does not "
+                                            f"match the {sky_stack.shape[0]} RSS rows for "
+                                            f"{channel}; blocked fibres NOT flagged")
+                primary_hdu.header['NIFUMSK'] = (int(ifu_blocked.sum()),
+                                                 'Fibres flagged behind the half-IFU mask')
+
                 # FLUX = counts - sky if subtract_sky=True and sky model is non-zero
                 has_sky = np.any(sky_stack != 0)
                 if subtract_sky and has_sky:
@@ -574,6 +602,12 @@ class RSSgeneration:
                         nf_sky = getattr(nf_obj, 'sky', None)
                         if nf_sky is None or nf_sky.shape != nf_counts.shape:
                             nf_sky = np.zeros_like(nf_counts)
+                        if _ifu_blocked_half is not None:      # same rule as the main SKY plane
+                            nf_sky = np.array(nf_sky, copy=True)
+                            nf_sky[blocked_mask(
+                                f"{getattr(nf_obj, 'bench', '')}{getattr(nf_obj, 'side', '')}",
+                                live_fibre_ids(n_nf, getattr(nf_obj, 'dead_fibers', None) or []),
+                                _ifu_blocked_half)] = 0.0
 
                         # Remove dead fibers to match the row layout of the main FLUX extension
                         dead_fibers = getattr(nf_obj, 'dead_fibers', None)
@@ -671,7 +705,8 @@ class RSSgeneration:
                     fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
                     fits.Column(name='FIBER_TYPE', format='10A', array=np.array(fiber_types)),
                     fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
-                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs))
+                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs)),
+                    fits.Column(name=FIBERMAP_COLUMN, format='L', array=ifu_blocked)
                 ]
 
                 fibermap_hdu = fits.BinTableHDU.from_columns(fibermap_cols)

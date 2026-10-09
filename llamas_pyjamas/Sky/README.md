@@ -68,3 +68,53 @@ framework after the fibre-flat step and cube construction then prefers the
 `sky_framework` (enable), `sky_method` (`scaled`|`pca`), `sky_pca_ncomp`,
 `sky_scale_window`, `sky_mask_method` (`whitelight`|`none`),
 `sky_fiber_percentile`, `sky_qa_plots`.
+
+## 3. Half-IFU mask
+
+A frontend mask can block half of the IFU. Consecutive fibres on a benchside alternate
+between the two fibre-map x halves (low-x `xpos ≤ 23.0`, high-x `xpos ≥ 23.5`). With the mask
+in, every other trace is therefore dark, and a faint-first sky selection would build its model
+from the dark fibres. `Utils/ifuMask.py` holds the logic; `reduce.py` drives it.
+
+- **Pre-flight.** Every input's `HIERARCH FRONTEND IFU MASK-STATE` is read before any
+  processing.
+  - `TOP`/`BOTTOM` switch the handling on.
+  - `EMPTY` means full field.
+  - `HOME` means the whole field is covered. That is normal for biases, darks and lamp
+    calibrations. The run stops, naming the files, if a science, standard, sky or twilight
+    frame reports it.
+  - Blank headers (older data) follow `IFU_mask`.
+  - A quick check: `python -m llamas_pyjamas.Utils.ifuMask FILES...`.
+- **Per frame**, after wavelength calibration, `measure_halves` compares the two halves'
+  continuum and sky-line levels. This confirms the blocked half, or decides it for
+  blank-header frames when `IFU_mask = true`; frames that look unmasked are left alone.
+  - The result is stamped into the pickle and RSS primary headers: `IFUMSTAT`, `IFUMREQ`,
+    `IFUMASK`, `IFUMBLK`, `IFUMSRC`, `IFUMDATA`, `IFUMRAT`, `IFUMLRAT`.
+- **Sky.** Every sky pool is restricted to the open half, without the fibres next to the
+  mask edge. That covers `skyModel_1d` (all selection methods and fallbacks, via
+  `skySelect` `allowed=`), the `refineSkyX` template, the pedestal blank set and the
+  framework's sky basis.
+  - With only half the field open, an extended target that fills the open half leaves no blank
+    sky in the frame. In that case use `sky_selection_method = frame` (a dedicated sky exposure;
+    a masked sky frame is fine) or `skymap`.
+- **Blocked fibres.** These have `SKY = 0` (no sky photons reach them), RSS `MASK` bit 4,
+  FIBERMAP `IFU_BLOCKED = T` and `NIFUMSK` in the primary header.
+  - The pedestal and framework leave them untouched.
+  - Cubes NaN the blocked half (both the simple and the traditional constructor).
+  - Registration's `per_fibre_flux` returns NaN for them.
+  - `Combine` transparency fitting leaves half-masked exposures unscaled.
+- **Hidden keys:**
+  - `IFU_mask_force_off = true` disables the half-mask handling (it never bypasses the HOME
+    failure);
+  - `IFU_mask_half = top|bottom` is used for blank-header frames the data check cannot decide.
+- **Re-runs.** Frames reduced under a different mask request stop the run with a request for
+  `clobber = true`.
+
+Future work:
+- tracing, fibre flats, twilight throughput and arcs taken with the mask in (pre-flight only
+  warns about them today);
+- the extraction-time white-light QA images;
+- confirming `BOTTOM` → low-x on a real frame (`TOP` → high-x was measured on
+  2026-01-07 09:16:45);
+- waveQA medians that include blocked fibres;
+- the CRR cube adapter.
