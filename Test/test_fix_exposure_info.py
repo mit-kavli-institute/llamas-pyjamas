@@ -106,10 +106,13 @@ def test_case_a_rexptime_and_tel_block(tmp_path):
     exp = audit.fix_for('EXPTIME')
     assert exp is not None and exp.value == 10.0 and exp.source == 'REXPTIME'
     for key, expect in [('UTC', '01:34:17.5'), ('DATE-OBS', '2024-11-29'),
-                        ('DATE', '2024-11-29'), ('RA', '02:34:56.7'),
-                        ('DEC', '-29:12:34'), ('AIRMASS', 1.14)]:
+                        ('DATE', '2024-11-29'), ('AIRMASS', 1.14)]:
         fix = audit.fix_for(key)
         assert fix is not None and fix.value == expect, key
+    # RA/DEC are decimal degrees by convention, so the TEL block's sexagesimal is converted.
+    for key, expect in [('RA', 38.73625), ('DEC', -29.209444)]:
+        fix = audit.fix_for(key)
+        assert fix is not None and abs(fix.value - expect) < 1e-5, key
     mjd = audit.fix_for('MJD-OBS')
     assert mjd is not None and abs(mjd.value - 60643.06547454) < 1e-4
 
