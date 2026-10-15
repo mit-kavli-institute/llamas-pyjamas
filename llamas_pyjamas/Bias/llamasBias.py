@@ -160,3 +160,118 @@ class BiasLlamas:
         return out_filename
 
  
+
+# ---------------------------------------------------------------------------
+# Median combination of raw multi-extension frames (biases, darks)
+# ---------------------------------------------------------------------------
+
+def detector_key(header):
+    """``(color, bench, side)`` of an image extension from COLOR/BENCH/SIDE, else
+    CAM_NAME (e.g. ``1A_Red``); None when neither identifies the detector."""
+    if 'COLOR' in header:
+        return (str(header['COLOR']).lower(), str(header.get('BENCH', '')),
+                str(header.get('SIDE', '')).upper())
+    parts = str(header.get('CAM_NAME', '')).split('_')
+    if len(parts) >= 2 and len(parts[0]) >= 2:
+        return parts[1].lower(), parts[0][0], parts[0][1].upper()
+    return None
+
+
+def _scaled_image(hdu, dtype=np.float32):
+    """Stored values of an extension with BSCALE/BZERO applied, as *dtype*."""
+    data = hdu.data.astype(dtype)
+    bscale = hdu.header.get('BSCALE', 1)
+    bzero = hdu.header.get('BZERO', 0)
+    if bscale != 1:
+        data *= dtype(bscale)
+    if bzero:
+        data += dtype(bzero)
+    return data
+
+
+def median_combine_mef(paths, out_path, subtract=None, extra_primary=None):
+    """Median-combine raw LLAMAS MEFs extension by extension and write *out_path*.
+
+    Extensions are matched across files by detector (``detector_key``), not by
+    position, so a missing or reordered camera in one frame only drops that
+    detector from the combination; an extension without COLOR/CAM_NAME is
+    matched by HDU position instead. Each output extension is the per-pixel median
+    of the frames that have that detector, as float32 in the raw orientation
+    (no trimming, no flip), with the first frame's extension header. The primary
+    header is the first frame's, plus ``NCOMBINE`` and one ``COMBSRCn`` card per
+    input. Frames are read memory-mapped one detector at a time.
+
+    Parameters
+    ----------
+    paths : list of str
+        Raw frames to combine (one or more).
+    out_path : str
+        Output file, overwritten.
+    subtract : str, optional
+        A MEF (e.g. the master bias) subtracted from every frame before the
+        median, matched by detector. Used to build a bias-subtracted master dark.
+    extra_primary : dict, optional
+        ``{key: value | (value, comment)}`` written to the primary header.
+
+    Returns
+    -------
+    str
+        *out_path*.
+    """
+    if not paths:
+        raise ValueError('median_combine_mef: no input frames')
+    hduls = [fits.open(p, do_not_scale_image_data=True, memmap=True) for p in paths]
+    sub_hdul = fits.open(subtract, do_not_scale_image_data=True, memmap=True) if subtract else None
+    try:
+        sub_by_key = {}
+        if sub_hdul is not None:
+            for hdu in sub_hdul[1:]:
+                key = detector_key(hdu.header)
+                if key is not None and hdu.data is not None:
+                    sub_by_key[key] = hdu
+
+        primary = fits.PrimaryHDU(header=hduls[0][0].header.copy())
+        primary.header['NCOMBINE'] = (len(paths), 'Frames median-combined')
+        for i, p in enumerate(paths, start=1):
+            primary.header[f'COMBSRC{i}'] = (os.path.basename(p), 'Input frame')
+        if subtract:
+            primary.header['COMBSUB'] = (os.path.basename(subtract), 'Subtracted from each frame')
+        for key, value in (extra_primary or {}).items():
+            primary.header[key] = value
+        out = fits.HDUList([primary])
+
+        # Output extension order follows the first frame. Extensions are matched
+        # by detector; one without COLOR/CAM_NAME is matched by HDU position.
+        for position, first_hdu in enumerate(hduls[0][1:], start=1):
+            if first_hdu.data is None:
+                continue
+            key = detector_key(first_hdu.header)
+            stack = []
+            for hdul in hduls:
+                if key is None:
+                    if position < len(hdul) and hdul[position].data is not None:
+                        stack.append(_scaled_image(hdul[position]))
+                    continue
+                for hdu in hdul[1:]:
+                    if detector_key(hdu.header) == key and hdu.data is not None:
+                        stack.append(_scaled_image(hdu))
+                        break
+            data = np.median(np.stack(stack), axis=0).astype(np.float32)
+            if key in sub_by_key:
+                data -= _scaled_image(sub_by_key[key])
+            elif key is None and sub_hdul is not None and position < len(sub_hdul):
+                data -= _scaled_image(sub_hdul[position])
+            header = first_hdu.header.copy()
+            for card in ('BSCALE', 'BZERO', 'BITPIX'):
+                header.pop(card, None)
+            header['NCOMBINE'] = (len(stack), 'Frames median-combined for this detector')
+            out.append(fits.ImageHDU(data=data, header=header, name=first_hdu.name))
+    finally:
+        for hdul in hduls:
+            hdul.close()
+        if sub_hdul is not None:
+            sub_hdul.close()
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    out.writeto(out_path, overwrite=True)
+    return out_path

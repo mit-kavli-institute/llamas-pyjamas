@@ -53,17 +53,98 @@ The white light images provide immediate visual feedback about the observation q
 pointing. It runs on the instrument-control machine, so it is single-process by design (no Ray).
 
 ```bash
-python -m llamas_pyjamas.Postprocessing.binary_whightlight <science.fits> [--hex] [--bias B] [--outfile F] [--plot] [-v]
+python -m llamas_pyjamas.Postprocessing.binary_whightlight <science.fits> [--hex] [--bias B] [--dark D | --no-dark]
+    [--skyref R | --no-skyref] [--weighted auto|on|off] [--crclip] [--outfile F] [--plot] [-v]
 ```
 
 By default a run prints only warnings and the output path. `-v`/`--verbose` adds per-detector
-details: the bias file, the residual bias levels and the fibre-label source.
+details: the bias, dark and sky-reference files, the residual bias levels, the fibre-label source
+and each colour's sky level and scatter.
+
+### What limits faint sources, and what the steps below do about it
+
+Measured on 1350-1800 s SLOW frames from 2026-09-30 and 2026-10-14 (both nights, all colours):
+photon plus read noise per fibre is 0.1-2 % of the sky, but the raw fibre sums carry structure
+10-100x larger. In order of size: **dark current and glow** inside the fibre stack (blue 1A/4A/4B:
+50-60 DN per fibre per second, invisible to the edge-row residual; 30-400 % of a dark-time blue
+sky), a **stale single-frame master bias** (interior offsets of 2k-137k DN per fibre plus its baked-in
+cosmic rays), and a **fixed fibre-to-fibre pattern** of 9-12 % that neither the LDLS lamp flat nor
+the twilight-tie corrections reproduce but a sky-illuminated twilight flat does. The 5 s acquisition
+frames are a different regime: read-noise and bias limited, with SLOW giving 4x the per-fibre S/N
+of FAST. With the night's median bias, its dark and its twilight reference, the sky-fibre scatter of
+an 1800 s frame falls from 11-12 % of the sky to 1.2-1.6 % in every colour, and the 5 s SLOW green
+image goes from unusable (sky S/N 1.5) to S/N 10 per fibre.
 
 ### Output file
 
-Extensions, in order: `RED`, `RED_TAB`, `GREEN`, `GREEN_TAB`, `BLUE`, `BLUE_TAB`. A colour with no
-data is left out, so look extensions up by name. Each `*_TAB` holds the `XDATA`, `YDATA` and `FLUX`
-of every fibre used to build the image.
+Extensions, in order: `RED`, `RED_TAB`, `GREEN`, `GREEN_TAB`, `BLUE`, `BLUE_TAB`, then
+`RED_SKYSUB`, `GREEN_SKYSUB`, `BLUE_SKYSUB` and `WHITE`. A colour with no data is left out, so look
+extensions up by name. The first six keep their meaning: the colour images are the raw fibre sums,
+and each `*_TAB` holds `XDATA`, `YDATA` and `FLUX` for every fibre used to build the image, plus
+`NORM` (`FLUX` divided by the per-fibre sky reference) and `SKYSUB` (below).
+
+- **`{COLOR}_SKYSUB`** is `NORM` minus a robust per-bench-side sky (the 30th percentile of that
+  bench-side's fibres, so an object covering part of a stripe is not removed with the sky), divided
+  by that colour's sky-fibre scatter: an S/N map. Bench-side steps are gone and ds9's zscale lands
+  on the faint sources. `SKYLVL` and `SKYSIG` (sky level and scatter, `NORM` units) and `SKYSIGF`
+  (scatter as a fraction of the sky, the figure quoted above) are in its header.
+- **`WHITE`** is the sum of the `*_SKYSUB` maps divided by the square root of their number: one
+  S/N map for the pointing check. A colour with no signal (blue in a 5 s frame) only adds unit
+  noise. `WHTCOLS` lists the colours used.
+
+The primary header records, besides the keys below: `QLEXPT` (exposure time used), `DARKFILE`,
+`DARKEXPT`, `DARKSCL`, `SKYREF`, `SKYREFN` (fibres without a reference value), `WEIGHTED` and
+`CRCLIP` (pixels clipped, -1 when off).
+
+### Calibrations: master dark and per-fibre sky reference
+
+Both come from one afternoon command on the night's raw directory
+(`python -m llamas_pyjamas.Scripts.update_quicklook_calibs RAW_DIR`, see `Bias/README.md`), which
+also median-combines the night's biases. Each is optional: without it the quick look logs one line
+and behaves as before.
+
+- **Dark.** After the master bias, `Bias/{slow,fast}_master_dark.fits` (bias-subtracted, `DARKEXPT`
+  in its header) is subtracted scaled by the frame's exposure time, then the edge-row residual is
+  measured as before. The dark signature is stable from night to night (the same blue cameras at
+  the same level two weeks apart), so a dark from a previous night is far better than none. A dark
+  of the other read mode, or a frame with no exposure time in its header, is skipped with a
+  warning, and so is any dark extension whose level is negative or whose pixel scatter exceeds
+  four read noises (a bad detector that night; listed in `DARKSKIP`). The 2026-10-01 dark has
+  green 1A and 2B like that. `--dark FILE` overrides, `--no-dark` disables.
+- **Sky reference** (`mastercalib/LLAMAS_quicklook_skyref.npz`, built by
+  `Postprocessing/build_quicklook_skyref.py`). One number per (detector, trace fibre): the fibre's
+  summed flux in the night's twilight sky flats (`CAL.R-SKY`), normalised by the detector median
+  and median-combined over frames; saturated detectors and detectors with no light are dropped.
+  `NORM = FLUX / reference`. The file is keyed to the fibre-label cache: after the master traces
+  (and the cache) change, the quick look ignores it with one warning until it is rebuilt. A
+  reference from a different night still removes most of the pattern (2 % instead of 11 % in red
+  and green after two weeks); sky-dominated science frames can also be used (`--science`, bright
+  fibres masked). `--skyref FILE` overrides, `--no-skyref` disables.
+
+### Short exposures: profile-weighted sums (`--weighted`)
+
+Below 60 s the fibre sums are read-noise limited and the plain sum is not the best estimate. With
+`--weighted auto` (default) such frames use, per fibre and column, the Horne (1986) estimate
+`sum(P d) / sum(P^2)` with `P` the normalised spatial fibre profile, summed over columns; it returns
+the plain-sum flux for a fibre that follows the profile, with 15-25 % less noise on 5 s frames and
+no gain on long ones. It needs the profile cache
+(`python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg --profiles --force`, ~60 MB
+in `mastercalib/`, rebuilt with the fibre-label cache); without it the quick look warns and sums
+plainly. `on` / `off` force either.
+
+### Cosmic-ray clip (`--crclip`, off by default)
+
+Replaces pixels more than 8 sigma above a 1x5 median along the dispersion axis with that median
+(sky lines survive, hits do not). It costs ~3 s per frame, and most speckles in short exposures came
+from the single-frame master bias, which the median bias removes, so it is a flag rather than the
+default.
+
+### Operational note for the pointing check
+
+Take the acquisition frame in SLOW, not FAST: for the same 5 s the per-fibre S/N is 4x higher
+(read noise 3.5 vs 10 DN), and the FAST red 4A bias structure changes between consecutive frames
+(hardware), which no master bias can remove. If FAST is used, take FAST biases in the afternoon.
+Judge the pointing on `WHITE` or `RED_SKYSUB`; blue carries no signal in a 5 s frame.
 
 The primary header records:
 - `READMODE`: the frame's `READ-MDE`.
@@ -170,8 +251,13 @@ master trace objects (~117 MB each, ~2.8 GB in total). This script writes just t
 compressed `.npz` (int16 labels, ~1.4 MB, loads in ~0.2 s, builds in ~6 s):
 
 ```bash
-python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg [--calib-dir DIR] [--out PATH.npz] [--force]
+python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg [--calib-dir DIR] [--out PATH.npz] [--force] [--profiles]
 ```
+
+`--profiles` also writes `mastercalib/LLAMAS_quicklook_profiles.npz`: each detector's spatial
+fibre profile normalised per fibre and column (float16) with its per-column `sum(P^2)`, read lazily
+one detector at a time by `QuickWhiteLightCube` for the profile-weighted sums of short exposures.
+It shares the fibre cache's metadata, so the same freshness check applies.
 
 - **Freshness check:** `QuickWhiteLightCube` uses `mastercalib/LLAMAS_quicklook_fiberimg.npz`
   whenever `quicklook_cache_is_fresh()` confirms that every recorded master-trace pickle still has

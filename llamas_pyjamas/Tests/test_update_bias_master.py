@@ -69,6 +69,36 @@ def test_unchecked_only_accepted_in_no_qa_mode():
     assert ubm.select_bias(verdicts, accept_unchecked=True)['SLOW'] == 'a'
 
 
+def test_select_bias_frames_takes_whole_tier_without_mixing():
+    verdicts = [_v('a', 'SLOW', 'warn'), _v('b', 'SLOW', 'pass'), _v('c', 'SLOW', 'pass'),
+                _v('d', 'FAST', 'warn'), _v('e', 'FAST', 'warn'), _v('f', 'FAST', 'fail')]
+    assert ubm.select_bias_frames(verdicts) == {'SLOW': ['b', 'c'], 'FAST': ['d', 'e']}
+    assert ubm.select_bias_frames(verdicts, allow_warn=False) == {'SLOW': ['b', 'c'], 'FAST': []}
+
+
+def test_install_bias_medians_several_frames_and_copies_one(tmp_path):
+    raw = str(tmp_path / 'raw')
+    os.makedirs(raw)
+    frames = [write_frame(raw, f'LLAMAS_0{i}_mef.fits', readmode='SLOW') for i in range(3)]
+    single = write_frame(raw, 'LLAMAS_09_mef.fits', readmode='FAST')
+    out = str(tmp_path / 'out')
+
+    installed = ubm.install_bias({'SLOW': frames, 'FAST': [single]}, out, out)
+
+    assert installed == ['SLOW', 'FAST']
+    with fits.open(os.path.join(out, 'slow_master_bias.fits')) as hdul:
+        assert hdul[0].header['NCOMBINE'] == 3
+        expected = np.median(np.stack([fits.getdata(f, 1) for f in frames]), axis=0)
+        np.testing.assert_allclose(hdul[1].data, expected)
+    assert np.array_equal(fits.getdata(os.path.join(out, 'fast_master_bias.fits'), 1),
+                          fits.getdata(single, 1))
+    # --no-combine semantics: only the first frame, copied.
+    installed = ubm.install_bias({'SLOW': frames, 'FAST': []}, out, out, combine=False)
+    assert installed == ['SLOW']
+    assert np.array_equal(fits.getdata(os.path.join(out, 'slow_master_bias.fits'), 1),
+                          fits.getdata(frames[0], 1))
+
+
 # ---------------------------------------------------------------------------
 # find_bias_candidates
 # ---------------------------------------------------------------------------
@@ -107,7 +137,7 @@ def night(tmp_path):
 
 
 def fake_qa(verdict_by_path):
-    def _qa(candidates):
+    def _qa(candidates, rule_set='BIAS'):
         return [{**c, 'verdict': verdict_by_path[c['path']]} for c in candidates]
     return _qa
 
@@ -186,7 +216,7 @@ def test_main_refuses_without_llamas_checks(night, monkeypatch, capsys):
     assert '--no-qa' in err
 
 
-def test_main_no_qa_takes_first_per_mode(night, monkeypatch, capsys):
+def test_main_no_qa_combines_every_frame_per_mode(night, monkeypatch, capsys):
     raw, out, f = night
     monkeypatch.setattr(ubm, 'HAVE_LLAMAS_CHECKS', False)
     bias_dir = str(out)
@@ -196,6 +226,23 @@ def test_main_no_qa_takes_first_per_mode(night, monkeypatch, capsys):
 
     assert code == 0
     assert 'WITHOUT QA vetting' in captured.err
+    # Every unvetted frame of a mode is median-combined.
+    for mode, keys in (('slow', ('s_warn', 's_pass')), ('fast', ('f_fail', 'f_warn'))):
+        expected = np.median(np.stack([fits.getdata(f[k], 1) for k in keys]), axis=0)
+        np.testing.assert_allclose(fits.getdata(os.path.join(bias_dir, f'{mode}_master_bias.fits'), 1),
+                                   expected)
+
+
+def test_main_no_combine_takes_first_per_mode(night, monkeypatch, capsys):
+    raw, out, f = night
+    monkeypatch.setattr(ubm, 'HAVE_LLAMAS_CHECKS', False)
+    bias_dir = str(out)
+
+    code = run_main([str(raw), '--bias-dir', bias_dir, '--calib-dir', bias_dir, '--no-qa',
+                     '--no-combine'])
+    captured = capsys.readouterr()
+
+    assert code == 0
     assert np.array_equal(fits.getdata(os.path.join(bias_dir, 'slow_master_bias.fits'), 1),
                           fits.getdata(f['s_warn'], 1))
     assert np.array_equal(fits.getdata(os.path.join(bias_dir, 'fast_master_bias.fits'), 1),
@@ -213,7 +260,9 @@ def test_pipeline_imports_without_llamas_checks():
         "import llamas_pyjamas.Bias\n"
         "import llamas_pyjamas.reduce\n"
         "import llamas_pyjamas.Scripts.update_bias_master as m\n"
-        "assert m.HAVE_LLAMAS_CHECKS is False\n"
+        "import llamas_pyjamas.Scripts.update_quicklook_calibs as q\n"
+        "import llamas_pyjamas.Postprocessing.build_quicklook_skyref\n"
+        "assert m.HAVE_LLAMAS_CHECKS is False and q.HAVE_LLAMAS_CHECKS is False\n"
         "print('ok')\n"
     )
     proc = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,

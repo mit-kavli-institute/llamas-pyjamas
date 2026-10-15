@@ -16,6 +16,9 @@ The bias module performs:
 ### `llamasBias.py`
 - `BiasLlamas` class: takes a directory or list of raw bias MEFs; `master_bias()`
   median-combines them per (COLOR, BENCH, SIDE) and writes `combined_bias.fits`.
+- `median_combine_mef(paths, out, subtract=None)`: detector-matched median of raw MEFs
+  (float32, raw orientation), optionally minus another MEF; builds the packaged master
+  biases and darks.
 
 ### `biasFirst.py`
 - `bias_correct_frame()`: the first data operation for every frame type. Subtracts the
@@ -31,34 +34,52 @@ The bias module performs:
 ### `biasChecking.py`, `biasPlots.py`
 Diagnostics: inter-fibre masks, bias-level statistics and plots.
 
-## Packaged master biases
+## Packaged master biases and darks
 
 `slow_master_bias.fits` and `fast_master_bias.fits` in this directory (and their copies in
-`mastercalib/`) are what the pipeline subtracts by default. They are **single raw bias frames**
-selected for quality, not median stacks.
+`mastercalib/`) are what the pipeline and the quick look subtract by default. Since 2026-10 they
+are the **median of the QA-passing raw biases of a night** (float32, `NCOMBINE` and `COMBSRCn` in
+the primary header); before that they were single raw frames. A single frame carries its own
+cosmic-ray hits and hot pixels (20-80 pixels per detector), which then appear as dark speckles in
+every bias-subtracted image; the median removes them.
+
+`slow_master_dark.fits` / `fast_master_dark.fits` (optional) are the median of a night's darks
+**minus the master bias of that mode**, with the dark exposure time in `DARKEXPT`. The quick-look
+white light scales them to each frame's exposure time; the main pipeline does not use them yet.
+Blue cameras 1A, 4A and 4B accumulate 50-60 DN per fibre per second of dark current and glow
+inside the fibre stack, which the edge-row residual cannot see, so long blue exposures need one.
 
 ### Updating them
 
 ```
-python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR [--no-warn-fallback] [--no-qa]
+python -m llamas_pyjamas.Scripts.update_quicklook_calibs RAW_DIR [--no-warn-fallback] [--no-qa]
 ```
 
-The script finds every bias in `RAW_DIR` (primary header `PRODCATG = CAL.R-BIA`), runs the
-[llamas-checks](https://github.com/mit-kavli-institute/llamas-checks) QA suite on each, and
-installs the first frame per read mode (SLOW and FAST, sorted filename order) whose verdict is
-`pass`. If a mode has no passing frame the first `warn` frame is used; `--no-warn-fallback`
-disables that. It prints a verdict table for every candidate and exits 0 with
-`Master BIAS files updated successfully (...)`, or 1 with `Update Failed: <reason>` on stderr.
+installs everything the quick look needs from one night's raw directory: the median biases, the
+median darks and the twilight per-fibre sky reference (`mastercalib/LLAMAS_quicklook_skyref.npz`,
+see `Image/README.md`). Each stage is skipped with a note when the night has no acceptable frame of
+that kind, and the exit status is 1 only when nothing at all was installed. The biases alone:
 
-`llamas-checks` is optional and is used only by this script; the pipeline never imports it.
-On a machine without it the script refuses to install an unvetted frame unless `--no-qa` is
-given, in which case it copies the first bias per read mode by header and warns.
+```
+python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR [--no-warn-fallback] [--no-combine] [--no-qa]
+```
+
+Both scripts find frames by primary-header `PRODCATG` (`CAL.R-BIA`, `CAL.R-DRK`, `CAL.R-SKY`), run
+the [llamas-checks](https://github.com/mit-kavli-institute/llamas-checks) QA suite on each, and use
+every frame per read mode whose verdict is `pass`, or every `warn` frame if there is no pass
+(`--no-warn-fallback` disables that; tiers are never mixed). `--no-combine` copies the first frame
+only, as before. They print a verdict table per frame type and end with
+`Master BIAS files updated successfully (...)` / `Quick-look calibrations updated (...)`, or
+`Update Failed: <reason>` on stderr with exit 1.
+
+`llamas-checks` is optional and is used only by these scripts; the pipeline never imports it. On a
+machine without it they refuse to install unvetted frames unless `--no-qa` is given.
 
 ### Median-stacked alternative
 
-To build a true master from many frames, tag them as *Bias* in the reduction setup GUI
-(`python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR`), which calls `BiasLlamas.master_bias()`
-per read mode and writes `slow_master_bias.fits` / `fast_master_bias.fits` next to your config.
+`BiasLlamas.master_bias()` (also behind the reduction setup GUI,
+`python -m llamas_pyjamas.Utils.reduxSetupGUI RAW_DIR`) writes `combined_bias.fits` next to your
+config; `median_combine_mef()` in the same module is the detector-matched combiner the scripts use.
 
 ## Usage
 

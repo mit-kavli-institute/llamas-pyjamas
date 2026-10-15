@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = 1
 DEFAULT_OUT = os.path.join(CALIB_DIR, 'LLAMAS_quicklook_fiberimg.npz')
+# Optional companion cache (--profiles): each detector's spatial fibre profile,
+# normalised to unit sum per fibre and column, as float16. QuickWhiteLightCube
+# uses it to profile-weight the fibre sums of short exposures.
+DEFAULT_PROFILES = os.path.join(CALIB_DIR, 'LLAMAS_quicklook_profiles.npz')
 COLORS = ('red', 'green', 'blue')
 BENCHES = ('1', '2', '3', '4')
 SIDES = ('A', 'B')
@@ -60,8 +64,45 @@ def _file_stamp(path):
     return st.st_size, st.st_mtime
 
 
-def _load_one(pkl_path, color, bench, side):
-    """Unpickle one master trace and return only the quick-look fields."""
+def normalised_profile(profimg, fiberimg, nfib):
+    """Spatial fibre profile normalised to unit sum over each fibre's pixels in
+    each column (float32, zero off-fibre and where the column has no profile).
+
+    With this normalisation a profile-weighted fibre sum
+    ``sum(P * d) / sum(P * P)`` (Horne weights for constant variance) returns the
+    column-summed flux for a fibre whose pixels follow the profile, so it can
+    replace the plain sum in the read-noise-limited regime.
+    """
+    prof = np.clip(np.asarray(profimg, dtype=np.float64), 0.0, None)
+    nrow, ncol = prof.shape
+    labels = np.asarray(fiberimg).ravel().astype(np.int64)
+    keep = (labels >= 0) & (labels < nfib)
+    cols = np.tile(np.arange(ncol, dtype=np.int64), nrow)[keep]
+    idx = labels[keep] * ncol + cols
+    colsum = np.bincount(idx, weights=prof.ravel()[keep], minlength=nfib * ncol)
+    norm = np.zeros(prof.size)
+    denom = colsum[idx]
+    good = denom > 0
+    norm[np.flatnonzero(keep)[good]] = prof.ravel()[keep][good] / denom[good]
+    return norm.reshape(prof.shape).astype(np.float32)
+
+
+def profile_column_norm(profile, fiberimg, nfib):
+    """``sum(P^2)`` of the normalised profile over each fibre's pixels in each
+    column, shape ``(nfib, ncol)`` float32: the denominator of the per-column
+    Horne estimate, precomputed once because it depends only on the profile."""
+    prof = np.asarray(profile, dtype=np.float64).ravel()
+    labels = np.asarray(fiberimg).ravel().astype(np.int64)
+    ncol = np.asarray(fiberimg).shape[1]
+    px = np.flatnonzero((labels >= 0) & (labels < nfib))
+    idx = labels[px] * ncol + (px % ncol)
+    den = np.bincount(idx, weights=prof[px] * prof[px], minlength=nfib * ncol)
+    return den.reshape(nfib, ncol).astype(np.float32)
+
+
+def _load_one(pkl_path, color, bench, side, profiles=False):
+    """Unpickle one master trace and return only the quick-look fields
+    (plus the normalised profile when *profiles*)."""
     with open(pkl_path, 'rb') as fp:
         traceobj = pickle.load(fp)
 
@@ -87,18 +128,31 @@ def _load_one(pkl_path, color, bench, side):
         'side': obj_side,
         'channel': obj_channel,
     }
+    if profiles:
+        profile = normalised_profile(traceobj.profimg, fiberimg, entry['nfibers'])
+        entry['profile'] = profile.astype(np.float16)
+        entry['pden'] = profile_column_norm(profile, fiberimg, entry['nfibers'])
     del traceobj, fiberimg
     return entry
 
 
-def build_quicklook_fiberimg(calib_dir=CALIB_DIR, out=DEFAULT_OUT, force=False):
-    """Build the cache from the master trace pickles in calib_dir; returns out."""
+def build_quicklook_fiberimg(calib_dir=CALIB_DIR, out=DEFAULT_OUT, force=False,
+                             profiles=False, profiles_out=DEFAULT_PROFILES):
+    """Build the cache from the master trace pickles in calib_dir; returns out.
+
+    With *profiles* a second file, *profiles_out*, holds each detector's
+    normalised spatial profile under the same metadata, so
+    ``quicklook_cache_is_fresh(profiles_out)`` checks it against the pickles too.
+    """
     if not out.endswith('.npz'):
         out += '.npz'  # np.savez_compressed would append it anyway
     if os.path.exists(out) and not force:
         raise FileExistsError(f"{out} exists; use --force to overwrite")
+    if profiles and os.path.exists(profiles_out) and not force:
+        raise FileExistsError(f"{profiles_out} exists; use --force to overwrite")
 
     arrays = {}
+    profile_arrays = {}
     detectors = {}
     for color in COLORS:
         for bench in BENCHES:
@@ -110,8 +164,11 @@ def build_quicklook_fiberimg(calib_dir=CALIB_DIR, out=DEFAULT_OUT, force=False):
                 fname = os.path.basename(pkl_path)
 
                 size, mtime = _file_stamp(pkl_path)
-                entry = _load_one(pkl_path, color, bench, side)
+                entry = _load_one(pkl_path, color, bench, side, profiles=profiles)
                 key = detector_key(color, bench, side)
+                if profiles:
+                    profile_arrays[f"{key}_profile"] = entry['profile']
+                    profile_arrays[f"{key}_pden"] = entry['pden']
                 arrays[f"{key}_fiberimg"] = entry['fiberimg']
                 arrays[f"{key}_nfibers"] = np.int32(entry['nfibers'])
                 arrays[f"{key}_bench"] = np.str_(entry['bench'])
@@ -140,11 +197,51 @@ def build_quicklook_fiberimg(calib_dir=CALIB_DIR, out=DEFAULT_OUT, force=False):
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     np.savez_compressed(out, meta=np.str_(json.dumps(meta)), **arrays)
     logger.info(f"Wrote {len(detectors)} detectors to {out}")
+    if profiles:
+        np.savez_compressed(profiles_out, meta=np.str_(json.dumps(meta)), **profile_arrays)
+        logger.info(f"Wrote {len(profile_arrays)} normalised profiles to {profiles_out}")
     return out
 
 
 def _read_meta(npz):
     return json.loads(str(npz['meta']))
+
+
+class QuicklookProfiles:
+    """Lazy reader for the normalised-profile cache (``--profiles``).
+
+    ``get((color, bench, side))`` returns that detector's ``(profile, pden)``
+    as float32 arrays (the normalised profile and its per-fibre, per-column
+    ``sum(P^2)``), or None; arrays are decompressed on demand so only the
+    detector being summed is in memory. Use as a context manager or call
+    ``close()``.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self._npz = np.load(path)
+        meta = _read_meta(self._npz)
+        if meta.get('format_version') != FORMAT_VERSION:
+            self._npz.close()
+            raise ValueError(f"{path}: unsupported format version {meta.get('format_version')}")
+        self.keys = {tuple(k.split('_')) for k in meta['detectors']}
+
+    def get(self, key):
+        if key not in self.keys:
+            return None
+        name = detector_key(*key)
+        return (self._npz[f"{name}_profile"].astype(np.float32),
+                self._npz[f"{name}_pden"].astype(np.float32))
+
+    def close(self):
+        self._npz.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 def load_quicklook_fiberimg(path):
@@ -227,10 +324,24 @@ def main():
         default=False,
         help="Overwrite an existing cache file (default: False)"
     )
+    parser.add_argument(
+        "--profiles",
+        action="store_true",
+        default=False,
+        help="Also write the normalised fibre-profile cache used to profile-weight "
+             f"short exposures (default: False; file {DEFAULT_PROFILES})"
+    )
+    parser.add_argument(
+        "--profiles-out",
+        type=str,
+        default=DEFAULT_PROFILES,
+        help=f"Output .npz path for --profiles (default: {DEFAULT_PROFILES})"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
-    build_quicklook_fiberimg(calib_dir=args.calib_dir, out=args.out, force=args.force)
+    build_quicklook_fiberimg(calib_dir=args.calib_dir, out=args.out, force=args.force,
+                             profiles=args.profiles, profiles_out=args.profiles_out)
 
 
 if __name__ == "__main__":

@@ -327,3 +327,25 @@ def update_ra_dec_in_header(header, save_to_file=None) -> fits.Header:
             hdul.flush()
     
     return header
+
+# Header keys that may carry the exposure time, in order of preference. Raw
+# LLAMAS frames put the requested time in the HIERARCH card 'OBS EXPTIME REQ'
+# and the shutter/requested times in SEXPTIME/REXPTIME; the per-extension
+# EXPTIME is often 0.0, so it is only a last resort.
+EXPTIME_KEYS = ('OBS EXPTIME REQ', 'REXPTIME', 'SEXPTIME', 'EXPTIME', 'INTTIME')
+
+
+def exposure_time(header):
+    """Exposure time in seconds from a raw-frame header, or None if no positive
+    value is found under any of ``EXPTIME_KEYS``."""
+    for key in EXPTIME_KEYS:
+        value = header.get(key)
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None

@@ -54,6 +54,51 @@ def main():
     )
 
     parser.add_argument(
+        "--dark",
+        type=str,
+        default=None,
+        help="Master dark to subtract (bias-subtracted, DARKEXPT in its header) instead of "
+             "Bias/{slow,fast}_master_dark.fits; scaled by the frame's exposure time"
+    )
+
+    parser.add_argument(
+        "--no-dark",
+        action="store_true",
+        default=False,
+        help="Do not subtract a master dark even if one is installed (default: subtract)"
+    )
+
+    parser.add_argument(
+        "--skyref",
+        type=str,
+        default=None,
+        help="Per-fibre sky reference (.npz from build_quicklook_skyref) instead of "
+             "mastercalib/LLAMAS_quicklook_skyref.npz"
+    )
+
+    parser.add_argument(
+        "--no-skyref",
+        action="store_true",
+        default=False,
+        help="Do not divide by the per-fibre sky reference (default: divide when one exists)"
+    )
+
+    parser.add_argument(
+        "--weighted",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Profile-weighted fibre sums: 'auto' for exposures shorter than 60 s, when the "
+             "profile cache exists (default); 'on' always; 'off' never"
+    )
+
+    parser.add_argument(
+        "--crclip",
+        action="store_true",
+        default=False,
+        help="Clip cosmic rays with a 1x5 median along the dispersion axis (+~3 s; default: off)"
+    )
+
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         default=False,
@@ -69,7 +114,10 @@ def main():
     # Call the function QuickWhiteLightCube with the provided science file
     QuickWhiteLightCube(args.science_file, bias=args.bias, ds9plot=args.plot,
                         outfile=args.outfile, hex_tiles=args.hex_tiles,
-                        pix_per_unit=args.pix_per_unit)
+                        pix_per_unit=args.pix_per_unit,
+                        dark=args.dark, use_dark=not args.no_dark,
+                        skyref=args.skyref, use_skyref=not args.no_skyref,
+                        weighted=args.weighted, crclip=args.crclip)
 
 if __name__ == "__main__":
     main()

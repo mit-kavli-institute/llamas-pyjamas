@@ -28,7 +28,7 @@ from llamas_pyjamas.Utils.utils import find_trace_pickle
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import mad_std, sigma_clipped_stats
 from astropy.table import Table
 import os
 import json
@@ -40,12 +40,16 @@ from typing import Tuple
 
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
+from scipy.ndimage import median_filter
 
-from llamas_pyjamas.File.llamasIO import trim_and_orient
+from llamas_pyjamas.File.llamasIO import exposure_time, trim_and_orient
 from llamas_pyjamas.DataModel.validate import validate_for_gui
 from llamas_pyjamas.Bias.biasChecking import BiasCheckThresholds
 from llamas_pyjamas.Postprocessing.build_quicklook_fiberimg import (
-    DEFAULT_OUT as QUICKLOOK_CACHE, load_quicklook_fiberimg, quicklook_cache_is_fresh)
+    DEFAULT_OUT as QUICKLOOK_CACHE, DEFAULT_PROFILES as QUICKLOOK_PROFILES,
+    QuicklookProfiles, load_quicklook_fiberimg, quicklook_cache_is_fresh)
+from llamas_pyjamas.Postprocessing.build_quicklook_skyref import (
+    DEFAULT_SKYREF as QUICKLOOK_SKYREF, load_quicklook_skyref, skyref_is_fresh)
 
 from matplotlib.patches import RegularPolygon
 import matplotlib.cm as cm
@@ -1031,7 +1035,7 @@ def _load_dead_fiber_lut() -> dict:
 
 
 def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber_lut: dict,
-                           offset: float = 0.0):
+                           offset: float = 0.0, weights=None, return_index: bool = False):
     """Summed flux and IFU position of every traced fibre on one detector.
 
     Sums ``data - offset`` over each fibre's pixels in ``fiberimg`` (-1 = no fibre;
@@ -1042,6 +1046,15 @@ def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber
     residual bias) is removed per fibre as ``offset * npix`` rather than from
     every pixel. Fibres with no pixels, or not in the fibre map, are skipped.
 
+    With ``weights`` (the normalised spatial profile ``P`` from
+    ``build_quicklook_fiberimg.normalised_profile``, or the ``(P, pden)`` pair
+    the profile cache returns) each column's flux becomes
+    ``sum(P * (data - offset)) / sum(P * P)`` over that column's pixels: the
+    Horne (1986) optimal estimate for constant per-pixel variance, i.e. the
+    read-noise-limited case of short exposures, summed over columns. For a
+    fibre whose pixels follow the profile it returns the same flux as the plain
+    sum, with less noise.
+
     Parameters
     ----------
     fiberimg : 2D int array, the detector's fibre-label image (trace or quick-look cache)
@@ -1050,10 +1063,13 @@ def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber
     data : 2D bias-subtracted frame, same shape and orientation as fiberimg
     dead_fiber_lut : dead physical fibres per benchside (_load_dead_fiber_lut)
     offset : constant level to subtract from every pixel
+    weights : optional 2D profile array, or ``(profile, pden)`` with ``pden`` the
+        per-fibre, per-column ``sum(P^2)`` (see above)
+    return_index : also return the trace fibre index of every returned fibre
 
     Returns
     -------
-    (x, y, flux) : lists, in trace-fibre order
+    (x, y, flux) or (x, y, flux, index) : lists, in trace-fibre order
     """
     # Get the sorted list of dead physical fiber indices for this bench
     dead_fibers = sorted(dead_fiber_lut.get(benchside, []))
@@ -1080,26 +1096,49 @@ def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber
         physical += 1
 
     # Per-fibre pixel counts and sums. fiberimg is -1 off-fibre; labels >= nfib
-    # are ignored. Only NaNs are zeroed so an inf still propagates, as np.nansum
-    # does; a NaN pixel contributes nothing, so the offset is applied per pixel
-    # on that (rare) path.
+    # are ignored.
     labels = fiberimg.ravel()
     values = data.ravel()
-    if np.isnan(values).any():
-        values = np.where(np.isnan(values), 0.0, values.astype(np.float64) - offset)
-        offset = 0.0
     starts = np.r_[0, np.flatnonzero(labels[1:] != labels[:-1]) + 1]
     run_labels = labels[starts]
     run_npix = np.diff(np.r_[starts, labels.size])
-    run_sums = np.add.reduceat(values, starts, dtype=np.float64)
     keep = (run_labels >= 0) & (run_labels < nfib)
     npix = np.bincount(run_labels[keep], weights=run_npix[keep], minlength=nfib)
-    sums = np.bincount(run_labels[keep], weights=run_sums[keep], minlength=nfib) - offset * npix
 
-    xdata, ydata, flux = [], [], []
+    if weights is None:
+        # Only NaNs are zeroed so an inf still propagates, as np.nansum does; a
+        # NaN pixel contributes nothing, so the offset is applied per pixel on
+        # that (rare) path.
+        if np.isnan(values).any():
+            values = np.where(np.isnan(values), 0.0, values.astype(np.float64) - offset)
+            offset = 0.0
+        run_sums = np.add.reduceat(values, starts, dtype=np.float64)
+        sums = np.bincount(run_labels[keep], weights=run_sums[keep], minlength=nfib) - offset * npix
+        usable = npix > 0
+    else:
+        # Horne estimate per fibre and column, sum(P d) / sum(P^2) over the
+        # column's pixels, then summed over columns: flux-conserving for a
+        # fibre that follows the profile. The per-column sum(P^2) depends only
+        # on the profile, so the cache supplies it precomputed (pden).
+        profile, pden = weights if isinstance(weights, tuple) else (weights, None)
+        ncol = data.shape[1]
+        w = np.asarray(profile, dtype=np.float64).ravel()
+        signal = values.astype(np.float64) - offset
+        signal[np.isnan(signal)] = 0.0
+        px = np.flatnonzero((labels >= 0) & (labels < nfib))
+        idx = labels[px].astype(np.int64) * ncol + (px % ncol)
+        num = np.bincount(idx, weights=w[px] * signal[px], minlength=nfib * ncol).reshape(nfib, ncol)
+        if pden is None:
+            pden = np.bincount(idx, weights=w[px] * w[px], minlength=nfib * ncol).reshape(nfib, ncol)
+        pden = np.asarray(pden, dtype=np.float64)
+        percol = np.divide(num, pden, out=np.zeros(num.shape), where=pden > 0)
+        sums = percol.sum(axis=1)
+        usable = (npix > 0) & (pden > 0).any(axis=1)
+
+    xdata, ydata, flux, index = [], [], [], []
     for ifib in range(nfib):
         physical_fiber = trace_to_physical[ifib]
-        if npix[ifib] == 0:
+        if not usable[ifib]:
             logger.debug(f'Skipping trace fiber {ifib} (physical {physical_fiber}) '
                          f'on bench {benchside}: no pixels in fiberimg')
             continue
@@ -1112,8 +1151,12 @@ def _detector_fibre_fluxes(fiberimg, nfib: int, benchside: str, data, dead_fiber
         xdata.append(x)
         ydata.append(y)
         flux.append(sums[ifib])
+        index.append(ifib)
 
+    if return_index:
+        return xdata, ydata, flux, index
     return xdata, ydata, flux
+
 
 
 def _render_whitelight(xdata, ydata, flux, hex_tiles: bool = False, pix_per_unit: int = 10):
@@ -1280,9 +1323,200 @@ def _detector_hdus(hdul):
     return hdus
 
 
+# Exposures shorter than this are read-noise limited; with weighted='auto' the
+# quick look profile-weights their fibre sums when the profile cache exists.
+SHORT_EXPOSURE_S = 60.0
+# Typical read noise per pixel (DN) by read mode, for the cosmic-ray clip.
+READ_NOISE_DN = {'SLOW': 3.5, 'FAST': 10.0}
+CRCLIP_SIGMA = 8.0
+# A master-dark extension is ignored when its level is negative beyond noise
+# (dark current cannot be) or its pixel scatter exceeds this many read noises:
+# both mean that detector's dark (or the bias it was built with) was bad.
+DARK_MIN_LEVEL_DN = -1.0
+DARK_MAX_SCATTER_RN = 4.0
+
+
+def dark_extension_ok(dark_data, read_noise):
+    """Sanity-check one master-dark extension on a pixel subsample (~1 ms).
+    Returns ``(ok, median, scatter)`` in DN."""
+    sample = np.asarray(dark_data[::8, ::8], dtype=np.float64)
+    level = float(np.median(sample))
+    scatter = float(mad_std(sample))
+    ok = level >= DARK_MIN_LEVEL_DN and scatter <= DARK_MAX_SCATTER_RN * read_noise
+    return ok, level, scatter
+# Per-benchside sky level of the sky-subtracted products: a low percentile, so
+# an object that covers part of a bench-side stripe is not removed with the sky.
+SKY_PERCENTILE = 30.0
+
+
+def clip_cosmic_rays(data, read_noise, nsigma=CRCLIP_SIGMA):
+    """Replace pixels more than ``nsigma`` above a 1x5 median along the
+    dispersion axis with that median.
+
+    The window runs along columns, so a sky line (a vertical feature) is its own
+    neighbourhood and survives; a cosmic-ray hit, one to three pixels wide, does
+    not. The threshold allows for Poisson noise on the local level plus the
+    read noise. About 0.12 s per detector.
+
+    Returns ``(clipped, count)``.
+    """
+    local = median_filter(data, size=(1, 5))
+    threshold = nsigma * np.sqrt(np.clip(local, 0.0, None) + read_noise ** 2)
+    hit = (data - local) > threshold
+    return np.where(hit, local, data), int(hit.sum())
+
+
+def bench_sky_subtract(values, groups, percentile=SKY_PERCENTILE):
+    """Subtract a robust per-group sky level (input units).
+
+    ``groups`` labels each value with its bench-side; the sky of a group is the
+    ``percentile`` of its finite values, so the bench-side steps left by any
+    calibration residual go with it. ``global_sky`` is the median of the group
+    levels, i.e. the frame's sky per fibre.
+
+    Returns ``(skysub, sky_by_group, global_sky)``.
+    """
+    values = np.asarray(values, dtype=float)
+    groups = np.asarray(groups)
+    skysub = np.full(values.shape, np.nan)
+    sky_by_group = {}
+    for group in np.unique(groups):
+        in_group = groups == group
+        finite = in_group & np.isfinite(values)
+        if not finite.any():
+            continue
+        sky = float(np.percentile(values[finite], percentile))
+        sky_by_group[str(group)] = sky
+        skysub[in_group] = values[in_group] - sky
+    global_sky = float(np.median(list(sky_by_group.values()))) if sky_by_group else np.nan
+    return skysub, sky_by_group, global_sky
+
+
+def robust_scatter(values, upper_percentile=80.0):
+    """MAD-based scatter of the values at or below ``upper_percentile`` (the sky
+    fibres, leaving out sources), or NaN with fewer than 10 finite values."""
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 10:
+        return np.nan
+    v = v[v <= np.percentile(v, upper_percentile)]
+    scatter = float(mad_std(v))
+    return scatter if scatter > 0 else np.nan
+
+
+def combine_white(images):
+    """Combine per-colour sky-subtracted images given in units of their own
+    sky-fibre scatter (S/N maps) into one S/N map.
+
+    Each pixel is the sum of the colours finite there divided by the square
+    root of their number, so a source with S/N ``s`` in each of three colours
+    reads ``s * sqrt(3)``, and a colour with no signal only adds unit noise.
+    Pass only the colours whose scatter was defined.
+
+    Returns ``(white, colours_used)``, or ``(None, [])`` with no input.
+    """
+    used = [c for c, img in images.items() if img is not None]
+    if not used:
+        return None, []
+    total = count = None
+    for color in used:
+        img = np.asarray(images[color], dtype=float)
+        if total is None:
+            total = np.zeros(img.shape)
+            count = np.zeros(img.shape)
+        ok = np.isfinite(img)
+        total[ok] += img[ok]
+        count[ok] += 1
+    white = np.full(total.shape, np.nan)
+    good = count > 0
+    white[good] = total[good] / np.sqrt(count[good])
+    return white, used
+
+
+def _resolve_master_dark(dark, use_dark, read_mode, exptime):
+    """Pick the master dark for a frame: ``dark`` if given and present, else the
+    packaged ``Bias/{mode}_master_dark.fits``. Returns ``(path, scale,
+    dark_exptime)`` or ``(None, 0.0, None)`` when none applies (logged)."""
+    if not use_dark:
+        return None, 0.0, None
+    candidate = dark
+    if candidate is not None and not os.path.isfile(candidate):
+        logger.warning(f"Dark file {candidate} not found; falling back to the packaged master dark")
+        candidate = None
+    if candidate is None:
+        candidate = os.path.join(BIAS_DIR, f"{(read_mode or 'SLOW').lower()}_master_dark.fits")
+        if not os.path.isfile(candidate):
+            logger.info(f"No master dark {os.path.basename(candidate)}; dark current is not subtracted")
+            return None, 0.0, None
+    header = fits.getheader(candidate, 0)
+    try:
+        dark_exptime = float(header.get('DARKEXPT'))
+    except (TypeError, ValueError):
+        dark_exptime = 0.0
+    if dark_exptime <= 0:
+        logger.warning(f"Master dark {candidate} has no DARKEXPT; dark not subtracted")
+        return None, 0.0, None
+    dark_mode = str(header.get('READ-MDE', '') or '').strip().upper()
+    if read_mode in ('FAST', 'SLOW') and dark_mode and dark_mode != read_mode:
+        logger.warning(f"Master dark {candidate} is {dark_mode} mode but the frame is {read_mode}; "
+                       f"dark not subtracted")
+        return None, 0.0, None
+    if exptime is None:
+        logger.warning("Frame has no exposure time in its header; dark not subtracted")
+        return None, 0.0, None
+    return candidate, exptime / dark_exptime, dark_exptime
+
+
+def _resolve_skyref(skyref, use_skyref):
+    """Load the per-fibre sky reference (``skyref`` or the packaged file) if it
+    exists and matches the fibre-label cache. Returns ``(mapping, path)`` or
+    ``(None, None)``."""
+    if not use_skyref:
+        return None, None
+    path = skyref or QUICKLOOK_SKYREF
+    if not os.path.isfile(path):
+        if skyref:
+            logger.warning(f"Sky reference {path} not found; fibre pattern not corrected")
+        else:
+            logger.info(f"No sky reference {os.path.basename(path)}; fibre pattern not corrected. "
+                        f"Build one with: python -m llamas_pyjamas.Postprocessing.build_quicklook_skyref")
+        return None, None
+    if not skyref_is_fresh(path):
+        logger.warning(f"Sky reference {path} was built against a different fibre-label cache; "
+                       f"ignored. Rebuild it with build_quicklook_skyref")
+        return None, None
+    return load_quicklook_skyref(path), path
+
+
+def _resolve_profiles(weighted, exptime):
+    """Decide whether fibre sums are profile-weighted ('on', 'off' or 'auto' =
+    exposures shorter than SHORT_EXPOSURE_S) and open the profile cache.
+    Returns ``(use_weights, QuicklookProfiles | None)``."""
+    if isinstance(weighted, bool):
+        mode = 'on' if weighted else 'off'
+    else:
+        mode = str(weighted).lower()
+    if mode not in ('auto', 'on', 'off'):
+        raise ValueError(f"weighted must be 'auto', 'on' or 'off', not {weighted!r}")
+    if mode == 'off':
+        return False, None
+    if mode == 'auto' and (exptime is None or exptime >= SHORT_EXPOSURE_S):
+        return False, None
+    if not quicklook_cache_is_fresh(QUICKLOOK_PROFILES):
+        logger.warning("Profile cache missing or out of date; fibre sums are not profile-weighted. "
+                       "Build it with: python -m llamas_pyjamas.Postprocessing.build_quicklook_fiberimg "
+                       "--profiles --force")
+        return False, None
+    return True, QuicklookProfiles(QUICKLOOK_PROFILES)
+
+
+
 def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                         outfile: str = None, use_dir: str = None,
-                        hex_tiles: bool = False, pix_per_unit: int = 10) -> str:
+                        hex_tiles: bool = False, pix_per_unit: int = 10,
+                        dark: str = None, use_dark: bool = True,
+                        skyref: str = None, use_skyref: bool = True,
+                        weighted: str = 'auto', crclip: bool = False) -> str:
         """
         Generates a FITS file with quick-look white light images for each color
         straight from a raw science frame, using the master traces in CALIB_DIR.
@@ -1291,16 +1525,30 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
         Postprocessing/build_quicklook_fiberimg.py) when it matches the master trace
         pickles, and from the pickles otherwise.
 
-        Each detector is bias subtracted with the READ-MDE-matched master bias, then
-        its residual DC level (measured in the unilluminated rows outside the fibre
-        stack, see estimate_residual_bias) is subtracted in every read mode; the
-        per-detector levels are written to the primary header as RB{C}{bench}{side}
+        Per detector: the READ-MDE-matched master bias is subtracted, then the
+        master dark (``Bias/{mode}_master_dark.fits``, scaled by exposure time)
+        when one exists, then the residual DC level measured in the unilluminated
+        rows outside the fibre stack (see estimate_residual_bias). The per-detector
+        residual levels are written to the primary header as RB{C}{bench}{side}
         (e.g. RBR1A) and a warning is logged if any exceed 5 DN (stale master bias).
         Detectors whose master bias is a constant placeholder are listed in BIASPH.
 
+        Fibre fluxes are plain pixel sums, or profile-weighted sums for exposures
+        shorter than SHORT_EXPOSURE_S when the profile cache exists (``weighted``).
+        Each fibre is then divided by the per-fibre sky reference
+        (mastercalib/LLAMAS_quicklook_skyref.npz, see
+        Postprocessing/build_quicklook_skyref.py), which removes the ~10 % fixed
+        fibre-to-fibre pattern; without a reference the raw sums are used.
+
         Output extensions, in order: RED, RED_TAB, GREEN, GREEN_TAB, BLUE, BLUE_TAB
-        (colours with no data are omitted). Each *_TAB holds the fibre XDATA, YDATA
-        and FLUX used to build the image.
+        (colours with no data are omitted), then RED_SKYSUB, GREEN_SKYSUB,
+        BLUE_SKYSUB and WHITE. The first six are unchanged in meaning: the colour
+        images are the raw fibre sums; each *_TAB holds XDATA, YDATA and FLUX plus
+        NORM (flux / reference) and SKYSUB. The *_SKYSUB images are NORM minus a
+        robust per-bench-side sky, in units of the frame's sky, so a faint source
+        reads as a fraction of the sky and ds9's zscale lands on it. WHITE is the
+        inverse-variance weighted mean of the available *_SKYSUB images (weights in
+        WHT{R,G,B}); a colour with no usable signal gets no weight.
 
         Parameters:
             science_file (str): Raw LLAMAS science MEF.
@@ -1312,6 +1560,13 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             hex_tiles (bool, optional): Render fibres as hexagonal tiles instead of
                 interpolating onto the rectangular grid.
             pix_per_unit (int, optional): Hex tile resolution (pixels per fibre-map unit).
+            dark (str, optional): Master dark to use instead of the READ-MDE default.
+            use_dark (bool, optional): False skips dark subtraction entirely.
+            skyref (str, optional): Sky reference to use instead of the packaged one.
+            use_skyref (bool, optional): False skips the reference division.
+            weighted (str, optional): 'auto' (default: exposures < SHORT_EXPOSURE_S),
+                'on' or 'off' profile weighting of the fibre sums.
+            crclip (bool, optional): Clip cosmic rays with a 1x5 median (clip_cosmic_rays).
 
         Returns:
             str: The file path of the created quick-look white light FITS file.
@@ -1382,12 +1637,35 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
         # Validate bias file structure (add placeholders for missing cameras)
         masterbiasfile = validate_for_gui(masterbiasfile)
 
+        # Exposure time (for the dark scale and the weighting decision), master
+        # dark, per-fibre sky reference and profile weights.
+        exptime = exposure_time(primary_hdr)
+        darkfile, dark_scale, dark_exptime = _resolve_master_dark(dark, use_dark, read_mode, exptime)
+        skyref_map, skyref_file = _resolve_skyref(skyref, use_skyref)
+        use_weights, profiles = _resolve_profiles(weighted, exptime)
+        if darkfile:
+            logger.info(f"Dark file is {darkfile} ({dark_exptime:g} s), scaled by {dark_scale:.4f}")
+        if skyref_file:
+            logger.info(f"Sky reference is {skyref_file}")
+        if use_weights:
+            logger.info(f"Profile-weighted fibre sums (exposure {exptime:g} s)")
+
         primary_hdu = fits.PrimaryHDU()
         primary_hdu.header['COMMENT'] = "Quick White Light Cube created from science file extensions."
         primary_hdu.header['READMODE'] = (read_mode or 'UNKNOWN', 'READ-MDE of the science frame')
         primary_hdu.header['BIASFILE'] = (os.path.basename(masterbiasfile), 'Master bias subtracted')
         primary_hdu.header['RBMETHOD'] = ('edge rows, 3-sigma clipped mean',
                                           'Residual bias (RB*) estimator')
+        primary_hdu.header['QLEXPT'] = (exptime if exptime is not None else -1.0,
+                                        'Exposure time used (s), -1 = unknown')
+        primary_hdu.header['DARKFILE'] = (os.path.basename(darkfile) if darkfile else 'none',
+                                          'Master dark subtracted')
+        if darkfile:
+            primary_hdu.header['DARKEXPT'] = (dark_exptime, 'Master dark exposure time (s)')
+            primary_hdu.header['DARKSCL'] = (round(dark_scale, 6), 'Dark scale factor applied')
+        primary_hdu.header['SKYREF'] = (os.path.basename(skyref_file) if skyref_file else 'none',
+                                        'Per-fibre sky reference divided out')
+        primary_hdu.header['WEIGHTED'] = (bool(use_weights), 'Profile-weighted fibre sums')
         hdul = fits.HDUList([primary_hdu])
 
         # Fibre labels: the small quick-look cache if it matches the master trace
@@ -1400,21 +1678,29 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                            "trace pickles instead (slower). Rebuild it with: python -m "
                            "llamas_pyjamas.Postprocessing.build_quicklook_fiberimg --force")
 
-        # Per-colour fibre (x, y, flux), filled one detector at a time so that each
-        # frame (and trace object, on the pickle path) is released before the next
-        # is read. None means no detector of that colour was processed.
+        # Per-colour fibre (x, y, flux, norm, benchside), filled one detector at a
+        # time so that each frame (and trace object, on the pickle path) is
+        # released before the next is read. None means no detector of that colour
+        # was processed.
         fibre_fluxes = {color: None for color in QUICKLOOK_COLOR_ORDER}
         dead_fiber_lut = _load_dead_fiber_lut()
         stale_limit = BiasCheckThresholds().max_residual_median
         stale_detectors = []
         gradient_detectors = []
         placeholder_bias = []
+        read_noise = READ_NOISE_DN.get(read_mode, READ_NOISE_DN['SLOW'])
+        dark_skipped = []
+        clipped_pixels = 0
+        fibres_without_ref = 0
+        detectors_without_ref = []
 
         # Both files are memory-mapped and read one detector at a time as float32
         # (exact for 16-bit data), rather than scaling and copying all 48 HDUs up front.
         science_hdul = fits.open(science_file, do_not_scale_image_data=True)
         bias_hdul = fits.open(masterbiasfile, do_not_scale_image_data=True)
         bias_hdus = _detector_hdus(bias_hdul)
+        dark_hdul = fits.open(darkfile, do_not_scale_image_data=True) if darkfile else None
+        dark_hdus = _detector_hdus(dark_hdul) if dark_hdul is not None else None
 
         for ext in science_hdul[1:]:
             detector = _detector_id(ext.header)
@@ -1456,7 +1742,26 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             data -= bias_data
             del bias_data
 
-            # Step 2 (all read modes): the residual DC level measured in the
+            # Step 2: master dark, scaled to the exposure time. The dark is stored
+            # bias-subtracted (see Scripts/update_quicklook_calibs), so this removes
+            # only the dark current and glow that build up during the exposure.
+            if dark_hdus is not None:
+                dark_ext = dark_hdus.get(detector)
+                if dark_ext is None or dark_ext.data is None:
+                    logger.info(f"No master dark extension for {benchside} {color}; dark not subtracted there")
+                else:
+                    dark_data = trim_and_orient(dark_ext.data, dark_ext.header)
+                    dark_ok, dark_level, dark_scatter = dark_extension_ok(dark_data, read_noise)
+                    if not dark_ok:
+                        dark_skipped.append(f'{color}{benchside}')
+                        logger.warning(f"Master dark for {benchside} {color} looks bad (level "
+                                       f"{dark_level:.1f} DN, scatter {dark_scatter:.1f} DN); "
+                                       f"not subtracted there")
+                    elif dark_data.min() != dark_data.max():
+                        data -= dark_scale * dark_data
+                    del dark_data
+
+            # Step 3 (all read modes): the residual DC level measured in the
             # unilluminated rows outside the fibre stack. This absorbs the drift an
             # out-of-date master bias leaves, which otherwise shows up as bench-side
             # stripes in the white light. It is removed per fibre (offset * npix).
@@ -1474,17 +1779,42 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                     and abs(residual_bias) > stale_limit):
                 stale_detectors.append((f'{color}{benchside}', residual_bias))
 
+            # Step 4 (optional): cosmic-ray clip along the dispersion axis.
+            if crclip:
+                data, nclip = clip_cosmic_rays(data, read_noise)
+                clipped_pixels += nclip
+
             if color in fibre_fluxes:
-                x, y, f = _detector_fibre_fluxes(fiberimg, nfib, benchside, data, dead_fiber_lut,
-                                                 offset=residual_bias)
+                weights = profiles.get(detector) if profiles is not None else None
+                x, y, f, idx = _detector_fibre_fluxes(fiberimg, nfib, benchside, data, dead_fiber_lut,
+                                                      offset=residual_bias, weights=weights,
+                                                      return_index=True)
+                del weights
+                f = np.asarray(f, dtype=float)
+                norm = f.copy()
+                ref = skyref_map.get(detector) if skyref_map is not None else None
+                if ref is not None and len(ref) == nfib:
+                    ref_values = ref[np.asarray(idx, dtype=int)]
+                    good = np.isfinite(ref_values) & (ref_values > 0)
+                    norm[good] = f[good] / ref_values[good]
+                    fibres_without_ref += int((~good).sum())
+                elif skyref_map is not None:
+                    if ref is not None:
+                        logger.warning(f"Sky reference for {benchside} {color} has {len(ref)} fibres, "
+                                       f"trace has {nfib}; reference not applied there")
+                    detectors_without_ref.append(f'{color}{benchside}')
                 if fibre_fluxes[color] is None:
-                    fibre_fluxes[color] = ([], [], [])
-                for acc, vals in zip(fibre_fluxes[color], (x, y, f)):
+                    fibre_fluxes[color] = ([], [], [], [], [])
+                for acc, vals in zip(fibre_fluxes[color], (x, y, f, norm, [benchside] * len(f))):
                     acc.extend(vals)
             del data
 
         science_hdul.close()
         bias_hdul.close()
+        if dark_hdul is not None:
+            dark_hdul.close()
+        if profiles is not None:
+            profiles.close()
 
         if placeholder_bias:
             primary_hdu.header['BIASPH'] = (','.join(placeholder_bias),
@@ -1505,38 +1835,102 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             logger.warning(f"Bias gradient > {stale_limit:g} DN top-to-bottom on {named}: "
                            f"{os.path.basename(masterbiasfile)} no longer matches the bias structure; "
                            f"expect a stripe across that bench-side until it is remade")
+        if dark_skipped:
+            primary_hdu.header['DARKSKIP'] = (','.join(dark_skipped),
+                                              'Detectors whose master dark was not used')
+        if detectors_without_ref:
+            logger.warning(f"Sky reference has no entry for {', '.join(detectors_without_ref)}; "
+                           f"raw sums used there")
+        if skyref_map is not None:
+            primary_hdu.header['SKYREFN'] = (fibres_without_ref, 'Fibres with no reference value')
+        primary_hdu.header['CRCLIP'] = (clipped_pixels if crclip else -1,
+                                        'Cosmic-ray pixels clipped (-1 = off)')
+        if crclip:
+            logger.info(f"Cosmic-ray clip replaced {clipped_pixels} pixels")
 
-        # After processing all science_hdul extensions, generate white light images for each color
+        # White light images per colour: raw sums (as before), and the
+        # sky-subtracted normalised version for the display products.
         whitelight_results = {}
         for col in QUICKLOOK_COLOR_ORDER:
             if fibre_fluxes[col] is None:
                 logger.info(f"No data found for {col} color.")
-                whitelight_results[col] = (None, None, None, None)
+                whitelight_results[col] = None
                 continue
-            xdata, ydata, flux = (np.array(v, dtype=float) for v in fibre_fluxes[col])
+            xdata, ydata, flux, norm = (np.array(v, dtype=float) for v in fibre_fluxes[col][:4])
+            benches = np.array(fibre_fluxes[col][4])
             wl = _render_whitelight(xdata, ydata, flux, hex_tiles=hex_tiles, pix_per_unit=pix_per_unit)
+            # Sky-subtracted per bench-side, then in units of the sky-fibre scatter
+            # (an S/N map): well defined even when the sky itself is ~0 (5 s frames).
+            residual, sky_by_bench, sky_level = bench_sky_subtract(norm, benches)
+            sigma = robust_scatter(residual)
+            skysub = residual / sigma if np.isfinite(sigma) else np.full(residual.shape, np.nan)
+            wl_sub = (_render_whitelight(xdata, ydata, skysub, hex_tiles=hex_tiles,
+                                         pix_per_unit=pix_per_unit) if np.isfinite(sigma) else None)
             if ds9plot:
                 plot_ds9(wl)
-            whitelight_results[col] = (wl, xdata, ydata, flux)
+            sigma_frac = sigma / sky_level if np.isfinite(sigma) and sky_level > 0 else np.nan
+            whitelight_results[col] = {'wl': wl, 'x': xdata, 'y': ydata, 'flux': flux, 'norm': norm,
+                                       'skysub': skysub, 'wl_sub': wl_sub, 'sigma': sigma,
+                                       'sigma_frac': sigma_frac, 'sky': sky_level,
+                                       'sky_by_bench': sky_by_bench}
+            if np.isfinite(sigma_frac):
+                logger.info(f"{col}: sky {sky_level:.0f} per fibre, sky-fibre scatter "
+                            f"{100 * sigma_frac:.1f}% of sky")
+            else:
+                logger.info(f"{col}: sky {sky_level:.0f} per fibre, scatter {sigma:.0f}")
 
         for color in QUICKLOOK_COLOR_ORDER:
-            wl, xdata, ydata, flux = whitelight_results[color]
-            if wl is None:
+            res = whitelight_results[color]
+            if res is None:
                 continue
             # Create an image HDU for the white light image
-            image_hdu = fits.ImageHDU(data=wl.astype(np.float32), name=color.upper())
+            image_hdu = fits.ImageHDU(data=res['wl'].astype(np.float32), name=color.upper())
             if hex_tiles:
                 for _k, _v in hex_header_keys(pix_per_unit).items():
                     image_hdu.header[_k] = _v
             hdul.append(image_hdu)
-            
+
             # Create a binary table HDU with the fiber x, y positions and flux data
             tab_hdu = fits.BinTableHDU.from_columns([
-                fits.Column(name='XDATA', format='E', array=np.array(xdata, dtype=np.float32)),
-                fits.Column(name='YDATA', format='E', array=np.array(ydata, dtype=np.float32)),
-                fits.Column(name='FLUX',  format='E', array=np.array(flux, dtype=np.float32))
+                fits.Column(name='XDATA', format='E', array=np.array(res['x'], dtype=np.float32)),
+                fits.Column(name='YDATA', format='E', array=np.array(res['y'], dtype=np.float32)),
+                fits.Column(name='FLUX',  format='E', array=np.array(res['flux'], dtype=np.float32)),
+                fits.Column(name='NORM',  format='E', array=np.array(res['norm'], dtype=np.float32)),
+                fits.Column(name='SKYSUB', format='E', array=np.array(res['skysub'], dtype=np.float32)),
             ], name=f'{color.upper()}_TAB')
+            tab_hdu.header['TCOMM4'] = 'FLUX / per-fibre sky reference'
+            tab_hdu.header['TCOMM5'] = 'NORM minus bench-side sky, in sigma units'
             hdul.append(tab_hdu)
+
+        # Display products: per-colour sky-subtracted S/N images and their sum.
+        for color in QUICKLOOK_COLOR_ORDER:
+            res = whitelight_results[color]
+            if res is None or res['wl_sub'] is None:
+                continue
+            sub_hdu = fits.ImageHDU(data=res['wl_sub'].astype(np.float32), name=f'{color.upper()}_SKYSUB')
+            if hex_tiles:
+                for _k, _v in hex_header_keys(pix_per_unit).items():
+                    sub_hdu.header[_k] = _v
+            sub_hdu.header['BUNIT'] = ('sigma', 'Sky-subtracted flux / sky-fibre scatter')
+            sub_hdu.header['SKYLVL'] = (round(float(res['sky']), 3) if np.isfinite(res['sky']) else -1.0,
+                                        'Frame sky level per fibre (NORM units)')
+            sub_hdu.header['SKYSIG'] = (round(float(res['sigma']), 3),
+                                        'Sky-fibre scatter (NORM units) = 1 sigma')
+            sub_hdu.header['SKYSIGF'] = (round(float(res['sigma_frac']), 5) if np.isfinite(res['sigma_frac']) else -1.0,
+                                         'SKYSIG / SKYLVL (-1 = sky not positive)')
+            sub_hdu.header['SKYPCT'] = (SKY_PERCENTILE, 'Percentile used for the bench-side sky')
+            hdul.append(sub_hdu)
+
+        white, white_colours = combine_white(
+            {c: r['wl_sub'] for c, r in whitelight_results.items() if r is not None})
+        if white is not None:
+            white_hdu = fits.ImageHDU(data=white.astype(np.float32), name='WHITE')
+            if hex_tiles:
+                for _k, _v in hex_header_keys(pix_per_unit).items():
+                    white_hdu.header[_k] = _v
+            white_hdu.header['BUNIT'] = ('sigma', 'Sum of the *_SKYSUB S/N images / sqrt(n)')
+            white_hdu.header['WHTCOLS'] = (','.join(white_colours), 'Colours combined')
+            hdul.append(white_hdu)
 
         # Determine output file name
         if outfile is None:
@@ -1545,17 +1939,17 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
             white_light_file = f"{name}_quickwhitelight.fits"
         else:
             white_light_file = outfile
-            
-        
+
         # Write the FITS file to disk.
         if use_dir is None:
             use_dir = OUTPUT_DIR
 
         outpath = os.path.join(use_dir, white_light_file)
         hdul.writeto(outpath, overwrite=True)
-        
+
         print(f'Quick white light cube saved to {outpath}')
         return outpath
+
 
 
 def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None, 
