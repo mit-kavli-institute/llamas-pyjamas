@@ -15,7 +15,7 @@ for looking things up.
 | Open the CubeViewer | `python -m llamas_pyjamas.CubeViewer [file]` |
 | Combine a field → cube | `python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --cube` |
 | Combine a field → image | `python -m llamas_pyjamas.Combine.combineField --dir REDUCED --object J2151 --band LO HI --png` |
-| Build/update a master bias | `python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR` |
+| Update the packaged master biases | `python -m llamas_pyjamas.Scripts.update_bias_master RAW_DIR [--no-warn-fallback] [--no-qa]` — copies the first QA-*pass* bias per read mode (falls back to *warn*), vetted by the optional [llamas-checks](https://github.com/mit-kavli-institute/llamas-checks) package; `--no-qa` installs unvetted frames where it is not installed |
 | Fetch flux-standard catalogue | `python -m llamas_pyjamas.Scripts.fetch_standards` |
 | Repair a MEF with missing cameras | `python -m llamas_pyjamas.DataModel.validate in.fits -o fixed.fits` |
 
