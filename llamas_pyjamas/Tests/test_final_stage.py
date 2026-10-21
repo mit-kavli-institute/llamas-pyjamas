@@ -320,3 +320,305 @@ def test_twilight_ti_unbiased_by_zero_fill(tmp):
     assert abs(c[5] / ref - 1.0) < 0.01          # nansum gave ~0.63 here
     assert abs(c[7] / ref - 1.0) < 0.01          # benchside median, not a silent 1.0
     assert flags[7] & MASK_FLAT_LAMP_ONLY and not flags[5] & MASK_FLAT_LAMP_ONLY
+
+
+# ================================================================ step 3: guards
+def _sensfunc(meta=None):
+    from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
+    chans = {}
+    for c, (lo, hi) in {'blue': (3400, 4900), 'green': (4600, 7100), 'red': (6700, 9900)}.items():
+        w = np.linspace(lo, hi, 200)
+        chans[c] = SensChannel(channel=c, wave=w, sens=np.full(200, 1e-16), raw=np.full(200, 1e-16),
+                               good=np.ones(200, bool))
+    return SensFunc(channels=chans, meta=dict(meta or {}))
+
+
+def test_missing_flam_raises_no_silent_fallback(tmp):
+    from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError, build_super_rss
+    files = write_exposure(tmp, stages=('base',))
+    with pytest.raises(MissingFluxCalibrationError):
+        build_super_rss([files[('base', 'green')]])
+    sr = build_super_rss([files[('base', 'green')]], plane='skysub')       # explicit opt-in
+    assert sr.plane == 'skysub' and sr.bunit == 'counts/s' and sr.stage == 'base'
+
+
+def test_partial_flam_raises(tmp):
+    from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError, build_super_rss
+    files = write_exposure(tmp, stages=('base',))
+    write_rss(files[('base', 'green')], flam=True)                         # green only
+    with pytest.raises(MissingFluxCalibrationError) as exc:
+        build_super_rss([files[('base', 'green')]])
+    assert 'blue' in str(exc.value) and 'red' in str(exc.value)
+
+
+def test_cube_records_plane_and_stage(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    from llamas_pyjamas.Combine.cube import combine_cube
+    files = write_exposure(tmp, stages=('base',), flam=True)
+    sr = build_super_rss([files[('base', 'green')]])
+    cube = combine_cube(sr, 'green')
+    out = cube.write(os.path.join(tmp, 'cube.fits'))
+    hdr = fits.getheader(out)
+    assert hdr['PLANE'] == 'flam' and hdr['RSSSTAGE'] == 'base'
+    assert hdr['RSSFIL1'].endswith('_RSS_green.fits')
+
+
+def test_cube_plane_inferred_for_legacy_cubes():
+    from llamas_pyjamas.CubeViewer.cubeViewCube import cube_plane
+    assert cube_plane(fits.Header({'PLANE': 'skysub'})) == 'skysub'
+    assert cube_plane(fits.Header({'BUNIT': 'erg/s/cm2/Angstrom/arcsec2'})) == 'flam'
+    assert cube_plane(fits.Header({'BUNIT': 'counts/s/arcsec2'})) == 'skysub'
+
+
+def test_mixed_stage_exposures_raise_unless_allowed(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    from llamas_pyjamas.File.llamasRSS import MixedStageError
+    a = write_exposure(tmp, stages=('base',), flam=True)
+    other = 'LLAMAS_2026-10-16_00-54-54.4_SCI24_mef_bias_corrected_flat_corrected_extract'
+    b = write_exposure(tmp, stages=('ff',), base=other, flam=True, fiberwcs=True)
+    paths = [a[('base', 'green')], b[('ff', 'green')]]
+    with pytest.raises(MixedStageError):
+        build_super_rss(paths)
+    sr = build_super_rss(paths, allow_mixed_stage=True)
+    assert sr.stage == 'mixed' and sr.provenance()['OVR_MIX'] is True
+
+
+def test_combiner_refuses_unregistered_final_when_base_is_registered(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    files = write_exposure(tmp, per_stage={'base': {'registered': True}}, flam=True)
+    with pytest.raises(RegistrationMismatchError):
+        build_super_rss([files[('ff_skysub', 'green')]])
+    build_super_rss([files[('base', 'green')]])                           # the registered one
+
+
+def test_combine_cli_reports_instead_of_traceback(tmp, capsys):
+    from llamas_pyjamas.Combine.combineField import main
+    files = write_exposure(tmp, stages=('base',))
+    assert main([files[('base', 'green')], '-o', os.path.join(tmp, 'x.fits')]) == 2
+    assert 'MissingFluxCalibrationError' in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- sensfunc stage (C1)
+def test_sensfunc_stage_rules(tmp, caplog):
+    from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, apply_sensfunc
+    ff = write_rss(os.path.join(tmp, 'a_RSS_green_FF.fits'), stage='ff')
+    base = write_rss(os.path.join(tmp, 'a_RSS_green.fits'), stage='base')
+    with fits.open(ff) as h:
+        with pytest.raises(SensfuncStageError):                           # built at base
+            apply_sensfunc(h, _sensfunc({'fibrflat': False, 'rssstage': 'base'}),
+                           apply_extinction=False)
+        with pytest.raises(SensfuncStageError):                           # unknown on FF science
+            apply_sensfunc(h, _sensfunc(), apply_extinction=False)
+        apply_sensfunc(h, _sensfunc(), apply_extinction=False, sensfunc_stage='ff_skysub')
+        assert h['FLAM'].header['SENSPROV'] == 'declared'
+        assert h['FLAM'].header['RSSSTAGE'] == 'ff'
+        apply_sensfunc(h, _sensfunc({'fibrflat': False}), apply_extinction=False,
+                       allow_stage_mismatch=True)
+        assert h['FLAM'].header['OVR_STG'] is True
+        with pytest.raises(SensfuncStageError):                           # declaration contradicts
+            apply_sensfunc(h, _sensfunc({'fibrflat': True}), apply_extinction=False,
+                           sensfunc_stage='base')
+    with fits.open(base) as h, caplog.at_level(logging.WARNING):
+        apply_sensfunc(h, _sensfunc(), apply_extinction=False)            # unknown on base: warns
+        assert 'does not record' in caplog.text
+        assert h['FLAM'].header['SENSPROV'] == 'unknown'
+
+
+def test_sensfunc_stage_meta_round_trips(tmp):
+    from llamas_pyjamas.Flux.sensFunc import SensFunc
+    p = os.path.join(tmp, 's.fits')
+    _sensfunc({'fibrflat': False, 'rssstage': 'base', 'stdfile': 'x_RSS_green.fits'}).save(p)
+    m = SensFunc.load(p).meta
+    assert m['fibrflat'] is False and m['rssstage'] == 'base' and m['stdfile'] == 'x_RSS_green.fits'
+
+
+def test_flux_calibrate_file_is_atomic(tmp, monkeypatch):
+    from llamas_pyjamas.Flux import fluxCalibrate
+    p = write_rss(os.path.join(tmp, 'a_RSS_green.fits'))
+    before = open(p, 'rb').read()
+
+    def boom(*a, **k):
+        raise OSError('disk full')
+    monkeypatch.setattr(fluxCalibrate.os, 'replace', boom)
+    with pytest.raises(OSError):
+        fluxCalibrate.flux_calibrate_file(p, _sensfunc({'fibrflat': False}), apply_extinction=False)
+    assert open(p, 'rb').read() == before
+    assert not [f for f in os.listdir(tmp) if f.endswith('-tmp')]
+
+
+# ---------------------------------------------------------------- promote_final_rss (F1)
+def _legacy(tmp, **per_stage):
+    """A legacy keep-intermediate reduction: base registered + FLAM, FF stages have neither."""
+    ps = {'base': {'registered': True, 'flam': True}}
+    ps.update(per_stage)
+    return write_exposure(tmp, channels=('green',), per_stage=ps)
+
+
+def test_promote_copies_registration_and_flam(tmp):
+    from llamas_pyjamas.Postprocessing.promote_final_rss import main
+    files = _legacy(tmp)
+    sens = os.path.join(tmp, 'sens.fits')
+    _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub'}).save(sens)
+    assert main([tmp, '-y', '--sensfunc', sens, '--no-extinction']) == 0
+    final, base = files[('ff_skysub', 'green')], files[('base', 'green')]
+    with fits.open(final) as f, fits.open(base) as b:
+        np.testing.assert_array_equal(f['FIBERWCS'].data['RA'], b['FIBERWCS'].data['RA'])
+        np.testing.assert_array_equal(f['FIBERMAP'].data['DEC'], b['FIBERMAP'].data['DEC'])
+        assert f['FIBERWCS'].header['WCSREFIN'] and 'FLAM' in f and 'FLAM_ERR' in f
+        assert f['FLAM'].header['RSSSTAGE'] == 'ff_skysub'
+    check_stage_consistency(final)                       # now nothing to object to
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    sr = build_super_rss([final])
+    assert sr.plane == 'flam' and sr.stage == 'ff_skysub'
+
+
+def test_promote_dry_run_writes_nothing(tmp):
+    from llamas_pyjamas.Postprocessing.promote_final_rss import main
+    files = _legacy(tmp)
+    final = files[('ff_skysub', 'green')]
+    before = open(final, 'rb').read()
+    assert main([tmp, '--dry-run']) == 1                 # FLAM still missing -> attention
+    assert open(final, 'rb').read() == before
+
+
+def test_promote_refuses_mismatched_fibre_rows(tmp):
+    from llamas_pyjamas.Postprocessing.promote_final_rss import promote_directory
+    files = _legacy(tmp)
+    with fits.open(files[('ff_skysub', 'green')], mode='update') as h:
+        h['FIBERMAP'].data['FIBER_ID'][:] = h['FIBERMAP'].data['FIBER_ID'][::-1]
+    results, n_problem = promote_directory(tmp)
+    assert n_problem == 1 and any('do not match' in p for p in results[0][4])
+    with fits.open(files[('ff_skysub', 'green')]) as h:
+        assert 'FIBERWCS' not in h
+
+
+def test_promote_interrupted_write_leaves_original(tmp, monkeypatch):
+    from llamas_pyjamas.Postprocessing import promote_final_rss as pf
+    files = _legacy(tmp)
+    final = files[('ff_skysub', 'green')]
+    before = open(final, 'rb').read()
+
+    def boom(*a, **k):
+        raise OSError('interrupted')
+    monkeypatch.setattr(pf.os, 'replace', boom)
+    with pytest.raises(OSError):
+        pf.promote_directory(tmp)
+    assert open(final, 'rb').read() == before
+    assert not [f for f in os.listdir(tmp) if f.endswith('-tmp')]
+
+
+def test_promote_keep_duplicates_moves_others_aside(tmp):
+    from llamas_pyjamas.Postprocessing.promote_final_rss import promote_directory
+    files = _legacy(tmp)
+    old = write_rss(stage_name(tmp, 'green', None, consolidated=True), stage='ff_skysub')
+    results, _ = promote_directory(tmp)
+    assert 'more than one file' in results[0][4][0]
+    results, _ = promote_directory(tmp, keep_duplicates='long')
+    assert not os.path.exists(old)
+    assert os.path.exists(os.path.join(tmp, 'superseded', os.path.basename(old)))
+    assert final_rss(files[('base', 'green')]) == files[('ff_skysub', 'green')]
+
+
+def test_promote_header_sync_refuses_derived_keys(tmp):
+    from llamas_pyjamas.Postprocessing.promote_final_rss import promote_directory
+    files = _legacy(tmp, base={'registered': True, 'flam': True,
+                               'header': {'AIRMASS': 1.17, 'SKYPED': True}})
+    results, n_problem = promote_directory(tmp, sync_from='base')
+    final = files[('ff_skysub', 'green')]
+    with fits.open(final) as h:
+        assert h[0].header['AIRMASS'] == 1.17            # plain key synced
+        assert 'SKYPED' not in h[0].header               # data-change key refused
+    assert any('re-reduce' in p for p in results[0][4]) and n_problem == 1
+
+
+# ================================================================ propagation through every stage
+def test_propagation_base_ff_skysub_consolidate_promote(tmp):
+    """Each extension / key / mask bit of the audit table is preserved, regenerated or
+    intentionally absent at base -> FF -> FF_SKYSUB -> (consolidate | register base + promote)."""
+    from llamas_pyjamas.Flat.fibreFlat import apply_fibre_flat_to_rss
+    from llamas_pyjamas.Sky.skySubtract import subtract_sky_rss
+    from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
+    from llamas_pyjamas.File.llamasRSS import apply_fibre_astrometry
+    from llamas_pyjamas.Flux.fluxCalibrate import flux_calibrate_file
+    from llamas_pyjamas.Postprocessing.promote_final_rss import promote_directory
+    from llamas_pyjamas.reduce import consolidate_rss_files
+
+    derived = {'SKYPED': True, 'SKYPEDSC': 'template', 'SKYLR': True, 'SKYLRTMP': False}
+    base = write_rss(stage_name(tmp, 'green', 'base'), noflat=True, header=derived,
+                     mask_bits={32: (slice(10, 12), slice(0, 400))},
+                     zero_counts=(slice(20, 21), slice(0, 60)))
+    with fits.open(base, mode='update') as h:
+        h['MASK'].data[20, :60] |= MASK_NO_COUNTS      # as generate_rss flags zero-fill
+    corr = _corrections(os.path.join(tmp, 'corr.fits'), benchsides=('1A', '1B'))
+    ff = apply_fibre_flat_to_rss(base, corr, stage_name(tmp, 'green', 'ff'))
+    sky = subtract_sky_rss(ff, config=SkySubtractConfig(method='scaled', qa_plots=False))
+    assert sky == stage_name(tmp, 'green', 'ff_skysub')
+
+    # post-processing as it used to happen: registration + FLAM on the BASE file only
+    with fits.open(base, mode='update') as h:
+        fw = h['FIBERWCS'].data
+        apply_fibre_astrometry(h, ras=fw['RA'] + 1.0 / 3600, decs=fw['DEC'],
+                               xs=fw['X_FIBERMAP'], ys=fw['Y_FIBERMAP'],
+                               prov={'method': 'astrometric', 'tier': 'gaia', 'refined': True,
+                                     'pa_offset': 0.0, 'catalog': 'GaiaDR3', 'rms': 0.1,
+                                     'nstars': 3})
+    flux_calibrate_file(base, _sensfunc({'fibrflat': False, 'rssstage': 'base'}),
+                        apply_extinction=False)
+
+    with fits.open(base) as b, fits.open(ff) as f, fits.open(sky) as s:
+        nb, nf, ns = ({h.name for h in x} for x in (b, f, s))
+        # primary: every key carried; only the stage keywords differ
+        assert primary_header_diff_ok(b, f) and primary_header_diff_ok(f, s)
+        assert [x[0].header['RSSSTAGE'] for x in (b, f, s)] == ['base', 'ff', 'ff_skysub']
+        assert all(x[0].header[k] == v for x in (f, s) for k, v in derived.items())
+        # data planes
+        np.testing.assert_allclose(f['SKYSUB'].data, b['SKYSUB'].data / 2.0, rtol=1e-6)
+        np.testing.assert_allclose(f['ERROR'].data, b['ERROR'].data / 2.0, rtol=1e-6)
+        np.testing.assert_array_equal(s['ERROR'].data, f['ERROR'].data)       # copied, not grown
+        assert not np.array_equal(s['SKYSUB'].data, f['SKYSUB'].data)         # regenerated
+        for ext in ('COUNTS', 'SKY', 'WAVE', 'FWHM'):
+            np.testing.assert_array_equal(f[ext].data, b[ext].data)
+            np.testing.assert_array_equal(s[ext].data, f[ext].data)
+        np.testing.assert_array_equal(s['FIBERMAP'].data['FIBER_ID'], b['FIBERMAP'].data['FIBER_ID'])
+        # mask bits from base survive both stages
+        for x in (f, s):
+            assert np.all(x['MASK'].data[10:12] & 32)
+            assert np.all(x['MASK'].data[20, :60] & MASK_NO_COUNTS)
+        # extensions: NOFLAT dropped on purpose; FIBERWCS carried (rough); sky products added
+        assert 'NOFLAT' in nb and 'NOFLAT' not in nf | ns
+        assert 'FIBERWCS' in nf and 'FIBERWCS' in ns and not s['FIBERWCS'].header['WCSREFIN']
+        assert {'SKYRESID', 'SKYMASK'} <= ns and not {'SKYRESID', 'SKYMASK'} & nf
+        assert 'FLAM' in nb and 'FLAM' not in nf | ns
+
+    # consolidation is a byte-identical rename of the most-corrected file
+    cons_dir = os.path.join(tmp, 'cons')
+    os.makedirs(cons_dir)
+    for p in (base, ff, sky):
+        shutil.copy(p, cons_dir)
+    sky_bytes = open(sky, 'rb').read()
+    consolidate_rss_files(cons_dir, keep_intermediate=False)
+    (only,) = os.listdir(cons_dir)
+    assert only == f'{EXP_ID}_RSS_green.fits' and rss_stage(os.path.join(cons_dir, only)) == 'ff_skysub'
+    assert open(os.path.join(cons_dir, only), 'rb').read() == sky_bytes
+
+    # the final stage now refuses to be combined; promote brings registration + FLAM across
+    with pytest.raises(RegistrationMismatchError):
+        check_stage_consistency(sky)
+    sens = os.path.join(tmp, 'sens.fits')
+    _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub'}).save(sens)
+    os.remove(corr)
+    results, n_problem = promote_directory(tmp, sensfunc_path=sens, apply_extinction=False)
+    assert n_problem == 0, results
+    with fits.open(base) as b, fits.open(sky) as s:
+        np.testing.assert_array_equal(s['FIBERWCS'].data['RA'], b['FIBERWCS'].data['RA'])
+        np.testing.assert_array_equal(s['FIBERMAP'].data['RA'], b['FIBERMAP'].data['RA'])
+        assert s['FIBERWCS'].header['WCSREFIN'] and 'FLAM' in s
+        assert {'SKYRESID', 'SKYMASK'} <= {h.name for h in s}
+        assert np.all(s['MASK'].data[10:12] & 32)
+        assert primary_header_diff_ok(b, s)
+    check_stage_consistency(sky)
+
+
+def primary_header_diff_ok(a, b):
+    from llamas_pyjamas.File.llamasRSS import primary_header_diff
+    return primary_header_diff(a[0].header, b[0].header) == {}

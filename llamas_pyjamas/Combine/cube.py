@@ -258,6 +258,7 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
                 KERNFWHM=kernel_fwhm, PIXSCALE=pixscale, DWAVE=dwave,
                 NEXPTOT=super_rss.n_exposures,
                 exposure_paths=[e.path for e in super_rss.exposures])   # provenance for rebuild
+    meta.update(super_rss.provenance())                  # PLANE, RSSSTAGE, OVR_*
     return CoaddCube(data=data, var=var, wave=wl, coverage=coverage.reshape(ny, nx),
                      nexp=nexp.reshape(ny, nx), wcs=wcs, bunit=unit, meta=meta)
 
@@ -314,6 +315,8 @@ def narrowband_image(cube, line_wave, *, half_width=5.0, cont_half_width=None, c
     meta = dict(FIELD=cube.meta.get('FIELD', ''), CHANNEL=cube.meta.get('CHANNEL', ''),
                 LINEWAVE=float(line_wave), LINEHW=float(hw), CONTGAP=float(gap),
                 PIXSCALE=cube.meta.get('PIXSCALE', 0.5), NARROWBD=True)
+    meta.update({k: v for k, v in cube.meta.items()
+                 if k in ('PLANE', 'RSSSTAGE') or str(k).startswith('OVR_')})
     return CoaddImage(data=data, var=var, coverage=cube.coverage, nexp=cube.nexp,
                       wcs=cube.wcs.celestial, bunit=bunit, meta=meta)
 

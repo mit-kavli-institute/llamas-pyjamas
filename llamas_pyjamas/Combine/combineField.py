@@ -125,7 +125,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--cube', action='store_true',
                    help='build an (RA,DEC,wave) cube (single channel) instead of a 2-D image')
     p.add_argument('--dwave', type=float, help='cube wavelength step (A); default native median')
-    p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto')
+    p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto',
+                   help='data plane: auto/flam = flux-calibrated FLAM, required in every exposure '
+                        '(no silent fallback); skysub = the instrumental sky-subtracted plane')
+    p.add_argument('--allow-mixed-stage', action='store_true',
+                   help='combine exposures/channels at different RSS stages (flat-fielded and '
+                        'not); recorded as OVR_MIX in the output header')
+    p.add_argument('--allow-header-mismatch', action='store_true',
+                   help="use files whose primary header differs from their exposure's other "
+                        'stages; recorded as OVR_HDR in the output header')
     p.add_argument('--keep-bad-fibres', action='store_true',
                    help='do NOT mask strongly-negative (broken) fibres as no-data')
     p.add_argument('--scale-transparency', action='store_true',
@@ -148,21 +156,31 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.error('give RSS files, or --dir and --object')
     logger.info('combining %d exposure file(s)', len(paths))
 
-    sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
-                         reject_bad_fibres=not args.keep_bad_fibres)
-    logger.info(sr.summary())
+    from llamas_pyjamas.File.llamasRSS import RSSStageError
+    from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError
+    from llamas_pyjamas.Combine.transparency import TransparencyError
+    try:
+        sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
+                             reject_bad_fibres=not args.keep_bad_fibres,
+                             allow_mixed_stage=args.allow_mixed_stage,
+                             allow_header_mismatch=args.allow_header_mismatch)
+        logger.info(sr.summary())
 
-    if args.scale_transparency:
-        from llamas_pyjamas.Combine.transparency import transparency_scales
-        sources = None
-        if args.scale_source:
-            from astropy.coordinates import SkyCoord
-            import astropy.units as u
-            sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
-        scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
-                                     radius_arcsec=args.scale_radius, channels=args.channels)
-        sr.apply_scales(scales)
-        logger.info('after transparency scaling: %s', sr.summary())
+        if args.scale_transparency:
+            from llamas_pyjamas.Combine.transparency import transparency_scales
+            sources = None
+            if args.scale_source:
+                from astropy.coordinates import SkyCoord
+                import astropy.units as u
+                sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
+            scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
+                                         radius_arcsec=args.scale_radius, channels=args.channels)
+            sr.apply_scales(scales)
+            logger.info('after transparency scaling: %s', sr.summary())
+    except (RSSStageError, MissingFluxCalibrationError, TransparencyError) as exc:
+        logger.error('%s: %s', type(exc).__name__, exc)
+        print(f'combineField: not combined -- {type(exc).__name__}: {exc}', file=sys.stderr)
+        return 2
 
     if args.cube:
         from llamas_pyjamas.Combine.cube import combine_cube

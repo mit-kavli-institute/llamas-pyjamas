@@ -26,6 +26,20 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_ORDER, Spectrum, Spe
 logger = logging.getLogger(__name__)
 
 
+def cube_plane(hdr) -> str:
+    """The data plane a combined cube was built from: its PLANE card, else (cubes written before
+    PLANE existed) inferred from BUNIT -- 'erg/...' is flux-calibrated, 'counts/s...' instrumental."""
+    plane = str(hdr.get('PLANE', '') or '').strip().lower()
+    if plane in ('flam', 'skysub'):
+        return plane
+    bunit = str(hdr.get('BUNIT', '') or '').strip().lower()
+    if bunit.startswith('erg'):
+        return 'flam'
+    if bunit.startswith('counts'):
+        return 'skysub'
+    return 'auto'
+
+
 class CoaddCubeScene(SpectralScene):
     """A scene over per-channel combined cubes (a spaxel is the same sky position in every channel).
 
@@ -314,6 +328,9 @@ class CoaddCubeScene(SpectralScene):
                     'PIXSCALE': hdr.get('PIXSCALE', 0.5), 'exposure_paths': paths}
             if 'COVFRAC' in hdr:                           # display floor the cube was combined with
                 meta['COVFRAC'] = float(hdr['COVFRAC'])
+            meta['PLANE'] = cube_plane(hdr)
+            if 'RSSSTAGE' in hdr:
+                meta['RSSSTAGE'] = str(hdr['RSSSTAGE'])
             return CoaddCube(data=data, var=var, wave=wave, coverage=cov, nexp=nexp,
                              wcs=WCS(hdr), bunit=hdr.get('BUNIT', ''), meta=meta)
 
@@ -351,7 +368,10 @@ class CoaddCubeScene(SpectralScene):
         try:
             from llamas_pyjamas.Combine.superRSS import build_super_rss
             from llamas_pyjamas.Combine.transparency import transparency_scales
-            sr = build_super_rss(paths)
+            # Rebuild from exactly the recorded files, in the plane the cube was combined in
+            # (a legacy cube's plane comes from its BUNIT); the safety checks ran at combine time.
+            sr = build_super_rss(paths, plane=ref_cube.meta.get('PLANE') or 'auto',
+                                 check_stages=False, allow_mixed_stage=True)
             try:                                          # match the combine's photometric scaling
                 sr.apply_scales(transparency_scales(sr))
             except Exception as exc:                      # noqa: BLE001

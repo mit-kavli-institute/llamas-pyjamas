@@ -467,7 +467,21 @@ class CubeViewerWindow(QMainWindow):
             from llamas_pyjamas.Combine.cube import combine_field_cubes
             from llamas_pyjamas.Combine.transparency import TransparencyError, transparency_scales
             from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
-            sr = build_super_rss(paths)             # all channels
+            from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError
+            try:
+                sr = build_super_rss(paths)         # all channels
+            except MissingFluxCalibrationError as exc:
+                # No silent fallback to counts: the user decides.
+                QApplication.restoreOverrideCursor()
+                answer = QMessageBox.question(
+                    self, 'Combine field',
+                    f'{exc}\n\nCombine the UNCALIBRATED sky-subtracted plane (counts/s) instead?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                sr = build_super_rss(paths, plane='skysub')
             try:                                   # transparency is best-effort (needs a bright src)
                 sr.apply_scales(transparency_scales(sr))
             except TransparencyError as exc:
@@ -946,10 +960,31 @@ class CubeViewerWindow(QMainWindow):
             except (TypeError, ValueError):
                 airmass = None
 
+        # Record the standard's processing stage in the sensfunc, so applying it to science at a
+        # different fibre-flat state is caught (fluxCalibrate.apply_sensfunc).
+        from llamas_pyjamas.File.llamasRSS import final_rss, rss_stage
+        stage_meta = {}
+        if self._path:
+            try:
+                stage = rss_stage(self._path)
+                stage_meta = {'rssstage': stage, 'fibrflat': stage != 'base',
+                              'stdfile': os.path.basename(self._path)}
+                final = final_rss(self._path)
+                if os.path.abspath(final) != os.path.abspath(self._path):
+                    QMessageBox.information(
+                        self, 'Sensitivity function',
+                        f'This standard is loaded at stage {stage!r}, but its exposure has a more '
+                        f'processed file:\n{os.path.basename(final)}\n\nThe sensfunc will be '
+                        f'recorded as {stage!r} and can only calibrate science at the same '
+                        f'fibre-flat state. Open the final file to build one for final-stage science.')
+            except Exception as exc:                   # noqa: BLE001 - provenance best-effort
+                logger.warning('Could not determine the standard RSS stage: %s', exc)
+
         from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncDialog, SensFuncModel
         model = SensFuncModel(spectra=spectra, exptime=exptime,
                               ref_wave=ref_wave, ref_flux=ref_flux,
-                              standard_name=self._standard.name, airmass=airmass)
+                              standard_name=self._standard.name, airmass=airmass,
+                              meta=stage_meta)
         default_path = ''
         if self._path:
             base = os.path.splitext(os.path.basename(self._path))[0]

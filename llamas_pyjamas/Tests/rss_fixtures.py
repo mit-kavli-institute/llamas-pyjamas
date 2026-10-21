@@ -13,6 +13,7 @@ import numpy as np
 from astropy.io import fits
 
 from llamas_pyjamas.File.llamasRSS import _fiberwcs_hdu
+from llamas_pyjamas.Utils.wcsLlamas import FIBRE_AREA_ARCSEC2
 
 N_FIB = 60
 N_WAVE = 400
@@ -28,7 +29,7 @@ EXP_ID = 'LLAMAS_2026-10-16_00-31-08.4'
 
 SCIENCE_KEYS = {
     'OBJECT': 'TESTFIELD', 'SEXPTIME': 600.0, 'AIRMASS': 1.2, 'RA': RA0, 'DEC': DEC0,
-    'TEL ROT': 0.0, 'MJD-OBS': 61000.25, 'OBS TYPE': 'SCI24', 'FIBAREA': 0.4418,
+    'TEL ROT': 0.0, 'MJD-OBS': 61000.25, 'OBS TYPE': 'SCI24', 'FIBAREA': FIBRE_AREA_ARCSEC2,
     'VELFRAME': 'heliocentric', 'HELIOVEL': 12.3, 'VELCORR': 1.000041,
 }
 

@@ -40,7 +40,7 @@ from typing import Optional
 import numpy as np
 from astropy.io import fits
 
-from llamas_pyjamas.File.llamasRSS import skysub_extname
+from llamas_pyjamas.File.llamasRSS import RSS_STAGES, RSSStageError, rss_stage, skysub_extname
 from llamas_pyjamas.Flux.sensFunc import SensFunc
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,35 @@ LCO_LONGITUDE = -70.692
 LCO_LATITUDE = -29.015
 
 FLAM_BUNIT = 'erg/s/cm2/Angstrom'
+
+
+class SensfuncStageError(RSSStageError):
+    """The sensitivity function and the science RSS are not at the same fibre-flat state.
+
+    A sensfunc built from un-flat-fielded standard data applied to flat-fielded science (or the
+    reverse) is off by the per-fibre flat factors -- tens of percent per fibre, ~10-20% in an
+    aperture. ``fibrflat`` is recorded in the sensfunc when it is built (CubeViewer); a legacy
+    sensfunc without it can be declared with ``sensfunc_stage``."""
+
+
+def sensfunc_flat_state(sensfunc, declared_stage=None):
+    """``(fibrflat, stage, provenance)`` of a sensfunc: whether its standard was fibre-flat-
+    fielded, its recorded/declared stage, and where that came from ('recorded', 'declared' or
+    'unknown'). A declaration that contradicts a recorded state raises."""
+    recorded = sensfunc.meta.get('fibrflat')
+    stage = sensfunc.meta.get('rssstage')
+    if declared_stage is not None:
+        if declared_stage not in RSS_STAGES:
+            raise ValueError(f'sensfunc stage must be one of {RSS_STAGES}, not {declared_stage!r}')
+        declared_flat = declared_stage != 'base'
+        if recorded is not None and bool(recorded) != declared_flat:
+            raise SensfuncStageError(f'declared sensfunc stage {declared_stage!r} contradicts the '
+                                     f'recorded fibrflat={bool(recorded)}')
+        if recorded is None:
+            return declared_flat, declared_stage, 'declared'
+    if recorded is None:
+        return None, 'unknown', 'unknown'
+    return bool(recorded), str(stage or ('ff' if recorded else 'base')), 'recorded'
 
 _EXT_CACHE = None
 
@@ -96,7 +125,8 @@ def _differential_extinction(wave: np.ndarray, x_sci: float, x_std: Optional[flo
 
 def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
                    apply_extinction: bool = True, extinct=None,
-                   sensfile: str = '') -> fits.HDUList:
+                   sensfile: str = '', sensfunc_stage: Optional[str] = None,
+                   allow_stage_mismatch: bool = False) -> fits.HDUList:
     """Add FLAM / FLAM_ERR extensions to a science RSS HDUList, in place.
 
     Parameters
@@ -112,6 +142,15 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
         Pre-loaded extinction table; :func:`load_lco_extinction` if None.
     sensfile : str
         Path of the sensfunc, recorded in provenance.
+    sensfunc_stage : str, optional
+        Declares the stage of a legacy sensfunc that records none ('base', 'ff', 'ff_skysub').
+    allow_stage_mismatch : bool
+        Calibrate even when the sensfunc's fibre-flat state differs from the science file's, or
+        is unknown for flat-fielded science (recorded in the FLAM header).
+
+    Raises :class:`SensfuncStageError` when the sensfunc's fibre-flat state differs from the
+    science RSS's, or is unknown while the science is flat-fielded; an unknown state on
+    un-flat-fielded (base) science only warns.
 
     Returns
     -------
@@ -123,6 +162,30 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
     if channel not in sensfunc.channels:
         raise ValueError(f"sensfunc has no '{channel}' channel (has: "
                          f"{', '.join(sensfunc.channels)})")
+
+    # The sensfunc must be at the science file's fibre-flat state (only FIBRFLAT matters: the
+    # residual-sky step barely changes a bright standard).
+    sci_stage = rss_stage(hdul)
+    sci_flat = sci_stage != 'base'
+    sens_flat, sens_stage, sens_prov = sensfunc_flat_state(sensfunc, sensfunc_stage)
+    name = os.path.basename(sensfile) or 'sensfunc'
+    override = False
+    if sens_flat is None:
+        msg = (f'{name} does not record whether its standard was fibre-flat-fielded; the science '
+               f'is at stage {sci_stage!r}. Declare it (sensfunc_stage / --sensfunc-stage) or '
+               f'rebuild the sensfunc in CubeViewer.')
+        if sci_flat and not allow_stage_mismatch:
+            raise SensfuncStageError(msg)
+        logger.warning(msg)
+        override = sci_flat
+    elif sens_flat != sci_flat:
+        msg = (f'{name} was built at stage {sens_stage!r} (fibre flat '
+               f'{"applied" if sens_flat else "not applied"}) but the science is at stage '
+               f'{sci_stage!r}: they differ by the per-fibre flat factors.')
+        if not allow_stage_mismatch:
+            raise SensfuncStageError(msg + ' Rebuild the sensfunc at the matching stage.')
+        logger.warning(msg + ' Proceeding (allow_stage_mismatch).')
+        override = True
 
     sky_name = skysub_extname(hdul)
     skysub = np.asarray(hdul[sky_name].data, dtype=float)
@@ -172,6 +235,10 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
         'SCIAIR': (x_sci if x_sci is not None else 0.0, 'Science airmass'),
         'EXTCORR': (bool(apply_extinction and x_std is not None and x_sci is not None),
                     'Differential extinction applied'),
+        'RSSSTAGE': (sci_stage, 'RSS stage calibrated'),
+        'SENSSTG': (sens_stage, 'Stage of the sensfunc standard'),
+        'SENSPROV': (sens_prov, 'Sensfunc stage: recorded/declared/unknown'),
+        'OVR_STG': (bool(override), 'Calibrated despite a stage mismatch/unknown'),
     }
 
     _replace_or_append(hdul, 'FLAM', flam, prov)
@@ -198,7 +265,9 @@ def _replace_or_append(hdul: fits.HDUList, name: str, data: np.ndarray, header_i
 
 
 def flux_calibrate_file(rss_path: str, sensfunc, apply_extinction: bool = True,
-                        out_path: Optional[str] = None, extinct=None) -> str:
+                        out_path: Optional[str] = None, extinct=None,
+                        sensfile: Optional[str] = None, sensfunc_stage: Optional[str] = None,
+                        allow_stage_mismatch: bool = False) -> str:
     """Flux-calibrate a science RSS on disk, writing FLAM/FLAM_ERR back into it.
 
     Parameters
@@ -212,6 +281,13 @@ def flux_calibrate_file(rss_path: str, sensfunc, apply_extinction: bool = True,
         Where to write; overwrites `rss_path` in place if None.
     extinct : optional
         Pre-loaded extinction table.
+    sensfile : str, optional
+        Path recorded as SENSFILE when ``sensfunc`` is passed already loaded.
+    sensfunc_stage, allow_stage_mismatch :
+        See :func:`apply_sensfunc`.
+
+    The file is written to a temporary name beside the target and renamed into place, so an
+    interrupted run never leaves a half-written RSS.
 
     Returns
     -------
@@ -222,12 +298,19 @@ def flux_calibrate_file(rss_path: str, sensfunc, apply_extinction: bool = True,
         sensfile = sensfunc
         sensfunc = SensFunc.load(sensfunc)
     else:
-        sensfile = ''
+        sensfile = sensfile or ''
 
-    with fits.open(rss_path) as hdul:
-        apply_sensfunc(hdul, sensfunc, apply_extinction=apply_extinction,
-                       extinct=extinct, sensfile=sensfile)
-        target = out_path or rss_path
-        hdul.writeto(target, overwrite=True)
+    target = out_path or rss_path
+    tmp = target + '.fluxcal-tmp'
+    try:
+        with fits.open(rss_path) as hdul:
+            apply_sensfunc(hdul, sensfunc, apply_extinction=apply_extinction,
+                           extinct=extinct, sensfile=sensfile, sensfunc_stage=sensfunc_stage,
+                           allow_stage_mismatch=allow_stage_mismatch)
+            hdul.writeto(tmp, overwrite=True)
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     logger.info('Wrote flux-calibrated RSS to %s', target)
     return target

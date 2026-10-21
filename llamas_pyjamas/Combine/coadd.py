@@ -300,4 +300,5 @@ def combine_image(super_rss, wave_min, wave_max, *, channels=None, **kwargs) -> 
     img.meta['FIELD'] = super_rss.field
     img.meta['WAVEMIN'] = float(wave_min)
     img.meta['WAVEMAX'] = float(wave_max)
+    img.meta.update(super_rss.provenance())               # PLANE, RSSSTAGE, OVR_*
     return img
