@@ -1008,6 +1008,14 @@ class CubeViewerWindow(QMainWindow):
         rss_paths = dialog.chosen_files
         if not sens_path or not rss_paths:
             return
+        # FLAM goes on each exposure's final stage -- the file the combiner uses.
+        from llamas_pyjamas.Flux.fluxCalibrate import calibration_targets
+        try:
+            rss_paths = calibration_targets(rss_paths)
+        except Exception as exc:                       # noqa: BLE001
+            QMessageBox.critical(self, 'Apply sensitivity function',
+                                 f'Cannot resolve the files to calibrate:\n{exc}')
+            return
 
         reply = QMessageBox.question(
             self, 'Apply sensitivity function',
@@ -1020,12 +1028,13 @@ class CubeViewerWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from llamas_pyjamas.Flux.fluxCalibrate import flux_calibrate_file
+        from llamas_pyjamas.Flux.fluxCalibrate import check_calibration_target, flux_calibrate_file
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         n_ok, failures = 0, []
         try:
             for path in rss_paths:
                 try:
+                    check_calibration_target(path)
                     flux_calibrate_file(path, sens_path, apply_extinction=True)
                     n_ok += 1
                 except Exception as exc:               # noqa: BLE001
@@ -1034,7 +1043,7 @@ class CubeViewerWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
         # If the open file was among those calibrated, reload so its FLAM shows now.
-        if self._path in rss_paths:
+        if self._path and os.path.abspath(self._path) in rss_paths:
             self.load(self._path)
 
         message = f'Flux-calibrated {n_ok}/{len(rss_paths)} file(s).'

@@ -40,7 +40,8 @@ from typing import Optional
 import numpy as np
 from astropy.io import fits
 
-from llamas_pyjamas.File.llamasRSS import RSS_STAGES, RSSStageError, rss_stage, skysub_extname
+from llamas_pyjamas.File.llamasRSS import (RSS_STAGES, RSSStageError, check_stage_consistency,
+                                           final_rss, rss_stage, skysub_extname)
 from llamas_pyjamas.Flux.sensFunc import SensFunc
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,28 @@ class SensfuncStageError(RSSStageError):
     reverse) is off by the per-fibre flat factors -- tens of percent per fibre, ~10-20% in an
     aperture. ``fibrflat`` is recorded in the sensfunc when it is built (CubeViewer); a legacy
     sensfunc without it can be declared with ``sensfunc_stage``."""
+
+
+def calibration_targets(paths, stage='auto'):
+    """The files to flux-calibrate for ``paths``: each resolved to its exposure/channel's final
+    stage (:func:`~llamas_pyjamas.File.llamasRSS.final_rss`, or the named ``stage``), de-duplicated
+    and in input order. FLAM belongs on the file that will be combined, not on whichever stage
+    was picked. Raises on duplicate stage files or a missing named stage."""
+    out, seen = [], set()
+    for p in paths:
+        target = os.path.abspath(final_rss(p, stage))
+        if target not in seen:
+            seen.add(target)
+            out.append(target)
+    return out
+
+
+def check_calibration_target(path, allow_header_mismatch=False):
+    """Refuse a file whose primary header differs from its exposure's other stages (an AIRMASS or
+    exposure-time fix applied to one stage only would change FLAM). Registration is not checked:
+    FLAM does not depend on fibre positions. Returns the stage report."""
+    return check_stage_consistency(path, allow_header_mismatch=allow_header_mismatch,
+                                   check_registration=False)
 
 
 def sensfunc_flat_state(sensfunc, declared_stage=None):

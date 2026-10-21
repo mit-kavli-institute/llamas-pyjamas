@@ -520,7 +520,7 @@ class StageReport:
 
 
 def check_stage_consistency(path, *, allow_header_mismatch=False, raise_errors=True,
-                            sep_tol_arcsec=0.01):
+                            check_registration=True, sep_tol_arcsec=0.01):
     """Compare ``path`` with the other stages of its exposure/channel before it is used.
 
     * **Registration** — another stage refined (rank 2) while ``path`` is not raises
@@ -531,7 +531,9 @@ def check_stage_consistency(path, *, allow_header_mismatch=False, raise_errors=T
       :data:`STAGE_HEADER_DERIVED` are flagged as needing a re-reduction.
 
     Also raises :class:`DuplicateStageError` (via :func:`stage_files`). With
-    ``raise_errors=False`` nothing raises and the findings are returned in the report.
+    ``raise_errors=False`` nothing raises and the findings are returned in the report;
+    ``check_registration=False`` skips only the registration error (flux calibration does not
+    depend on fibre positions).
     """
     path = os.path.abspath(path)
     try:
@@ -583,7 +585,7 @@ def check_stage_consistency(path, *, allow_header_mismatch=False, raise_errors=T
     for w in report.warnings:
         logger.warning(w)
 
-    if raise_errors and report.better_wcs_stage is not None:
+    if raise_errors and check_registration and report.better_wcs_stage is not None:
         raise RegistrationMismatchError(
             f'{os.path.basename(path)} ({stage}) has only {report.wcs[stage][1]} astrometry but '
             f'its {report.better_wcs_stage} stage ({os.path.basename(files[report.better_wcs_stage])}) '

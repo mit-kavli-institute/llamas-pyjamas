@@ -622,3 +622,49 @@ def test_propagation_base_ff_skysub_consolidate_promote(tmp):
 def primary_header_diff_ok(a, b):
     from llamas_pyjamas.File.llamasRSS import primary_header_diff
     return primary_header_diff(a[0].header, b[0].header) == {}
+
+
+# ================================================================ step 4: flux calibration on the final stage
+def test_fluxcal_cli_writes_flam_on_the_final_stage(tmp, capsys):
+    from llamas_pyjamas.Postprocessing.apply_fluxcal import main
+    files = write_exposure(tmp, channels=('green',))
+    sens = os.path.join(tmp, 'std_sens.fits')
+    _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub'}).save(sens)
+    # every stage of the exposure named -> one target, the final file
+    assert main([sens, files[('base', 'green')], files[('ff', 'green')], '--no-extinction']) == 0
+    with fits.open(files[('ff_skysub', 'green')]) as f:
+        assert 'FLAM' in f and f['FLAM'].header['SENSFILE'] == 'std_sens.fits'
+        assert f['FLAM'].header['RSSSTAGE'] == 'ff_skysub' and f['FLAM'].header['SENSPROV'] == 'recorded'
+    for s in ('base', 'ff'):
+        with fits.open(files[(s, 'green')]) as h:
+            assert 'FLAM' not in h
+    assert 'Flux-calibrated 1/1' in capsys.readouterr().out
+
+
+def test_fluxcal_cli_refuses_wrong_stage_sensfunc_and_header_mismatch(tmp, capsys):
+    from llamas_pyjamas.Postprocessing.apply_fluxcal import main
+    files = write_exposure(tmp, channels=('green',),
+                           per_stage={'base': {'header': {'AIRMASS': 1.17}}})
+    base_sens = os.path.join(tmp, 'base_sens.fits')
+    _sensfunc({'fibrflat': False, 'rssstage': 'base'}).save(base_sens)
+    assert main([base_sens, files[('base', 'green')], '--no-extinction',
+                 '--allow-header-mismatch']) == 1                   # stage mismatch
+    assert 'was built at stage' in capsys.readouterr().err
+    ff_sens = os.path.join(tmp, 'ff_sens.fits')
+    _sensfunc({'fibrflat': True}).save(ff_sens)
+    assert main([ff_sens, files[('base', 'green')], '--no-extinction']) == 1   # AIRMASS differs
+    err = capsys.readouterr().err
+    assert 'AIRMASS' in err
+    # an explicit stage is honoured
+    assert main([base_sens, files[('ff_skysub', 'green')], '--stage', 'base', '--no-extinction',
+                 '--allow-header-mismatch']) == 0
+    with fits.open(files[('base', 'green')]) as h:
+        assert 'FLAM' in h
+
+
+def test_calibration_targets_deduplicate_exposures(tmp):
+    from llamas_pyjamas.Flux.fluxCalibrate import calibration_targets
+    files = write_exposure(tmp)
+    got = calibration_targets([files[(s, c)] for s in ('base', 'ff', 'ff_skysub')
+                               for c in ('green', 'red')])
+    assert got == [files[('ff_skysub', 'green')], files[('ff_skysub', 'red')]]
