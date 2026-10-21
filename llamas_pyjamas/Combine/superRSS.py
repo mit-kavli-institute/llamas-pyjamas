@@ -312,7 +312,7 @@ def _hdr_float(*values, default=np.nan):
     return float(default)
 
 
-def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0,
+def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, stage=None,
                   check_stages=True, allow_header_mismatch=False, allow_mixed_stage=False):
     """Read one exposure (its channel siblings) into native per-fibre arrays.
 
@@ -324,16 +324,26 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0,
     otherwise :class:`MissingFluxCalibrationError` (no silent fallback to SKYSUB). ``'flam'``
     is the same requirement; ``'skysub'`` is the explicit opt-in to the instrumental plane.
 
+    ``stage`` picks which stage of the exposure to read, per channel
+    (:func:`~llamas_pyjamas.File.llamasRSS.final_siblings`): ``'auto'`` the most-corrected one on
+    disk, or ``'base'`` / ``'ff'`` / ``'ff_skysub'``; ``None`` reads ``rss_path`` and its
+    same-stage channel siblings exactly as given (a cube rebuild from its recorded files).
+
     ``check_stages`` runs :func:`~llamas_pyjamas.File.llamasRSS.check_stage_consistency` on each
     loaded channel file (registration held by another stage, primary headers that differ between
     stages, duplicate stage files raise). Channels at different stages raise
     :class:`~llamas_pyjamas.File.llamasRSS.MixedStageError` unless ``allow_mixed_stage``.
     ``sky_penalty`` -> see :func:`_read_channel`."""
     from llamas_pyjamas.File.llamasRSS import (MixedStageError, channel_siblings,
-                                               check_stage_consistency, skysub_extname, stage_of)
+                                               check_stage_consistency, final_siblings,
+                                               skysub_extname, stage_of)
     if plane not in PLANES:
         raise ValueError(f"plane must be one of {PLANES}, not {plane!r}")
-    siblings = channel_siblings(rss_path) or {'': rss_path}
+    if stage is None:
+        siblings = channel_siblings(rss_path) or {'': rss_path}
+    else:
+        siblings = (final_siblings(rss_path, stage, allow_mixed=allow_mixed_stage)
+                    or {'': os.path.abspath(rss_path)})
     want = [c for c in CHANNELS if c in siblings] if channels is None \
         else [c for c in channels if c in siblings]
     if not want:
@@ -414,12 +424,16 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0,
 
 
 def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reject_bad_fibres=True,
-                    sky_penalty=0.0, check_stages=True, allow_header_mismatch=False,
+                    sky_penalty=0.0, stage='auto', check_stages=True, allow_header_mismatch=False,
                     allow_mixed_stage=False):
     """Assemble a field's exposures into a :class:`SuperRSS`.
 
-    ``rss_paths`` may list any channel of each exposure (siblings are found automatically) and may
-    repeat an exposure; exposures are de-duplicated by :func:`exposure_prefix` and ordered by MJD.
+    ``rss_paths`` may list any channel -- and any stage -- of each exposure and may repeat an
+    exposure; exposures are de-duplicated by exposure (long per-stage names and a consolidated
+    name are the same exposure) and ordered by MJD. ``stage='auto'`` (default) reads each
+    exposure's most-corrected stage on disk, so whichever file was listed, the combine uses the
+    final one; a named stage forces it; ``None`` reads the given files exactly (see
+    :func:`load_exposure`).
     ``scales`` is an optional ``{exposure_id: scale}`` map (variable-transparency correction);
     missing/None -> 1.0. The scale multiplies flux and scales variance by scale^2, so the substrate
     is on one photometric system and inverse-variance weighting down-weights hazy exposures.
@@ -435,9 +449,10 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
 
     Returns a SuperRSS holding native per-fibre spectra per channel.
     """
+    from llamas_pyjamas.File.llamasRSS import exposure_key
     prefixes, seen = [], set()
     for p in rss_paths:                              # de-dup exposures, keep first path seen
-        k = exposure_prefix(p)
+        k = exposure_key(p) if stage is not None else exposure_prefix(p)
         if k not in seen:
             seen.add(k)
             prefixes.append(p)
@@ -445,8 +460,9 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
     loaded = []
     for p in prefixes:
         meta, resolved_plane, data = load_exposure(
-            p, plane=plane, channels=channels, sky_penalty=sky_penalty, check_stages=check_stages,
-            allow_header_mismatch=allow_header_mismatch, allow_mixed_stage=allow_mixed_stage)
+            p, plane=plane, channels=channels, sky_penalty=sky_penalty, stage=stage,
+            check_stages=check_stages, allow_header_mismatch=allow_header_mismatch,
+            allow_mixed_stage=allow_mixed_stage)
         if not data:
             logger.warning('%s: no usable channels; exposure skipped', meta.exposure_id)
             continue

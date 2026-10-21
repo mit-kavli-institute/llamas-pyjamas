@@ -96,7 +96,26 @@ quote paths**). The authoritative, annotated list is
   --scale-radius, --scale-sources, --scale-source RA DEC
 --keep-bad-fibres              keep strongly-negative broken fibres (default: masked)
 --dwave A                      cube wavelength step (default: native median)
+--stage {auto,base,ff,ff_skysub}  which stage of each exposure (default: the final one)
+--plane {auto,flam,skysub}     auto/flam need FLAM in every exposure; skysub = instrumental plane
+--allow-mixed-stage            combine exposures/channels at different stages (OVR_MIX)
+--allow-header-mismatch        use files whose header differs from their other stages (OVR_HDR)
 -o OUT.fits                    --png (preview)
+```
+
+## `promote_final_rss`
+
+Brings a reduction registered / flux-calibrated on the base files across to each exposure's
+final stage (see [Combining](04-combining-dithers.md#which-file-of-each-exposure-is-combined)).
+
+```
+python -m llamas_pyjamas.Postprocessing.promote_final_rss EXTRACTIONS_DIR
+--dry-run                      report only        -y  apply without asking
+--sensfunc FILE                write FLAM on final files that lack it
+--sensfunc-stage {base,ff,ff_skysub}   declare the stage of a sensfunc that records none
+--allow-stage-mismatch         calibrate despite a sensfunc / science stage mismatch (OVR_STG)
+--keep-duplicates {long,consolidated}  move same-stage duplicates to superseded/
+--sync-header-from STAGE       copy differing header keys from STAGE (data-change keys refused)
 ```
 
 ## Troubleshooting
@@ -112,6 +131,10 @@ quote paths**). The authoritative, annotated list is
 | Displayed image looks soft / PSF too big | the gridding kernel softens the *rendered* image only; lower the combine **Kernel FWHM**; point-source extraction is unaffected ([stage 4](04-combining-dithers.md)) |
 | "latex could not be found" when anchoring to Gaia | resolved in current code (gaiaxpy no longer forces LaTeX); update the package |
 | Gaia anchor says *approximate* | the source has no Gaia XP spectrum (faint); it fell back to broadband photometry ([stage 5](05-science-products.md#absolute-flux-anchor-gaia)) |
+| `MissingFluxCalibrationError` when combining | an exposure's final stage has no FLAM: apply the sensfunc (it lands on the final stage), run `promote_final_rss --sensfunc ...` for an older reduction, or combine `--plane skysub` deliberately |
+| `RegistrationMismatchError` | the registration is on another stage (older reductions registered the base file): `promote_final_rss` copies it to the final stage |
+| `SensfuncStageError` | the sensfunc was built from the standard at a different fibre-flat stage than the science: rebuild it from the standard's final stage (or declare an old sensfunc with `--sensfunc-stage`) |
+| `DuplicateStageError` | two files hold the same stage of one exposure (e.g. an old consolidated file next to a new run): `promote_final_rss --keep-duplicates long` moves the old ones to `superseded/` |
 
 ## Other documentation
 

@@ -79,7 +79,7 @@ python reduce.py /path/to/raw_night/llamas_redux_config.txt
 python -m llamas_pyjamas.CubeViewer
 
 # 4. (alternative) combine a field from the command line
-python -m llamas_pyjamas.Combine.combineField --dir /path/to/reduced --object J2151 --cube
+python -m llamas_pyjamas.Combine.combineField --dir /path/to/reduced/extractions --object J2151 --cube
 ```
 
 See [Reference & troubleshooting](07-reference.md) for the full option lists and directory layout.

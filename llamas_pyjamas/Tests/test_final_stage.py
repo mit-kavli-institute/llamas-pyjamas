@@ -388,7 +388,9 @@ def test_combiner_refuses_unregistered_final_when_base_is_registered(tmp):
     files = write_exposure(tmp, per_stage={'base': {'registered': True}}, flam=True)
     with pytest.raises(RegistrationMismatchError):
         build_super_rss([files[('ff_skysub', 'green')]])
-    build_super_rss([files[('base', 'green')]])                           # the registered one
+    with pytest.raises(RegistrationMismatchError):                        # naming base still
+        build_super_rss([files[('base', 'green')]])                       # resolves to final
+    build_super_rss([files[('base', 'green')]], stage='base')             # explicit choice
 
 
 def test_combine_cli_reports_instead_of_traceback(tmp, capsys):
@@ -721,3 +723,61 @@ def test_apply_fibre_astrometry_updates_in_place_only_for_matching_rows(tmp):
     with fits.open(p) as h:
         np.testing.assert_array_equal(h['FIBERWCS'].data['FIBER_ID'], h['FIBERMAP'].data['FIBER_ID'])
         assert [x.name for x in h][-1] == 'FIBERWCS'
+
+
+# ================================================================ step 6: the combiner picks the final stage
+def test_combiner_uses_the_final_stage_whichever_file_is_named(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    files = write_exposure(tmp, flam=True, per_stage={'ff_skysub': {'registered': True}})
+    sr = build_super_rss([files[('base', 'green')], files[('ff', 'red')]])  # one exposure
+    assert sr.n_exposures == 1 and sr.stage == 'ff_skysub'
+    assert sr.exposures[0].path == files[('ff_skysub', 'green')]
+    assert set(sr.channels) == {'blue', 'green', 'red'}
+    sr_base = build_super_rss([files[('ff_skysub', 'green')]], stage='base')
+    assert sr_base.stage == 'base' and sr_base.exposures[0].path == files[('base', 'green')]
+
+
+def test_combiner_dedups_long_and_consolidated_names(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    a = write_exposure(tmp, stages=('base',), flam=True)
+    other_dir = os.path.join(tmp, 'other')
+    os.makedirs(other_dir)
+    sr = build_super_rss([a[('base', 'green')], a[('base', 'red')], a[('base', 'blue')]])
+    assert sr.n_exposures == 1
+
+
+def test_combiner_resolves_channels_independently(tmp):
+    """A channel that never reached the sky framework is not silently dropped: the exposure is
+    refused as mixed-stage unless allowed, and then every channel is read."""
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    files = write_exposure(tmp, stages=('base', 'ff'), flam=True, fiberwcs=True)
+    write_rss(stage_name(tmp, 'green', 'ff_skysub'), stage='ff_skysub', flam=True)
+    with pytest.raises(MixedStageError):
+        build_super_rss([files[('base', 'green')]])
+    sr = build_super_rss([files[('base', 'green')]], allow_mixed_stage=True,
+                         allow_header_mismatch=True)
+    assert set(sr.channels) == {'blue', 'green', 'red'} and sr.stage == 'mixed'
+
+
+def test_discover_field_groups_by_exposure_any_stage(tmp):
+    from llamas_pyjamas.Combine.combineField import discover_field
+    files = write_exposure(tmp)
+    other = 'LLAMAS_2026-10-16_00-54-54.4_SCI24_mef_bias_corrected_flat_corrected_extract'
+    write_rss(os.path.join(tmp, f'{other}_RSS_red_FF.fits'), stage='ff', channel='red')
+    got = discover_field(tmp, 'TESTFIELD')
+    assert len(got) == 2
+    assert files[('base', 'green')] in got or files[('ff', 'green')] in got \
+        or files[('ff_skysub', 'green')] in got
+    assert discover_field(tmp, 'NOPE') == []
+
+
+def test_combine_cli_stage_option_and_named_stage_missing(tmp, capsys):
+    from llamas_pyjamas.Combine.combineField import main
+    files = write_exposure(tmp, stages=('base', 'ff'), flam=True, fiberwcs=True)
+    out = os.path.join(tmp, 'cube.fits')
+    assert main([files[('base', 'green')], '--cube', '--channels', 'green', '-o', out]) == 0
+    hdr = fits.getheader(out)
+    assert hdr['RSSSTAGE'] == 'ff' and hdr['PLANE'] == 'flam'
+    assert hdr['RSSFIL1'] == files[('ff', 'green')]
+    assert main([files[('base', 'green')], '--stage', 'ff_skysub', '-o', out]) == 2
+    assert 'ff_skysub' in capsys.readouterr().err

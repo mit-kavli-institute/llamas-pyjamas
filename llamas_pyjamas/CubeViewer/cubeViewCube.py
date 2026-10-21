@@ -370,7 +370,7 @@ class CoaddCubeScene(SpectralScene):
             from llamas_pyjamas.Combine.transparency import transparency_scales
             # Rebuild from exactly the recorded files, in the plane the cube was combined in
             # (a legacy cube's plane comes from its BUNIT); the safety checks ran at combine time.
-            sr = build_super_rss(paths, plane=ref_cube.meta.get('PLANE') or 'auto',
+            sr = build_super_rss(paths, plane=ref_cube.meta.get('PLANE') or 'auto', stage=None,
                                  check_stages=False, allow_mixed_stage=True)
             try:                                          # match the combine's photometric scaling
                 sr.apply_scales(transparency_scales(sr))
