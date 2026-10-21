@@ -90,6 +90,7 @@ def build_synthetic_rss(path, rng, with_common=True):
     # Build FITS.
     phdu = fits.PrimaryHDU()
     phdu.header["CHANNEL"] = "green"
+    phdu.header["FIBRFLAT"] = True      # an FF-stage file, as apply_fibre_flat_to_rss writes it
 
     def img(data, name):
         h = fits.ImageHDU(data.astype(np.float32))

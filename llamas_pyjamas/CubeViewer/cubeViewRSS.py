@@ -33,7 +33,6 @@ channel_siblings  Map a channel RSS path to all available channel paths
 
 import logging
 import os
-import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -48,7 +47,11 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import (
     SpectralScene,
     linear_wcs,
 )
-from llamas_pyjamas.File.llamasRSS import skysub_extname
+from llamas_pyjamas.File.llamasRSS import (  # noqa: F401 - CHANNEL_RE/channel_siblings re-exported
+    CHANNEL_RE,
+    channel_siblings,
+    skysub_extname,
+)
 from llamas_pyjamas.Utils.wcsLlamas import (
     ARCSEC_PER_FIBRE,
     celestial_wcs,
@@ -63,9 +66,6 @@ from llamas_pyjamas.Image.WhiteLightModule import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: Matches the channel token in e.g. ``..._extract_RSS_green_FF_SKYSUB.fits``.
-CHANNEL_RE = re.compile(r'(_RSS_)(blue|green|red)(?=[_.])')
 
 DEFAULT_PIX_PER_UNIT = 10
 
@@ -88,35 +88,6 @@ HEX_CIRCUMRADIUS = HEX_PITCH / np.sqrt(3.0)
 LATTICE_TOL = 1e-3 * HEX_PITCH
 
 FibreKey = Tuple[str, int]
-
-
-def channel_siblings(path: str) -> Dict[str, str]:
-    """Find every channel RSS belonging to the same exposure and processing stage.
-
-    Substitutes the channel token in the filename and keeps the files that exist, so
-    ``..._RSS_green_FF.fits`` finds ``..._RSS_blue_FF.fits`` and ``..._RSS_red_FF.fits`` but
-    never the un-flat-fielded or ``_SKYSUB`` variants — the suffix is part of the stem and is
-    preserved.
-
-    Returns
-    -------
-    dict
-        channel -> path, always including `path` itself. Falls back to ``{channel: path}``
-        when the name does not follow the convention.
-    """
-    directory, name = os.path.split(os.path.abspath(path))
-    match = CHANNEL_RE.search(name)
-    if match is None:
-        logger.warning("Filename %r does not match the _RSS_{channel} convention; "
-                       "loading it alone", name)
-        return {}
-
-    found: Dict[str, str] = {}
-    for channel in CHANNEL_ORDER:
-        sibling = os.path.join(directory, CHANNEL_RE.sub(rf'\g<1>{channel}', name))
-        if os.path.exists(sibling):
-            found[channel] = sibling
-    return found
 
 
 class RSSChannel:

@@ -26,9 +26,10 @@ CORRECTION_CLAMP = (0.2, 5.0)
 # Minimum reference flux to apply correction (below this → C_i = 1.0)
 MIN_REF_FLUX = 100.0
 
-# RSS MASK bitmask flags written by apply_fibre_flat_to_rss
-MASK_FLAT_LAMP_ONLY        = np.int16(1)  # benchside T_i derived from lamp, not twilight
-MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # fibre absent from FiberMap_LUT; gradient interpolated from benchside peers
+# RSS MASK bitmask flags written by apply_fibre_flat_to_rss (registry in File/llamasRSS.py)
+from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
+    MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
+from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1127,11 +1128,16 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                 tc = twi_counts[fid]
 
                 if tw is not None and np.any(np.isfinite(tw)):
-                    mask = (np.isfinite(tw) & (tw >= w_lo)
-                            & (tw <= w_hi) & (tc > 0))
-                    if np.sum(mask) > 10:
-                        all_integrals[(benchside_str, fid)] = np.nansum(
-                            tc[mask])
+                    # mean(valid) x N over the window: a zero-filled or non-finite sample
+                    # must not count as zero flux, or a fibre with partial coverage gets a
+                    # low T_i and is over-corrected. Needs >10 valid samples and >= half
+                    # the window; otherwise the fibre gets the benchside median (pass 2).
+                    no_data = ~np.isfinite(tc) | (tc == 0)
+                    val, _, frac = band_integral(tc, tw, no_data, w_lo, w_hi)
+                    n_valid = int(np.sum(np.isfinite(tw) & (tw >= w_lo) & (tw <= w_hi)
+                                         & ~no_data))
+                    if n_valid > 10 and np.isfinite(val[0]):
+                        all_integrals[(benchside_str, fid)] = float(val[0])
 
         channel_integrals[channel] = all_integrals
         logger.info(f"  {channel}: gathered {len(all_integrals)} twilight "
@@ -1255,14 +1261,28 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         # ── Combine C_i = T_i × W_i ──
         fid_to_row = {fid: idx for idx, fid in enumerate(fiber_ids)}
         fibre_flags = np.zeros(len(fiber_ids), dtype=np.int16)
+        # Fibres without their own twilight integral (too little valid data) take the
+        # benchside median T_i and are flagged, rather than a silent T_i = 1.0, which is
+        # off by the benchside's lamp offset.
+        ti_fallback = float(np.median(list(t_i.values()))) if t_i else 1.0
+        n_fallback = 0
         for fid in fiber_ids:
             idx = fid_to_row[fid]
-            ti = t_i.get(fid, 1.0)
+            ti = t_i.get(fid)
+            if ti is None:
+                ti = ti_fallback
+                n_fallback += 1
+                fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
             corr_arr[idx] = ti * w_arr[idx]
             if ext_name in lamp_only_benchsides:
                 fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
             if (benchside_str, fid) in all_unmapped_keys:
                 fibre_flags[idx] |= MASK_UNMAPPED_FIBRE_INTERP
+
+        if n_fallback and ext_name not in lamp_only_benchsides:
+            logger.warning(f"  {ext_name}: {n_fallback} fibre(s) without a usable twilight "
+                           f"integral take the benchside median T_i = {ti_fallback:.4f} "
+                           f"(flagged MASK_FLAT_LAMP_ONLY)")
 
         # Clamp
         corr_arr = np.clip(corr_arr, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
@@ -1430,6 +1450,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
     with fits.open(rss_file) as hdul:
         from llamas_pyjamas.File.llamasRSS import skysub_extname
+        if bool(hdul[0].header.get('FIBRFLAT', False)):
+            # e.g. a consolidated {exposure}_RSS_{channel}.fits picked up on a resumed run:
+            # flat-fielding it again would divide by C_i twice.
+            raise RSSStageError(f'{os.path.basename(rss_file)} is already fibre-flat-fielded '
+                                f'(FIBRFLAT=True); refusing to apply the fibre flat again')
         sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         channel = hdul[0].header.get('CHANNEL', 'unknown').lower()
 
@@ -1467,6 +1492,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
             if ext_name not in corr_lookup:
                 logger.debug(f"Row {row_idx}: no corrections for {ext_name}")
+                mask_data[row_idx, :] |= MASK_NOT_FLAT_FIELDED
                 n_skipped += 1
                 continue
 
@@ -1478,6 +1504,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             if not np.any(match_mask):
                 logger.debug(f"Row {row_idx}: FIBER_ID {fid} not in "
                              f"corrections for {ext_name}")
+                mask_data[row_idx, :] |= MASK_NOT_FLAT_FIELDED
                 n_skipped += 1
                 continue
 
@@ -1533,6 +1560,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
         logger.info(f"Applied fibre flat to {n_applied}/{flux.shape[0]} fibres "
                     f"({n_skipped} skipped)")
+        if n_skipped:
+            # Their flux stays on the un-flattened scale, so they are flagged bad, not
+            # silently mixed in with the corrected fibres.
+            logger.warning(f"{os.path.basename(rss_file)}: {n_skipped} fibre(s) had no fibre-flat "
+                           f"correction; flagged MASK_NOT_FLAT_FIELDED")
 
         # Write output RSS with corrected flux/error
         out_hdul = fits.HDUList()
@@ -1543,6 +1575,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         primary.header['FFLATFIL'] = (os.path.basename(corrections_file),
                                       'Fibre flat corrections file')
         primary.header['FFMETHD'] = (corr_method, 'Fibre flat method')
+        primary.header['RSSSTAGE'] = ('ff', 'RSS processing stage (see rss_stage)')
         primary.header['HISTORY'] = (f'Fibre flat applied: {n_applied} fibres '
                                      f'corrected ({corr_method})')
         out_hdul.append(primary)
@@ -1575,6 +1608,21 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                 out_hdul.append(hdul[ext_name_copy].copy())
             except KeyError:
                 pass
+
+        # FIBERWCS (per-fibre positions + astrometry provenance) carries forward so the FF
+        # stages keep it; it is keyed row-for-row to FIBERMAP, so check that before copying.
+        # NOFLAT is deliberately dropped: a diagnostic plane that is neither flat- nor
+        # pedestal-corrected.
+        if 'FIBERWCS' in hdul:
+            fw = hdul['FIBERWCS'].data
+            same_rows = (len(fw) == len(fibermap)
+                         and np.array_equal(np.asarray(fw['FIBER_ID']), np.asarray(fiber_ids))
+                         and np.array_equal(np.char.strip(np.asarray(fw['BENCHSIDE']).astype(str)),
+                                            benchsides))
+            if not same_rows:
+                raise RSSStageError(f'{os.path.basename(rss_file)}: FIBERWCS rows do not match '
+                                    f'FIBERMAP (FIBER_ID/BENCHSIDE); not carrying it forward')
+            out_hdul.append(hdul['FIBERWCS'].copy())
 
         out_hdul.writeto(output_file, overwrite=True)
         logger.info(f"FF RSS written: {output_file}")

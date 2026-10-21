@@ -36,6 +36,8 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
+from llamas_pyjamas.File.llamasRSS import (RSS_STAGE_RANK, RSS_STAGE_RE, exposure_id,
+                                           rss_stage, write_rss_manifest)
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger, find_trace_pickle
@@ -1627,30 +1629,9 @@ def _frame_label(science_file):
     return os.path.splitext(base)[0][:24]
 
 
-def _exposure_id(name):
-    """The bare exposure identifier ``LLAMAS_<date>_<time>`` for a frame.
-
-    Everything from the exposure-type marker (``_SCI##`` / ``_CAL##``) onward — including the
-    whole processing chain (``_mef_bias_corrected_flat_corrected_extract`` …) — is dropped, so
-    the same id is recovered from a raw file, any intermediate product, or the consolidated
-    RSS. This is what the consolidated RSS is named after and what resume detection keys on;
-    the exposure timestamp is unique, so it identifies the frame on its own. Falls back to the
-    old stem (extension + trailing ``_mef`` stripped) when no type marker is present.
-    """
-    stem = os.path.basename(str(name))
-    m = re.match(r'^(.*?)_(?:SCI|CAL)\d', stem)
-    if m:
-        return m.group(1)
-    # Strip only a real FITS extension -- NOT os.path.splitext, which would eat the fractional
-    # second of a timestamp (e.g. '..._23-21-07.7' -> '..._23-21-07'). That decimal must be kept
-    # so it matches the raw frames and the consolidated name is stable across re-runs.
-    for _ext in ('.fits.gz', '.fits', '.fit'):
-        if stem.lower().endswith(_ext):
-            stem = stem[:-len(_ext)]
-            break
-    if stem.endswith('_mef'):
-        stem = stem[:-len('_mef')]
-    return stem
+#: The bare exposure identifier ``LLAMAS_<date>_<time>`` of a frame (see
+#: :func:`llamas_pyjamas.File.llamasRSS.exposure_id`, where the stage contract lives).
+_exposure_id = exposure_id
 
 
 def _science_stem(science_file):
@@ -1677,19 +1658,22 @@ def _has_rss_product(extraction_dir, stem):
     return False
 
 
-#: RSS correction-stage suffixes, least to most corrected. The consolidator keeps the most
-#: corrected file per (frame, channel) and drops the earlier stages.
-_RSS_STAGE_RANK = {'': 0, '_FF': 1, '_FF_SKYSUB': 2}
-_RSS_STAGE_RE = re.compile(r'^(.*)_RSS_(blue|green|red)(_FF(?:_SKYSUB)?)?\.fits$')
+#: RSS correction-stage suffixes, least to most corrected (shared with the post-processing tools
+#: through :mod:`llamas_pyjamas.File.llamasRSS`). The consolidator keeps the most corrected file
+#: per (frame, channel) and drops the earlier stages.
+_RSS_STAGE_RANK = RSS_STAGE_RANK
+_RSS_STAGE_RE = RSS_STAGE_RE
 
 
 def consolidate_rss_files(extraction_dir, keep_intermediate=False):
     """Collapse the per-stage RSS files to one per (frame, channel).
 
     The extract / fibre-flat (_FF) / sky-subtracted (_FF_SKYSUB) stages each write a
-    progressively-corrected RSS with the same HDU layout, so on disk there are up to three
-    files per channel. This keeps the most-corrected one, deletes the earlier stages, and
-    renames the survivor to the clean ``{base}_RSS_{color}.fits`` (dropping the stage suffix).
+    progressively-corrected RSS, so on disk there are up to three files per channel. Their HDU
+    layouts differ: the fibre flat drops NOFLAT, and the sky framework adds SKYRESID/SKYMASK.
+    This keeps the most-corrected one, deletes the earlier stages, and renames the survivor to
+    the clean ``{base}_RSS_{color}.fits`` (dropping the stage suffix, so the stage then lives
+    only in the headers -- see ``llamasRSS.rss_stage``).
 
     Must run AFTER cube construction, which reads the _FF / _FF_SKYSUB files. With
     `keep_intermediate` (config ``keep_intermediate_rss``) nothing is touched.
@@ -1734,6 +1718,40 @@ def consolidate_rss_files(extraction_dir, keep_intermediate=False):
 
 
 _WHITELIGHT_RE = re.compile(r'^(.*)_whitelight\.fits$')
+
+
+def _base_stage_rss(extraction_dir, note=None):
+    """Base-stage RSS files in ``extraction_dir``: the inputs of the pedestal and the fibre flat.
+
+    Candidates are suffix-less per-channel RSS names (plus the single-channel ``_RSS.fits``);
+    their headers decide (``rss_stage``). A suffix-less file at a later stage -- the consolidated
+    ``{exposure}_RSS_{channel}.fits`` of an earlier run -- is kept as it is, because flat-fielding
+    it again would divide by C_i twice; that is printed and passed to ``note(path, msg)`` so the
+    manifest records it. Derived files (``_EMPSKY`` and the like) are never candidates.
+    """
+    out = []
+    if not os.path.isdir(extraction_dir):
+        return out
+    for fname in sorted(os.listdir(extraction_dir)):
+        m = RSS_STAGE_RE.match(fname)
+        if not ((m is not None and not m.group(3)) or fname.endswith('_RSS.fits')):
+            continue
+        full = os.path.join(extraction_dir, fname)
+        try:
+            stage = rss_stage(full)
+        except Exception as exc:                                  # noqa: BLE001
+            logger.warning(f"Cannot determine the stage of {fname}: {exc}; not processed")
+            if note:
+                note(full, f'not processed: stage unreadable ({exc})')
+            continue
+        if stage == 'base':
+            out.append(full)
+        else:
+            print(f"Keeping existing {stage} file {fname}; not regenerated "
+                  f"(already processed by an earlier run).")
+            if note:
+                note(full, f'kept existing {stage} file; not regenerated')
+    return out
 
 
 def consolidate_whitelight_files(extraction_dir, keep_intermediate=False):
@@ -2244,6 +2262,12 @@ def main(config_path):
 
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
     # No need to pre-create a separate pixel_maps directory
+    # What this run wrote and kept, per RSS file, for rss_manifest.json (see write_rss_manifest).
+    _run_record = {'written': set(), 'notes': {}}
+
+    def _note(path, msg):
+        _run_record['notes'].setdefault(os.path.basename(path), []).append(msg)
+
     try:
         reporter.phase("🔦", "Tracing fibres")
 
@@ -3174,6 +3198,7 @@ def main(config_path):
             # Updating RA and Dec in RSS files
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+                _run_record['written'].add(os.path.basename(rss_output_file))
 
             # Free wavelength-corrected extractions to reduce memory pressure
             del corr_extractions, corr_extraction_list
@@ -3197,11 +3222,17 @@ def main(config_path):
         # per-run counts/sec template (or config/shipped fallback) and applies it idempotently.
         if config.get('sky_subtract', True) and config.get('sky_pedestal', False):
             from llamas_pyjamas.Sky.skyPedestal import run_pedestal_stage
-            _ped_rss = [
-                os.path.join(extraction_path, f)
-                for f in os.listdir(extraction_path)
-                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
-            ]
+            _ped_rss = []
+            for _f in _base_stage_rss(extraction_path, _note):
+                _ff = _f.replace('.fits', '_FF.fits')
+                if resume and os.path.exists(_ff):
+                    # Its FF (and FF_SKYSUB) were made without this pedestal; changing only
+                    # the base file now would leave the stages holding different data.
+                    print(f"RESUME: pedestal not applied to {os.path.basename(_f)} -- its _FF "
+                          f"already exists (set clobber=true to redo the chain).")
+                    _note(_f, 'pedestal skipped: downstream stage exists')
+                    continue
+                _ped_rss.append(_f)
             if _ped_rss:
                 print(f"Applying run-level continuum pedestal to {len(_ped_rss)} RSS files "
                       f"(scope={config.get('sky_pedestal_scope', 'slit')})...")
@@ -3220,11 +3251,7 @@ def main(config_path):
             # RSS files that still need a fibre-flat product. On resume, drop any
             # that already have their _FF.fits so the (expensive) twilight
             # reduction below is skipped entirely when nothing is pending.
-            _rss_all = [
-                os.path.join(extraction_path, f)
-                for f in os.listdir(extraction_path)
-                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
-            ]
+            _rss_all = _base_stage_rss(extraction_path, _note)
             if resume:
                 _rss_pending = [r for r in _rss_all
                                 if not os.path.exists(r.replace('.fits', '_FF.fits'))]
@@ -3354,6 +3381,7 @@ def main(config_path):
                     ff_output = rss_file.replace('.fits', '_FF.fits')
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
                                            ff_output)
+                    _run_record['written'].add(os.path.basename(ff_output))
                     print(f"  FF RSS: {os.path.basename(ff_output)}")
             else:
                 print("WARNING: Smooth models file not found — "
@@ -3386,6 +3414,11 @@ def main(config_path):
                 print("=" * 60)
                 sky_cfg = SkySubtractConfig.from_pipeline_config(config)
                 skysub_files = subtract_sky_all_colors(ff_for_sky, config=sky_cfg)
+                _run_record['written'].update(os.path.basename(sf) for sf in skysub_files)
+                _made = {os.path.basename(sf) for sf in skysub_files}
+                for _ff in ff_for_sky:
+                    if os.path.basename(_ff.replace('_FF.fits', '_FF_SKYSUB.fits')) not in _made:
+                        _note(_ff, 'sky framework failed (see log); no _FF_SKYSUB')
                 for sf in skysub_files:
                     print(f"  SKYSUB RSS: {os.path.basename(sf)}")
                 logger.info(f"Sky framework produced: {skysub_files}")
@@ -3475,6 +3508,15 @@ def main(config_path):
         for _action, _detail in consolidate_rss_files(
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"RSS consolidation: {_action} {_detail}")
+            if _action == 'renamed':
+                _old, _new = [x.strip() for x in _detail.split('->')]
+                if _old in _run_record['written']:
+                    _run_record['written'].add(_new)
+                _run_record['notes'].setdefault(_new, []).extend(
+                    _run_record['notes'].get(_old, []))
+        _manifest = write_rss_manifest(extraction_path, _run_record)
+        if _manifest:
+            print(f"RSS manifest: {_manifest}")
 
         # Rename the per-exposure pipeline white-light to {exposure_id}_whitelight_fullpipeline.fits
         # -- distinct from the telescope quicklook's {timestamp}_whitelight.fits (left untouched).

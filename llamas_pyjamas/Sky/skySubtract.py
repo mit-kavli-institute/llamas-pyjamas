@@ -85,7 +85,13 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
                 os.path.basename(ff_fits), os.path.basename(output_file), color)
 
     with fits.open(ff_fits) as hdul:
-        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        from llamas_pyjamas.File.llamasRSS import RSSStageError, rss_stage, skysub_extname
+        stage = rss_stage(hdul)
+        if stage != 'ff':
+            # The framework refines the fibre-flat stage; on base data it would produce a
+            # file that is no pipeline stage, and on its own output it would apply twice.
+            raise RSSStageError(f"{os.path.basename(ff_fits)} is at stage {stage!r}; the sky "
+                                f"framework needs a fibre-flat ('ff') RSS")
         sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         flux = _get_data(hdul, sky_plane)
         if flux is None:
@@ -136,6 +142,7 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         # --- assemble output, copying every input extension ---
         out = fits.HDUList([h.copy() for h in hdul])
+        out[0].header["RSSSTAGE"] = ("ff_skysub", "RSS processing stage (see rss_stage)")
         out[sky_plane].data = flux_out
         out[sky_plane].header["SKYSUB2"] = (True, "Sky framework refinement applied")
         for key, val in config.to_header_dict().items():
