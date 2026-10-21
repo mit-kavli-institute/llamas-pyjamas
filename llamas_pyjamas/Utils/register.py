@@ -91,14 +91,16 @@ def query_gaia(ra_deg, dec_deg, radius_arcsec=45.0, mag_limit=20.5, timeout=60, 
 
 
 def per_fibre_flux(hdul, band=None):
-    """Per-fibre collapsed flux from an RSS HDUList (SKYSUB summed over `band` (lo,hi) A)."""
-    from llamas_pyjamas.File.llamasRSS import skysub_extname
+    """Per-fibre collapsed flux from an RSS HDUList: SKYSUB integrated over ``band`` (lo, hi) A,
+    or the whole fibre. Masked / zero-count pixels do not count as zero flux (they would make a
+    partly-covered fibre read faint and pull a centroid off it); it is the same computation as
+    the viewer's fibre totals. NaN where a fibre has too little good data."""
+    from llamas_pyjamas.File.llamasRSS import bad_pixel_mask, skysub_extname
+    from llamas_pyjamas.Utils.maskedSums import fibre_band_flux
     flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
     wave = np.asarray(hdul['WAVE'].data, dtype=float)
-    if band is not None:
-        lo, hi = band
-        flux = np.where((wave >= lo) & (wave <= hi), flux, np.nan)
-    return np.nansum(flux, axis=1)
+    lo, hi = band if band is not None else (-np.inf, np.inf)
+    return fibre_band_flux(flux, wave, bad_pixel_mask(hdul), lo, hi)
 
 
 def _fibre_xy(fiber_ids, benchsides):

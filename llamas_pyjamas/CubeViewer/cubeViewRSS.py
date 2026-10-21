@@ -49,9 +49,11 @@ from llamas_pyjamas.CubeViewer.cubeViewScene import (
 )
 from llamas_pyjamas.File.llamasRSS import (  # noqa: F401 - CHANNEL_RE/channel_siblings re-exported
     CHANNEL_RE,
+    bad_pixel_mask,
     channel_siblings,
     skysub_extname,
 )
+from llamas_pyjamas.Utils.maskedSums import complete_sum, fibre_band_flux
 from llamas_pyjamas.Utils.wcsLlamas import (
     ARCSEC_PER_FIBRE,
     celestial_wcs,
@@ -99,8 +101,9 @@ class RSSChannel:
         'blue', 'green' or 'red'.
     flux, wave : ndarray
         Shape (nfibre, nwave). `wave` is per-fibre, in Angstrom.
-    mask : ndarray or None
-        Shape (nfibre, nwave), non-zero where bad.
+    mask : ndarray
+        Shape (nfibre, nwave), bool, True where the pixel must not be used (the shared
+        :func:`~llamas_pyjamas.File.llamasRSS.bad_pixel_mask`: bad MASK bits, zero-count pixels).
     keys : list of (str, int)
         Row -> (benchside, fibre id).
     index : dict
@@ -119,7 +122,7 @@ class RSSChannel:
             self.primary_header = header.copy()
             self.flux = np.asarray(hdul[skysub_extname(hdul)].data, dtype=float)
             self.wave = np.asarray(hdul['WAVE'].data, dtype=float)
-            self.mask = (np.asarray(hdul['MASK'].data) if 'MASK' in hdul else None)
+            self.mask = bad_pixel_mask(hdul)
             # Flux-calibrated plane, present only after apply_fluxcal has run on this RSS.
             self.flam = (np.asarray(hdul['FLAM'].data, dtype=float) if 'FLAM' in hdul else None)
 
@@ -148,27 +151,20 @@ class RSSChannel:
         return float(finite.min()), float(finite.max())
 
     def collapse_fibres(self, wave_min: float, wave_max: float) -> np.ndarray:
-        """Sum each fibre's flux over a wavelength window.
+        """Integrate each fibre's flux over a wavelength window.
 
         The window is applied per fibre against that fibre's own wavelength array, which is
         what the 2-D WAVE extension requires — a shared column slice would be wrong, since
-        fibres are not on a common grid.
+        fibres are not on a common grid. It is clipped to the channel's common coverage and
+        masked pixels do not count as zero flux (:func:`~llamas_pyjamas.Utils.maskedSums.
+        fibre_band_flux`, the same function registration uses).
 
         Returns
         -------
         ndarray
-            One value per row; NaN where a fibre has no samples in the window.
+            One value per row; NaN where a fibre has too little data in the window.
         """
-        inside = (self.wave >= wave_min) & (self.wave <= wave_max)
-        if self.mask is not None:
-            inside &= (self.mask == 0)
-        selected = np.where(inside, self.flux, np.nan)
-        with np.errstate(invalid='ignore'):
-            totals = np.nansum(selected, axis=1)
-        # nansum gives 0.0 for an all-NaN row; that is a fibre with no data in the window,
-        # which must stay distinguishable from a genuine zero flux.
-        totals[~np.any(inside, axis=1)] = np.nan
-        return totals
+        return fibre_band_flux(self.flux, self.wave, self.mask, wave_min, wave_max)
 
     def spectrum(self, key: FibreKey) -> Optional[Spectrum]:
         """This channel's spectrum for a fibre, or None if the fibre is absent here."""
@@ -181,7 +177,7 @@ class RSSChannel:
             flux=self.flux[row],
             channel=self.channel,
             label=f'{benchside} fibre {fibre_id}',
-            mask=(self.mask[row] != 0) if self.mask is not None else None,
+            mask=self.mask[row],
             flam=(self.flam[row] if self.flam is not None else None),
         )
 
@@ -309,12 +305,16 @@ class RSSScene(SpectralScene):
 
     def _fibre_totals(self, wave_min: float, wave_max: float,
                       wanted: Sequence[str]) -> Tuple[np.ndarray, Dict[str, int]]:
-        """Per-fibre flux summed over the window, aligned to ``self.keys``/``self.positions``,
-        plus the per-channel contributing-fibre counts. Shared by :meth:`collapse` (which tiles
-        it into an image) and :meth:`fibre_flux` (which hands it to the centroider)."""
-        totals = np.full(len(self.keys), np.nan, dtype=float)
-        contributions: Dict[str, int] = {}
+        """Per-fibre flux over the window, aligned to ``self.keys``/``self.positions``, plus the
+        per-channel contributing-fibre counts. Shared by :meth:`collapse` (which tiles it into an
+        image) and :meth:`fibre_flux` (which hands it to the centroider).
+
+        A fibre's total is the sum over the channels that cover the window, and only when it has
+        a value in EVERY such channel: a fibre missing from one channel would otherwise read low
+        and pull a centroid away from it."""
         row_of = {key: i for i, key in enumerate(self.keys)}
+        per_channel = []
+        contributions: Dict[str, int] = {}
         for name in wanted:
             channel = self._channels.get(name)
             if channel is None:
@@ -325,15 +325,22 @@ class RSSScene(SpectralScene):
                              name, wave_min, wave_max)
                 continue
             values = channel.collapse_fibres(wave_min, wave_max)
-            used = 0
+            if not np.isfinite(values).any():
+                # The window only touches this channel outside its common coverage.
+                logger.debug('%s has no usable coverage in %.1f-%.1f A; skipped',
+                             name, wave_min, wave_max)
+                continue
+            aligned = np.full(len(self.keys), np.nan, dtype=float)
             for row, key in enumerate(channel.keys):
                 target = row_of.get(key)
-                if target is None or not np.isfinite(values[row]):
-                    continue
-                totals[target] = (values[row] if np.isnan(totals[target])
-                                  else totals[target] + values[row])
-                used += 1
-            contributions[name] = used
+                if target is not None:
+                    aligned[target] = values[row]
+            per_channel.append(aligned)
+            contributions[name] = int(np.isfinite(aligned).sum())
+        if not per_channel:
+            return np.full(len(self.keys), np.nan, dtype=float), contributions
+        stack = np.vstack(per_channel)
+        totals, _ = complete_sum(stack, ~np.isfinite(stack))
         return totals, contributions
 
     def fibre_flux(self, wave_min: float, wave_max: float,

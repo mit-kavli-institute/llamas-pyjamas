@@ -498,11 +498,17 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         outfile = rss_file.replace('.fits', '_whitelight.fits')
 
     with fits.open(rss_file) as hdul:
-        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        from llamas_pyjamas.File.llamasRSS import bad_pixel_mask, skysub_extname
+        from llamas_pyjamas.Utils.maskedSums import fibre_band_flux
         flux     = hdul[skysub_extname(hdul)].data   # sky-subtracted plane (SKYSUB, or FLUX pre-rename)
         wave     = hdul['WAVE'].data          # shape: (n_fibers, n_wave)
         fibermap = hdul['FIBERMAP'].data
         channel  = hdul[0].header.get('CHANNEL', 'UNKNOWN')
+        # Per-fibre band flux with masked / zero-count pixels not counted as zero (the same
+        # computation as the viewer and registration); NaN where a fibre has too little data.
+        band_flux = fibre_band_flux(flux, wave, bad_pixel_mask(hdul),
+                                    -np.inf if wave_min is None else wave_min,
+                                    np.inf if wave_max is None else wave_max)
 
     fiber_ids  = fibermap['FIBER_ID']
     benchsides = fibermap['BENCHSIDE']
@@ -519,14 +525,7 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         except Exception:
             continue
 
-        fiber_wave = wave[i, :]
-        mask = np.ones(fiber_wave.shape, dtype=bool)
-        if wave_min is not None:
-            mask &= fiber_wave >= wave_min
-        if wave_max is not None:
-            mask &= fiber_wave <= wave_max
-
-        thisflux = np.nansum(flux[i, mask])
+        thisflux = band_flux[i]
         xdata = np.append(xdata, x)
         ydata = np.append(ydata, y)
         fdata = np.append(fdata, thisflux)
@@ -540,7 +539,8 @@ def WhiteLightFromRSS(rss_file: str, outfile: str = None,
         whitelight, hex_header = hex_tile_image(xdata, ydata, fdata,
                                                 pix_per_unit=pix_per_unit)
     else:
-        flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), fdata,
+        fin = np.isfinite(fdata)
+        flux_interpolator = LinearNDInterpolator(list(zip(xdata[fin], ydata[fin])), fdata[fin],
                                                  fill_value=np.nan)
         x_grid, y_grid = whitelight_grid()
         whitelight = flux_interpolator(x_grid, y_grid)

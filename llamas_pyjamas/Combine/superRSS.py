@@ -45,6 +45,8 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 from astropy.io import fits
 
+from llamas_pyjamas.Utils.maskedSums import MIN_VALID_FRAC, band_integral, common_coverage
+
 logger = logging.getLogger(__name__)
 
 CHANNELS = ('blue', 'green', 'red')
@@ -146,23 +148,30 @@ class SuperRSS:
         return [c for c in channels if c in self.channels]
 
     def collapse_band(self, wave_min: float, wave_max: float,
-                      channels: Optional[Sequence[str]] = None) -> FibreTable:
-        """Collapse every fibre to its summed flux over ``[wave_min, wave_max]`` in its OWN frame
-        (no cross-fibre resampling), for the image co-add. A fibre whose channel/coverage misses
-        the window contributes nothing (dropped). Variance adds in quadrature over the window."""
+                      channels: Optional[Sequence[str]] = None, *,
+                      min_frac: float = MIN_VALID_FRAC) -> FibreTable:
+        """Collapse every fibre to its integrated flux over ``[wave_min, wave_max]`` in its OWN
+        frame (no cross-fibre resampling), for the image co-add.
+
+        The integral is ``mean(valid) * N`` over the window clipped to the channel's common
+        coverage (:func:`~llamas_pyjamas.Utils.maskedSums.band_integral`): a masked pixel never
+        counts as zero flux, so a fibre with masked pixels in the window is not biased low (and,
+        under ivar weighting, not up-weighted for it). A fibre with less than ``min_frac`` of the
+        window valid, or whose coverage misses it, is dropped. Variance is
+        ``(N/n)^2 * sum(var_valid)``; ``npix`` is the valid count n."""
         want = self._resolve_channels(channels)
         ras, decs, vals, vars, oms, exps, chs, npix = ([] for _ in range(8))
         for c in want:
             st = self.channels[c]
-            inside = (st.wave >= wave_min) & (st.wave <= wave_max) & (~st.mask)
-            n = inside.sum(axis=1)
-            keep = n > 0                              # fibres with any good pixel in the window
+            common = common_coverage(st.wave, ~st.mask & np.isfinite(st.flux))
+            bi = band_integral(st.flux, st.wave, st.mask, wave_min, wave_max, var=st.var,
+                               common=common, min_frac=min_frac)
+            keep = np.isfinite(bi.value)
             if not keep.any():
                 continue
-            fsum = np.where(inside, st.flux, 0.0).sum(axis=1)
-            vsum = np.where(inside, st.var, 0.0).sum(axis=1)
+            n = bi.n
             ras.append(st.ra[keep]); decs.append(st.dec[keep])
-            vals.append(fsum[keep]); vars.append(vsum[keep])
+            vals.append(bi.value[keep]); vars.append(bi.var[keep])
             oms.append(st.solid_angle[keep]); exps.append(st.exposure[keep])
             npix.append(n[keep])
             chs.append(np.full(int(keep.sum()), c))
@@ -236,12 +245,13 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
     so without this an ivar co-add cannot down-weight sky-line wavelengths and their residuals
     stack. The SKYRESID/ERROR ratio is plane-independent (the sensfunc cancels), so this is correct
     for both FLAM and SKYSUB planes."""
+    from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
     flux = np.asarray(hdul[flux_ext].data, dtype=np.float32)
     err = np.asarray(hdul[err_ext].data, dtype=np.float32)
     wave = np.asarray(hdul['WAVE'].data, dtype=np.float64)
-    mask = np.zeros(flux.shape, dtype=bool)
-    if 'MASK' in hdul:
-        mask |= np.asarray(hdul['MASK'].data) != 0
+    # The shared rule (bad MASK bits, zero-count pixels); the fibre-flat informational bits
+    # leave a pixel usable.
+    mask = bad_pixel_mask(hdul)
     mask |= ~np.isfinite(flux) | ~np.isfinite(err) | (err <= 0) | ~np.isfinite(wave)
     var = np.where(mask, np.inf, err.astype(np.float64) ** 2)
 

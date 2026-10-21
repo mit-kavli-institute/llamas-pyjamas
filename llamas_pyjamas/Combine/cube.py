@@ -41,6 +41,7 @@ from astropy.wcs import WCS
 from scipy.sparse import coo_matrix
 
 from llamas_pyjamas.Combine.coadd import _kernel, make_output_grid, _coverage_bool
+from llamas_pyjamas.Utils.maskedSums import band_integral, resample_bad
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +104,17 @@ def _wave_grid(st, dwave, wave_range):
 def _resample_fibres(st, wl, units):
     """Resample every fibre onto the common wave grid ``wl``. Returns (x, V, bad) each (N, nw):
     x = flux (or SB), V = variance, bad = no-data (outside the fibre's coverage or masked). The one
-    spectral resample -- linear interp, so mildly non-flux-conserving (documented)."""
+    spectral resample -- linear interp, so mildly non-flux-conserving (documented).
+
+    Interpolation bridges a single masked native pixel (a cosmic ray, a lone zero-count sample),
+    but a run of two or more stays bad on the output grid: filling it would invent data."""
     n, nw = st.n_fibres, wl.size
     x = np.zeros((n, nw), np.float32)
     V = np.full((n, nw), np.inf, np.float64)
     for i in range(n):
-        m = (~st.mask[i]) & np.isfinite(st.wave[i]) & np.isfinite(st.flux[i]) & np.isfinite(st.var[i])
+        fin_w = np.isfinite(st.wave[i])
+        b = st.mask[i] | ~fin_w | ~np.isfinite(st.flux[i]) | ~np.isfinite(st.var[i])
+        m = ~b
         if m.sum() < 2:
             continue
         wv = st.wave[i][m]
@@ -116,7 +122,13 @@ def _resample_fibres(st, wl, units):
         wv = wv[order]
         fi = np.interp(wl, wv, st.flux[i][m][order], left=np.nan, right=np.nan)
         vi = np.interp(wl, wv, st.var[i][m][order], left=np.inf, right=np.inf)
-        cov = np.isfinite(fi)
+        # wide gaps: a bad native pixel next to another bad one (in wavelength order)
+        o_all = np.argsort(np.where(fin_w, st.wave[i], np.inf))
+        bo = b[o_all]
+        wide = bo & (np.r_[bo[1:], True] | np.r_[True, bo[:-1]])
+        keep = fin_w[o_all]
+        gap = resample_bad(wl, st.wave[i][o_all][keep], wide[keep])
+        cov = np.isfinite(fi) & ~gap
         x[i, cov] = fi[cov]
         V[i, cov] = vi[cov]
     bad = ~np.isfinite(x) | ~np.isfinite(V) | (V <= 0)
@@ -221,15 +233,19 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
         data = S.dot(wx) / den
         var = S2.dot(w2V) / den ** 2
 
-    coverage = np.asarray((S > 0).sum(axis=1)).ravel().astype(np.int64)
+    # Depth maps count only fibres that carry data in this channel: a fully-masked fibre adds
+    # no information, and counting it would overstate coverage (and under-apply COVFRAC).
+    has_data = ~bad.all(axis=1)
+    coverage = np.asarray((S[:, has_data] > 0).sum(axis=1)).ravel().astype(np.int64)
     below = coverage < min_coverage
     data[below, :] = np.nan
     var[below, :] = np.nan
 
     nexp = np.zeros(npix, dtype=np.int32)
     for e in np.unique(st.exposure):
-        sel = st.exposure == e
-        nexp += _coverage_bool(px[sel], py[sel], r, ny, nx).astype(np.int32).ravel()
+        sel = (st.exposure == e) & has_data
+        if sel.any():
+            nexp += _coverage_bool(px[sel], py[sel], r, ny, nx).astype(np.int32).ravel()
     nexp[below] = 0
 
     # to (nw, ny, nx)
@@ -268,12 +284,24 @@ def narrowband_image(cube, line_wave, *, half_width=5.0, cont_half_width=None, c
     if not line_sl.any():
         raise ValueError(f'line window {line_wave}+-{hw} A outside cube {wl[0]:.0f}-{wl[-1]:.0f}')
     line_w = int(line_sl.sum()) * dw
-    with np.errstate(invalid='ignore'):
-        line_int = np.nansum(cube.data[line_sl], axis=0) * dw
-        vline = np.nansum(cube.var[line_sl], axis=0) * dw ** 2
+    ny, nx = cube.data.shape[1:]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        # Line integral per spaxel: mean of the valid planes x the window (a NaN plane must not
+        # count as zero line flux); NaN below the minimum valid fraction.
+        flat_d = cube.data.reshape(wl.size, -1).T
+        flat_v = cube.var.reshape(wl.size, -1).T
+        bi = band_integral(flat_d, wl, ~np.isfinite(flat_d) | ~np.isfinite(flat_v),
+                           line_wave - hw, line_wave + hw, var=flat_v)
+        line_int = (bi.value * dw).reshape(ny, nx)
+        vline = (bi.var * dw ** 2).reshape(ny, nx)
         if cont_sl.any():
-            cont = np.nanmean(cube.data[cont_sl], axis=0)
-            vcont = np.nansum(cube.var[cont_sl], axis=0) / max(int(cont_sl.sum()), 1) ** 2
+            cd, cv = cube.data[cont_sl], cube.var[cont_sl]
+            cvalid = np.isfinite(cd) & np.isfinite(cv)
+            ncont = cvalid.sum(axis=0)
+            cont = np.where(ncont > 0, np.where(cvalid, cd, 0.0).sum(axis=0) / np.maximum(ncont, 1),
+                            np.nan)
+            vcont = np.where(ncont > 0, np.where(cvalid, cv, 0.0).sum(axis=0) /
+                             np.maximum(ncont, 1) ** 2, np.nan)
         else:
             cont = np.zeros(cube.data.shape[1:])
             vcont = np.zeros(cube.data.shape[1:])

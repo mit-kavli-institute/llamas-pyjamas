@@ -29,7 +29,7 @@ def _one_channel_super(stack):
     return SuperRSS(field='T', plane='skysub', bunit='counts', exposures=[], channels={stack.channel: stack})
 
 
-def test_collapse_band_sums_window_and_respects_mask():
+def test_collapse_band_integrates_window_without_zero_filling_masked_pixels():
     wave = np.tile([5000, 5001, 5002, 5003, 5004], (3, 1))
     flux = np.array([[1, 2, 3, 4, 5],       # fibre 0: clean
                      [10, 10, 10, 10, 10],  # fibre 1: pixel @5002 masked
@@ -43,8 +43,10 @@ def test_collapse_band_sums_window_and_respects_mask():
     ft = sr.collapse_band(5001, 5003)                 # window = indices 1,2,3
     assert len(ft) == 2                                # fibre 2 dropped
     order = np.argsort(ft.ra)
-    assert list(ft.value[order]) == [2 + 3 + 4, 10 + 10]      # fibre1 drops its masked @5002
-    assert list(ft.var[order]) == [3.0, 2.0]                  # variance adds in quadrature (=count here)
+    # fibre 1's masked @5002 does not count as zero flux: mean of the valid pixels x the 3-pixel
+    # window, with the variance scaled by (N/n)^2 = (3/2)^2
+    assert list(ft.value[order]) == [2 + 3 + 4, 30.0]
+    assert list(ft.var[order]) == [3.0, 2.0 * 2.25]
     assert list(ft.npix[order]) == [3, 2]
 
 

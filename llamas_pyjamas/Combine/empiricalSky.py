@@ -125,8 +125,12 @@ def _load_field(rss_files):
             elif not np.array_equal(fid, fids0):
                 logger.warning("empiricalSky: %s FIBER_ID mismatch; skipped", os.path.basename(f))
                 continue
-            counts.append(np.asarray(h['COUNTS'].data, float))
-            masks.append(np.asarray(h['MASK'].data) if 'MASK' in h else np.zeros_like(counts[-1]))
+            # Shared bad-pixel rule: bad MASK bits and zero-count pixels are NaN in the stack, so
+            # the blank-sky medians and per-fibre continua skip them instead of reading zero.
+            from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+            bad = bad_pixel_mask(h)
+            counts.append(np.where(bad, np.nan, np.asarray(h['COUNTS'].data, float)))
+            masks.append(bad)
             waves.append(np.asarray(h['WAVE'].data, float) if 'WAVE' in h else None)
             used.append(f)
     if len(used) < 2:

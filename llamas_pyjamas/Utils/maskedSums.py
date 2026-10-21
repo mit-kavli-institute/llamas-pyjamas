@@ -19,7 +19,13 @@ Three rules, chosen by what the quantity is:
 numpy only, so any module can import it.
 """
 
+from collections import namedtuple
+
 import numpy as np
+
+#: Result of :func:`band_integral`, per row: the integral, its variance (``None`` without ``var``),
+#: the valid fraction n/N and the number of valid samples n.
+BandIntegral = namedtuple('BandIntegral', 'value var frac n')
 
 #: Default minimum fraction of a window's samples that must be valid for a band integral.
 MIN_VALID_FRAC = 0.5
@@ -51,9 +57,9 @@ def band_integral(flux, wave, bad, lo, hi, *, var=None, common=None, min_frac=MI
     are not extrapolated into); ``n`` counts the valid ones among them (not ``bad``, finite flux).
     The result is the sum-equivalent of the full window, unbiased by the masked samples.
 
-    Returns ``(value, variance, frac)`` per row: ``variance`` is ``(N/n)^2 * sum(var_valid)``
-    (``None`` if ``var`` is not given) and ``frac = n/N``. Rows with ``N == 0`` or
-    ``frac < min_frac`` are NaN.
+    Returns a :data:`BandIntegral` ``(value, var, frac, n)`` of per-row arrays: ``var`` is
+    ``(N/n)^2 * sum(var_valid)`` (``None`` if ``var`` is not given), ``frac = n/N`` and ``n`` the
+    valid count. Rows with ``N == 0`` or ``frac < min_frac`` are NaN.
     """
     flux = np.atleast_2d(np.asarray(flux, dtype=float))
     wave = np.broadcast_to(np.atleast_2d(np.asarray(wave, dtype=float)), flux.shape)
@@ -76,7 +82,7 @@ def band_integral(flux, wave, bad, lo, hi, *, var=None, common=None, min_frac=MI
             var = np.broadcast_to(np.atleast_2d(np.asarray(var, dtype=float)), flux.shape)
             vsum = np.where(valid & np.isfinite(var), var, 0.0).sum(axis=1)
             variance = vsum * scale ** 2
-    return value, variance, frac
+    return BandIntegral(value, variance, frac, n.astype(int))
 
 
 def complete_sum(values, bad, weights=None):
@@ -124,3 +130,13 @@ def resample_bad(ref_wave, wave, bad):
         return np.ones(np.shape(ref_wave), dtype=bool)
     b = np.interp(ref_wave, wave[fin], bad[fin].astype(float), left=1.0, right=1.0)
     return b > 0
+
+
+def fibre_band_flux(flux, wave, bad, lo, hi, *, min_frac=MIN_VALID_FRAC):
+    """Per-fibre band flux over ``[lo, hi]``: :func:`band_integral` within the fibres' common
+    coverage. The one implementation behind the viewer's fibre totals, registration's source
+    detection and the RSS white light, so they agree. NaN where a fibre has too little data."""
+    flux = np.atleast_2d(np.asarray(flux, dtype=float))
+    bad = np.atleast_2d(np.asarray(bad, dtype=bool))
+    common = common_coverage(wave, ~bad & np.isfinite(flux))
+    return band_integral(flux, wave, bad, lo, hi, common=common, min_frac=min_frac).value

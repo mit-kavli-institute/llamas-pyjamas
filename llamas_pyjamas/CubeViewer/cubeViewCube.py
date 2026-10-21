@@ -355,7 +355,8 @@ class CoaddCubeScene(SpectralScene):
             try:                                          # match the combine's photometric scaling
                 sr.apply_scales(transparency_scales(sr))
             except Exception as exc:                      # noqa: BLE001
-                logger.debug('transparency scaling skipped on rebuild: %s', exc)
+                # Same data and rule as the original combine, which then also ran unscaled.
+                logger.warning('transparency scaling skipped on rebuild: %s', exc)
             return sr
         except Exception as exc:                          # noqa: BLE001
             logger.warning('super-RSS rebuild failed (%s); cube-space extraction only', exc)

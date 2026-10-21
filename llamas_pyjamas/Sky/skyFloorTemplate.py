@@ -89,7 +89,9 @@ def build_floor_template(rss_files, channel='green', per_second=True):
                 hdr = h[0].header
                 C = np.asarray(h['COUNTS'].data, float)
                 S = np.asarray(h['SKY'].data, float)
-                msk = np.asarray(h['MASK'].data)
+                # Shared bad-pixel rule (bad MASK bits + zero-count pixels): 0 = usable.
+                from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+                msk = bad_pixel_mask(h).astype(np.int8)
                 bs = np.array([str(b).strip() for b in h['FIBERMAP'].data['BENCHSIDE']])
         except Exception as exc:                          # noqa: BLE001
             logger.warning('skyFloorTemplate: skipping %s (%s)', f, exc)

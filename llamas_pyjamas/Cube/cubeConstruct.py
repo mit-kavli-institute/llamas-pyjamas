@@ -898,6 +898,14 @@ class CubeConstructor:
                 except Exception as e:
                     self.logger.error(f"Error loading data from {extname}: {str(e)}")
             
+            # Shared bad-pixel rule (bad MASK bits + zero-count pixels); applied to the flux in
+            # construct_cube_from_rss_channel. The stored 'dq' above is kept for reference only.
+            try:
+                from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+                channels[channel]['bad'] = bad_pixel_mask(hdul)
+            except Exception as e:                       # noqa: BLE001
+                self.logger.warning(f"Could not build the bad-pixel mask: {e}")
+
             # Check if we have all necessary data
             if 'flux' not in channels[channel]:
                 self.logger.error(f"No FLUX data found for channel {channel}")
@@ -970,6 +978,10 @@ class CubeConstructor:
         # Get the flux data and table
         flux_data = channels[channel]['flux']
         table_data = channels[channel].get('table')
+        bad = channels[channel].get('bad')
+        if flux_data is not None and bad is not None and bad.shape == flux_data.shape:
+            # Bad pixels become NaN, which every path below already treats as no data.
+            flux_data = np.where(bad, np.nan, np.asarray(flux_data, dtype=float))
         
         # Get the wavelength data for each fiber
         fiber_wavelengths = channels[channel].get('wave')

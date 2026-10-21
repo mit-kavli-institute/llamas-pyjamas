@@ -149,12 +149,11 @@ class SimpleCubeConstructor:
                 print("  WARNING: No ERROR extension, variance will not be computed")
                 self.error = None
 
-            if 'MASK' in hdul:
-                self.mask = hdul['MASK'].data
-                print(f"  MASK: {self.mask.shape}")
-            else:
-                print("  WARNING: No MASK extension, all pixels assumed good")
-                self.mask = np.zeros_like(self.flux, dtype=bool)
+            # Shared bad-pixel rule (bad MASK bits + zero-count pixels; the fibre-flat
+            # informational bits stay usable). Works for files without MASK too.
+            from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+            self.mask = bad_pixel_mask(hdul)
+            print(f"  MASK: {self.mask.shape} ({int(self.mask.sum())} bad pixels)")
 
             if 'FWHM' in hdul:
                 self.fwhm = hdul['FWHM'].data
@@ -431,6 +430,16 @@ class SimpleCubeConstructor:
                                    left=np.nan, right=np.nan)
         except Exception:
             return None, None
+        # Bridge a single bad native pixel, but keep a run of two or more as no-data rather
+        # than inventing values across it (same rule as Combine.cube._resample_fibres).
+        from llamas_pyjamas.Utils.maskedSums import resample_bad
+        fin_w = np.isfinite(wave_fiber) & (wave_fiber > 0)
+        order_all = np.argsort(np.where(fin_w, wave_fiber, np.inf))
+        bo = (~valid)[order_all]
+        wide = bo & (np.r_[bo[1:], True] | np.r_[True, bo[:-1]])
+        keep = fin_w[order_all]
+        gap = resample_bad(self.wave_grid, wave_fiber[order_all][keep], wide[keep])
+        interp_flux = np.where(gap, np.nan, interp_flux)
 
         # Variance (if available)
         if self.error is not None:
@@ -441,6 +450,7 @@ class SimpleCubeConstructor:
             try:
                 interp_var = np.interp(self.wave_grid, wave_sorted, var_sorted,
                                       left=np.nan, right=np.nan)
+                interp_var = np.where(gap, np.nan, interp_var)
             except Exception:
                 interp_var = None
         else:

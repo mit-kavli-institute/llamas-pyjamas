@@ -465,11 +465,17 @@ class CubeViewerWindow(QMainWindow):
         try:
             from llamas_pyjamas.Combine.superRSS import build_super_rss
             from llamas_pyjamas.Combine.cube import combine_field_cubes
-            from llamas_pyjamas.Combine.transparency import transparency_scales
+            from llamas_pyjamas.Combine.transparency import TransparencyError, transparency_scales
             from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
             sr = build_super_rss(paths)             # all channels
             try:                                   # transparency is best-effort (needs a bright src)
                 sr.apply_scales(transparency_scales(sr))
+            except TransparencyError as exc:
+                # Some exposure cannot be measured: scaling only the others would mix photometric
+                # systems, so combine all of them unscaled and say so.
+                QApplication.restoreOverrideCursor()
+                QMessageBox.warning(self, 'Combine', f'Combining WITHOUT transparency scaling:\n\n{exc}')
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
             cov_frac = opts.pop('coverage_frac', 0.0)
@@ -914,8 +920,23 @@ class CubeViewerWindow(QMainWindow):
                                 f'Could not load the reference spectrum: {exc}')
             return
 
-        # The picker already summed the aperture per channel; hand those spectra straight in.
+        # The picker already summed the aperture per channel (complete-coverage: a wavelength is
+        # kept only where every aperture fibre has good data). A fibre with no good data at all
+        # would empty the sum, so name it rather than build from a partial aperture.
+        empty = {s.channel: s.empty_members for s in self._current_spectra if s.empty_members}
+        if empty:
+            detail = '; '.join(f"{c}: {', '.join(m)}" for c, m in empty.items())
+            QMessageBox.warning(
+                self, 'Sensitivity function',
+                f'The aperture includes fibre(s) with no good data ({detail}).\n\nTheir share of '
+                f'the star\'s flux would be missing from the total. Pick an aperture without them.')
+            return
         spectra = {s.channel: s.good() for s in self._current_spectra}
+        coverage = {c: (float(w.min()), float(w.max())) for c, (w, _) in spectra.items() if w.size}
+        logger.info('Sensfunc aperture: complete-coverage range per channel %s',
+                    {c: f'{lo:.0f}-{hi:.0f} A' for c, (lo, hi) in coverage.items()})
+        self.statusBar().showMessage('Aperture complete coverage: ' + ', '.join(
+            f'{c} {lo:.0f}-{hi:.0f} A' for c, (lo, hi) in coverage.items()))
 
         airmass = None
         if self._header is not None:

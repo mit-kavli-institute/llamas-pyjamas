@@ -1133,11 +1133,9 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                     # low T_i and is over-corrected. Needs >10 valid samples and >= half
                     # the window; otherwise the fibre gets the benchside median (pass 2).
                     no_data = ~np.isfinite(tc) | (tc == 0)
-                    val, _, frac = band_integral(tc, tw, no_data, w_lo, w_hi)
-                    n_valid = int(np.sum(np.isfinite(tw) & (tw >= w_lo) & (tw <= w_hi)
-                                         & ~no_data))
-                    if n_valid > 10 and np.isfinite(val[0]):
-                        all_integrals[(benchside_str, fid)] = float(val[0])
+                    bi = band_integral(tc, tw, no_data, w_lo, w_hi)
+                    if bi.n[0] > 10 and np.isfinite(bi.value[0]):
+                        all_integrals[(benchside_str, fid)] = float(bi.value[0])
 
         channel_integrals[channel] = all_integrals
         logger.info(f"  {channel}: gathered {len(all_integrals)} twilight "

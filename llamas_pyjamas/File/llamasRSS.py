@@ -116,6 +116,19 @@ def patch_rss_astrometry(path):
     return prov
 
 
+#: RSS MASK bit registry. INFORMATIONAL bits record how a pixel was processed and leave it usable;
+#: every other bit means the value must not be used. 32 and 64 are reserved for the per-fibre
+#: sky_quality codes (channel-global fallback / no sky), which are not written to MASK today.
+MASK_FLAT_LAMP_ONLY = np.int16(1)         # informational: T_i not from this fibre's twilight
+                                          # (lamp offset for the benchside, or benchside median)
+MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # informational: fibre absent from FiberMap_LUT; its
+                                          # twilight gradient was interpolated from peers
+MASK_NOT_FLAT_FIELDED = np.int16(4)       # bad: the fibre flat had no correction for this fibre
+MASK_DEAD_FIBRE = np.int16(8)             # bad: reserved (legacy Flat/fibre_flat.py)
+MASK_NO_COUNTS = np.int16(16)             # bad: extraction wrote no data here (COUNTS zero-fill)
+MASK_INFO_BITS = np.int16(MASK_FLAT_LAMP_ONLY | MASK_UNMAPPED_FIBRE_INTERP)
+
+
 def skysub_extname(hdul):
     """Name of the sky-subtracted science plane in an RSS HDUList.
 
@@ -130,6 +143,37 @@ def skysub_extname(hdul):
     if 'FLUX' in names:
         return 'FLUX'
     raise KeyError('RSS has neither a SKYSUB nor a FLUX extension')
+
+
+def bad_pixel_mask_arrays(mask=None, counts=None, shape=None):
+    """Boolean "do not use" mask from MASK and COUNTS arrays (see :func:`bad_pixel_mask`)."""
+    if shape is None:
+        shape = np.shape(mask if mask is not None else counts)
+    bad = np.zeros(shape, dtype=bool)
+    if mask is not None:
+        bad |= (np.asarray(mask).astype(np.int64) & ~int(MASK_INFO_BITS)) != 0
+    if counts is not None:
+        c = np.asarray(counts)
+        bad |= ~np.isfinite(c) | (c == 0)
+    return bad
+
+
+def bad_pixel_mask(hdul):
+    """The one rule every RSS reader applies: True where a pixel must not be used.
+
+    A pixel is bad when MASK carries any non-informational bit (bits 1 and 2 only record how the
+    fibre flat was derived), or when COUNTS is exactly 0 or non-finite -- the extraction's
+    zero-fill, where SKYSUB = -SKY is junk. The COUNTS test makes legacy files, whose MASK is all
+    zero, agree with new ones. A missing MASK or COUNTS adds nothing; the shape comes from the
+    science plane.
+    """
+    names = {h.name for h in hdul}
+    mask = np.asarray(hdul['MASK'].data) if 'MASK' in names else None
+    counts = np.asarray(hdul['COUNTS'].data) if 'COUNTS' in names else None
+    shape = None
+    if mask is None and counts is None:
+        shape = np.shape(hdul[skysub_extname(hdul)].data)
+    return bad_pixel_mask_arrays(mask, counts, shape)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -154,18 +198,6 @@ RSS_STAGE_RE_NOCASE = re.compile(RSS_STAGE_RE.pattern, re.IGNORECASE)
 #: Matches the channel token in e.g. ``..._extract_RSS_green_FF_SKYSUB.fits``.
 CHANNEL_RE = re.compile(r'(_RSS_)(blue|green|red)(?=[_.])')
 RSS_CHANNELS = ('blue', 'green', 'red')
-
-#: RSS MASK bit registry. INFORMATIONAL bits record how a pixel was processed and leave it usable;
-#: every other bit means the value must not be used. 32 and 64 are reserved for the per-fibre
-#: sky_quality codes (channel-global fallback / no sky), which are not written to MASK today.
-MASK_FLAT_LAMP_ONLY = np.int16(1)         # informational: T_i not from this fibre's twilight
-                                          # (lamp offset for the benchside, or benchside median)
-MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # informational: fibre absent from FiberMap_LUT; its
-                                          # twilight gradient was interpolated from peers
-MASK_NOT_FLAT_FIELDED = np.int16(4)       # bad: the fibre flat had no correction for this fibre
-MASK_DEAD_FIBRE = np.int16(8)             # bad: reserved (legacy Flat/fibre_flat.py)
-MASK_NO_COUNTS = np.int16(16)             # bad: extraction wrote no data here (COUNTS zero-fill)
-MASK_INFO_BITS = np.int16(MASK_FLAT_LAMP_ONLY | MASK_UNMAPPED_FIBRE_INTERP)
 
 _SUFFIX_STAGE = {'_FF': 'ff', '_FF_SKYSUB': 'ff_skysub'}
 _STAGE_RANK = {s: i for i, s in enumerate(RSS_STAGES)}
@@ -969,7 +1001,13 @@ class RSSgeneration:
                 wave_stack = np.vstack(all_waves)
                 if _helio_factor != 1.0:               # shift into the heliocentric/bary frame
                     wave_stack = wave_stack * _helio_factor
-                dq_stack = np.vstack(all_dq)
+                dq_stack = np.vstack(all_dq).astype(np.int16)
+                # Zero-fill from extraction (no profile pixels / off the detector) carries no
+                # data: SKYSUB there is -SKY. Flag it so no reader mistakes it for a value.
+                _no_counts = ~np.isfinite(counts_stack) | (counts_stack == 0)
+                dq_stack[_no_counts] |= MASK_NO_COUNTS
+                self.logger.info(f"Channel {channel}: {int(_no_counts.sum())} zero-count pixels "
+                                 f"({100.0 * _no_counts.mean():.1f}%) flagged MASK_NO_COUNTS")
                 fwhm_stack = np.vstack(all_fwhm)
                 sky_stack = np.vstack(all_sky)
 
