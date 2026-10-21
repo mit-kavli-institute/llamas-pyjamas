@@ -169,3 +169,24 @@ if __name__ == '__main__':
             print(f'FAIL {name}: {type(e).__name__}: {e}')
     print(f'\n{len(fns) - failed}/{len(fns)} passed')
     sys.exit(1 if failed else 0)
+
+
+def test_scan_picks_each_exposures_final_stage():
+    """With every stage kept, the picker hands out the final stage, not the shortest name, and a
+    consolidated name of the same exposure joins the same row."""
+    from llamas_pyjamas.Tests.rss_fixtures import write_exposure
+    with tempfile.TemporaryDirectory() as d:
+        files = write_exposure(d)
+        rows = scan_rss_exposures(d)
+        assert len(rows) == 1 and not rows[0]['error']
+        assert rows[0]['paths'] == [files[('ff_skysub', c)] for c in ('blue', 'green', 'red')]
+        assert rows[0]['representative'] == files[('ff_skysub', 'green')]
+
+
+def test_scan_reports_duplicate_stages_as_row_error():
+    from llamas_pyjamas.Tests.rss_fixtures import stage_name, write_exposure, write_rss
+    with tempfile.TemporaryDirectory() as d:
+        write_exposure(d, channels=('green',))
+        write_rss(stage_name(d, 'green', None, consolidated=True), stage='ff_skysub')
+        rows = scan_rss_exposures(d)
+        assert len(rows) == 1 and 'more than one file' in rows[0]['error']

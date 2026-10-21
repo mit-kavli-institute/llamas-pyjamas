@@ -668,3 +668,56 @@ def test_calibration_targets_deduplicate_exposures(tmp):
     got = calibration_targets([files[(s, c)] for s in ('base', 'ff', 'ff_skysub')
                                for c in ('green', 'red')])
     assert got == [files[('ff_skysub', 'green')], files[('ff_skysub', 'red')]]
+
+
+# ================================================================ step 5: registration on the final stage
+def test_registration_writes_the_final_stage(tmp):
+    from llamas_pyjamas.Utils.register import _registration_siblings, reset_rough
+    files = write_exposure(tmp, per_stage={'base': {'registered': True}})
+    sib = _registration_siblings(files[('base', 'green')])
+    assert sib == {c: files[('ff_skysub', c)] for c in ('blue', 'green', 'red')}
+    base_bytes = open(files[('base', 'green')], 'rb').read()
+    written = reset_rough(files[('base', 'green')])          # opened via the BASE file
+    assert set(written) >= set(sib.values())
+    assert open(files[('base', 'green')], 'rb').read() == base_bytes   # base untouched
+    with fits.open(files[('ff_skysub', 'green')]) as h:
+        assert h['FIBERWCS'].header['WCSMETH'] == 'rough-header'
+
+
+def test_detect_common_sources_keys_stay_the_given_paths(tmp):
+    from llamas_pyjamas.Utils.register import detect_common_sources
+    files = write_exposure(tmp, channels=('green',))
+    out = detect_common_sources([files[('base', 'green')], files[('ff', 'green')]])
+    assert list(out) == [files[('base', 'green')]]           # one per exposure, keyed as given
+
+
+def test_registration_refuses_header_mismatch(tmp):
+    from llamas_pyjamas.Utils.register import _registration_siblings
+    files = write_exposure(tmp, channels=('green',), per_stage={'base': {'header': {'TEL ROT': 90.0}}})
+    with pytest.raises(StageHeaderMismatchError):
+        _registration_siblings(files[('base', 'green')])
+
+
+def test_apply_fibre_astrometry_updates_in_place_only_for_matching_rows(tmp):
+    from llamas_pyjamas.File.llamasRSS import apply_fibre_astrometry
+    prov = {'method': 'astrometric', 'tier': 'gaia', 'refined': True, 'pa_offset': 0.0,
+            'catalog': 'GaiaDR3', 'rms': 0.1, 'nstars': 3}
+    p = write_rss(os.path.join(tmp, 'x_RSS_green_FF_SKYSUB.fits'), stage='ff_skysub', fiberwcs=True)
+    with fits.open(p) as h:
+        idx = [x.name for x in h].index('FIBERWCS')
+        fw = h['FIBERWCS'].data
+        ras, decs, xs, ys = fw['RA'] + 1e-3, fw['DEC'].copy(), fw['X_FIBERMAP'], fw['Y_FIBERMAP']
+    with fits.open(p, mode='update') as h:
+        apply_fibre_astrometry(h, ras=ras, decs=decs, xs=xs, ys=ys, prov=prov)
+        assert [x.name for x in h].index('FIBERWCS') == idx  # updated in place, not moved
+    with fits.open(p) as h:
+        np.testing.assert_allclose(h['FIBERWCS'].data['RA'], ras)
+        assert h['FIBERWCS'].header['WCSREFIN']
+    # same shape, permuted fibres: must be rebuilt from FIBERMAP, not overwritten row by row
+    with fits.open(p, mode='update') as h:
+        h['FIBERWCS'].data['FIBER_ID'][:] = h['FIBERWCS'].data['FIBER_ID'][::-1]
+    with fits.open(p, mode='update') as h:
+        apply_fibre_astrometry(h, ras=ras, decs=decs, xs=xs, ys=ys, prov=prov)
+    with fits.open(p) as h:
+        np.testing.assert_array_equal(h['FIBERWCS'].data['FIBER_ID'], h['FIBERMAP'].data['FIBER_ID'])
+        assert [x.name for x in h][-1] == 'FIBERWCS'

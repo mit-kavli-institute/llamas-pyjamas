@@ -1069,6 +1069,17 @@ class CubeViewerWindow(QMainWindow):
         Only an RSS scene can be reloaded through the RSS loader — reloading a cube here raised
         'RSS has neither a SKYSUB nor a FLUX extension'. Skip the reload for non-RSS scenes."""
         if self._path and isinstance(self.scene, RSSScene):
+            # Registration writes to each exposure's FINAL stage; if another stage is open, show
+            # the file that now carries the solution rather than one that does not.
+            try:
+                from llamas_pyjamas.File.llamasRSS import final_rss
+                final = final_rss(self._path)
+                if os.path.abspath(final) != os.path.abspath(self._path):
+                    message += (f'\n\nThe solution was written to the final stage, '
+                                f'{os.path.basename(final)}; now showing it.')
+                    self._path = final
+            except Exception as exc:              # noqa: BLE001 - reload what is open
+                logger.warning('Could not resolve the final stage of %s: %s', self._path, exc)
             self.load(self._path)                 # reload -> scene.refined_wcs from FIBERWCS
             try:
                 self.display()
@@ -1171,9 +1182,10 @@ class CubeViewerWindow(QMainWindow):
         """Write the registration QA plot (fitted centroids + Gaia over the white light)."""
         if not self._require_file('Registration QA'):
             return
-        from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+        from llamas_pyjamas.File.llamasRSS import final_siblings
         from llamas_pyjamas.QA.qa_registration import plot_registration_qa
-        siblings = channel_siblings(self._path) or {'': self._path}
+        # the registration lives on the final stage
+        siblings = final_siblings(self._path, allow_mixed=True) or {'': self._path}
         green = siblings.get('green') or next(iter(siblings.values()))
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:

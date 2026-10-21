@@ -339,6 +339,21 @@ def _detect_and_query(det_path, band, mag_limit, radius_arcsec, gaia=None):
     return ra, dec, pa, xs, ys, flux, sources, gaia
 
 
+def _registration_siblings(rss_path):
+    """The channel files a registration reads and writes for ``rss_path``'s exposure.
+
+    Each channel resolves to its FINAL stage (:func:`~llamas_pyjamas.File.llamasRSS.final_siblings`)
+    so the solution lands on the file the combiner uses, whichever stage was opened or listed.
+    Duplicate stage files, channels on mixed stages, or a primary header that differs between
+    stages (e.g. a pointing fix on one stage only) raise. ``{'': rss_path}`` for a name outside
+    the convention."""
+    from llamas_pyjamas.File.llamasRSS import check_stage_consistency, final_siblings
+    siblings = final_siblings(rss_path) or {'': os.path.abspath(rss_path)}
+    for path in siblings.values():
+        check_stage_consistency(path, check_registration=False)
+    return siblings
+
+
 def _write_frame_solution(det_path, siblings, wcs, prov):
     """Write a solved WCS into every channel's FIBERMAP/FIBERWCS and the exposure white-light image
     (pipeline product only; the external quicklook is left alone). Returns the files written."""
@@ -359,10 +374,17 @@ def _write_frame_solution(det_path, siblings, wcs, prov):
             hh.flush()
         written.append(path)
 
-    import glob as _glob
+    from llamas_pyjamas.File.llamasRSS import exposure_key
     prefix = os.path.basename(det_path).split('_RSS_')[0]
-    for wl in _glob.glob(os.path.join(os.path.dirname(det_path),
-                                      f'{prefix}_whitelight_fullpipeline.fits')):
+    # consolidated runs name it {exposure}_whitelight_fullpipeline.fits; runs that keep the
+    # intermediates leave the long {stem}_whitelight.fits (stem = the RSS stem without _extract)
+    candidates = {f'{prefix}_whitelight_fullpipeline.fits',
+                  f'{exposure_key(det_path)}_whitelight_fullpipeline.fits'}
+    if prefix.endswith('_extract'):
+        candidates.add(f"{prefix[:-len('_extract')]}_whitelight.fits")
+    for wl in sorted(os.path.join(os.path.dirname(det_path), c) for c in candidates):
+        if not os.path.exists(wl):
+            continue
         with fits.open(wl, mode='update') as wh:
             for ext in wh:
                 if getattr(ext, 'data', None) is None or ext.name not in ('BLUE', 'GREEN', 'RED'):
@@ -384,11 +406,10 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
     channel. Falls back to the rough solution (Tier 3) if no Gaia match. Returns a
     :class:`RegistrationResult`.
     """
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
     from llamas_pyjamas.Image.WhiteLightModule import FIELD_XMAX, FIELD_YMAX
     from llamas_pyjamas.File.llamasRSS import apply_fibre_astrometry
 
-    siblings = channel_siblings(rss_path)
+    siblings = _registration_siblings(rss_path)
     det_path = siblings.get('green') or next(iter(siblings.values()))
     cx, cy = FIELD_XMAX / 2.0, FIELD_YMAX / 2.0
 
@@ -502,14 +523,12 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
 
     Returns {rss_path: RegistrationResult}.
     """
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
-
     # -- pass 1: per-frame detect/query + fit each frame's own rotation where 2+ stars match
     # (skipped entirely when the caller supplies a fixed block rotation)
     frames, drots = [], []
     block_gaia = None                                     # a block shares ONE pointing -> query Gaia
     for p in rss_paths:                                   # once and reuse (8 slow queries -> 1)
-        sib = channel_siblings(p)
+        sib = _registration_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         ra, dec, pa, xs, ys, flux, sources, gaia = _detect_and_query(dp, band, mag_limit,
                                                                       radius_arcsec, gaia=block_gaia)
@@ -572,14 +591,14 @@ def detect_common_sources(rss_paths, *, band=None):
     """Auto-detect the brightest compact source (fibre x, y) per exposure — the seed the relative-
     registration override UI shows so the user can confirm or re-click each frame's source. Returns
     ``{rss_path: (x, y) or None}`` (None where nothing was detected). De-dups channel planes."""
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+    from llamas_pyjamas.File.llamasRSS import exposure_key
     seen, out = set(), {}
     for p in rss_paths:
-        k = os.path.basename(p).split('_RSS_')[0]
+        k = exposure_key(p)
         if k in seen:
             continue
         seen.add(k)
-        sib = channel_siblings(p)
+        sib = _registration_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         with fits.open(dp) as hd:
             fmap = hd['FIBERMAP'].data
@@ -616,12 +635,12 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
 
     Returns {rss_path: RegistrationResult}.
     """
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+    from llamas_pyjamas.File.llamasRSS import exposure_key
     from astropy.coordinates import SkyCoord
     import astropy.units as u
     _seen, _uniq = set(), []                             # de-dup channel planes -> one path/exposure
-    for p in rss_paths:
-        k = os.path.basename(p).split('_RSS_')[0]
+    for p in rss_paths:                                  # (results stay keyed by the path given)
+        k = exposure_key(p)
         if k not in _seen:
             _seen.add(k)
             _uniq.append(p)
@@ -629,7 +648,7 @@ def register_block_relative(rss_paths, *, anchor=None, band=None, block_pa=None,
     anchor_sc = SkyCoord(anchor[0] * u.deg, anchor[1] * u.deg) if anchor is not None else None
     results = {}
     for p in rss_paths:
-        sib = channel_siblings(p)
+        sib = _registration_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         with fits.open(dp) as hd:
             ra, dec, pa = pointing_from_header(hd[0].header)
@@ -700,8 +719,7 @@ def reset_rough(rss_path):
     """Revert an exposure's stored WCS to the rough header (TCS) pointing, discarding any star-tied
     solution -- the bail-out when a refinement is worse than the raw pointing. Rewrites FIBERMAP/
     FIBERWCS and the white-light image for every channel. Returns the files written."""
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
-    siblings = channel_siblings(rss_path) or {'': rss_path}
+    siblings = _registration_siblings(rss_path)
     det = siblings.get('green') or next(iter(siblings.values()))
     with fits.open(det) as hd:
         ra, dec, pa = pointing_from_header(hd[0].header)

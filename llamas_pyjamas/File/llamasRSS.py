@@ -96,12 +96,37 @@ def apply_fibre_astrometry(hdul, ras=None, decs=None, xs=None, ys=None, prov=Non
         ras, decs, xs, ys, prov = _fibre_sky_table(fiber_ids, benchsides, hdul[0].header)
     hdul['FIBERMAP'].data['RA'][:] = np.asarray(ras, dtype=float)
     hdul['FIBERMAP'].data['DEC'][:] = np.asarray(decs, dtype=float)
+    new = _fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov)
     names = [h.name for h in hdul]
-    if 'FIBERWCS' in names:
-        del hdul[names.index('FIBERWCS')]
-    hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov))
+    if 'FIBERWCS' in names and _same_fibre_rows(hdul['FIBERWCS'], fiber_ids, benchsides,
+                                                 new.columns.names):
+        # Same fibres in the same order: update the table in place, so an update-mode file is
+        # not rewritten (FIBERWCS sits mid-file in fibre-flat products).
+        old = hdul['FIBERWCS']
+        for col in new.columns.names:
+            old.data[col][:] = new.data[col]
+        for key in ('WCSMETH', 'WCSTIER', 'WCSREFIN', 'PAOFFSET', 'WCSCAT', 'WCSRMS', 'WCSNSTAR',
+                    'FIBAREA'):
+            old.header[key] = (new.header[key], new.header.comments[key])
+    else:
+        # Missing, or rows that do not match FIBERMAP row for row (equal shape is not enough:
+        # a permuted table would hand each fibre another fibre's position): rebuild it.
+        if 'FIBERWCS' in names:
+            del hdul[names.index('FIBERWCS')]
+        hdul.append(new)
     hdul[0].header['FIBAREA'] = (FIBRE_AREA_ARCSEC2, 'Lenslet solid angle [arcsec2] (flux<->SB)')
     return prov
+
+
+def _same_fibre_rows(hdu, fiber_ids, benchsides, columns):
+    """True when a FIBERWCS table has exactly ``columns`` and FIBER_ID/BENCHSIDE equal to the
+    given (FIBERMAP) values row for row."""
+    data = hdu.data
+    if data is None or len(data) != len(fiber_ids) or list(data.columns.names) != list(columns):
+        return False
+    strip = lambda a: np.char.strip(np.asarray(a).astype(str))   # noqa: E731
+    return (np.array_equal(np.asarray(data['FIBER_ID']), np.asarray(fiber_ids))
+            and np.array_equal(strip(data['BENCHSIDE']), strip(benchsides)))
 
 
 def patch_rss_astrometry(path):
