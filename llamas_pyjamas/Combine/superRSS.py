@@ -146,6 +146,7 @@ class SuperRSS:
     channels: Dict[str, ChannelStack] = field(default_factory=dict)
     stage: str = ''                                #: common RSS stage, or 'mixed'
     overrides: Dict[str, bool] = field(default_factory=dict)  #: safety checks overridden
+    sky_penalty: float = 0.0                       #: SKYRESID variance penalty applied
 
     @property
     def n_exposures(self) -> int:
@@ -155,6 +156,8 @@ class SuperRSS:
         """Header cards recording what a product was built from: the data plane, the RSS stage
         and any safety check that was overridden (``OVR_*``), so a cube says what it is."""
         meta = {'PLANE': self.plane, 'RSSSTAGE': self.stage or 'unknown'}
+        if self.sky_penalty:
+            meta['SKYPEN'] = float(self.sky_penalty)
         names = {'header': 'OVR_HDR', 'mixed': 'OVR_MIX', 'nocheck': 'OVR_NCHK'}
         for key, flag in self.overrides.items():
             if flag and key in names:
@@ -333,8 +336,10 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
     loaded channel file (registration held by another stage, primary headers that differ between
     stages, duplicate stage files raise). Channels at different stages raise
     :class:`~llamas_pyjamas.File.llamasRSS.MixedStageError` unless ``allow_mixed_stage``.
-    ``sky_penalty`` -> see :func:`_read_channel`."""
-    from llamas_pyjamas.File.llamasRSS import (MixedStageError, channel_siblings,
+    ``sky_penalty`` -> see :func:`_read_channel`; it needs the SKYRESID extension of the
+    residual-sky stage, and a channel without it raises rather than silently skipping the
+    penalty (which would weight exposures inconsistently)."""
+    from llamas_pyjamas.File.llamasRSS import (MixedStageError, RSSStageError, channel_siblings,
                                                check_stage_consistency, final_siblings,
                                                skysub_extname, stage_of)
     if plane not in PLANES:
@@ -406,6 +411,10 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
                 logger.warning('%s %s: no %s/%s plane; channel skipped',
                                exposure_prefix(rss_path), c, flux_ext, err_ext)
                 continue
+            if sky_penalty and 'SKYRESID' not in hd:
+                raise RSSStageError(f'{os.path.basename(siblings[c])} has no SKYRESID (stage '
+                                    f'{stages[c]!r}), so the sky penalty cannot be applied to it; '
+                                    f'combine the ff_skysub stage or drop --sky-penalty')
             w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext, sky_penalty=sky_penalty)
         if to_per_second:
             f = f / exptime
@@ -417,9 +426,9 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
         raise MixedStageError(f'{exposure_prefix(det)}: channels are at different stages {stages}; '
                               f'combining them mixes flat-fielded and un-flat-fielded data. '
                               f'Override with allow_mixed_stage / --allow-mixed-stage.')
-    stage = distinct[0] if len(distinct) == 1 else 'mixed'
+    loaded_stage = distinct[0] if len(distinct) == 1 else 'mixed'
     meta = ExposureMeta(exposure_id=exposure_prefix(det), path=det, exptime=exptime,
-                        airmass=airmass, mjd=mjd, stage=stage)
+                        airmass=airmass, mjd=mjd, stage=loaded_stage)
     return meta, resolved_plane, data
 
 
@@ -541,7 +550,8 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
                                        ('mixed', allow_mixed_stage), ('nocheck', not check_stages))
                  if v}
     sr = SuperRSS(field=field_name, plane=plane_resolved, bunit=bunit,
-                  exposures=exposures, channels=channels_out, stage=stage, overrides=overrides)
+                  exposures=exposures, channels=channels_out, stage=stage, overrides=overrides,
+                  sky_penalty=float(sky_penalty or 0.0))
     if reject_bad_fibres:
         sr.mask_bad_fibres()
     logger.info(sr.summary())

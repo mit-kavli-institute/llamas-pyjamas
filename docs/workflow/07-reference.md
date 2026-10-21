@@ -100,6 +100,8 @@ quote paths**). The authoritative, annotated list is
 --plane {auto,flam,skysub}     auto/flam need FLAM in every exposure; skysub = instrumental plane
 --allow-mixed-stage            combine exposures/channels at different stages (OVR_MIX)
 --allow-header-mismatch        use files whose header differs from their other stages (OVR_HDR)
+--sky-penalty ALPHA            down-weight sky-line residuals using SKYRESID (ff_skysub only;
+                               default 0 = off; needs tuning; recorded as SKYPEN)
 -o OUT.fits                    --png (preview)
 ```
 

@@ -150,6 +150,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--stage', choices=('auto', 'base', 'ff', 'ff_skysub'), default='auto',
                    help='which processing stage of each exposure to combine (default: the most '
                         'corrected one on disk); recorded as RSSSTAGE in the output header')
+    p.add_argument('--sky-penalty', type=float, default=0.0, metavar='ALPHA',
+                   help='inflate the variance where the residual-sky estimate (SKYRESID, ff_skysub '
+                        'stage only) exceeds the formal error: var *= 1 + (ALPHA*SKYRESID/ERROR)^2, '
+                        'so sky-line residuals are down-weighted in the co-add. 0 (default) = off; '
+                        'needs tuning. Recorded as SKYPEN.')
     p.add_argument('--allow-mixed-stage', action='store_true',
                    help='combine exposures/channels at different RSS stages (flat-fielded and '
                         'not); recorded as OVR_MIX in the output header')
@@ -184,6 +189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
                              reject_bad_fibres=not args.keep_bad_fibres, stage=args.stage,
+                             sky_penalty=args.sky_penalty,
                              allow_mixed_stage=args.allow_mixed_stage,
                              allow_header_mismatch=args.allow_header_mismatch)
         logger.info(sr.summary())

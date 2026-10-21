@@ -781,3 +781,25 @@ def test_combine_cli_stage_option_and_named_stage_missing(tmp, capsys):
     assert hdr['RSSFIL1'] == files[('ff', 'green')]
     assert main([files[('base', 'green')], '--stage', 'ff_skysub', '-o', out]) == 2
     assert 'ff_skysub' in capsys.readouterr().err
+
+
+# ================================================================ step 7: --sky-penalty
+def test_sky_penalty_needs_skyresid_and_is_recorded(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    from llamas_pyjamas.Combine.cube import combine_cube
+    files = write_exposure(tmp, flam=True, per_stage={'ff_skysub': {'fiberwcs': True}})
+    with pytest.raises(RSSStageError):                    # base has no SKYRESID
+        build_super_rss([files[('base', 'green')]], stage='base', sky_penalty=2.0)
+    sr = build_super_rss([files[('base', 'green')]], sky_penalty=2.0)   # final = ff_skysub
+    assert sr.sky_penalty == 2.0
+    cube = combine_cube(sr, 'green')
+    assert cube.meta['SKYPEN'] == 2.0
+
+
+def test_sky_penalty_cli(tmp):
+    from llamas_pyjamas.Combine.combineField import main
+    files = write_exposure(tmp, flam=True, per_stage={'ff_skysub': {'fiberwcs': True}})
+    out = os.path.join(tmp, 'c.fits')
+    assert main([files[('base', 'green')], '--cube', '--sky-penalty', '1.5', '-o', out]) == 0
+    assert fits.getheader(out)['SKYPEN'] == 1.5
+    assert main([files[('base', 'green')], '--stage', 'ff', '--sky-penalty', '1.5', '-o', out]) == 2
