@@ -33,6 +33,7 @@ Functions:
         Check wavelength ranges in extraction file and compare to reference arc.
 """
 import os
+import sys
 import logging
 from datetime import datetime
 import numpy as np
@@ -42,7 +43,7 @@ import json
 import matplotlib.pyplot as plt
 import traceback
 from matplotlib import cm
-from typing import Union
+from typing import Optional, Union
 #from llamas_pyjamas.Trace.traceLlamasMaster import TraceLlamas
 
 import glob
@@ -658,10 +659,68 @@ def find_trace_pickle(channel: str, bench: str, side: str, directory: str) -> st
         f"No trace file for {channel}{bench}{side} in {directory}; tried {names}")
 
 
+# Live fibres per benchside: every trace set must have exactly this many traces.
+TRACE_FIBRE_COUNTS = {'1A': 298, '1B': 300, '2A': 298, '2B': 297,
+                      '3A': 298, '3B': 300, '4A': 300, '4B': 298}
+
+
+class MasterTraceUnusableError(FileNotFoundError):
+    """A camera's mastercalib trace exists but cannot stand in for it.
+
+    Subclasses FileNotFoundError so every caller that already treats a missing
+    mastercalib trace as "no fallback for this camera" does the same here.
+    """
+
+
+def find_usable_master_trace(channel: str, bench: str, side: str,
+                             mastercalib_dir: str, audit=None) -> str:
+    """Locate a camera's mastercalib trace and check it can stand in for the camera.
+
+    A fallback is only better than no trace if its fibres are right: it must have
+    the benchside's fibre count and, if it predates the tracer's registration checks
+    (no ``comb_ok``), pass ``audit_trace_registration``. Otherwise its flux lands on
+    the wrong lenslets.
+
+    Args:
+        channel, bench, side: camera identity.
+        mastercalib_dir: directory holding the fallback traces.
+        audit: callable from ``make_trace_auditor``; built here if None.
+
+    Returns:
+        str: path to the mastercalib trace.
+
+    Raises:
+        FileNotFoundError: no mastercalib trace for this camera.
+        MasterTraceUnusableError: one exists but is unusable; the message says why.
+    """
+    path = find_trace_pickle(channel, bench, side, mastercalib_dir)
+    name, benchside = os.path.basename(path), f"{bench}{side}"
+    try:
+        with open(path, 'rb') as f:
+            traceobj = pickle.load(f)
+        nfib = traceobj.traces.shape[0]
+    except Exception as e:                                        # noqa: BLE001
+        raise MasterTraceUnusableError(f"mastercalib {name} cannot be read: {e}") from e
+
+    expected = TRACE_FIBRE_COUNTS.get(benchside)
+    if nfib != expected:
+        raise MasterTraceUnusableError(
+            f"mastercalib {name} has {nfib} fibres, {benchside} needs {expected}")
+    if not hasattr(traceobj, 'comb_ok'):
+        reason = (audit or make_trace_auditor())(traceobj)
+        if reason is not None:
+            raise MasterTraceUnusableError(
+                f"mastercalib {name} fails the registration check: {reason}")
+    return path
+
+
 def copy_mastercalib_trace(channel: str, bench: str, side: str,
-                          mastercalib_dir: str, target_dir: str) -> str:
+                          mastercalib_dir: str, target_dir: str, audit=None) -> str:
     """
     Copy mastercalib trace to target directory, replacing the invalid user trace.
+
+    The mastercalib trace is checked first (``find_usable_master_trace``): a
+    fallback with the wrong fibres is never copied in.
 
     Args:
         channel: Color channel (red/green/blue)
@@ -669,12 +728,14 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
         side: Side letter (A/B)
         mastercalib_dir: Source mastercalib directory
         target_dir: Destination user trace directory
+        audit: callable from ``make_trace_auditor``; built if None
 
     Returns:
         str: Path to copied trace file
 
     Raises:
         FileNotFoundError: If mastercalib trace not found
+        MasterTraceUnusableError: If it exists but is unusable as a fallback
 
     Example:
         >>> copy_mastercalib_trace('green', '4', 'B', '/calib', '/user/traces')
@@ -682,8 +743,8 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
     """
     import shutil
 
-    # Find mastercalib trace under either shipped filename form.
-    mastercalib_path = find_trace_pickle(channel, bench, side, mastercalib_dir)
+    # Find mastercalib trace under either shipped filename form, and check it.
+    mastercalib_path = find_usable_master_trace(channel, bench, side, mastercalib_dir, audit)
 
     # Copy to target directory using USER naming convention (without "master_" prefix)
     # This replaces the invalid user trace file
@@ -695,6 +756,70 @@ def copy_mastercalib_trace(channel: str, bench: str, side: str,
     logger.info(f"Replaced invalid trace with mastercalib: {user_filename}")
 
     return target_path
+
+
+def make_trace_auditor():
+    """Build ``audit(traceobj) -> reason or None`` for an already-saved trace.
+
+    Wraps ``audit_trace_registration`` with this camera's dead fibres (traceLUT.json)
+    and throughput fingerprint (LUT/trace_fingerprints.json), loaded once.
+
+    Returns:
+        callable: ``audit(traceobj)``, None if the trace passes, else the reason.
+    """
+    # Imported here, not at module top, because of a genuine circular import:
+    # traceLlamasMaster imports Utils.rayManager, which runs Utils/__init__.py
+    # (``from .utils import *``) and so re-enters this module half-initialised.
+    from llamas_pyjamas.Trace.traceLlamasMaster import (
+        audit_trace_registration, load_trace_fingerprints)
+
+    with open(os.path.join(LUT_DIR, 'traceLUT.json'), 'r') as f:
+        dead_fibers = json.load(f).get('dead_fibers', {})
+    fingerprints = load_trace_fingerprints()
+
+    def audit(traceobj):
+        benchside = f"{traceobj.bench}{traceobj.side}"
+        fingerprint = fingerprints.get(traceobj.channel.lower(), {}).get(benchside)
+        return audit_trace_registration(traceobj, dead_fibers=dead_fibers.get(benchside, []),
+                                        fingerprint=fingerprint)
+    return audit
+
+
+def replace_legacy_trace(pkl_file: str, channel: str, bench: str, side: str,
+                         mastercalib_dir: str, trace_dir: str, audit) -> tuple:
+    """Swap a misregistered legacy trace for the mastercalib one, keeping a backup.
+
+    The legacy file is renamed to ``<name>.pkl.legacy`` -- out of every ``*.pkl``
+    glob, and no duplicate camera if it carried the ``LLAMAS_master_`` name -- and
+    the mastercalib trace is copied in. If there is no usable mastercalib trace the
+    rename is undone and the error re-raised, so nothing has moved when the caller
+    asks the user what to do (``confirm_unusable_master_traces``).
+
+    Args:
+        pkl_file: the legacy trace that failed the audit.
+        channel, bench, side: camera identity.
+        mastercalib_dir: directory holding the fallback traces.
+        trace_dir: directory the replacement is copied into.
+        audit: callable from ``make_trace_auditor``.
+
+    Returns:
+        tuple: ``(mastercalib_path, copied_path)``.
+
+    Raises:
+        FileNotFoundError: no mastercalib trace, or ``MasterTraceUnusableError`` if
+            it is unusable. The legacy trace is left where it was.
+    """
+    backup = pkl_file + '.legacy'
+    os.replace(pkl_file, backup)
+    try:
+        copied_path = copy_mastercalib_trace(channel, bench, side, mastercalib_dir,
+                                             trace_dir, audit)
+    except FileNotFoundError:
+        os.replace(backup, pkl_file)
+        raise
+    logger.info(f"✓ {channel}{bench}{side}: legacy trace kept as "
+                f"{os.path.basename(backup)}, mastercalib trace copied in")
+    return find_trace_pickle(channel, bench, side, mastercalib_dir), copied_path
 
 
 def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_DIR) -> dict:
@@ -710,8 +835,23 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
     ``trace_dir`` gets a mastercalib fallback too. Callers therefore need
     ``trace_dir`` to be a COMPLETE trace set, not one channel's worth.
 
+    A legacy trace -- written before the tracer checked fibre registration, so it
+    has no ``comb_ok`` attribute -- is also audited (``audit_trace_registration``),
+    because a misregistered comb has the right fibre count. One that fails is
+    renamed to ``<name>.pkl.legacy`` and replaced by the mastercalib trace
+    (``replace_legacy_trace``).
+
+    The fallback is decided per camera, and a mastercalib trace is only copied in if
+    it is usable (``find_usable_master_trace``: right fibre count, and registered if
+    it is itself legacy). A camera left without a usable trace is listed in
+    ``unusable_masters`` and nothing of it is changed; the caller decides whether to
+    go on without it (``confirm_unusable_master_traces``). That covers a bad own
+    trace with no usable master, a missing camera whose master is unusable, and --
+    when ``trace_dir`` IS ``mastercalib_dir`` -- a master that fails the audit.
+
     Args:
-        trace_dir: User trace directory to validate
+        trace_dir: User trace directory to validate. An empty one is filled from
+            mastercalib camera by camera.
         mastercalib_dir: Mastercalib directory for fallback traces
 
     Returns:
@@ -719,6 +859,8 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
             'valid_traces': [(channel, bench, side, filepath), ...],
             'invalid_traces': [(channel, bench, side, expected, actual), ...],
             'missing_traces': [(channel, bench, side), ...],
+            'misregistered_traces': [(channel, bench, side, reason), ...],
+            'unusable_masters': [(channel, bench, side, reason, own_trace_path or None), ...],
             'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
             'all_valid': bool
         }
@@ -728,25 +870,19 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
         >>> if not results['all_valid']:
         ...     print(f"Replaced {len(results['fallback_used'])} invalid traces")
     """
-    # Expected fiber counts per benchside
-    N_fib = {'1A': 298, '1B': 300, '2A': 298, '2B': 297,
-             '3A': 298, '3B': 300, '4A': 300, '4B': 298}
-
     # Get all trace files in directory
     files = glob.glob(os.path.join(trace_dir, '*.pkl'))
-
     if not files:
-        logger.warning(f"No trace files found in {trace_dir}")
-        return {
-            'valid_traces': [],
-            'invalid_traces': [],
-            'fallback_used': [],
-            'all_valid': False
-        }
+        logger.warning(f"No trace files found in {trace_dir}; every camera falls back "
+                       f"to mastercalib")
 
     valid_traces = []
     invalid_traces = []
+    misregistered_traces = []
+    unusable_masters = []
     fallback_used = []
+    audit = make_trace_auditor()
+    trace_dir_is_mastercalib = os.path.realpath(trace_dir) == os.path.realpath(mastercalib_dir)
 
     for pkl_file in files:
         try:
@@ -762,16 +898,40 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
             benchside = f"{bench}{side}"
 
             # Get expected fiber count
-            expected_fibers = N_fib.get(benchside)
+            expected_fibers = TRACE_FIBRE_COUNTS.get(benchside)
 
             if expected_fibers is None:
                 logger.warning(f"Unknown benchside {benchside} in {os.path.basename(pkl_file)}")
                 continue
 
+            # A legacy trace (no comb_ok: written before the tracer checked fibre
+            # registration) has only ever had its COUNT checked, and a misregistered
+            # comb has the right count, so audit it before trusting it.
+            reason = None
+            if shape == expected_fibers and not hasattr(traceobj, 'comb_ok'):
+                reason = audit(traceobj)
+
             # Check if fiber count matches
-            if shape == expected_fibers:
+            if shape == expected_fibers and reason is None:
                 valid_traces.append((channel, bench, side, pkl_file))
                 logger.debug(f"✓ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (valid)")
+            elif reason is not None:
+                misregistered_traces.append((channel, bench, side, reason))
+                logger.warning(f"✗ {channel}{bench}{side}: legacy trace fails the "
+                               f"registration check: {reason}")
+                if trace_dir_is_mastercalib:
+                    # This trace IS the camera's mastercalib fallback.
+                    unusable_masters.append((channel, bench, side,
+                                             f"mastercalib fails the registration check: {reason}",
+                                             pkl_file))
+                    continue
+                try:
+                    fallback_used.append((channel, bench, side) + replace_legacy_trace(
+                        pkl_file, channel, bench, side, mastercalib_dir, trace_dir, audit))
+                except FileNotFoundError as e:
+                    # No usable stand-in, and this trace must not be used either.
+                    unusable_masters.append((channel, bench, side, str(e), pkl_file))
+                    logger.error(f"✗ {channel}{bench}{side}: no usable mastercalib fallback: {e}")
             else:
                 invalid_traces.append((channel, bench, side, expected_fibers, shape))
                 logger.warning(f"✗ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (invalid)")
@@ -780,14 +940,16 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
                 try:
                     copied_path = copy_mastercalib_trace(
                         channel, bench, side,
-                        mastercalib_dir, trace_dir
+                        mastercalib_dir, trace_dir, audit
                     )
                     fallback_used.append((channel, bench, side,
                                           find_trace_pickle(channel, bench, side, mastercalib_dir),
                                           copied_path))
                     logger.info(f"✓ Copied mastercalib fallback for {channel}{bench}{side}")
                 except FileNotFoundError as e:
-                    logger.error(f"✗ Could not find mastercalib fallback for {channel}{bench}{side}: {e}")
+                    # No usable stand-in, and this wrong-count trace must not be used either.
+                    unusable_masters.append((channel, bench, side, str(e), pkl_file))
+                    logger.error(f"✗ Could not find a usable mastercalib fallback for {channel}{bench}{side}: {e}")
 
         except Exception as e:
             logger.error(f"Error validating trace file {pkl_file}: {e}")
@@ -801,6 +963,7 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
     # matters more, so cover the missing cameras explicitly.
     present = {(ch, b, sd) for ch, b, sd, _ in valid_traces}
     present |= {(ch, b, sd) for ch, b, sd, *_ in invalid_traces}
+    present |= {(ch, b, sd) for ch, b, sd, _ in misregistered_traces}
     missing_traces = []
     for channel in ('red', 'green', 'blue'):
         for bench in ('1', '2', '3', '4'):
@@ -811,20 +974,25 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
                 logger.warning(f"✗ {channel}{bench}{side}: no trace file produced")
                 try:
                     copied_path = copy_mastercalib_trace(
-                        channel, bench, side, mastercalib_dir, trace_dir)
+                        channel, bench, side, mastercalib_dir, trace_dir, audit)
                     fallback_used.append((channel, bench, side,
                                           find_trace_pickle(channel, bench, side, mastercalib_dir),
                                           copied_path))
                     logger.info(f"✓ Copied mastercalib fallback for missing {channel}{bench}{side}")
+                except MasterTraceUnusableError as e:
+                    unusable_masters.append((channel, bench, side, str(e), None))
+                    logger.error(f"✗ Unusable mastercalib fallback for missing {channel}{bench}{side}: {e}")
                 except FileNotFoundError as e:
                     logger.error(f"✗ No mastercalib fallback for missing {channel}{bench}{side}: {e}")
 
-    all_valid = len(invalid_traces) == 0 and len(missing_traces) == 0
+    all_valid = not (invalid_traces or missing_traces or misregistered_traces)
 
     return {
         'valid_traces': valid_traces,
         'invalid_traces': invalid_traces,
         'missing_traces': missing_traces,
+        'misregistered_traces': misregistered_traces,
+        'unusable_masters': unusable_masters,
         'fallback_used': fallback_used,
         'all_valid': all_valid
     }
@@ -834,8 +1002,9 @@ def build_trace_fingerprints(mastercalib_dir: str = CALIB_DIR, out: str = None) 
     """
     Build the per-camera fibre throughput fingerprints used to register traces.
 
-    For every ``LLAMAS_master_{channel}_{bench}_{side}_traces.pkl`` in
-    ``mastercalib_dir``, measures the flat flux of each trace at the centre column
+    For every trace pickle in ``mastercalib_dir`` -- either shipped name form,
+    ``LLAMAS_master_{channel}_{bench}_{side}_traces.pkl`` or the older bundle's
+    ``LLAMAS_{channel}_{bench}_{side}_traces.pkl`` -- measures the flat flux of each trace at the centre column
     and stores its normalised fibre-to-fibre pattern in detector (= live-slot)
     order. traceLlamasMaster uses it to break slot-offset ties and to reject a
     comb numbered whole slots off. Only regenerate from a trace set whose fibre
@@ -847,13 +1016,19 @@ def build_trace_fingerprints(mastercalib_dir: str = CALIB_DIR, out: str = None) 
 
     Returns:
         dict: ``{channel: {benchside: [pattern per live slot]}}``.
+
+    Raises:
+        FileNotFoundError: if ``mastercalib_dir`` holds no trace pickles. Writing an
+            empty file would silently switch off every fingerprint check.
     """
+    # Imported here because of a genuine circular import (see make_trace_auditor).
     from llamas_pyjamas.Trace.traceLlamasMaster import (
         measure_trace_heights, normalise_trace_heights, TRACE_FINGERPRINT_FILE)
 
     out = out or TRACE_FINGERPRINT_FILE
     fingerprints = {}
-    for pkl in sorted(glob.glob(os.path.join(mastercalib_dir, 'LLAMAS_master_*_traces.pkl'))):
+    # Matches both name forms; sorted, so LLAMAS_master_* wins if a camera has both.
+    for pkl in sorted(glob.glob(os.path.join(mastercalib_dir, 'LLAMAS_*_traces.pkl'))):
         with open(pkl, 'rb') as f:
             traceobj = pickle.load(f)
         col = traceobj.naxis1 // 2
@@ -862,6 +1037,9 @@ def build_trace_fingerprints(mastercalib_dir: str = CALIB_DIR, out: str = None) 
         fingerprints.setdefault(traceobj.channel.lower(), {})[
             f"{traceobj.bench}{traceobj.side}"] = [round(float(v), 4) for v in pattern]
         print(f"{os.path.basename(pkl)}: {len(rows)} fibres")
+
+    if not fingerprints:
+        raise FileNotFoundError(f"No trace pickles in {mastercalib_dir}; not overwriting {out}")
 
     with open(out, 'w') as f:
         json.dump(fingerprints, f, indent=1)
@@ -876,18 +1054,27 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
     DEPRECATED: Use validate_and_fix_trace_fibres() for more detailed validation
     with automatic fallback support.
 
+    A legacy trace (no ``comb_ok``) with the right count is also run through
+    ``audit_trace_registration``, and failing it fails the set just as a wrong count
+    does: these are the fallback traces, so they must have the right fibres. The
+    caller then falls back per camera (``validate_and_fix_trace_fibres``).
+
     Args:
         mastercalib_dir (str): Directory containing the trace calibration pickle files.
             Defaults to CALIB_DIR from config.
 
     Returns:
-        bool: True if all trace files have the correct fiber count, False otherwise.
+        bool: True if there are trace files and every one has the correct fiber
+            count (and, if legacy, registration), False otherwise.
     """
-    N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
     files = glob.glob(mastercalib_dir+'/*.pkl')
     assert type(files) == list, 'File extraction did not return as list'
+    if not files:
+        logger.warning(f"No trace files in {mastercalib_dir}")
+        return False
 
     all_match = True
+    audit = make_trace_auditor()
 
     for idx, pkl in enumerate(files):
         with open(pkl, "rb") as file:
@@ -895,15 +1082,87 @@ def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
         shape = traceobj.traces.shape[0]
         channel = traceobj.channel
         benchside = f"{traceobj.bench}{traceobj.side}"
-        req = N_fib[benchside]
+        req = TRACE_FIBRE_COUNTS[benchside]
 
         if shape != req:
             all_match = False
+        elif not hasattr(traceobj, 'comb_ok'):
+            reason = audit(traceobj)
+            if reason is not None:
+                all_match = False
+                logger.warning(f"Mastercalib {channel} {benchside} fails the registration "
+                               f"check ({reason}); it cannot be used as a fallback")
 
         print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
 
     return all_match
-        
+
+
+def confirm_unusable_master_traces(unusable, interactive=None, input_fn=input,
+                                   stream=None) -> None:
+    """Ask whether to go on without the cameras that have no usable mastercalib fallback.
+
+    Each entry (``validate_and_fix_trace_fibres()['unusable_masters']``) is a camera
+    whose own trace is missing or bad and whose mastercalib trace cannot stand in for
+    it. Proceeding skips those cameras: a bad trace of their own is renamed to
+    ``<name>.pkl.legacy``, so extraction finds no trace and leaves their fibres blank
+    rather than putting flux on the wrong lenslets. Terminating stops the run with
+    nothing changed. Without a terminal there is nobody to ask, so the run stops.
+
+    The question is written to the real terminal (``sys.__stdout__``): during a
+    curated pipeline run ``sys.stdout`` is redirected to the log file.
+
+    Args:
+        unusable: ``[(channel, bench, side, reason, own_trace_path or None), ...]``.
+        interactive: whether someone can answer; defaults to ``sys.stdin.isatty()``.
+        input_fn: reads the answer (for tests).
+        stream: where the question is written; defaults to ``sys.__stdout__``.
+
+    Raises:
+        RuntimeError: not interactive.
+        SystemExit: the user chose to terminate.
+    """
+    if not unusable:
+        return
+    out = stream or sys.__stdout__
+    cameras = ', '.join(f"{ch}{b}{sd}" for ch, b, sd, *_ in unusable)
+    lines = ["", "=" * 60, "NO USABLE MASTERCALIB FALLBACK", "=" * 60]
+    lines += [f"  ✗ {ch}{b}{sd}: {reason}" for ch, b, sd, reason, _ in unusable]
+    lines += ["Proceeding skips these cameras: they get no trace, so their fibres are",
+              "blank in the RSS. Terminating stops the whole run.", ""]
+    out.write("\n".join(lines) + "\n")
+    out.flush()
+    logger.warning(f"No usable mastercalib fallback for {cameras}")
+
+    if interactive is None:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    if not interactive:
+        raise RuntimeError(
+            f"No usable mastercalib trace for {cameras}, and no terminal to ask whether to "
+            f"proceed without them, so the run is terminated. Rerun interactively, or replace "
+            f"those cameras' traces in the mastercalib directory.")
+
+    while True:
+        out.write("Proceed without these cameras, or terminate the run? [p/t]: ")
+        out.flush()
+        try:
+            answer = input_fn().strip().lower()
+        except EOFError:
+            answer = 't'
+        if answer in ('t', 'terminate'):
+            raise SystemExit(f"Terminated by user: no usable mastercalib trace for {cameras}.")
+        if answer in ('p', 'proceed'):
+            break
+        out.write("Please answer 'p' to proceed or 't' to terminate.\n")
+
+    for channel, bench, side, _reason, own in unusable:
+        if own and os.path.exists(own):
+            os.replace(own, own + '.legacy')
+            out.write(f"  {channel}{bench}{side}: set aside {os.path.basename(own)} "
+                      f"as {os.path.basename(own)}.legacy\n")
+    out.flush()
+    logger.warning(f"Proceeding without {cameras} at the user's request")
+
         
 def flip_blue_combs()-> None:
     """

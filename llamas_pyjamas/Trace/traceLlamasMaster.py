@@ -714,6 +714,58 @@ def validate_trace_comb(mid_positions, benchside, dead_fibers=None,
     return ok
 
 
+def audit_trace_registration(traceobj, dead_fibers=(), fingerprint=None,
+                             expected_count=None) -> Optional[str]:
+    """Re-run the tracer's registration checks on an already-saved trace object.
+
+    Trace pickles written before these checks existed (no ``comb_ok`` attribute)
+    were only ever checked for their fibre COUNT, and a misregistered comb has the
+    right count: the old 2A mis-trim kept 298 fibres with 129-298 of them on the
+    wrong lenslet. This applies the same three checks the tracer now runs before
+    saving -- slot resolution against the fibremap, comb regularity, and the
+    throughput fingerprint -- to the stored traces and the stored flat (``data``).
+    Old pickles load fine under the current code (the class travels inside the
+    pickle), so this is what makes them safe to reuse, not what makes them load.
+
+    Args:
+        traceobj: loaded trace object of any version, with ``traces``, ``naxis1``,
+            ``bench`` and ``side``; ``data`` enables the fingerprint check.
+        dead_fibers: fibremap positions of this benchside's dead fibres.
+        fingerprint: reference throughput pattern for this camera, or None.
+        expected_count: live fibres for this benchside; defaults to the number
+            of traces.
+
+    Returns:
+        None if the trace passes, otherwise the reason it failed.
+    """
+    benchside = f"{traceobj.bench}{traceobj.side}"
+    mid = int(traceobj.naxis1) // 2
+    rows = np.asarray(traceobj.traces[:, mid], dtype=float)
+    expected = rows.size if expected_count is None else int(expected_count)
+
+    data = getattr(traceobj, 'data', None)
+    heights = measure_trace_heights(data, rows, mid) if data is not None else None
+    if heights is None:
+        fingerprint = None
+
+    try:
+        keep, _ = resolve_trace_slots(np.arange(rows.size), rows, expected,
+                                      dead_fibers=dead_fibers, benchside=benchside,
+                                      heights=heights, fingerprint=fingerprint)
+        if keep.size != rows.size:
+            return f"{rows.size - keep.size} trace(s) sit off the fibremap comb"
+        if not validate_trace_comb(rows, benchside, dead_fibers=dead_fibers,
+                                   expected_count=expected):
+            return "traced comb failed validation"
+        if fingerprint is not None:
+            # The fingerprint is in detector (= live-slot) order.
+            check_fingerprint_registration(heights[np.argsort(rows)], fingerprint,
+                                           benchside=benchside)
+    except TraceCombError as e:
+        return str(e)
+    return None
+
+
 def get_fiber_position(channel: str, benchside: str, fiber: str) -> int:
     """
     Retrieve the position of a fiber from a lookup table (LUT) based on the given channel, benchside, and fiber.

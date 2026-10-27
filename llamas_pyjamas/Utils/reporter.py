@@ -29,6 +29,7 @@ import sys
 import time
 import threading
 import logging
+from contextlib import contextmanager
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -116,6 +117,7 @@ class PipelineReporter:
         self._stop = threading.Event()
         self._thread = None
         self._active = False
+        self._paused = False
 
     # -- internal terminal helpers (call under _lock) --------------------
     def _raw(self, text):
@@ -141,7 +143,7 @@ class PipelineReporter:
         return f"  {spin} {self._tag()}{self._emoji} {self._title}{sub}   {el}"
 
     def _redraw(self):
-        if not (self.enabled and self.tty and self._active):
+        if not (self.enabled and self.tty and self._active) or self._paused:
             return
         self._clear_line()
         self._raw(self._live_line())
@@ -221,6 +223,20 @@ class PipelineReporter:
         with self._lock:
             self._substatus = text or ""
             self._redraw()
+
+    @contextmanager
+    def paused(self):
+        """Hold the spinner off the terminal, e.g. while asking the user a question."""
+        with self._lock:
+            self._paused = True
+            if self.enabled:
+                self._clear_line()
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._paused = False
+                self._redraw()
 
     def note(self, text):
         """Print a one-off informational line above the spinner."""

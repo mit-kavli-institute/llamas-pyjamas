@@ -40,7 +40,9 @@ from llamas_pyjamas.File.llamasRSS import (RSS_STAGE_RANK, RSS_STAGE_RE, exposur
                                            rss_stage, write_rss_manifest)
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger, find_trace_pickle
+from llamas_pyjamas.Utils.utils import (count_trace_fibres, check_header, configure_pipeline_logging,
+                                       setup_logger, find_trace_pickle, validate_and_fix_trace_fibres,
+                                       confirm_unusable_master_traces)
 from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
@@ -2292,8 +2294,6 @@ def main(config_path):
                 print(f"Found {len(existing_traces)} existing trace files in {config.get('trace_output_dir')}")
 
                 # Validate existing traces with per-trace fallback
-                from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
-
                 print("Validating existing traces...")
                 validation_results = validate_and_fix_trace_fibres(
                     config.get('trace_output_dir'),
@@ -2310,10 +2310,13 @@ def main(config_path):
                     fallback_count = len(validation_results['fallback_used'])
 
                     missing_count = len(validation_results.get('missing_traces', []))
+                    misreg_count = len(validation_results.get('misregistered_traces', []))
 
                     print(f"⚠️  Found {invalid_count} trace(s) with incorrect fiber counts")
                     if missing_count:
                         print(f"⚠️  {missing_count} camera(s) produced no trace at all")
+                    if misreg_count:
+                        print(f"⚠️  {misreg_count} legacy trace(s) fail the fibre-registration check")
                     print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
 
                     # Print details about invalid traces
@@ -2323,9 +2326,17 @@ def main(config_path):
                     for channel, bench, side in validation_results.get('missing_traces', []):
                         print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
 
+                    for channel, bench, side, reason in validation_results.get('misregistered_traces', []):
+                        print(f"  ✗ {channel}{bench}{side}: legacy trace misregistered ({reason})")
+
                     # Print details about fallbacks used
                     for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
                         print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+
+                    # A camera with no usable trace and no usable mastercalib stand-in: ask
+                    # whether to go on without it (or stop the run).
+                    with reporter.paused():
+                        confirm_unusable_master_traces(validation_results.get('unusable_masters', []))
 
                     # Still use trace_output_dir (now contains mix of user + mastercalib)
                     final_trace_dir = config.get('trace_output_dir')
@@ -2365,8 +2376,6 @@ def main(config_path):
                            slow_bias=slow_bias_file, fast_bias=fast_bias_file)
 
             # Validate newly generated traces with per-trace fallback
-            from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
-
             print("Validating newly generated traces...")
             validation_results = validate_and_fix_trace_fibres(
                 config.get('trace_output_dir'),
@@ -2383,10 +2392,13 @@ def main(config_path):
                 fallback_count = len(validation_results['fallback_used'])
 
                 missing_count = len(validation_results.get('missing_traces', []))
+                misreg_count = len(validation_results.get('misregistered_traces', []))
 
                 print(f"⚠️  Found {invalid_count} generated trace(s) with incorrect fiber counts")
                 if missing_count:
                     print(f"⚠️  {missing_count} camera(s) produced no trace at all")
+                if misreg_count:
+                    print(f"⚠️  {misreg_count} legacy trace(s) fail the fibre-registration check")
                 print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
 
                 # Print details about invalid traces
@@ -2396,9 +2408,17 @@ def main(config_path):
                 for channel, bench, side in validation_results.get('missing_traces', []):
                     print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
 
+                for channel, bench, side, reason in validation_results.get('misregistered_traces', []):
+                    print(f"  ✗ {channel}{bench}{side}: legacy trace misregistered ({reason})")
+
                 # Print details about fallbacks used
                 for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
                     print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+
+                # A camera with no usable trace and no usable mastercalib stand-in: ask
+                # whether to go on without it (or stop the run).
+                with reporter.paused():
+                    confirm_unusable_master_traces(validation_results.get('unusable_masters', []))
 
                 # Still use trace_output_dir (now contains mix of user + mastercalib)
                 final_trace_dir = config.get('trace_output_dir')
@@ -2410,13 +2430,23 @@ def main(config_path):
         if final_trace_dir is None:
             print(f"\n⚠️  FALLBACK: Using mastercalib traces from {CALIB_DIR}")
 
-            # Validate mastercalib traces exist and are valid
+            # Every master usable: use the mastercalib set in place, nothing copied.
             if count_trace_fibres(CALIB_DIR):
                 final_trace_dir = CALIB_DIR
                 trace_source = "mastercalib"
                 print("✓ Mastercalib traces validated successfully")
             else:
-                raise RuntimeError(f"FATAL: Even mastercalib traces in {CALIB_DIR} are invalid or missing!")
+                # Otherwise fall back camera by camera: only the usable masters are
+                # copied into the (empty) trace directory.
+                print("⚠️  Some mastercalib traces are unusable; falling back camera by camera")
+                validation_results = validate_and_fix_trace_fibres(
+                    config.get('trace_output_dir'), mastercalib_dir=CALIB_DIR)
+                if not validation_results['fallback_used']:
+                    raise RuntimeError(f"FATAL: no usable mastercalib trace in {CALIB_DIR} for any camera!")
+                with reporter.paused():
+                    confirm_unusable_master_traces(validation_results['unusable_masters'])
+                final_trace_dir = config.get('trace_output_dir')
+                trace_source = "mastercalib_per_camera"
 
         # Update config to reflect final decision
         config['trace_output_dir'] = final_trace_dir
