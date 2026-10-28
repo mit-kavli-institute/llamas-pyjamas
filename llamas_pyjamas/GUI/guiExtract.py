@@ -165,13 +165,6 @@ def match_hdu_to_traces(hdu_list, trace_files, start_idx=1):
 
     return matches
 
-# Define a Ray remote function for processing a single trace extraction.
-# NOTE: no hard `memory=` reservation here. A fixed per-task memory reservation
-# can deadlock extraction when Ray's auto-detected logical `memory` pool (≈ free
-# RAM − object store) drops below the reservation, in which case the task becomes
-# permanently unschedulable. Concurrency is governed by `num_cpus` instead. To opt
-# back into a reservation on low-RAM machines, set `ray_task_memory_mb` in the
-# config (applied via `.options(memory=...)` at dispatch).
 def _load_unillum_mask(mask_dir, bench, side, color, shape):
     """Load the per-camera flat-derived unilluminated mask extension, or None.
 
@@ -360,16 +353,9 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
 
     if bias is not None:
         # --- Inter-fibre diagnostic (informational only) ---
-        # Log the divergence between the raw frame's inter-fibre median and the
-        # master bias's inter-fibre median.  For science frames, this divergence
-        # is dominated by sky background in the gaps and can legitimately be
-        # hundreds of DN — it does NOT indicate a bad bias file.  The master
-        # bias is never discarded here; hard failures (missing file, read-mode
-        # mismatch, wrong detector) are handled earlier.
-        # This diagnostic is INFORMATIONAL ONLY — the master bias is never
-        # discarded here — so every outcome is logged at INFO (not WARNING): a
-        # large sky-illuminated divergence is expected and would otherwise
-        # flood the curated terminal (~166 lines/run).
+        # Frame vs master-bias inter-fibre median. On science frames sky in the gaps
+        # can make this hundreds of DN without a bad bias, so the bias is never
+        # discarded here and every outcome is logged at INFO, not WARNING.
         try:
             gap_mask = build_interfibre_mask(tracer, hdu_data.shape, image_type='science')
             # Raw frames may carry an extra row (2049 vs the 2048 mask); index on
@@ -418,24 +404,18 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
     return bias
 
 
+# No hard `memory=` reservation: when Ray's logical memory pool (~free RAM - object
+# store) drops below a fixed reservation the task is never scheduled. Concurrency is
+# governed by `num_cpus`; opt in with `ray_task_memory_mb` (applied at dispatch).
 @ray.remote
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
                   remove_cosmic_rays=True, edge_bias=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
 
-    The tracer is loaded first so its fiberimg can be used for an inter-fibre
-    bias quality check and, when needed, an inter-fibre fallback bias estimate.
-
-    Bias selection logic:
-    1. Try to load master bias extension from use_bias file.
-    2. If loaded, verify bench/side/color match.
-    3. If verified, run inter-fibre quality check: if the master bias inter-fibre
-       median deviates from the raw frame's inter-fibre median by more than
-       _BIAS_INTERFIBRE_THRESHOLD DN, discard the master bias.
-    4. If no valid master bias remains, call generate_fallback_bias_hdu(hdu_data, tracer)
-       which cross-validates inter-fibre vs test-region (rows 30-50) estimates and
-       selects the better one.
+    The tracer is loaded first so its fiberimg can be used for the inter-fibre
+    bias diagnostic and fallback bias. Bias selection is
+    :func:`select_bias_for_extension`.
 
     Returns a dict containing:
         'extraction': ExtractLlamas object (or None if error)
@@ -621,13 +601,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     slow_bias (str, optional): Path to the SLOW-mode master bias FITS file. Defaults to None.
     fast_bias (str, optional): Path to the FAST-mode master bias FITS file. Defaults to None.
     method (str, optional): Extraction method ('optimal' or 'boxcar'). None (default)
-                            resolves from the LLAMAS_EXTRACT_METHOD environment
-                            variable (set once by reduce.py from the config's
-                            extraction_method key), falling back to 'optimal'.
-                            The env mechanism keeps EVERY extraction in a run
-                            (science, arc, flat, twilight, sky) on the same
-                            method — mixing methods breaks the per-fibre
-                            throughput calibration.
+                            resolves from LLAMAS_EXTRACT_METHOD (set by reduce.py),
+                            else 'optimal'. Every extraction in a run must use the
+                            same method, or the per-fibre throughput calibration breaks.
     trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
     mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
                                            Defaults to CALIB_DIR if None.
@@ -657,10 +633,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         # Per-task memory reservation for extraction (0 ⇒ schedule purely on CPUs).
         task_mem_mb = int(os.environ.get('LLAMAS_RAY_TASK_MEMORY_MB', 0))
 
-        # Attach to (or start) the one consolidated Ray session — object store clamped
-        # to 30% RAM, temp/spill redirected into the owned scratch dir, package uploaded
-        # once per run. In the pipeline this attaches to the session reduce.py started;
-        # the GUI passes force_refresh=True so each click re-bundles source (per-click reset).
+        # Attach to (or start) the shared Ray session (see Utils/rayManager.py). The GUI
+        # passes force_refresh=True so each click re-bundles edited source.
         init_ray(force_refresh=force_refresh)
 
         # Import placeholder detection utilities
