@@ -9,27 +9,8 @@ Usage:
     Then call the `master_bias` method to create and save the master bias frame.
 Example:
     bias_llamas = BiasLlamas('/path/to/bias/images')
-
-    A class to handle bias image processing and creation of a master bias frame.
-    Attributes:
-        bias_path (str): The directory path containing bias images.
-        files (list): A list of bias image files.
-    Methods:
-        master_bias(): Creates and saves the master bias frame from the provided bias images.
-
-        Initializes the BiasLlamas class with the provided input data.
-        Args:
-            input_data (str or list): A directory path containing bias images or a list of bias image files.
-        Raises:
-            ValueError: If the provided directory does not exist or no .fits files are found.
-            TypeError: If the input data is not a string or a list.
-
-        Creates and saves the master bias frame from the provided bias images.
-        The method reads bias images from the specified directory or list, combines them using average method with sigma clipping,
-        and saves the combined bias frame as 'combined_bias.fit' in the specified directory.
-        Raises:
-            ValueError: If no bias images are found in the specified directory or list.
-        """
+    bias_llamas.master_bias()   # writes combined_bias.fits next to the inputs
+"""
 import os
 from astropy.nddata import CCDData
 from astropy.stats import mad_std

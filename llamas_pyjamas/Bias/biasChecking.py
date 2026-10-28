@@ -85,7 +85,7 @@ def build_interfibre_mask(tracer,
     Uses the ``fiberimg`` attribute of a loaded ``TraceLlamas`` object.
     ``fiberimg`` is a 2-D integer array (shape naxis2 × naxis1) where pixels
     belonging to a fibre are set to that fibre's index and inter-fibre gap
-    pixels are set to -1 (see traceLlamasMaster.py:769).
+    pixels are set to -1 (see TraceLlamas.profileFit in traceLlamasMaster.py).
 
     For flat-field image types (dome_flat, lamp_flat, trace_flat), one pixel
     of binary erosion is applied to the fibre mask before inverting, widening

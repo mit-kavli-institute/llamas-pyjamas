@@ -69,7 +69,7 @@ class BiasReadModeError(ValueError):
 class BiasCameraMissingError(BiasNotFoundError):
     """
     Raised when a master-bias file is readable but has no extension for the
-    requested camera (e.g. the 2026-01-06 FAST master lacks blue 1A and 4A).
+    requested camera (e.g. a master built while that camera was down).
 
     Subclasses BiasNotFoundError so every caller that already falls back to
     ``generate_fallback_bias_hdu`` for a missing bias does so here too.
@@ -108,8 +108,8 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
     Cross-validation rule (``cross_check_threshold = 5 DN``):
     * If the two estimates agree within 5 DN → use the inter-fibre estimate
       (more spatially representative).
-    * If they diverge → use whichever is closer to the raw frame's
-      inter-fibre median (i.e. whichever self-validates better).
+    * If they diverge → use the lower estimate: contamination (sky, dark
+      current, source) can only push a pedestal estimate up.
 
     When no tracer is available (or it lacks ``fiberimg``), only the
     test-region estimate is used.
@@ -196,10 +196,7 @@ def generate_fallback_bias_hdu(frame_data: np.ndarray, tracer=None) -> fits.Imag
                 f"{_CROSS_CHECK_THRESHOLD} DN); using inter-fibre estimate"
             )
         else:
-            # Estimates diverge — prefer the lower value.
-            # A CCD bias pedestal can only be over-estimated (contaminated by sky,
-            # dark current, or source signal); it cannot be under-estimated.
-            # The lower of the two estimates has the least contamination.
+            # Estimates diverge — prefer the lower (least contaminated) value.
             if est_interfibre <= est_test_region:
                 bias_level = est_interfibre
                 bias_src   = 'interfibre_mask'

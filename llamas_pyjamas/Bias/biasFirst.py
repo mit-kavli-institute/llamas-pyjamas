@@ -19,12 +19,11 @@ then writes ``{base}_bias_corrected.fits`` with ``BIASSUB``/``BIASSRC``/
 Downstream stages (trace generation, extraction) detect those keywords and
 skip their internal bias handling, so the correction is applied exactly once.
 
-Why this matters: the flat-field division previously operated on frames that
-still carried their ~500 DN bias pedestal.  Percent-level spectral structure
-in the pixel flat was thereby multiplied by the pedestal instead of the
-signal, imprinting tens-of-DN fake emission lines (discovered as spurious
-blue "sky lines" that no sky model could subtract).  With the pedestal
-removed first, the same flat structure perturbs the signal by <1 DN.
+Why this matters: dividing the pixel flat into a frame that still carries its
+~500 DN bias pedestal multiplies percent-level flat structure by the pedestal
+instead of the signal, imprinting tens-of-DN fake emission lines that no sky
+model can subtract. With the pedestal removed first, the same structure
+perturbs the signal by <1 DN.
 """
 
 import os
@@ -199,11 +198,10 @@ def bias_correct_frame(fits_file, output_dir, slow_bias=None, fast_bias=None,
             header['BIASLVL'] = (float(np.nanmedian(bias_data)),
                                  'Median bias level subtracted (DN)')
 
-            # 2) per-frame edge DC from the unilluminated stripes.
-            # The stripe mask is built at the tracer's detector geometry
-            # (2048x2048); raw frames may carry an extra row. The DC is a
-            # scalar, so measure it on the tracer-compatible sub-frame and
-            # subtract it from the full frame.
+            # 2) per-frame edge DC from the unilluminated stripes. The stripe
+            # mask is at the tracer's geometry (2048x2048) but raw frames may
+            # carry an extra row, so measure the scalar DC on the matching
+            # sub-frame and subtract it from the full frame.
             if tracer is not None:
                 fib = getattr(tracer, 'fiberimg', None)
                 tshape = fib.shape if fib is not None else (2048, 2048)
