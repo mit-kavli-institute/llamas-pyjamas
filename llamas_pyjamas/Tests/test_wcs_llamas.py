@@ -59,8 +59,8 @@ def _axis_pa(w):
 
 
 def test_pa_x_tracks_telrot_with_slope_plus_one():
-    # Calibrated: PA(+x) = TEL_ROT + IFU_PA_OFFSET (slope +1). Guards against the sign flip that
-    # made it slope -1 (right near 212 deg, ~90 deg off by 265). Check across a wide TEL_ROT span.
+    # Calibrated: PA(+x) = TEL_ROT + IFU_PA_OFFSET (slope +1). A sign flip (slope -1) can look right
+    # at one angle and be far off at another, so check across a wide TEL_ROT span.
     for tel_rot in (0.0, 90.0, 212.0, 265.0, 330.0):
         got = _axis_pa(_wcs(pa_deg=tel_rot, pa_offset=0.0))
         assert np.isclose(((got - tel_rot + 180) % 360) - 180, 0.0, atol=0.5), tel_rot

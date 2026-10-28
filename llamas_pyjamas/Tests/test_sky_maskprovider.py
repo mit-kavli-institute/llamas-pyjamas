@@ -1,4 +1,4 @@
-"""Tests for the SkyMask abstraction + build_sky_mask provider (Sky/skySelect.py, sky-refine Phase 1).
+"""Tests for the SkyMask abstraction + build_sky_mask provider (Sky/skySelect.py).
 
 Behaviour-preserving guarantee: build_sky_mask must return the SAME fibres as select_sky_fibres for
 every brightness-based method (it just wraps it and attaches provenance). Plus: the 'manual' provider,

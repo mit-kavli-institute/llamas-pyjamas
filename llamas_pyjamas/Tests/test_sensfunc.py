@@ -2,8 +2,8 @@
 
 The unit tests use synthetic data with a known answer: the key property is that masking a
 stellar-line region lets the fit recover the smooth continuum response *through* the line
-rather than diving into it. The integration test builds a real sensfunc from the bundled
-GD108 extraction if the may26 data is present, and is skipped otherwise.
+rather than diving into it. The integration test builds a real sensfunc from a GD108
+extraction if that data is present, and is skipped otherwise.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_sensfunc`).
 """

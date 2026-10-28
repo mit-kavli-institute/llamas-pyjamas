@@ -143,7 +143,7 @@ def test_find_sensfuncs_by_property_ignores_rss_and_name():
 
 
 def test_apply_dialog_autofills_sensfunc_from_parent():
-    # RSS in a subdir, sensfunc in the parent -- the real layout that hid the file before.
+    # RSS in a subdir, sensfunc in the parent -- the usual layout.
     with tempfile.TemporaryDirectory() as parent:
         sens = _write_sensfunc(parent)
         sub = os.path.join(parent, 'extractions')

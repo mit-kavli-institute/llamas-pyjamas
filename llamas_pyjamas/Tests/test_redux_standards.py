@@ -31,7 +31,7 @@ def _write_and_parse(assignments, tmp_path):
 
 
 def test_match_standard_on_science_pointing():
-    # GD108 pointing (may26), tagged as a science exposure in the header.
+    # GD108 pointing, tagged as a science exposure in the header.
     header = {'OBS TYPE': 'SCIENCE', 'RA': 150.19716666, 'DEC': -7.55888888}
     result = _match_standard(header)
     assert result is not None
@@ -60,9 +60,8 @@ def test_flux_standard_files_omitted_when_none(tmp_path):
 
 
 def test_flux_standards_appended_when_template_lacks_key(tmp_path):
-    # Regression: rewriting a config written before this feature (no flux_standard_files line)
-    # must still record the standards by appending, not silently drop them. The substitution
-    # loop only fills keys already present, so absence of the key was the failure mode.
+    # A config with no flux_standard_files line must still record the standards by appending:
+    # the substitution loop only fills keys already present.
     legacy = os.path.join(tmp_path, 'legacy.txt')
     with open(legacy, 'w') as fh:
         fh.write('science_files = /d/sci.fits\nclobber = true\nsky_method = scaled\n')

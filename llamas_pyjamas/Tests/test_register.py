@@ -1,4 +1,4 @@
-"""Tests for the astrometric registration engine (Utils/register.py, Phase 3).
+"""Tests for the astrometric registration engine (Utils/register.py).
 
 Synthetic and network-free: source detection on a fibre lattice, the common-offset matcher
 (robust to the pointing error, rejecting decoys), and the solve with its rotation cap. The full
@@ -69,8 +69,8 @@ def test_match_common_offset_matches_true_and_rejects_decoy():
 
 def test_match_common_offset_cluster_beats_median():
     # 6 Gaia; 2 detections share the TRUE common offset, 4 are spurious with scattered offsets
-    # whose inclusion drags a MEDIAN-based seed off the real pair. The densest-cluster seed must
-    # still recover the 2 real matches (regression for the J1613 06-22 banding failure).
+    # (e.g. from sky-residual banding) that drag a MEDIAN-based seed off the real pair. The
+    # densest-cluster seed must still recover the 2 real matches.
     gra = 100.0 + np.array([0.000, 0.004, 0.008, 0.012, 0.016, 0.020])
     gdec = 20.0 + np.array([0.000, 0.003, -0.002, 0.005, -0.004, 0.001])
     gaia = SkyCoord(gra * u.deg, gdec * u.deg)

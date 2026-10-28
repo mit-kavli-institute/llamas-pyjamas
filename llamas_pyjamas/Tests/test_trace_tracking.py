@@ -1,9 +1,8 @@
 """Unit tests for walking fibre centroids along the dispersion axis.
 
-On 2026-09-29 blue 4A, faint fibres sitting between saturated bright neighbours
-crept onto the neighbour one pitch away as the old walk re-centroided around
-``int(previous)`` and accepted any step under 1.5 px. ``track_comb_step`` must
-keep every fibre on its own peak over a full half-detector walk.
+Faint fibres between saturated bright neighbours can creep onto the neighbour
+one pitch away. ``track_comb_step`` must keep every fibre on its own peak over a
+full half-detector walk.
 Runnable with pytest or as a plain script
 (`python -m llamas_pyjamas.Tests.test_trace_tracking`).
 """
@@ -67,8 +66,7 @@ def test_negative_comb_is_not_a_centroid():
 
 def test_dark_stretch_does_not_run_away():
     """A block of fibres with no signal for 25 columns (vignetted corner) must
-    re-acquire afterwards, not drift together on carried predictions -- the
-    first cut of this fix ran blue 4A's bottom 40 fibres 67 px off this way."""
+    re-acquire afterwards, not drift together on carried predictions."""
     prev, prevprev, prev_ok, step_ok = truth(0), None, np.ones(NFIB, bool), None
     for k in range(1, 73):
         comb = comb_at(k)

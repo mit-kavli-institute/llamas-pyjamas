@@ -1,7 +1,7 @@
 """Unit tests for matching a traced fibre comb to the fibremap.
 
-These pin down the invariant broken on 2025-03-05 and 2026-08-31: a trace's index
-IS its fibremap position, so discarding the wrong trace when the detection
+These pin down the invariant that a trace's index IS its fibremap position, so
+discarding the wrong trace when the detection
 over-counts silently moves every fibre after it onto the neighbouring lenslet.
 Benchside 2A over-counts on every dataset because dead fibre 299 leaks a faint
 peak at the regular comb pitch at the end of the slit, where trimming by spacing
@@ -31,8 +31,7 @@ def assert_dropped(keep, n_detected, expected):
 
     Slot labels alone cannot express this: dropping the first trace and dropping
     the last both leave ``resolved == range(n)``, so a test that only checks the
-    labels passes whether the ghost or a live fibre was thrown away. That is
-    exactly how the green 3B one-lenslet shift got through.
+    labels passes whether the ghost or a live fibre was thrown away.
     """
     got = sorted(set(range(n_detected)) - set(np.asarray(keep).tolist()))
     assert got == list(expected), f"dropped {got}, expected {list(expected)}"
@@ -79,7 +78,7 @@ def test_isolated_ghost_off_the_comb_is_dropped():
 
 
 def test_end_gap_does_not_define_its_own_pitch():
-    """Green 3B, 2026-08-31: the exact geometry that shifted a bench by one lenslet.
+    """Green 3B geometry: a ghost past the slit end can shift a bench by one lenslet.
 
     The running pitch median is padded with the edge value, so without care the
     ghost's own 4.2x gap becomes the pitch it is measured against, it quantises to
@@ -132,9 +131,8 @@ def test_interior_dead_gap_survives_the_pitch_cleanup():
 
 
 def test_missing_live_fibre_refuses_rather_than_guessing():
-    # Exactly the 2025-03-05 failure: a live mid-slit fibre was never detected AND
-    # the slot-299 leak was. The count is still 298, so a count check passes -- the
-    # comb must be checked instead.
+    # A live mid-slit fibre was never detected AND the slot-299 leak was. The count
+    # is still 298, so a count check passes -- the comb must be checked instead.
     detected = [s for s in range(300) if s not in (169, 270)]
     assert len(detected) == 298
     with pytest.raises(TraceCombError):
@@ -168,7 +166,7 @@ def throughput(n, seed=0):
 
 
 def test_fingerprint_breaks_the_one_pitch_tie():
-    """Green 3A / blue 3B, 2026-09-29: the coin-flip geometry, now with fluxes.
+    """Green 3A / blue 3B: the coin-flip geometry, with fluxes.
 
     The ghost past the slit end is ~1% of a fibre. Dropping it keeps the reference
     throughput pattern; dropping live slot 0 shifts it by one fibre.

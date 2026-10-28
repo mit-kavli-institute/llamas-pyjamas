@@ -1,6 +1,6 @@
 """Tests for the super-RSS substrate (Combine/superRSS.py).
 
-The file-reading `build_super_rss` / `load_exposure` are validated on real may26 data; these cover
+The file-reading `build_super_rss` / `load_exposure` are validated on real data; these cover
 the headless view logic: band collapse (native per-fibre, no resample), masking + dropping fibres
 with no good pixel in the window, quadrature variance, multi-channel concatenation, and the
 surface-brightness conversion.

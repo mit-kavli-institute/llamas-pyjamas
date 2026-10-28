@@ -225,7 +225,7 @@ def test_transparency_drops_incomplete_source_instead_of_scaling_up():
     sr, srcs = _sr_two_exposures(mask_fibre_in_exp1=True, n_src=2)
     sources = [SkyCoord(r * u.deg, 2.0 * u.deg) for r in srcs]
     scales = transparency_scales(sr, sources=sources, radius_arcsec=2.0, channels=['green'])
-    # old: source 0 summed 2 of 3 fibres in e1 -> e1 scaled up by 1.5 on that source
+    # a partial sum (2 of 3 fibres of source 0 in e1) would scale e1 up by 1.5
     assert np.isclose(scales['e0'], 1.0) and np.isclose(scales['e1'], 1.0)
 
 
@@ -283,4 +283,4 @@ def test_cube_coverage_ignores_fibres_without_data():
     sr = SuperRSS('T', 'skysub', 'counts', [ExposureMeta('e0', 'p0', 1.0, 1.0, 1.0)],
                   {'green': st})
     cube = combine_cube(sr, 'green')
-    assert cube.coverage.max() == 1                        # was 2: the empty fibre counted
+    assert cube.coverage.max() == 1                        # not 2: the empty fibre must not count

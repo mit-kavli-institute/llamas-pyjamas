@@ -136,7 +136,7 @@ class TestSkyMask(unittest.TestCase):
             truth = build_synthetic_rss(os.path.join(d, "x_RSS_green_FF.fits"), rng)
         cfg = SkySubtractConfig()
         sm = build_sky_fiber_mask(truth["counts"], None, cfg)
-        self.assertIsInstance(sm, SkyMask)              # now a first-class SkyMask
+        self.assertIsInstance(sm, SkyMask)              # a first-class SkyMask
         mask = sm.mask
         self.assertEqual(mask.dtype, np.bool_)
         # The bright object fibres (first N_OBJ) should be excluded.

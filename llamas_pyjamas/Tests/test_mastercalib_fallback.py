@@ -3,10 +3,8 @@
 Two filename conventions are in circulation: the mastercalib bundle ships
 ``LLAMAS_{channel}_{bench}_{side}_traces.pkl``, while traces written by
 ``run_ray_tracing(is_master_calib=True)`` carry a ``LLAMAS_master_`` prefix.
-Every lookup has to accept both. Checking only the prefixed form made the
-fallback unreachable against a stock bundle, so a camera that failed to trace
-silently produced no trace at all rather than mastercalib data -- which is how
-blue 1A and 4A became 598 blank rows in the RSS on 2026-08-31.
+Every lookup has to accept both, or the fallback is unreachable against a stock
+bundle and a camera that fails to trace silently becomes blank RSS rows.
 
 Runnable with pytest or as a plain script
 (``python -m llamas_pyjamas.Tests.test_mastercalib_fallback``).
@@ -66,11 +64,8 @@ def test_missing_trace_names_both_attempts(tmp_path):
 
 
 def test_copy_from_a_stock_bundle_succeeds(tmp_path):
-    """The regression: a bundle holding only the unprefixed name must still work.
-
-    Against the old code this raised FileNotFoundError, the fallback was skipped,
-    and the camera ended up as blank fibres downstream.
-    """
+    """A bundle holding only the unprefixed name must still work, or the fallback
+    is skipped and the camera ends up as blank fibres downstream."""
     src = tmp_path / 'mastercalib'
     src.mkdir()
     dst = tmp_path / 'traces'

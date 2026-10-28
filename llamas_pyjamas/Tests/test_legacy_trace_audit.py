@@ -1,10 +1,8 @@
 """Unit tests for auditing legacy trace pickles before they are reused.
 
-A legacy trace was written before the tracer checked fibre registration, so it
-has no ``comb_ok`` attribute. Such pickles still load under the current code (the
-class travels inside the pickle), but until now they were accepted on fibre COUNT
-alone, and a misregistered comb has the right count. The old 2A mis-trim kept
-298 fibres while dropping a live one and keeping dead fibre 299's leak.
+A legacy trace predates the tracer's fibre-registration check, so it has no
+``comb_ok`` attribute, and a misregistered comb can still have the right fibre
+COUNT (e.g. a 2A trim that drops a live fibre but keeps dead fibre 299's leak).
 These tests pin down that the audit catches that, that it leaves good legacy
 traces and new-style traces alone, and that a failing one is swapped for the
 mastercalib trace without losing the user's file. Runnable with pytest or as a
@@ -30,7 +28,7 @@ from llamas_pyjamas.Utils.utils import (
 # 2A per traceLUT.json: 298 live fibres, dead at fibremap 270 and 299.
 DEAD_2A = [270, 299]
 LIVE_2A = [s for s in range(300) if s not in DEAD_2A]
-# The old mis-trim: live slot 126 dropped, dead slot 299's leak kept. Right count.
+# A mis-trim: live slot 126 dropped, dead slot 299's leak kept. Right count.
 MISTRIM_2A = [s for s in range(300) if s not in (126, 270)]
 
 
@@ -81,7 +79,7 @@ def test_clean_legacy_trace_passes():
 
 
 def test_2a_mistrim_is_flagged():
-    # Right count, so the count-only check accepted it; the slot check does not.
+    # Right count, so a count-only check accepts it; the slot check does not.
     obj = legacy_2a(MISTRIM_2A)
     assert obj.nfibers == 298
     assert audit_trace_registration(obj, dead_fibers=DEAD_2A) is not None

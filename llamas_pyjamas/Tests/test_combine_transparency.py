@@ -3,7 +3,7 @@
 Synthetic super-RSS with a bright reference source seen at different throughputs in two exposures;
 checks that the per-exposure scales bring the source flux to a common level, that variance scales
 by scale^2, and that apply_scales is applied as a ratio (composes/idempotent). find_reference_sources
-and the peak-finder are validated on real may26 data.
+and the peak-finder are validated on real data.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_transparency`).
 """

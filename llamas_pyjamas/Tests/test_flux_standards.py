@@ -1,8 +1,8 @@
 """Unit tests for the spectrophotometric standards catalogue and crossmatch.
 
 The crossmatch is what tells a standard-star exposure from a science target when the header
-cannot, so these pin the behaviour that matters: the two may26 standards match and the three
-quasars do not, coordinates round-trip through the header keys, and the radius actually gates.
+cannot, so these pin the behaviour that matters: standards match and quasar fields do not,
+coordinates round-trip through the header keys, and the radius actually gates.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_flux_standards`).
 """
@@ -24,7 +24,7 @@ _MINI = StandardsCatalog([GD108, FEIGE110])
 
 
 def test_match_hits_standard_within_radius():
-    # GD108 pointing from the may26 header.
+    # GD108 pointing from a real header.
     m = _MINI.match(150.19716666, -7.55888888)
     assert m is not None and m.name == 'GD108'
     assert m.separation_arcsec < 5.0
@@ -58,10 +58,9 @@ def test_ra_dec_from_header_missing_or_bad():
 
 
 def test_ra_dec_from_header_sexagesimal_from_tel_block():
-    # A header repaired by Postprocessing.fix_exposure_info carries the TEL block's SEXAGESIMAL
-    # strings in RA/DEC. float() cannot read those, and returning (None, None) silently greyed
-    # out the sensitivity-function action on the mar25 GD108 exposures -- the standard is found
-    # by crossmatch, so an unreadable pointing reads as "not a standard".
+    # A header repaired by Postprocessing.fix_exposure_info can carry the TEL block's SEXAGESIMAL
+    # strings in RA/DEC. float() cannot read those, and an unreadable pointing reads as "not a
+    # standard" to the crossmatch.
     hdr = {'RA': '10:00:47.03', 'DEC': '-7:33:28.9',
            'TEL RA': '10:00:47.03', 'TEL DEC': '-7:33:28.9'}
     ra, dec = ra_dec_from_header(hdr)
@@ -71,8 +70,8 @@ def test_ra_dec_from_header_sexagesimal_from_tel_block():
 
 
 def test_sexagesimal_header_resolves_to_gd108():
-    # End to end against the committed bundle: the mar25 pointing must land on GD108, inside the
-    # 30 arcsec radius, with a reference spectrum -- the exact condition the GUI action gates on.
+    # End to end against the committed bundle: a sexagesimal pointing must land on GD108, inside
+    # the 30 arcsec radius, with a reference spectrum -- the exact condition the GUI action gates on.
     hdr = {'RA': '10:00:47.03', 'DEC': '-7:33:28.9',
            'TEL RA': '10:00:47.03', 'TEL DEC': '-7:33:28.9'}
     match = load_catalog().match_header(hdr)
@@ -95,17 +94,17 @@ def test_bundled_catalog_covers_may26_standards():
     feige = catalog.match(349.9933, -5.1655)
     assert gd is not None and gd.name == 'GD108'
     assert feige is not None and feige.name == 'Feige110'
-    # Phase II needs the reference spectrum; both may26 standards must carry one.
+    # The sensfunc needs the reference spectrum; both standards must carry one.
     assert gd.standard.has_spectrum, 'GD108 must have a bundled flux file'
     assert feige.standard.has_spectrum, 'Feige110 must have a bundled flux file'
 
 
 def test_bundled_catalog_rejects_quasar_fields():
-    # The three may26 science targets must not match any standard.
+    # Quasar science fields must not match any standard.
     catalog = load_catalog()
-    for ra, dec in [(148.0, 13.79),    # J0958+1347 approx
-                    (243.26, 8.135),   # J1613+0808 approx
-                    (327.9, 2.59)]:    # J2151+0235 approx
+    for ra, dec in [(148.0, 13.79),
+                    (243.26, 8.135),
+                    (327.9, 2.59)]:
         assert catalog.match(ra, dec) is None, f'{ra},{dec} should not match a standard'
 
 

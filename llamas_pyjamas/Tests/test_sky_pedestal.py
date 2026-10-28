@@ -1,8 +1,8 @@
-"""Tests for the per-camera additive continuum pedestal (Sky/skyPedestal.py, sky-refine Phase 3a).
+"""Tests for the per-camera additive continuum pedestal (Sky/skyPedestal.py).
 
 Synthetic camera: base sky already subtracted (sci.sky = spline*throughput), leaving a smooth
 additive continuum FLOOR on every fibre plus object flux on the bright fibres. The pedestal must:
-recover the floor from blank fibres, remove it, PRESERVE narrow line emission (the Lyα guard),
+recover the floor from blank fibres, remove it, PRESERVE narrow line emission (the narrow-line guard),
 preserve real object continuum, select only blank fibres, and no-op when there is no data.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_sky_pedestal`).
@@ -30,7 +30,7 @@ def _camera(line_fibres=(), line_amp=40.0, floor_amp=5.0):
     base_sky = sky_model[None, :] * tp[:, None]
     counts = base_sky + floor[None, :] + rng.normal(0, 0.3, size=(NFIB, NWAVE))
     counts[:20] += 2000.0                                           # bright object continuum
-    line = _gauss(x, 200, line_amp, sig=1.0)                        # narrow "Lyα" emission
+    line = _gauss(x, 200, line_amp, sig=1.0)                        # narrow line emission
     for i in line_fibres:
         counts[i] += line
     return counts, base_sky, tp, floor
@@ -59,7 +59,7 @@ def test_estimate_recovers_the_floor():
 
 
 def test_narrow_line_not_absorbed_into_pedestal():
-    # a narrow line in some BLANK fibres must NOT enter the continuum pedestal (the Lyα guard)
+    # a narrow line in some BLANK fibres must NOT enter the continuum pedestal (the narrow-line guard)
     counts, base_sky, tp, floor = _camera(line_fibres=(30, 35, 40), line_amp=60.0)
     blank = np.zeros(NFIB, bool); blank[20:] = True
     ped = estimate_pedestal(counts, base_sky, blank)
@@ -104,7 +104,7 @@ def test_too_few_blank_is_noop():
 
 
 def _camera_slitfloor(line_fibres=(), line_amp=40.0):
-    """Like _camera but the floor VARIES along the slit (arch, the diagnosed shape)."""
+    """Like _camera but the floor VARIES along the slit (an arch)."""
     x = np.arange(NWAVE)
     oh = sum(_gauss(x, c, 500.0) for c in (80, 160, 240, 320))
     sky_model = 100.0 + oh

@@ -2,8 +2,7 @@
 
 Most logic lives in the model — region composition, per-channel fitting, refine regions, and
 that user edits change the result — but the dialog is also constructed to catch import/wiring
-regressions (a missing QComboBox import once stopped the Build window opening). Qt runs under
-the offscreen platform.
+regressions. Qt runs under the offscreen platform.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_cubeview_sensfunc`).
 """
@@ -53,9 +52,8 @@ def test_fit_channel_ok_and_too_few():
 
 
 def test_dialog_constructs_and_fits():
-    # Guards against import/wiring regressions in the dialog itself (a missing QComboBox import
-    # once stopped the Build window from opening). Constructing it exercises every control and
-    # the initial fit+draw.
+    # Guards against import/wiring regressions in the dialog itself. Constructing it exercises
+    # every control and the initial fit+draw.
     dialog = SensFuncDialog(_model(), default_path='')
     assert dialog.drag_combo.count() == 2                       # Mask / Breakpoints
     # the fit controls all exist and the model was seeded with (list-typed) refine regions

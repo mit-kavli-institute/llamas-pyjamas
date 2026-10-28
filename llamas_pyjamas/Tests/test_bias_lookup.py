@@ -1,10 +1,8 @@
 """Unit tests for master-bias camera lookup when the bias file lacks a camera.
 
-The 2026-01-06 FAST master bias has 22 extensions -- blue 1A and 4A are absent.
-The lookup used to fall through to an index guess, get a neighbouring camera,
-and raise a bare ValueError that failed the trace and crashed bias-first. It
-must instead raise BiasCameraMissingError (a BiasNotFoundError), which every
-caller already knows how to fall back from.
+A master bias can lack cameras (here blue 1A and 4A). The lookup must raise
+BiasCameraMissingError (a BiasNotFoundError), which every caller falls back
+from, rather than guessing a neighbouring camera by index.
 Runnable with pytest or as a plain script
 (`python -m llamas_pyjamas.Tests.test_bias_lookup`).
 """
@@ -46,7 +44,7 @@ def test_missing_camera_raises_the_specific_error(bias22):
 
 
 def test_missing_camera_is_a_bias_not_found(bias22):
-    # Existing fallbacks catch BiasNotFoundError; the new error must reach them.
+    # Fallbacks catch BiasNotFoundError; this error must reach them.
     with pytest.raises(BiasNotFoundError):
         tlm._grab_bias_hdu(bench='4', side='A', color='blue', dir='fast.fits')
 

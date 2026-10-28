@@ -317,12 +317,12 @@ def test_twilight_ti_unbiased_by_zero_fill(tmp):
         c = np.nanmedian(d['CORRECTION'], axis=1)
         flags = d['FLAGS']
     ref = np.median(np.delete(c, [5, 7]))
-    assert abs(c[5] / ref - 1.0) < 0.01          # nansum gave ~0.63 here
+    assert abs(c[5] / ref - 1.0) < 0.01          # a plain nansum would read ~0.63
     assert abs(c[7] / ref - 1.0) < 0.01          # benchside median, not a silent 1.0
     assert flags[7] & MASK_FLAT_LAMP_ONLY and not flags[5] & MASK_FLAT_LAMP_ONLY
 
 
-# ================================================================ step 3: guards
+# ================================================================ guards
 def _sensfunc(meta=None):
     from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
     chans = {}
@@ -400,7 +400,7 @@ def test_combine_cli_reports_instead_of_traceback(tmp, capsys):
     assert 'MissingFluxCalibrationError' in capsys.readouterr().err
 
 
-# ---------------------------------------------------------------- sensfunc stage (C1)
+# ---------------------------------------------------------------- sensfunc stage
 def test_sensfunc_stage_rules(tmp, caplog):
     from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, apply_sensfunc
     ff = write_rss(os.path.join(tmp, 'a_RSS_green_FF.fits'), stage='ff')
@@ -448,7 +448,7 @@ def test_flux_calibrate_file_is_atomic(tmp, monkeypatch):
     assert not [f for f in os.listdir(tmp) if f.endswith('-tmp')]
 
 
-# ---------------------------------------------------------------- promote_final_rss (F1)
+# ---------------------------------------------------------------- promote_final_rss
 def _legacy(tmp, **per_stage):
     """A legacy keep-intermediate reduction: base registered + FLAM, FF stages have neither."""
     ps = {'base': {'registered': True, 'flam': True}}
@@ -556,7 +556,7 @@ def test_propagation_base_ff_skysub_consolidate_promote(tmp):
     sky = subtract_sky_rss(ff, config=SkySubtractConfig(method='scaled', qa_plots=False))
     assert sky == stage_name(tmp, 'green', 'ff_skysub')
 
-    # post-processing as it used to happen: registration + FLAM on the BASE file only
+    # legacy post-processing: registration + FLAM on the BASE file only
     with fits.open(base, mode='update') as h:
         fw = h['FIBERWCS'].data
         apply_fibre_astrometry(h, ras=fw['RA'] + 1.0 / 3600, decs=fw['DEC'],
@@ -626,7 +626,7 @@ def primary_header_diff_ok(a, b):
     return primary_header_diff(a[0].header, b[0].header) == {}
 
 
-# ================================================================ step 4: flux calibration on the final stage
+# ================================================================ flux calibration on the final stage
 def test_fluxcal_cli_writes_flam_on_the_final_stage(tmp, capsys):
     from llamas_pyjamas.Postprocessing.apply_fluxcal import main
     files = write_exposure(tmp, channels=('green',))
@@ -672,7 +672,7 @@ def test_calibration_targets_deduplicate_exposures(tmp):
     assert got == [files[('ff_skysub', 'green')], files[('ff_skysub', 'red')]]
 
 
-# ================================================================ step 5: registration on the final stage
+# ================================================================ registration on the final stage
 def test_registration_writes_the_final_stage(tmp):
     from llamas_pyjamas.Utils.register import _registration_siblings, reset_rough
     files = write_exposure(tmp, per_stage={'base': {'registered': True}})
@@ -725,7 +725,7 @@ def test_apply_fibre_astrometry_updates_in_place_only_for_matching_rows(tmp):
         assert [x.name for x in h][-1] == 'FIBERWCS'
 
 
-# ================================================================ step 6: the combiner picks the final stage
+# ================================================================ the combiner picks the final stage
 def test_combiner_uses_the_final_stage_whichever_file_is_named(tmp):
     from llamas_pyjamas.Combine.superRSS import build_super_rss
     files = write_exposure(tmp, flam=True, per_stage={'ff_skysub': {'registered': True}})
@@ -783,7 +783,7 @@ def test_combine_cli_stage_option_and_named_stage_missing(tmp, capsys):
     assert 'ff_skysub' in capsys.readouterr().err
 
 
-# ================================================================ step 7: --sky-penalty
+# ================================================================ --sky-penalty
 def test_sky_penalty_needs_skyresid_and_is_recorded(tmp):
     from llamas_pyjamas.Combine.superRSS import build_super_rss
     from llamas_pyjamas.Combine.cube import combine_cube

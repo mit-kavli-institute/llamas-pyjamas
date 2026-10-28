@@ -1,9 +1,9 @@
-"""Tests for optimal point-source extraction and the narrowband line image (Phase 4, step 2).
+"""Tests for optimal point-source extraction and the narrowband line image.
 
 Synthetic: a Gaussian point source sampled by fibres over two exposures (optimal extraction should
 recover the template and beat a single fibre / uniform sum), the seeing estimate, and a cube with a
 line on one spaxel (narrowband should recover the line integral and continuum-subtract to zero
-off-line). Validated further on real may26 data.
+off-line).
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_spectrum`).
 """
@@ -61,10 +61,8 @@ def test_optimal_spectrum_fits_profile_and_recovers_template():
 
 
 def test_profile_fit_converges_at_flux_calibrated_scale():
-    # FLAM-scale data (~1e-14) must still be FIT, not silently return the initial guess. The LSQ
-    # fitter meets its convergence tolerance immediately on tiny values and leaves sigma at its 0.6"
-    # start -> a spurious constant 1.41" FWHM (and a wrong extraction profile). Regression for the
-    # rescale-to-O(1) fix.
+    # FLAM-scale data (~1e-14) must still be FIT: on tiny values the LSQ fitter meets its tolerance
+    # immediately and leaves sigma at its 0.6" start (a spurious 1.41" FWHM).
     sr = _point_source_super(C=3e-14, fwhm=1.8)
     r = fit_source_profile(sr, RA0, DEC0)
     assert r is not None
@@ -106,7 +104,7 @@ def _abs_super(F0=100.0, sigma=1.0, area=0.44, nexp=1, nw=5):
 
 
 def test_optimal_spectrum_recovers_absolute_total_flux():
-    # F_hat must equal the source total flux AND be invariant to exposure count (the N-count bug fix)
+    # F_hat must equal the source total flux AND be invariant to exposure count
     for nexp in (1, 4):
         sr = _abs_super(F0=100.0, sigma=1.0, nexp=nexp)
         spec, fit = optimal_spectrum(sr, RA0, DEC0, dar=False)

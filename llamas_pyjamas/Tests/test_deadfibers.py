@@ -1,7 +1,7 @@
 """Unit tests for dead-fibre bookkeeping + per-fibre array alignment.
 
-These pin down the invariant that motivated the 2026-07 dead-fibre refactor:
-every per-fibre array is LIVE-indexed and mutually aligned, and the fibermap
+These pin down the invariant that every per-fibre array is LIVE-indexed and
+mutually aligned, and that the fibermap
 expansion is a clean, round-trippable operation. Runnable with pytest or as a
 plain script (`python -m llamas_pyjamas.Tests.test_deadfibers`).
 """
@@ -73,7 +73,7 @@ def test_two_arrays_expanded_with_same_dead_stay_aligned():
 
 
 def test_regression_old_padded_counts_misaligns_live_wave():
-    # The bug: counts fibermap-padded (dead inserted) while wave stays LIVE.
+    # Failure mode: counts fibermap-padded (dead inserted) while wave stays LIVE.
     # Pairing counts[i] with wave[i] misaligns every fibre after the first dead.
     n_live, dead = 6, [2]
     fibre_id = np.arange(n_live, dtype=float).reshape(-1, 1)
@@ -83,7 +83,7 @@ def test_regression_old_padded_counts_misaligns_live_wave():
     assert counts_padded[3, 0] == 2.0
     assert wave_live[3, 0] == 3.0
     assert counts_padded[3, 0] != wave_live[3, 0]
-    # The fix: keep BOTH live -> identical indexing -> aligned everywhere.
+    # Keeping BOTH live -> identical indexing -> aligned everywhere.
     counts_live = fibre_id.copy()
     np.testing.assert_array_equal(counts_live, wave_live)
 

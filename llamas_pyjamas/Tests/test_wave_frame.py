@@ -22,7 +22,7 @@ def _sci_header(obstype='SCIENCE'):
     h = fits.Header()
     h['OBS TYPE'] = obstype
     h['MJD-OBS'] = 61177.0918          # 2026-05-17T02:12 UTC
-    h['RA'] = 243.2592                 # J1613+0808
+    h['RA'] = 243.2592                 # a science-field pointing
     h['DEC'] = 8.1349
     h['SEXPTIME'] = 2200.0
     return h
