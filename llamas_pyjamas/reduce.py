@@ -487,11 +487,9 @@ def apply_twilight_throughput(extraction_dict, twilight_dir):
     """Set per-fibre relative_throughput from the twilight (sky) flat extraction.
 
     The twilight illuminates the fibres with the same geometry as the night sky
-    (unlike the dome lamp), and — because it is extracted with the same method
-    as the science in the same run — its per-fibre response is directly
-    applicable (validated 2026-07: predicts the stable on-sky 5577 response at
-    corr 0.97 on cameras where the lamp throughput reads 0.40). Objects never
-    contaminate it (dedicated sky-illuminated frames).
+    (unlike the lamp), and is extracted with the same method as the science in
+    the same run, so its per-fibre response is directly applicable. Objects
+    never contaminate it (dedicated sky-illuminated frames).
 
     Finds the newest twilight extraction pickle in ``twilight_dir`` and, for
     every camera present in both, replaces ``relative_throughput`` with the
@@ -632,10 +630,6 @@ def correct_wavelengths(science_extraction_file, soln=None):
     product from refineArcX/refineArcX2D), an already-loaded arcdict, or None
     for the packaged reference arc. Loads are cached keyed on the source path
     so successive science files reuse one load.
-
-    NOTE: this function previously ignored ``soln`` entirely (a leftover TODO)
-    and always used the packaged reference arc — silently discarding any
-    refined solution, so refine_arc had no effect on science reductions.
     """
     global _cached_reference_arc, _cached_reference_arc_path
 
@@ -687,14 +681,14 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 def _pointing_from_header(header):
-    """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header (F6).
+    """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header.
 
     Prefers the decimal ``RA``/``DEC`` keywords, falling back to the sexagesimal
     HIERARCH ``TEL RA``/``TEL DEC`` pair, and reads the field POSITION angle from
     ``TEL ROT`` (then ``TEL PA``). ``TEL PA`` is the PARALLACTIC angle, not the
     instrument orientation, so it must not preempt ``TEL ROT``. Returns
-    ``(0.0, 0.0, 0.0)`` if nothing usable is present so cube construction degrades
-    to the old placeholder behaviour.
+    ``(0.0, 0.0, 0.0)`` if nothing usable is present so cube construction still
+    runs, without a real pointing.
     """
     if header is None:
         return 0.0, 0.0, 0.0
@@ -729,7 +723,7 @@ def _pointing_from_header(header):
 
 
 def resolve_twilight_files(config):
-    """Resolve the twilight flat to use for each colour (F1).
+    """Resolve the twilight flat to use for each colour.
 
     Supports both the per-colour keys ``{red,green,blue}_twilight_flat`` and the
     singular ``twilight_flat`` key, with the per-colour key taking precedence and
@@ -1351,7 +1345,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
         crr_config (CRRCubeConfig, optional): CRR configuration parameters
         parallel (bool): Use parallel processing for CRR method
-        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
+        cube_method (str): Cube construction method: 'simple', 'crr', or 'traditional' (default)
         cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
         cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
         cube_wave_sampling (float): Wavelength sampling factor (for simple method)
@@ -1464,9 +1458,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 # Construct cube
                 constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
 
-                # Create WCS from the real telescope pointing in the RSS header
-                # (F6) — previously hardcoded to (0,0), leaving cubes with no
-                # on-sky astrometry.
+                # Create WCS from the telescope pointing in the RSS header.
                 _ra_c, _dec_c, _pa = _pointing_from_header(
                     getattr(constructor, 'primary_header', None))
                 constructor.create_wcs(ra_center=_ra_c, dec_center=_dec_c,
@@ -1898,13 +1890,10 @@ def main(config_path):
                 config[key] = value
 
 
-    # Spectrophotometric standards are extracted exactly like science frames, so fold
-    # flux_standard_files into the science list here, before any stage runs. Every
-    # downstream stage (bias-first, flat correction, extraction) then processes them
-    # uniformly with no standard-specific code path. flux_standard_files is kept as its
-    # own key purely as a record of which exposures are standards; the flux-calibration
-    # step re-identifies each one from its header coordinates, so nothing downstream needs
-    # to track the star name or thread a separate path through the pipeline.
+    # Spectrophotometric standards are reduced exactly like science frames, so fold
+    # flux_standard_files into the science list before any stage runs. The key is kept
+    # only as a record; flux calibration re-identifies each standard from its header
+    # coordinates.
     _std = config.get('flux_standard_files')
     if _std:
         _std_list = [s for s in ([_std] if isinstance(_std, str) else _std) if str(s).strip()]
@@ -1920,12 +1909,9 @@ def main(config_path):
 
     # (full configuration is logged to the file once logging is set up, below)
 
-    # Resume control: by default the pipeline reuses any intermediate products
-    # already on disk (flat pixel maps, per-science RSS/_FF products, cubes) and
-    # skips the stages that produced them, so a re-run only does the work that is
-    # actually missing. Set ``clobber = true`` in the config to force every stage
-    # to run from scratch (including trace regeneration; normally traces are also
-    # reused when ``use_existing_traces`` is true, which is the default).
+    # Resume control: by default intermediate products already on disk (flat pixel
+    # maps, RSS/_FF products, cubes) are reused and their stages skipped. Set
+    # ``clobber = true`` to run every stage from scratch, including tracing.
     clobber = bool(config.get('clobber', False))
     resume = not clobber
     # (clobber/resume status is logged to the file below, after logging setup)
@@ -1949,18 +1935,15 @@ def main(config_path):
     logger.info(f"Pipeline started. Config: {config_path}")
 
     # ── Curated terminal reporting (terminal_verbose = false, default) ──────
-    # Route the driver's ~hundreds of print()/logger.info lines to the log file
-    # and show a compact live phase summary on the terminal instead. Ray worker
-    # output is already off the terminal (log_to_driver=False). Set
-    # terminal_verbose = true to restore the full firehose for debugging.
+    # Route the driver's print()/logger.info output to the log file and show a
+    # compact live phase summary on the terminal instead. Set
+    # terminal_verbose = true to restore the full output for debugging.
     import sys as _sys, atexit as _atexit, warnings as _warnings
     from llamas_pyjamas.Utils.reporter import (PipelineReporter, StdoutToLog,
                                                ReporterLogHandler)
-    # Suppress a benign, high-frequency third-party warning: pypeit's per-line
-    # Gaussian centroid fit (fitting.py fit_gauss -> curve_fit) reports
-    # "Covariance of the parameters could not be estimated" for marginal/blended
-    # lines. The pipeline uses the fitted centroid, not its covariance, so this
-    # is noise; it fires hundreds of times during arc refinement/line detection.
+    # Suppress a benign, high-frequency pypeit warning from its per-line Gaussian
+    # centroid fit on marginal/blended lines. The pipeline uses the fitted
+    # centroid, not its covariance.
     _warnings.filterwarnings('ignore',
                              message='Covariance of the parameters could not be estimated')
     # pypeit's bspline solver (util.py) warns "NaN found in cholesky_band" when a
@@ -2020,19 +2003,15 @@ def main(config_path):
                 if clobber else "resume (reuse existing intermediate products)")
 
     # --- Ray / temp scratch management ---------------------------------------
-    # Redirect all of Ray's temp output (session logs, object-store spill, and the
-    # runtime_env package uploads) into one short, owned, per-run directory so it can
-    # be bounded and reliably cleaned up. Registers atexit + SIGTERM backstops so the
-    # scratch is removed even if the pipeline fails early, and reclaims any leftovers
-    # from crashed prior runs. See llamas_pyjamas/Utils/rayManager.py.
+    # Redirect all of Ray's temp output into one owned, per-run directory that is
+    # cleaned up at exit (even on failure), and reclaim leftovers from crashed runs.
+    # See llamas_pyjamas/Utils/rayManager.py.
     ray_temp_dir = resolve_run_temp_dir(config)
     prune_stale(config)
 
-    # Fail fast if any input lives on an unresponsive filesystem (an offline
-    # cloud mount — Box/iCloud/Dropbox — or a dead network share). Otherwise the
-    # first os.stat in validate_pipeline_config below blocks indefinitely with no
-    # message. This only flags paths whose stat never returns; genuinely missing
-    # files are reported by the existence checks that follow.
+    # Fail fast if any input lives on an unresponsive filesystem (an offline cloud
+    # mount or dead network share); otherwise the first os.stat below blocks
+    # indefinitely with no message. Missing files are reported by later checks.
     check_inputs_reachable(get_input_files_from_config(config),
                            timeout_s=float(config.get('input_timeout_s', 15)))
 
@@ -2088,13 +2067,10 @@ def main(config_path):
     print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
 
     # ── Extraction method (applies to EVERY extraction in the run) ──────────
-    # 'boxcar' (default): trace-following aperture with fractional pixel weights
-    # at the edges (continuous across half-pixel trace crossings). Interim
-    # default until the Horne optimal extraction is rebuilt — the current
-    # profile-weighted 'optimal' is unstable on cameras with blended profiles.
-    # Threaded via environment so science, arc, flat, twilight and sky
-    # extractions all use the SAME method — mixing methods breaks the
-    # per-fibre throughput calibration.
+    # 'boxcar' (default): trace-following aperture with fractional edge weights;
+    # 'optimal' is unstable on cameras with blended profiles. Threaded via the
+    # environment so science, arc, flat, twilight and sky extractions all use the
+    # SAME method; mixing methods breaks the per-fibre throughput calibration.
     extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
     if extraction_method not in ('optimal', 'boxcar', 'horne', 'legacy'):
         print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
@@ -2170,7 +2146,7 @@ def main(config_path):
         if not os.path.exists(arcdict):
             raise FileNotFoundError(f"Reference arc file not found at {arcdict}")
         config['arcdict'] = arcdict
-        # NOTE: refine_arc dispatch now happens AFTER trace selection (below),
+        # NOTE: refine_arc dispatch happens AFTER trace selection (below),
         # because the 2d method can extract the night's own arc exposures
         # ({red,green,blue}_arc_file) as its line source, which needs traces.
 
@@ -2200,21 +2176,12 @@ def main(config_path):
           f"use_flat_mask={edge_bias_cfg['use_flat_mask']}")
 
     # ── BIAS-FIRST PREPROCESSING (unconditional) ────────────────────────────
-    # Bias subtraction is ALWAYS the first data operation for EVERY frame —
-    # science, arc, flat, twilight and sky — before flat division, tracing or
-    # extraction. Each raw MEF gets (1) the mode-appropriate (READ-MDE) 2D
-    # master bias and (2) the per-frame edge DC measured from the
-    # unilluminated stripes outside the fibre bundle, then is written to
-    # {output_dir}/bias_corrected/ with BIASSUB/EDGE* header stamps that make
-    # every downstream stage skip its internal bias handling (exactly-once).
-    # Not configurable: any other order is unphysical.
-    #
-    # WHY: the flat-field division previously ran on frames still carrying
-    # their ~500 DN bias pedestal, so percent-level spectral structure in the
-    # pixel flat was multiplied by the pedestal instead of the signal,
-    # imprinting tens-of-DN fake emission lines (the spurious blue "sky
-    # lines" of 2026-07). With the pedestal removed first, the same flat
-    # structure perturbs the signal by <1 DN.
+    # Bias subtraction is ALWAYS the first data operation for EVERY frame, before
+    # flat division, tracing or extraction: the READ-MDE 2D master bias plus the
+    # per-frame edge DC, written to {output_dir}/bias_corrected/ with BIASSUB/EDGE*
+    # stamps so downstream stages skip their own bias handling. Not configurable:
+    # dividing the flat into a frame still carrying its ~500 DN pedestal turns
+    # percent-level flat structure into tens-of-DN fake emission lines.
     from llamas_pyjamas.Bias.biasFirst import bias_correct_frame
     reporter.phase("🧾", "Bias subtraction")
     print("\n" + "=" * 60)
@@ -2460,7 +2427,7 @@ def main(config_path):
         print(f"All pipeline steps will use traces from: {final_trace_dir}")
         print("="*60)
 
-        # ── Arc xshift refinement (moved after trace selection so the 2d
+        # ── Arc xshift refinement (after trace selection so the 2d
         # method can extract the night's own arc exposures) ──
         if config.get('refine_arc', False) and not config.get('generate_new_wavelength_soln'):
             reporter.phase("🌈", "Arc wavelength refinement")
@@ -2473,11 +2440,9 @@ def main(config_path):
             if refine_method == '2d':
                 from llamas_pyjamas.Arc.arcSurface import refineArcX2D
 
-                # Night-of arc line source: extract the same-afternoon arc
-                # exposures ({red,green,blue}_arc_file) through the night's
-                # traces so the refined solution aligns to the observation
-                # epoch rather than the packaged reference arc's. Extraction
-                # is resume-aware (existing *_extract.pkl in arcs/ reused).
+                # Night-of arc line source: extract the same-afternoon arcs
+                # through the night's traces so the refined solution matches the
+                # observation epoch, not the packaged reference arc's.
                 line_source = None
                 if bool(config.get('refine_arc_use_night_arcs', True)):
                     night_arcs = {}
@@ -2558,11 +2523,9 @@ def main(config_path):
             reporter.phase("💡", "Flat field")
         flat_pixel_maps = []
         flat_field_method = config.get('flat_field_method', 'simple')
-        # Resume: flat_pixel_maps is always a single-element list holding the path
-        # to pixel_maps.fits (see process_flat_field_calibration). If both that MEF
-        # and the flat_smooth_models.fits (needed by the fibre-flat stage) already
-        # exist, we can skip the expensive flat extraction entirely and just point
-        # flat_pixel_maps at the existing file.
+        # Resume: if pixel_maps.fits and flat_smooth_models.fits (needed by the
+        # fibre-flat stage) both exist, skip the expensive flat extraction and
+        # point flat_pixel_maps (a single-element list) at the existing MEF.
         _flat_field_dir = config.get('flat_field_output_dir',
                                      os.path.join(extraction_path, 'flat'))
         _flat_products_present = (
@@ -2663,7 +2626,7 @@ def main(config_path):
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flat when specified (per-colour aware, F1).
+            # Prefer twilight flat when specified (per-colour aware).
             twilight_by_color = resolve_twilight_files(config)
             twilight_files = list(dict.fromkeys(
                 f for f in twilight_by_color.values() if f))  # distinct, ordered
@@ -2849,11 +2812,10 @@ def main(config_path):
             print(f"Total extensions with errors: {overall_stats['total_errors']}")
 
         # ── Field-level empirical multi-dither 2D sky (opt-in; default off) ──
-        # Build, per exposure, the empirical sky from the field's dithers on the bias+flat-corrected
-        # 2D frames and extract it with the pipeline aperture, saved as a per-exposure sidecar pkl
-        # ({stem}_empsky2d.pkl). The sky loop below seeds each fibre's .sky with it as the BASE, then
-        # skyModel_1d(residual=True) + sky_line_refine + the framework stage run as the second-pass
-        # residual cleanup (each independently config-toggleable). See Combine/empiricalSky2D.
+        # Build each exposure's empirical sky from the field's dithers on the 2D frames, extracted
+        # with the pipeline aperture into a {stem}_empsky2d.pkl sidecar. The sky loop below seeds
+        # .sky with it as the BASE; the later sky stages then clean up the residual.
+        # See Combine/empiricalSky2D.
         if (config.get('sky_empirical_2d', False)
                 and isinstance(science_files_to_process, list)
                 and len(science_files_to_process) >= 2):
@@ -3042,11 +3004,8 @@ def main(config_path):
 
             corr_extraction_list = corr_extractions['extractions']
 
-            # Read primary header directly from the original science FITS file.
-            # This guarantees correct RA/DEC and telescope pointing regardless of what
-            # may have been stored in intermediate pickle files (flat-corrected copies,
-            # concat'd flat pkls, etc. all share the same primary HDU data but the
-            # pkl chain is fragile — the original file is authoritative).
+            # Read the primary header from the original science FITS file: it is the
+            # authoritative source of RA/DEC and pointing, not the intermediate pkl chain.
             with fits.open(orig_science_file) as _sci_hdul:
                 primary_hdr = _sci_hdul[0].header.copy()
 
@@ -3114,16 +3073,12 @@ def main(config_path):
                     rss_input_file = lr_file
                     print(f"OH line refinement applied -> {os.path.basename(lr_file)}")
 
-                # The continuum pedestal (sky_pedestal) is NO LONGER applied per-frame here: its
-                # floor template is built by combining ALL of the run's frames, so it runs as a
-                # run-level stage after this loop (see run_pedestal_stage, before the fibre-flat).
+                # The continuum pedestal (sky_pedestal) is not applied per-frame: its floor
+                # template combines ALL of the run's frames, so it runs as a run-level stage
+                # after this loop (see run_pedestal_stage, before the fibre-flat).
 
-                # Per-science wavelength QA: final xshift (incl. refineSkyX if
-                # enabled) + populated .sky. Writes one HTML report + CSV per
-                # science frame into qa_output_dir. Never fatal. Note: lives
-                # inside the loop that resume skips, so QA regenerates only when
-                # extraction reruns; the standalone CLI
-                # (python -m llamas_pyjamas.QA.waveQA) covers existing products.
+                # Per-science wavelength QA (HTML + CSV per frame). Never fatal. Resume skips
+                # this loop, so for existing products use python -m llamas_pyjamas.QA.waveQA.
                 if wavelength_qa:
                     try:
                         from llamas_pyjamas.QA import waveQA
@@ -3234,22 +3189,19 @@ def main(config_path):
             del corr_extractions, corr_extraction_list
             gc.collect()
 
-            # Extraction pkls are intermediate products: the RSS carries everything the
-            # downstream steps need, and each pkl is large (~GB). By default they are removed
-            # once the RSS is written; set save_extraction_pkl = true to keep them at full
-            # size for deep inspection (most users never look at them). The RSS, not the pkl,
-            # is the resume anchor, so removal does not affect resume.
+            # Extraction pkls (~GB each) are removed once the RSS is written, which carries
+            # everything downstream needs and is the resume anchor. Set
+            # save_extraction_pkl = true to keep them for inspection.
             for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file],
                                                 config.get('save_extraction_pkl', False)):
                 print(f"Removed extraction pkl (save_extraction_pkl=false): "
                       f"{os.path.basename(_pkl)}")
 
-        # ── Run-level continuum pedestal (option A) ──
-        # Applied here, after every base-sky per-channel RSS exists and BEFORE the fibre-throughput
-        # flat: scattered light does not traverse the fibre so it is not throughput-modulated and must
-        # be subtracted pre-flat (the RSS COUNTS/SKY planes are pre-flat). The floor template needs all
-        # the run's frames, so it cannot run in the per-frame loop above; run_pedestal_stage builds the
-        # per-run counts/sec template (or config/shipped fallback) and applies it idempotently.
+        # ── Run-level continuum pedestal ──
+        # Applied after every base RSS exists and BEFORE the fibre-throughput flat: scattered
+        # light does not traverse the fibre, so it is not throughput-modulated and must be
+        # subtracted pre-flat. The floor template needs all the run's frames; run_pedestal_stage
+        # builds it (or uses the config/shipped fallback) and applies it idempotently.
         if config.get('sky_subtract', True) and config.get('sky_pedestal', False):
             from llamas_pyjamas.Sky.skyPedestal import run_pedestal_stage
             _ped_rss = []
@@ -3297,10 +3249,8 @@ def main(config_path):
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
                 print("=" * 60)
 
-                # F1: resolve twilight flats PER COLOUR. The previous code read
-                # only the singular ``twilight_flat`` key and silently ignored
-                # the per-colour keys ``{red,green,blue}_twilight_flat`` that the
-                # LLAMAS config templates use, forcing a lamp-only fallback.
+                # Resolve twilight flats PER COLOUR ({red,green,blue}_twilight_flat,
+                # falling back to the shared twilight_flat key).
                 twilight_by_color = resolve_twilight_files(config)
                 # Group colours by the distinct file that serves them (a single
                 # LLAMAS twilight MEF holds all cameras, so several colours often
@@ -3531,10 +3481,9 @@ def main(config_path):
             print("Cube generation disabled (generate_cubes=False)")
 
         # ── Consolidate per-stage RSS files to one per (frame, channel) ──
-        # The extract / _FF / _FF_SKYSUB stages leave up to three RSS per channel; keep only
-        # the most-corrected, renamed to a clean {base}_RSS_{color}.fits. Runs here, after cube
-        # construction (which consumes the _FF / _FF_SKYSUB files). Set keep_intermediate_rss =
-        # true to keep every stage.
+        # Keep only the most-corrected stage, renamed to {base}_RSS_{color}.fits. Must run after
+        # cube construction, which consumes the _FF / _FF_SKYSUB files. Set
+        # keep_intermediate_rss = true to keep every stage.
         for _action, _detail in consolidate_rss_files(
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"RSS consolidation: {_action} {_detail}")
@@ -3559,13 +3508,11 @@ def main(config_path):
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
     finally:
-        # Restore the terminal (finalise the reporter, un-redirect stdout) before
-        # teardown so the completion line and any traceback render normally.
-        # exc_info is set iff an exception is propagating through this finally.
+        # Restore the terminal before teardown so the completion line and any
+        # traceback render normally.
         _restore_terminal(ok=(_sys.exc_info()[0] is None))
-        # Prompt teardown: shut Ray down and remove the run scratch dir (honours
-        # cleanup_scratch=false). The atexit/SIGTERM backstops guarantee this also
-        # runs for failures before this try (validate/flat/arc) and on signals.
+        # Shut Ray down and remove the run scratch dir (honours cleanup_scratch=false).
+        # atexit/SIGTERM backstops cover failures before this try and signals.
         cleanup_scratch()
 
 
