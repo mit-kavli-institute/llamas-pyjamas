@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 orig_fibre_map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LLAMAS_FiberMap_revA.dat')
 fibre_map_path = os.path.join(LUT_DIR, 'LLAMAS_FiberMap_rev04.dat')
-logger.debug(f'Fibre map path: {fibre_map_path}')   # was print(): fires at import, cluttered startup
+logger.debug(f'Fibre map path: {fibre_map_path}')   # debug only: runs at import
 fibermap_lut = Table.read(fibre_map_path, format='ascii.fixed_width')
 
 # Extent of the fibre field, taken from the (static) fibre map: x 0.5..46.0,
@@ -104,14 +104,9 @@ def whitelight_grid(subsample: float = WHITELIGHT_SUBSAMPLE):
     """Canonical white-light sampling grid, tight to the fibre field.
 
     Returns ``(x_grid, y_grid)`` covering ``0..FIELD_XMAX`` by ``0..FIELD_YMAX``
-    in steps of ``1/subsample``.
-
-    The old grid hard-coded 53 units on both axes while the fibres only reach
-    x=46.0, y=44.2, so ~28% of every frame was NaN padding beyond the last fibre.
-    Deriving the extent from the fibre map removes that dead margin and keeps the
-    grid identical across frames, channels and code paths (the map is static) —
-    previously WhiteLight and QuickWhiteLight built their grids separately and
-    silently disagreed about the sky coverage.
+    in steps of ``1/subsample``. Deriving the extent from the (static) fibre map
+    avoids NaN padding beyond the last fibre and keeps the grid identical across
+    frames, channels and code paths.
     """
     step = 1.0 / float(subsample)
     nx = int(np.floor(FIELD_XMAX / step)) + 1
@@ -294,8 +289,7 @@ def WhiteLightFits(extraction_array: list, metadata: dict, outfile=None,
     primary_hdu = fits.PrimaryHDU()
     fitsfile = blue[0].fitsfile if blue else green[0].fitsfile if green else red[0].fitsfile
     primary_hdu.header['ORIGFILE'] = os.path.basename(fitsfile)
-    # Carry object + pointing from the science header so the frame is self-describing. (This
-    # PrimaryHDU used to be discarded — a fresh empty one was appended — losing all of it.)
+    # Carry object + pointing from the science header so the frame is self-describing.
     if primary_header is not None:
         for _k in ('OBJECT', 'RA', 'DEC', 'TEL RA', 'TEL DEC', 'TEL ROT', 'TEL PA'):
             if _k in primary_header:
@@ -430,10 +424,9 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True,
         
         nfib, naxis1 = np.shape(extraction.counts)
 
-        # counts is LIVE-indexed (dead fibres absent, since commit c8ab75f), so
-        # row `ifib` is NOT the fibremap position. Map each live row to its
-        # physical fibremap position before the LUT lookup, else every fibre
-        # after the first dead one is placed at the wrong (x, y).
+        # counts is LIVE-indexed (dead fibres absent), so row `ifib` is NOT the
+        # fibremap position. Map each live row to its fibremap position before
+        # the LUT lookup, else every fibre after a dead one lands at the wrong (x, y).
         fibmap_pos = live_fibre_ids(nfib, getattr(extraction, 'dead_fibers', []))
 
         for ifib in range(nfib):
@@ -583,11 +576,8 @@ def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np
         - ydata (numpy.ndarray): Array of y-coordinates for fibers.
         - flux (numpy.ndarray): Array of flux values for fibers.
     Notes:
-    - The function reads the trace object from the provided tracefile.
-    - It uses a fiber map lookup table (FiberMap_LUT) to get x and y coordinates for each fiber.
-    - The flux for each fiber is calculated by summing the data values where the fiber image matches the fiber index.
-    - A linear interpolator (LinearNDInterpolator) is used to create the white light image.
-    - Optionally, the white light image can be plotted using DS9 (if ds9plot is set to True).
+    - Each fibre's flux is the sum of ``data`` over its ``fiberimg`` pixels; the
+      fluxes are then linearly interpolated onto the shared white-light grid.
     """
 
     #    hdul = fits.open(data)
@@ -619,8 +609,7 @@ def WhiteLightQuickLook(tracefile: str, data)-> Tuple[np.ndarray, np.ndarray, np
 
     flux_interpolator = LinearNDInterpolator(list(zip(xdata, ydata)), flux, fill_value=np.nan)
         
-    # Shared field grid: the old 46x43 grid stopped at y=42 and clipped the top of
-    # bench 1A (which runs to y=44.2).
+    # Shared field grid (must reach y=44.2, the top of bench 1A).
     x_grid, y_grid = whitelight_grid()
 
     whitelight = flux_interpolator(x_grid, y_grid)
@@ -983,19 +972,8 @@ def fibermap_table()-> Table:
     
 def rerun():
     """
-    Reruns the WhiteLight process with a set of predefined extractions.
-    This function loads several extraction files using the ExtractLlamas class and then
-    runs the WhiteLight process with these extractions.
-    The following extraction files are loaded:
-    - Extract_1A.pkl
-    - Extract_2A.pkl
-    - Extract_3A.pkl
-    - Extract_4A.pkl
-    - Extract_1B.pkl
-    - Extract_2B.pkl
-    - Extract_3B.pkl
-    - Extract_4B.pkl
-    The loaded extractions are then passed to the WhiteLight function for processing.
+    Reruns WhiteLight on the per-benchside files Extract_1A.pkl ... Extract_4B.pkl
+    in the current directory.
     """
 
     extraction1a = ('Extract_1A.pkl')
@@ -1067,15 +1045,9 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
             logger.info(f'Bench {benchside}: {trace_obj.nfibers} traced fibers, '
                         f'dead physical fibers: {dead_fibers}')
 
-        # Build the trace-index → physical-fiber-number mapping.
-        # The trace object has nfibers entries (e.g. 297 for 2B) because dead
-        # fibers were never detected during tracing.  We need to re-insert the
-        # gaps so that trace index i maps to the correct physical fiber number
-        # that the FiberMap LUT expects.
-        #
-        # Example for 2B (dead fiber 49, nfibers=297):
-        #   trace 0-48  → physical 0-48
-        #   trace 49-296 → physical 50-297
+        # Build the trace-index → physical-fiber-number mapping. Dead fibres are
+        # never traced, so re-insert their gaps for the FiberMap LUT, e.g. 2B
+        # (dead 49): trace 0-48 → physical 0-48, trace 49-296 → physical 50-297.
         trace_to_physical = []
         physical = 0
         dead_set = set(dead_fibers)
@@ -1116,11 +1088,8 @@ def QuickWhiteLight(trace_list, data_list, metadata=None, ds9plot=False,
             xdata = np.append(xdata, x)
             ydata = np.append(ydata, y)
 
-    # Create interpolated image using only valid fibers
-    # Dead fibers are simply absent from the interpolation inputs;
-    # LinearNDInterpolator will naturally fill those positions from neighbours.
-    # Generate white light image: either flat hexagonal fibre tiles (no
-    # interpolation) or the default resampling onto the shared rectangular grid.
+    # Either flat hexagonal fibre tiles (dead fibres left as holes) or the default
+    # resampling onto the shared grid, where dead fibres are filled from neighbours.
     if hex_tiles:
         whitelight, _ = hex_tile_image(xdata, ydata, flux, pix_per_unit=pix_per_unit)
     else:
@@ -1161,21 +1130,19 @@ def QuickWhiteLightCube(science_file, bias: str = None, ds9plot: bool = False,
                         hex_tiles: bool = False, pix_per_unit: int = 10) -> str:
         """
         Generates a cube FITS file with quick-look white light images for each color.
-        The function groups the mastercalib dictionary by color (keys: blue, green, red),
-        calls QuickWhiteLight for each color group, and creates an HDU for the image and an
-        associated binary table HDU with fiber positions and flux data.
-        
+        Each extension is bias-subtracted, summed over its mastercalib trace footprint
+        (QuickWhiteLight), and written as an image HDU plus a fibre x/y/flux table HDU.
+
         Parameters:
-            mastercalib (dict): Dictionary with keys 'blue', 'green', and 'red'. For each key, 
-                the value should be a dict with the following entries:
-                    'traces'   - list of trace objects,
-                    'data'     - list of corresponding data arrays,
-                    'metadata' - (optional) list of metadata dictionaries.
+            science_file (str): Raw science frame.
+            bias (str, optional): Master bias; if None or missing, chosen from READ-MDE.
             ds9plot (bool, optional): If True, display each generated white light image using DS9.
-                                        Default is True.
-            outfile (str, optional): Output FITS file name. If None, a file name is generated
-                                     with the current timestamp.
-        
+            outfile (str, optional): Output FITS file name. Defaults to
+                ``<science_file>_quickwhitelight.fits``.
+            use_dir (str, optional): Output directory. Defaults to OUTPUT_DIR.
+            hex_tiles (bool, optional): Render flat hexagonal fibre tiles instead of interpolating.
+            pix_per_unit (int, optional): Pixels per fibre-map unit for ``hex_tiles``.
+
         Returns:
             str: The file path of the created quick-look white light cube FITS file.
         """
@@ -1615,20 +1582,9 @@ def plot_spaxelmap(outpath: str)-> None:
     This function generates a plot with hexagonal patches representing each fiber position for 
     different configurations (1A, 2A, 3A, 4A, 1B, 2B, 3B, 4B). The positions are scaled by the 
     spatial pitch of 0.75" to create a spaxel map with physical units. It also includes directional 
-    annotations (N for North, E for East) and saves the plot as an image file.
-    
-    Color coding:
-    - Fibers in configuration 1A are plotted in black
-    - Fibers in configuration 3A are plotted in red
-    - Fibers in configuration 4B are plotted in purple
-    - Fibers in configuration 2B are plotted in orange
-    - Fibers in configuration 2A are plotted in blue
-    - Fibers in configuration 4A are plotted in green
-    - Fibers in configuration 3B are plotted in cyan
-    - Fibers in configuration 1B are plotted in magenta
-    
-    The plot is saved as a high-resolution image in the specified path.
-    
+    annotations (N for North, E for East) and saves the plot as an image file,
+    one colour per benchside.
+
     Returns:
         None
     """
