@@ -12,7 +12,7 @@ Functions:
     get_expected_camera_list: Returns the complete list of expected camera configurations.
     get_existing_cameras: Extracts camera metadata from existing FITS extensions.
     identify_missing_cameras: Determines which camera configurations are missing.
-    create_placeholder_hdu: Creates a placeholder HDU with 1.0-valued arrays.
+    create_placeholder_hdu: Creates a placeholder HDU with all-zero arrays.
     validate_fits_structure: Checks if a FITS file needs validation.
     get_reference_dimensions: Determines appropriate array dimensions for placeholders.
 
@@ -173,7 +173,7 @@ def is_placeholder_extension(hdu: fits.ImageHDU) -> bool:
 
     Detects placeholder extensions created by the validation module by checking:
     1. Header COMMENT field for placeholder marker
-    2. Data array for uniform 1.0 values (fallback detection)
+    2. Data array for uniform 0.0 values (fallback detection)
 
     Args:
         hdu: FITS ImageHDU to check.
@@ -192,7 +192,7 @@ def is_placeholder_extension(hdu: fits.ImageHDU) -> bool:
             if 'Placeholder extension created for missing camera' in str(comment):
                 return True
 
-    # Fallback: Check for uniform 1.0 data (characteristic of placeholders)
+    # Fallback: Check for uniform 0.0 data (characteristic of placeholders)
     if hdu.data is not None:
         try:
             unique_vals = np.unique(hdu.data)
@@ -344,7 +344,7 @@ def validate_and_fix_extensions(fits_file: str,
     """Main function to validate and fix missing extensions in a FITS file.
 
     This function checks if a FITS file has the expected number of extensions,
-    and if not, creates placeholder extensions filled with 1.0 values to maintain
+    and if not, creates placeholder extensions filled with 0.0 values to maintain
     pipeline compatibility.
 
     Args:
