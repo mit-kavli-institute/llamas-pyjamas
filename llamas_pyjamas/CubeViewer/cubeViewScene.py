@@ -6,17 +6,13 @@ a wavelength window into an image, and asks it what spectra live at a pixel. Fib
 hexagons and dithered mosaics are all details of a scene implementation.
 
 The rule that keeps this honest: **every scene returns an** :class:`astropy.wcs.WCS`, always.
-Today the RSS scene has no per-fibre astrometry (the RSS ``FIBERMAP`` RA/DEC columns are
-written as NaN), so it synthesises a *linear* WCS in fibre-map units. A cube carries a real
-``RA---TAN``/``DEC--TAN`` WCS. Both satisfy the same interface, so when per-fibre sky
-coordinates are eventually populated the RSS scene swaps its linear WCS for a TAN one and
-nothing above it changes. That is what makes registering and combining dithered exposures a
-new scene rather than a rewrite.
+A scene without sky astrometry synthesises a *linear* WCS in fibre-map units; a registered RSS
+or a cube carries a real ``RA---TAN``/``DEC--TAN`` WCS. Both satisfy the same interface, so
+nothing above the scene needs to know which.
 
-:meth:`SpectralScene.spectra_at` returns a *list*, never a single spectrum. One fibre today;
-several weighted fibres once aperture extraction lands; one spaxel for a cube; a resampled
-stack for a mosaic. The plotting panel already handles all of these because it only ever sees
-a list.
+:meth:`SpectralScene.spectra_at` returns a *list*, never a single spectrum: one fibre, several
+weighted fibres for an aperture, or one spaxel for a cube. The plotting panel handles all of
+these because it only ever sees a list.
 
 Classes
 -------

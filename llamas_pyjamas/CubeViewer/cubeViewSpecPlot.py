@@ -312,10 +312,8 @@ class SpectrumPanel(QWidget):
             self.axes.set_ylim(low / 1.5, high * 1.5)
             return
         if high <= low:
-            # Flat within the percentile range — a near-dead fibre, possibly with a cosmic
-            # ray. The limits must still be set explicitly: bailing out here would leave
-            # matplotlib's default autoscale in charge, and that *does* include the spike,
-            # which is the very thing this method exists to avoid.
+            # Flat within the percentile range (a near-dead fibre, maybe with a cosmic ray).
+            # Set limits explicitly anyway: matplotlib's autoscale would include the spike.
             level = float(low)
             span = max(abs(level) * 0.05, 1.0)
             self.axes.set_ylim(level - span, level + span)

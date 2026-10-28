@@ -1,14 +1,14 @@
 """
 Interactive sensitivity-function fitting for CubeViewer.
 
-When a loaded RSS is a spectrophotometric standard (identified by the Phase I crossmatch on its
-header), the user defines an aperture on the star in DS9 the same way as for any spectrum, then
+When a loaded RSS is a spectrophotometric standard (identified by crossmatching its header
+pointing), the user defines an aperture on the star in DS9 the same way as for any spectrum, then
 opens this dialog to turn the aperture's summed counts into a sensitivity function.
 
 Two modes, both driven by the same core (:mod:`llamas_pyjamas.Flux.sensFunc`):
 
 * **Auto** — open the dialog and the fit is already there, using the default telluric + stellar
-  masks and a span-derived breakpoint spacing. "Let it rip"; just Save.
+  masks and a span-derived breakpoint spacing; just Save.
 * **Interactive** — drag on the plot to add a mask region, toggle the default masks, and change
   the breakpoint spacing / spline order; the fit and residuals redraw live before you Save.
 

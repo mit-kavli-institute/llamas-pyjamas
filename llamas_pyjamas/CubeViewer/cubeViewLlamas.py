@@ -120,10 +120,8 @@ class CombineOptionsDialog(QDialog):
         form.addRow('Weighting', self.weighting)
 
         # White-light coverage floor: exclude collapsed spaxels shallower than this
-        # fraction of the peak dither depth (NEXP). 0 keeps the FULL field (outer,
-        # fewer-dither regions included, at lower SNR); 0.7 shows only the well-
-        # covered core (avoids biased partial-coverage boundaries). The CUBE always
-        # keeps every covered spaxel regardless -- this only masks the white light.
+        # fraction of the peak dither depth (NEXP). 0 keeps the FULL field; 0.7 shows
+        # only the well-covered core. This only masks the white light, not the cube.
         self.coverage_frac = QDoubleSpinBox()
         self.coverage_frac.setRange(0.0, 0.95)
         self.coverage_frac.setSingleStep(0.05)
@@ -385,7 +383,7 @@ class CubeViewerWindow(QMainWindow):
         for action in self.wcs_file_actions:
             action.setEnabled(False)
 
-        # Combine: stack a field's dithers into a cube and inspect it (Phase 4).
+        # Combine: stack a field's dithers into a cube and inspect it.
         combine_menu = self.menuBar().addMenu('&Combine')
         combine_menu.setToolTipsVisible(True)
         cube_action = QAction('Combine field into &cube…', self)
@@ -395,7 +393,7 @@ class CubeViewerWindow(QMainWindow):
         combine_menu.addAction(cube_action)
         self.narrowband_action = QAction('&Narrowband line image…', self)
         self.narrowband_action.setToolTip('Continuum-subtracted narrowband image at a chosen line '
-                                          'wavelength (e.g. Lya), sent to a new DS9 frame')
+                                          'wavelength, sent to a new DS9 frame')
         self.narrowband_action.triggered.connect(self.narrowband_image_dialog)
         combine_menu.addAction(self.narrowband_action)
 
@@ -732,7 +730,6 @@ class CubeViewerWindow(QMainWindow):
             header = fits.getheader(path, 0)
             # Warn, don't whisper: the standard is identified by CROSSMATCH, so a header the
             # matcher cannot read means the sensfunc action greys out with no visible reason.
-            # This was silent at DEBUG while the entry point logs at INFO.
             if ra_dec_from_header(header) == (None, None):
                 logger.warning(
                     'no usable pointing in %s (RA=%r DEC=%r): cannot tell whether this is a '
@@ -820,7 +817,7 @@ class CubeViewerWindow(QMainWindow):
 
         header = fits.Header()
         # Provenance/meta keys, minus WCS cards -- the authoritative WCS is the returned `wcs`
-        # object (previously it was discarded and DS9 only saw meta's linear map).
+        # object, not meta's linear map.
         _wcs_prefixes = ('CRPIX', 'CRVAL', 'CDELT', 'CTYPE', 'CUNIT', 'CD', 'PC',
                          'CROTA', 'LONPOLE', 'LATPOLE', 'RADESYS', 'WCSAXES', 'EQUINOX')
         for key, value in meta.items():
@@ -1064,10 +1061,9 @@ class CubeViewerWindow(QMainWindow):
         """Reload the current file so the freshly-written (refined or rough) WCS is picked up, then
         re-display and report.
 
-        Block registration operates on the SELECTED dithers, not the open file, so the currently
-        displayed scene may be unrelated (e.g. a leftover combined CUBE from an earlier Combine).
-        Only an RSS scene can be reloaded through the RSS loader — reloading a cube here raised
-        'RSS has neither a SKYSUB nor a FLUX extension'. Skip the reload for non-RSS scenes."""
+        Block registration operates on the SELECTED dithers, not the open file, so the displayed
+        scene may be unrelated (e.g. a combined cube). Only an RSS scene can be reloaded through
+        the RSS loader, so the reload is skipped for non-RSS scenes."""
         if self._path and isinstance(self.scene, RSSScene):
             # Registration writes to each exposure's FINAL stage; if another stage is open, show
             # the file that now carries the solution rather than one that does not.

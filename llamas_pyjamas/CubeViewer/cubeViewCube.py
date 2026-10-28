@@ -66,10 +66,8 @@ class CoaddCubeScene(SpectralScene):
         self._nexp = np.max([getattr(c, 'nexp', c.coverage) for c in self._cubes.values()], axis=0)
         #: white-light spaxels shallower than this fraction of peak NEXP are excluded from the
         #: collapsed image (biased at partial-coverage boundaries); the cube itself is untouched.
-        #: Reproduce the floor the cube was COMBINED with (persisted as the COVFRAC header) so opening
-        #: a saved cube shows the same field it was built with. Full field (0.0) when unrecorded
-        #: (older cubes) — the data is always complete, so default to showing all of it, not the old
-        #: 0.7 deep-core floor. (The combine dialog still overrides this on freshly-built scenes.)
+        #: Uses the floor the cube was combined with (COVFRAC header), else the full field (0.0).
+        #: The combine dialog overrides this on freshly-built scenes.
         _covfracs = [c.meta.get('COVFRAC') for c in self._cubes.values()
                      if c.meta.get('COVFRAC') is not None]
         self.coverage_frac = float(_covfracs[0]) if _covfracs else 0.0

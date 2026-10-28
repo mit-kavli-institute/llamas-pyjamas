@@ -12,8 +12,8 @@ Two facts about the RSS format shape this module:
   wavelength cut is a per-fibre mask, not a column slice.
 * Rows are LIVE-indexed (dead fibres are absent), so a row index is **not** a fibre id. Fibre
   identity is ``(BENCHSIDE, FIBER_ID)`` from the ``FIBERMAP`` table, and only that pair may be
-  handed to ``FiberMap_LUT``. Mixing the two is precisely the bug class behind the 3B/4A and
-  white-light dead-fibre regressions, so this module never indexes geometry by row.
+  handed to ``FiberMap_LUT``. Mixing the two misplaces fibres after any dead fibre, so this
+  module never indexes geometry by row.
 
 Images are rendered as hexagonal tiles (:func:`~llamas_pyjamas.Image.WhiteLightModule.hex_tile_image`).
 That is not cosmetic: each pixel takes exactly one fibre's raw flux, so a DS9 click inverts to
@@ -74,19 +74,10 @@ DEFAULT_PIX_PER_UNIT = 10
 #: A point inside a pointy-top hexagon lies at most one circumradius from its centre.
 HEX_CIRCUMRADIUS = HEX_PITCH / np.sqrt(3.0)
 
-#: Slack for distance comparisons against the lattice.
-#:
-#: An aperture of "N fibre spacings" lands exactly on a ring of neighbours, and the fibre map's
-#: coordinates are not exact: HEX_PITCH derives as 0.9999996 rather than 1.0, and a ring that
-#: should sit at 1.0 actually spreads over 0.999999-1.000002. Without slack a radius of one
-#: pitch admits whichever neighbours happen to round below it -- 5 of 7 on real data, which
-#: looks plausible enough to ship unnoticed.
-#:
-#: 1e-3 is chosen from the geometry rather than by taste: it is ~500x the observed coordinate
-#: jitter (~2e-6), and ~700x smaller than the gap to the next ring (1.0 -> 1.732, i.e. 0.73
-#: pitch), so it cannot pull in a ring that does not belong. hex_tile_image needs only 1e-6
-#: because it compares against exact pixel-centre offsets; nearest-neighbour distances
-#: accumulate error from both coordinates and need more room.
+#: Slack for distance comparisons against the lattice. An aperture of "N fibre spacings" lands
+#: exactly on a ring of neighbours, but the fibre map's coordinates jitter by ~2e-6 (HEX_PITCH
+#: derives as 0.9999996), so without slack only some of the ring is admitted. 1e-3 is ~500x
+#: that jitter and far below the gap to the next ring (1.0 -> 1.732 pitch).
 LATTICE_TOL = 1e-3 * HEX_PITCH
 
 FibreKey = Tuple[str, int]
@@ -438,11 +429,7 @@ class RSSScene(SpectralScene):
             return [] if key is None else [key]
 
         world = self._to_world(x_pix, y_pix)
-        # The lattice pitch derived from the LUT is 0.9999996, not 1.0 (finite precision in
-        # the fibre map), while the true nearest-neighbour distances are exactly 1.0. An
-        # aperture of "one fibre spacing" is therefore 0.9999996 and lands *just inside* the
-        # neighbour ring, admitting only whichever neighbours happen to round below it -- 3
-        # of 6 on real data. hex_tile_image hit the same trap and solved it the same way.
+        # LATTICE_TOL keeps a whole-pitch aperture from landing just inside the neighbour ring.
         radius_world = radius_pix * self._step() + LATTICE_TOL
         rows = self._tree.query_ball_point(world, radius_world)
         # Nearest first, so the aperture's reference grid is the central fibre's -- the
