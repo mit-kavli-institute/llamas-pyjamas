@@ -22,7 +22,7 @@ def _fibre_sky_table(fiber_ids, benchsides, primary_hdr):
     celestial WCS (``celestial_wcs`` at 0.75"/fibre-unit, CRPIX at the fibre-field centre,
     rotation from the header). If the header has no pointing, RA/DEC are all NaN and prov.method
     is 'none' -- x/y are still returned so a later step can re-solve. This is the ROUGH solution;
-    Phase 3 registration overwrites RA/DEC and bumps the provenance in place.
+    registration later overwrites RA/DEC and bumps the provenance in place.
     """
     from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT, FIELD_XMAX, FIELD_YMAX
     from llamas_pyjamas.Utils.wcsLlamas import (celestial_wcs, pointing_from_header,
@@ -83,8 +83,8 @@ def _fiberwcs_hdu(fiber_ids, benchsides, ras, decs, xs, ys, prov):
 
 def apply_fibre_astrometry(hdul, ras=None, decs=None, xs=None, ys=None, prov=None):
     """Write per-fibre astrometry onto an open RSS HDUList: fill FIBERMAP RA/DEC, (re)build the
-    FIBERWCS extension, and set FIBAREA. Reusable by generate_rss (rough, at build), the patch
-    below, and Phase-3 registration (pass a refined ras/decs/prov to overwrite in place).
+    FIBERWCS extension, and set FIBAREA. Used by generate_rss (rough, at build), the patch
+    below, and registration (pass a refined ras/decs/prov to overwrite in place).
 
     If ``ras``/``decs`` are not supplied, the rough solution is computed from the primary header
     pointing + the FIBERMAP fibre ids. Returns the provenance dict written.
@@ -816,7 +816,7 @@ class RSSgeneration:
                 all_sky = []
                 fiber_ids = []
                 benchsides = []
-                # F3: tally per-fibre sky provenance (1=channel-global fallback,
+                # Tally per-fibre sky provenance (1=channel-global fallback,
                 # 2=no sky available) for SKY-extension header keywords.
                 n_sky_fallback_total = 0
                 n_sky_none_total = 0
@@ -925,13 +925,9 @@ class RSSgeneration:
                             self.logger.warning(f"Sky shape {sky.shape} != counts shape {counts.shape} for object {i}. Using zeros.")
                             sky = np.zeros_like(counts, dtype=np.float32)
 
-                    # Dead fibres are NOT removed here: the extraction now keeps
-                    # every per-fibre array LIVE-indexed (dead fibres already
-                    # absent, all arrays mutually aligned). The dead_fibers list
-                    # holds the fibremap positions and is used only to assign the
-                    # physical fibre id of each live row (below). Removing rows
-                    # here would (a) desync counts from the fibre-id list and
-                    # (b) wrongly drop a faint live fibre whose row reads as zero.
+                    # Dead fibres are NOT removed here: every per-fibre array is
+                    # already LIVE-indexed. dead_fibers holds fibremap positions and
+                    # is used only to assign each live row its physical fibre id.
                     dead_fibers = getattr(obj, 'dead_fibers', None)
                     removed_dead_fibers = []
                     if dead_fibers:
@@ -989,7 +985,7 @@ class RSSgeneration:
                     all_fwhm.append(fwhm)
                     all_sky.append(sky)
 
-                    # F3: accumulate sky provenance flags for this extension.
+                    # Accumulate sky provenance flags for this extension.
                     _sq = getattr(obj, 'sky_quality', None)
                     if _sq is not None:
                         _sq = np.asarray(_sq)
@@ -1005,11 +1001,8 @@ class RSSgeneration:
                     benchsides.extend([benchside_str] * n_fibers)
 
                     # Physical fibre id of each (live-indexed) row: the fibremap
-                    # positions skipping the camera's dead fibres. Derived from
-                    # the canonical dead_fibers list so it is correct whether or
-                    # not the (legacy, backward-compat) removal path above fired —
-                    # arrays are live-indexed, so removed_dead_fibers is normally
-                    # empty and sequential IDs would be wrong.
+                    # positions skipping the camera's dead fibres. Sequential ids
+                    # would be wrong after the first dead fibre.
                     _dead_for_ids = dead_fibers if dead_fibers else removed_dead_fibers
                     if _dead_for_ids and len(_dead_for_ids) > 0:
                         fibers = live_fibre_ids(n_fibers, _dead_for_ids)
@@ -1083,10 +1076,9 @@ class RSSgeneration:
                 except Exception as e:
                     self.logger.error(f"Could not determine wavelength range: {str(e)}")
                 
-                # Extension 1 - SKYSUB: sky-subtracted instrumental spectrum [NFIBER x NWAVE].
-                # = COUNTS - SKY when subtract_sky=True and a sky model is present. Named SKYSUB
-                # (was FLUX) so it is not confused with the flux-calibrated FLAM extension; the
-                # units are instrumental, not physical flux, despite the BUNIT label.
+                # Extension 1 - SKYSUB: sky-subtracted instrumental spectrum [NFIBER x NWAVE]
+                # (= COUNTS - SKY when a sky model is present). Units are instrumental, not
+                # physical flux, despite the BUNIT label; the flux-calibrated plane is FLAM.
                 flux_hdu = fits.ImageHDU(flux_stack, header=common_header)
                 flux_hdu.header['EXTNAME'] = 'SKYSUB'
                 flux_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
@@ -1095,9 +1087,8 @@ class RSSgeneration:
                 self.logger.info(f"Added SKYSUB extension with shape {flux_stack.shape}")
 
                 # Extension - ERROR: 1-sigma uncertainty per fiber [NFIBER x NWAVE].
-                # error_stack is already computed above; emit it so the fibre-flat stage
-                # (apply_fibre_flat_to_rss reads hdul['ERROR']) and downstream variance
-                # handling have it. The sky-framework RSS refactor had dropped this.
+                # Required by the fibre-flat stage (apply_fibre_flat_to_rss) and
+                # downstream variance propagation.
                 error_hdu = fits.ImageHDU(error_stack, header=common_header)
                 error_hdu.header['EXTNAME'] = 'ERROR'
                 error_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
@@ -1123,14 +1114,8 @@ class RSSgeneration:
                         if nf_sky is None or nf_sky.shape != nf_counts.shape:
                             nf_sky = np.zeros_like(nf_counts)
 
-                        # Dead fibres are NOT removed here, for the same reason as in
-                        # the main path above: the extraction is LIVE-indexed, so the
-                        # dead fibres are already absent and the row layout already
-                        # matches FLUX. The old block treated dead_fibers (which holds
-                        # FIBREMAP positions) as row indices and dropped whichever row
-                        # happened to read as zero -- which, while extractLlamas was
-                        # blanking live row 270/49, silently desynced NOFLAT from
-                        # SKYSUB by one row per affected camera.
+                        # Dead fibres are NOT removed here, as in the main path: the
+                        # extraction is LIVE-indexed, so the rows already match SKYSUB.
 
                         nf_tp2d = nf_tp[:, np.newaxis]
                         nf_flux = (nf_counts - nf_sky) / nf_tp2d
@@ -1166,7 +1151,7 @@ class RSSgeneration:
                 sky_hdu.header['EXTNAME'] = 'SKY'
                 sky_hdu.header['BUNIT'] = '10^(-17) erg/s/cm2/Ang/fiber'
                 sky_hdu.header['SKYSUB'] = subtract_sky
-                # F3: sky provenance — fibres whose sky came from a channel-global
+                # Sky provenance — fibres whose sky came from a channel-global
                 # fallback (NSKYFALL) or that have no sky model at all (NSKYNONE).
                 sky_hdu.header['NSKYFALL'] = (n_sky_fallback_total,
                                               'n fibres using channel-global fallback sky')
@@ -1226,7 +1211,7 @@ class RSSgeneration:
 
                 # Extension - FIBERWCS: fibre-map (x,y) + plate-solved RA/DEC + astrometry
                 # provenance. Kept separate from FIBERMAP so the astrometry can be re-solved and
-                # overwritten in place (Phase 3) without disturbing the base fibre map.
+                # overwritten in place without disturbing the base fibre map.
                 hdul.append(_fiberwcs_hdu(fiber_ids, benchsides, fiber_ras, fiber_decs,
                                           fiber_x, fiber_y, _sky_prov))
                 self.logger.info(f"Added FIBERWCS ({_sky_prov['method']}, "
