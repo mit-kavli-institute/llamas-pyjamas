@@ -3,7 +3,7 @@ llamas_pyjamas.Combine.empiricalSky2D
 =====================================
 Empirical multi-dither sky subtraction on the BIAS+FLAT-CORRECTED 2D DETECTOR FRAMES (pre-extraction).
 
-Rationale (RS): the post-extraction b-spline model cannot see the sky's true 2D optical footprint —
+Rationale: the post-extraction b-spline model cannot see the sky's true 2D optical footprint —
 per-fibre LSF/optics aberrations (worst in the red) and inter-fibre scattered light. Subtracting the
 sky on the raw 2D frame, from the dithers where each fibre lands on BLANK sky, matches that footprint
 pixel-for-pixel (same detector pixel = same optics), then the frame is re-extracted. OH airglow varies
@@ -105,11 +105,10 @@ def build_camera_2d_sky(stack, fiberimg, min_blank=MIN_BLANK, blank_frac=BLANK_F
         bm[gap] = np.isfinite(S_safe[d])                   # gaps: always sky (when frame usable)
         blankimg[d] = bm
 
-    # DUAL per-frame scaling (RS): the empirical sky is right up to a per-frame amplitude, but that
-    # amplitude differs for the OH lines (airglow ~low-dimensional in intensity, ~one brightness scale)
-    # vs the less-variable inter-line continuum. So build a leave-one-out sky SHAPE (native-level median
-    # of the blank dithers) and fit TWO amplitudes to the target frame's own blank pixels: a_oh on OH
-    # pixels, a_cont on continuum pixels. Collapses the OH-variability residual the single scale left.
+    # DUAL per-frame scaling: the empirical sky is right up to a per-frame amplitude, but that amplitude
+    # differs for the OH lines (airglow varies ~as one brightness scale) vs the less-variable continuum.
+    # Build a leave-one-out sky SHAPE (median of the blank dithers) and fit TWO amplitudes to the target
+    # frame's own blank pixels: a_oh on OH pixels, a_cont on continuum pixels.
     OH_FACTOR = 3.0
     emp_sky = np.full_like(stack, np.nan)
     amps = {}

@@ -1,5 +1,5 @@
 """
-Super-RSS: the substrate for combining a field's exposures (Phase 4).
+Super-RSS: the substrate for combining a field's exposures.
 
 Combining LLAMAS dithers is done through a single in-memory table that holds EVERY fibre from EVERY
 exposure of a field, tagged with its plate-solved sky position. The deliverables (co-added images,
@@ -17,11 +17,8 @@ Two design rules shape it:
   (var *= scale^2) at build time, so a downstream inverse-variance co-add both rescales and
   down-weights a hazy exposure in one step. ``scales=None`` leaves everything at 1.0.
 
-The table is built ON THE FLY when you combine; it is not written to disk.
-
-Facility note: this is deliberately general. `plane` (calibrated FLAM vs instrumental SKYSUB),
-`channels`, and the per-exposure `scales` are all caller choices; the combine engine that reads a
-:class:`SuperRSS` picks weighting/units/resampling per product.
+The table is built ON THE FLY when you combine; it is not written to disk. `plane` (calibrated
+FLAM vs instrumental SKYSUB), `channels` and the per-exposure `scales` are caller choices.
 
 Classes
 -------
@@ -267,10 +264,9 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
 
     ``sky_penalty`` (alpha, 0 disables) inflates the variance where the sky-subtraction residual
     exceeds the formal error: ``var *= 1 + (alpha * SKYRESID/ERROR)^2``. The formal ERROR carries
-    sky SHOT noise but not the sky-subtraction SYSTEMATIC (measured ~6x larger at red sky lines),
-    so without this an ivar co-add cannot down-weight sky-line wavelengths and their residuals
-    stack. The SKYRESID/ERROR ratio is plane-independent (the sensfunc cancels), so this is correct
-    for both FLAM and SKYSUB planes."""
+    sky SHOT noise but not the sky-subtraction SYSTEMATIC, so without this an ivar co-add cannot
+    down-weight sky-line wavelengths and their residuals stack. The SKYRESID/ERROR ratio is
+    plane-independent (the sensfunc cancels), so this is correct for both FLAM and SKYSUB planes."""
     from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
     flux = np.asarray(hdul[flux_ext].data, dtype=np.float32)
     err = np.asarray(hdul[err_ext].data, dtype=np.float32)
@@ -301,10 +297,9 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
 def _hdr_float(*values, default=np.nan):
     """First of ``values`` that casts to float, else ``default``.
 
-    Pre-TCS/old frames can carry an EMPTY header card (key present, value ``None``); then
-    ``hdr.get(key, fallback)`` returns that ``None`` rather than the fallback, and ``float(None)``
-    raises. This skips ``None``/blank/non-numeric entries so a missing MJD-OBS/AIRMASS/EXPTIME
-    degrades to ``default`` (NaN) instead of crashing the whole combine."""
+    Older frames can carry an EMPTY header card (value ``None``), which ``hdr.get(key, fallback)``
+    returns instead of the fallback. Skipping ``None``/blank/non-numeric entries lets a missing
+    MJD-OBS/AIRMASS/EXPTIME degrade to ``default`` (NaN) instead of crashing the combine."""
     for v in values:
         if v is None:
             continue
@@ -385,10 +380,8 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
                 f'for a reduction calibrated at another stage), or combine the instrumental plane '
                 f'explicitly with plane="skysub" / --plane skysub.')
 
-    # SKYSUB is raw counts (NOT exposure-time normalised); FLAM is already per-second (the sensfunc
-    # step divides by exptime). To honour this module's "one photometric system up front" invariant,
-    # put SKYSUB on a counts/SECOND system too, so exposures of different exposure time co-add
-    # coherently and the per-exposure `scale` is left to carry ONLY transparency (not exptime).
+    # SKYSUB is raw counts; FLAM is already per-second. Put SKYSUB on counts/SECOND too, so
+    # exposures of different exptime co-add coherently and `scale` carries ONLY transparency.
     to_per_second = (resolved_plane == 'skysub') and np.isfinite(exptime) and (exptime > 0)
     if resolved_plane == 'skysub' and not to_per_second:
         logger.warning('%s: SKYSUB plane but no usable exposure time (%.3g); combining in raw counts '

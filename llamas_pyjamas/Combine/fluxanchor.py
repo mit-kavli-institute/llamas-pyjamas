@@ -1,5 +1,5 @@
 """
-Absolute flux anchoring to Gaia DR3 XP spectra (Phase 4).
+Absolute flux anchoring to Gaia DR3 XP spectra.
 
 The stacked, flux-calibrated (FLAM) spectra still carry an aperture loss + any zero-point drift.
 Anchoring the extracted in-field point source to its Gaia DR3 XP low-resolution, flux-calibrated
@@ -162,7 +162,7 @@ def _phot_to_sed(mags: Dict[str, float]):
 
 def gaia_phot_sed(source_id, *, timeout=30):
     """Approximate reference SED from Gaia DR3 broadband photometry, for sources with no XP spectrum
-    (the faint-source fallback RS asked for). Fetches G/BP/RP and converts each to a flux density at
+    (the faint-source fallback). Fetches G/BP/RP and converts each to a flux density at
     its band pivot wavelength -> a 2-3 point SED. This is a FALLBACK: it pins the overall flux LEVEL
     (and gross colour across BP..RP) but not the detailed SED shape, and it only overlaps the
     extracted spectrum between the bluest and reddest band pivots (~5110-7769 A for all three), so

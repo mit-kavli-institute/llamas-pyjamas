@@ -1,5 +1,5 @@
 """
-Co-add engine: resample a field's fibres onto an output sky grid (Phase 4, step 2).
+Co-add engine: resample a field's fibres onto an output sky grid.
 
 Reads the per-fibre scalar table from :meth:`SuperRSS.collapse_band` and lays every fibre down on a
 common RA/DEC grid with a spatial kernel, producing a combined image plus the maps that make the
@@ -41,9 +41,9 @@ from astropy.wcs import WCS
 logger = logging.getLogger(__name__)
 
 # Default short-wavelength floor for WHITE-LIGHT collapses. Below this the blue detector sensitivity
-# falls to ~0, so the flux calibration diverges and those planes are read-noise + artifact dominated
-# (see Sky/diagnosis: the blue-edge over-subtraction spike). The CUBE keeps all wavelengths; this only
-# floors the DEFAULT white-light window, and callers warn rather than discard if a user goes bluer.
+# falls to ~0, so the flux calibration diverges and those planes are read-noise + artifact dominated.
+# The CUBE keeps all wavelengths; this only floors the DEFAULT white-light window, and callers warn
+# rather than discard if a user goes bluer.
 WHITELIGHT_BLUE_MIN_A = 3600.0
 
 
@@ -60,17 +60,14 @@ def whitelight_floor(wave_min, wave_max):
 
 # Default coverage-depth floor for WHITE-LIGHT / collapsed views, as a fraction of the field's peak
 # NEXP. Spaxels shallower than this are built from only a few dithers' edge-of-IFU fibres, so the
-# co-add value is BIASED and its variance is under-estimated (Sky/diagnosis/boundary_diag: J0958 NaN-
-# stripe boundaries reach ~90x sqrt(VAR); the bias clears by ~0.8*max). Default-EXCLUDED from images/
-# stats but NEVER discarded from the cube -- the coverage/NEXP maps stay so the mask is reversible.
+# co-add value is BIASED and its variance is under-estimated. Default-EXCLUDED from images/stats but
+# NEVER discarded from the cube -- the coverage/NEXP maps stay so the mask is reversible.
 COVERAGE_FRAC_MIN = 0.7
 
-# Grid guards: a mis-pointed/mislabelled exposure (wrong OBJECT, garbage RA/DEC, or a bogus WCS
-# solve on a no-Gaia field) can place fibres degrees from the field and size the output grid across
-# the sky -> a multi-TB allocation that OOM-kills the process. A LLAMAS field + its dithers spans far
-# less than a few arcmin, so fibres beyond MAX_FIELD_RADIUS_ARCSEC of the (robust median) centre are
-# excluded from the grid EXTENT (they still get pixel coords and simply fall outside the grid), and
-# the final pixel count is hard-capped with a clear error instead of a silent OOM.
+# Grid guards: a mis-pointed/mislabelled exposure (wrong OBJECT, garbage RA/DEC, bogus WCS solve)
+# can place fibres degrees away and size the grid across the sky -> an OOM. A LLAMAS field + dithers
+# spans far less than a few arcmin, so fibres beyond MAX_FIELD_RADIUS_ARCSEC of the median centre are
+# excluded from the grid EXTENT, and the pixel count is hard-capped with a clear error.
 MAX_FIELD_RADIUS_ARCSEC = 600.0
 MAX_GRID_PIXELS = 8_000_000          # ~2800x2800; any real IFU field is far smaller
 
@@ -106,9 +103,8 @@ def make_output_grid(ra, dec, pixscale, pad_pix, center=None):
 
     w0 = _tan_wcs(ra0, dec0, (1.0, 1.0), pixscale)
     px, py = w0.world_to_pixel(sc)
-    # Size the grid from fibres within MAX_FIELD_RADIUS of the field centre only, so a mis-pointed
-    # exposure cannot stretch the grid across the sky (multi-TB alloc -> OOM). Outliers keep their
-    # pixel coords and simply land outside the grid (skipped by the caller's coverage test).
+    # Size the grid from fibres within MAX_FIELD_RADIUS only. Outliers keep their pixel coords and
+    # simply land outside the grid (skipped by the caller's coverage test).
     sep = sc.separation(SkyCoord(ra0 * u.deg, dec0 * u.deg)).arcsec
     inlier = np.isfinite(px) & np.isfinite(py) & (sep <= MAX_FIELD_RADIUS_ARCSEC)
     n_out = int((~inlier).sum())

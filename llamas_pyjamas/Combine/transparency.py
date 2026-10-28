@@ -1,11 +1,11 @@
 """
-Transparency scaling: put a field's exposures on one photometric system (Phase 4).
+Transparency scaling: put a field's exposures on one photometric system.
 
 Under variable weather each dither has a different throughput, so the same source yields different
 counts frame to frame. Left uncorrected this prints as a dither-patterned mosaic in the co-add
-(the diagonal striping) and biases any surface-brightness measurement. This module measures each
-exposure's relative transparency from the bright in-field point source(s) -- the QSO pair here --
-and returns per-exposure scales for :meth:`SuperRSS.apply_scales`.
+and biases any surface-brightness measurement. This module measures each exposure's relative
+transparency from the bright in-field point source(s) and returns per-exposure scales for
+:meth:`SuperRSS.apply_scales`.
 
 The in-field source doubles as a photometric anchor: its aperture flux is proportional to the
 exposure's throughput, so scaling every exposure's source flux to a common reference makes them
@@ -13,8 +13,8 @@ consistent. Because :meth:`SuperRSS.apply_scales` scales variance by scale^2, an
 co-add then rescales AND down-weights a hazy exposure together. Absolute zero-point (aperture loss)
 is a later, separate step (anchor to Gaia); this is the RELATIVE, exposure-to-exposure correction.
 
-Only *relative* stability is assumed of the reference source over the ~hours session -- fine even
-for a (variable) quasar. Using several sources and combining per-source scales by median guards
+Only *relative* stability is assumed of the reference source over a ~hours sequence -- fine even
+for a variable source. Using several sources and combining per-source scales by median guards
 against one source landing on a gap in a given dither.
 
 Functions
@@ -60,7 +60,7 @@ def find_reference_sources(super_rss, *, n=2, band=None, channels=None, pixscale
 
     Uses a plain (uniform, flux) co-add so peaks are real source flux, finds local maxima above
     ``snr_min`` MAD over the background, and enforces ``min_sep_arcsec`` between accepted peaks
-    (so the two QSOs of a pair are picked, not one QSO twice)."""
+    (so two close sources are both picked, not one source twice)."""
     from scipy.ndimage import maximum_filter
     from llamas_pyjamas.Combine.coadd import combine_image
     lo, hi = band or _full_band(super_rss, channels)
@@ -185,11 +185,9 @@ def transparency_scales(super_rss, *, sources: Optional[Sequence[SkyCoord]] = No
             missing.append(super_rss.exposures[e].exposure_id)
         scales[super_rss.exposures[e].exposure_id] = float(np.median(s_e)) if s_e else 1.0
 
-    # A single out-of-band ratio (e.g. 300x, 0.03x) is proof the aperture photometry is unreliable for
-    # this field (faint/compact source, per-exposure coverage differences) — so DON'T trust the plausible
-    # -looking survivors either: a lone 0.5 among garbage would still imprint a 2x per-frame level step.
-    # No scaling is far safer than partial/wrong scaling; FLAM is already per-second so exposures still
-    # co-add coherently, just without a transparency correction.
+    # A single out-of-band ratio proves the aperture photometry unreliable for this field, so the
+    # plausible-looking survivors are not trusted either. No scaling is far safer than wrong scaling;
+    # FLAM is already per-second, so exposures still co-add coherently.
     if missing:
         raise TransparencyError(
             f'no complete reference-source measurement for exposure(s) {missing} (source off the '

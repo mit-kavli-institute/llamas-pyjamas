@@ -1,5 +1,5 @@
 """
-Cube co-add: resample a field's fibres into an (RA, DEC, wavelength) datacube (Phase 4, step 3).
+Cube co-add: resample a field's fibres into an (RA, DEC, wavelength) datacube.
 
 The general container the image and spectrum views are slices of. Each fibre keeps its native
 wavelength solution until here; the cube is where the ONE spectral resample happens (onto a common
@@ -265,14 +265,14 @@ def combine_cube(super_rss, channel='green', *, dwave=None, wave_range=None, pix
 
 def narrowband_image(cube, line_wave, *, half_width=5.0, cont_half_width=None, cont_gap=None,
                      min_coverage=1):
-    """Continuum-subtracted narrowband line image from a cube (e.g. Lya at the QSO redshift).
+    """Continuum-subtracted narrowband line image from a cube (e.g. an emission line at a source's redshift).
 
     Integrates surface brightness over the line window ``|lambda-line_wave| <= half_width`` and
     subtracts a continuum estimated from two side windows (each ``cont_half_width`` wide, offset by
     ``cont_gap`` from the line; defaults: cont_half_width=half_width, cont_gap=2*half_width), scaled
     to the line width. Returns a :class:`~llamas_pyjamas.Combine.coadd.CoaddImage` whose value is the
     integrated line SB (erg/s/cm2/arcsec2). Extended line emission shows as positive residual around
-    the (continuum-subtracted) sources; full QSO PSF subtraction is a later step."""
+    the (continuum-subtracted) sources; no point-source PSF subtraction is done here."""
     from llamas_pyjamas.Combine.coadd import CoaddImage
     wl = cube.wave
     dw = float(np.nanmedian(np.abs(np.diff(wl))))

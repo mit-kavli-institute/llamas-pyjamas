@@ -1,5 +1,5 @@
 """
-CLI: co-add a field's dithers into an image (Phase 4).
+CLI: co-add a field's dithers into an image.
 
 Discovers a field's registered RSS files (or takes them explicitly), builds the super-RSS, and
 writes a DS9-ready co-add image (or, with --cube, a cube) with its depth maps.
@@ -12,10 +12,10 @@ across with ``python -m llamas_pyjamas.Postprocessing.promote_final_rss``.
 
 Examples
 --------
-Broadband green co-add of J2151, auto-discovered in a reduction directory::
+Broadband green co-add of a field, auto-discovered in a reduction directory::
 
     python -m llamas_pyjamas.Combine.combineField --dir /path/reduced/extractions \\
-        --object J2151 --channels green -o j2151_green.fits --png
+        --object MYFIELD --channels green -o myfield_green.fits --png
 
 A narrowband window across all channels, surface brightness, from explicit files::
 

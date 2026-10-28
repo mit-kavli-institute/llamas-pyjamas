@@ -1,7 +1,7 @@
 """
-Optimal point-source spectrum from a field's stacked dithers (Phase 4).
+Optimal point-source spectrum from a field's stacked dithers.
 
-For a point source (a quasar here) the deepest spectrum is NOT a straight aperture sum of spaxels
+For a point source the deepest spectrum is NOT a straight aperture sum of spaxels
 -- it is the PSF- and inverse-variance-weighted combination of every fibre that saw the source,
 across all dithers (Horne 1986 optimal extraction, in fibre space):
 
@@ -147,11 +147,9 @@ def fit_source_profile(super_rss, ra, dec, *, radius_arcsec=3.0, channels=None):
     good = np.isfinite(z) & np.isfinite(dx[sel]) & np.isfinite(dy[sel])
     if good.sum() < 6 or not np.any(z[good] > 0):
         return None
-    # Rescale to O(1) before the least-squares fit. Flux-calibrated data is ~1e-14 (FLAM); at that
-    # magnitude the LSQ fitter's convergence tolerance is met immediately and it returns the INITIAL
-    # guess unchanged (sigma=0.6" -> a spurious constant 1.41" FWHM, and a wrong extraction profile).
-    # Amplitude scaling leaves the centroid, widths and PA unchanged, so this is safe; we restore the
-    # physical amplitude afterwards for callers that might read it.
+    # Rescale to O(1) before the least-squares fit: at FLAM ~1e-14 the fitter's tolerance is met
+    # immediately and it returns the INITIAL guess unchanged. Amplitude scaling leaves centroid,
+    # widths and PA unchanged; the physical amplitude is restored afterwards.
     scale = float(np.nanmax(z[good]))
     if not np.isfinite(scale) or scale <= 0:
         return None
