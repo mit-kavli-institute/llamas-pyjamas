@@ -187,8 +187,8 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
                 fibermap = Table(hdu.data)
                 logger.info(f"Loaded FIBERMAP: {len(fibermap)} fibers")
 
-        # CRR wants True = VALID. The shared rule gives True = bad (bad MASK bits, zero-count
-        # pixels); MASK.astype(bool) used to be passed straight through, i.e. inverted.
+        # CRR wants True = VALID; the shared rule gives True = bad (bad MASK bits, zero-count
+        # pixels), so invert it.
         if flux_data is not None:
             from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
             mask_data = ~bad_pixel_mask(hdul) & np.isfinite(flux_data)

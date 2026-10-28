@@ -124,8 +124,8 @@ class SimpleCubeConstructor:
         with fits.open(rss_file) as hdul:
             print(f"  Found {len(hdul)} extensions")
 
-            # Capture the primary header so the cube WCS can inherit the real
-            # telescope pointing (F6) instead of a (0,0) placeholder.
+            # Keep the primary header so the cube WCS can inherit the real
+            # telescope pointing instead of a (0,0) placeholder.
             self.primary_header = hdul[0].header.copy()
 
             # Load main data (sky-subtracted plane: SKYSUB, or FLUX pre-rename)
@@ -246,7 +246,6 @@ class SimpleCubeConstructor:
         """
         print("\nCreating wavelength grid...")
 
-        # Get wavelength range from data
         wave_valid = self.wave[np.isfinite(self.wave) & (self.wave > 0)]
 
         if wave_min is None:
@@ -264,10 +263,8 @@ class SimpleCubeConstructor:
 
         median_dwave = np.median(wave_diffs)
 
-        # Apply sampling factor
         dwave = median_dwave * self.wave_sampling
 
-        # Create grid
         nwave = int((wave_max - wave_min) / dwave) + 1
         self.wave_grid = np.linspace(wave_min, wave_max, nwave)
 
@@ -403,28 +400,23 @@ class SimpleCubeConstructor:
             resampled_flux (ndarray): Flux resampled onto wave_grid
             resampled_var (ndarray): Variance resampled onto wave_grid (if available)
         """
-        # Get fiber data
         wave_fiber = self.wave[fiber_idx, :]
         flux_fiber = self.flux[fiber_idx, :]
 
-        # Handle mask
         if self.mask is not None:
             mask_fiber = self.mask[fiber_idx, :].astype(bool)
         else:
             mask_fiber = np.zeros_like(flux_fiber, dtype=bool)
 
-        # Valid pixels
         valid = np.isfinite(wave_fiber) & np.isfinite(flux_fiber) & (wave_fiber > 0) & (~mask_fiber)
 
         if np.sum(valid) < 2:
             return None, None
 
-        # Sort by wavelength
         sort_idx = np.argsort(wave_fiber[valid])
         wave_sorted = wave_fiber[valid][sort_idx]
         flux_sorted = flux_fiber[valid][sort_idx]
 
-        # Interpolate onto common grid
         try:
             interp_flux = np.interp(self.wave_grid, wave_sorted, flux_sorted,
                                    left=np.nan, right=np.nan)
@@ -482,7 +474,6 @@ class SimpleCubeConstructor:
         fiber_coords = self.fiber_coords
         nfibers = len(fiber_coords)
 
-        # Initialize cube arrays
         nwave = len(self.wave_grid)
         ny = len(self.y_grid)
         nx = len(self.x_grid)
@@ -498,14 +489,11 @@ class SimpleCubeConstructor:
         print(f"  Cube shape: {self.cube.shape} (wavelength, y, x)")
         print(f"  Memory: ~{self.cube.nbytes / 1024**2:.1f} MB per array")
 
-        # Build KDTree for fast spatial lookups
         tree = cKDTree(fiber_coords)
 
-        # Create meshgrid of output positions
         xx, yy = np.meshgrid(self.x_grid, self.y_grid, indexing='xy')
         output_coords = np.column_stack([xx.ravel(), yy.ravel()])
 
-        # Find fibers within radius of each output pixel
         print("\n  Finding fiber neighbors for each spatial pixel...")
         neighbors = tree.query_ball_point(output_coords, radius)
 
@@ -515,7 +503,6 @@ class SimpleCubeConstructor:
 
         print("\n  Spatially interpolating onto cube grid...")
 
-        # Process each output spatial pixel
         total_pixels = len(output_coords)
 
         for pix_idx in range(total_pixels):
@@ -531,7 +518,6 @@ class SimpleCubeConstructor:
             if len(fiber_indices) == 0:
                 continue
 
-            # Calculate weights based on distance
             distances = np.linalg.norm(fiber_coords[fiber_indices] - out_pos, axis=1)
 
             # Gaussian kernel weighting
@@ -546,7 +532,6 @@ class SimpleCubeConstructor:
             fiber_indices = np.array(fiber_indices)[valid_weights]
             weights /= np.sum(weights)
 
-            # Combine fiber spectra
             combined_flux = np.zeros(nwave)
             combined_var = np.zeros(nwave) if self.cube_var is not None else None
             combined_weight = np.zeros(nwave)
@@ -593,10 +578,8 @@ class SimpleCubeConstructor:
 
         print(f"  Cube shape: {self.cube.shape} (wavelength, row, col)")
 
-        # Resample all fibers
         resampled_data = self._resample_all_fibers()
 
-        # Place each fiber at its hex grid position
         for (row, col), fib_idx in self._hex_fiber_map.items():
             flux_resamp, var_resamp = resampled_data[fib_idx]
 
@@ -632,20 +615,16 @@ class SimpleCubeConstructor:
 
         print(f"  Cube shape: {self.cube.shape} (wavelength, y, x)")
 
-        # Build KDTree
         tree = cKDTree(fiber_coords)
 
-        # Create meshgrid of output positions
         xx, yy = np.meshgrid(self.x_grid, self.y_grid, indexing='xy')
         output_coords = np.column_stack([xx.ravel(), yy.ravel()])
 
-        # Find nearest fiber for each output pixel
         distances, nearest_idx = tree.query(output_coords)
 
         # Only assign if within one fiber pitch
         max_dist = self.fiber_pitch * 1.1  # Small tolerance
 
-        # Resample all fibers
         resampled_data = self._resample_all_fibers()
 
         print(f"\n  Assigning nearest fibers to {len(output_coords)} pixels...")
@@ -704,7 +683,7 @@ class SimpleCubeConstructor:
             dec_center (float): Dec of field center in degrees
             rotation_deg (float): on-sky field rotation (e.g. instrument PA, deg
                 E of N) applied as a PC matrix in the spatial plane. Provisional
-                sign convention — validate against a known source (F6).
+                sign convention — validate against a known source.
         """
         print("\nCreating WCS...")
 
@@ -783,7 +762,6 @@ class SimpleCubeConstructor:
 
         hdu_list = fits.HDUList()
 
-        # Primary HDU with datacube
         primary = fits.PrimaryHDU(data=self.cube)
 
         primary.header['EXTNAME'] = 'FLUX'
@@ -850,7 +828,6 @@ class SimpleCubeConstructor:
             spaxel_hdu.header['COMMENT'] = 'Hex spaxel to arcsec coordinate mapping'
             hdu_list.append(spaxel_hdu)
 
-        # Write to file
         hdu_list.writeto(output_file, overwrite=overwrite)
 
         print(f"  Saved cube with {len(hdu_list)} extensions")
@@ -882,10 +859,8 @@ Examples:
         """
     )
 
-    # Required arguments
     parser.add_argument('rss_file', help='Input RSS FITS file')
 
-    # Optional arguments
     parser.add_argument('--output', '-o', default=None,
                        help='Output FITS file (default: auto-generate from input name)')
     parser.add_argument('--grid-method', default='oversampled',
@@ -912,14 +887,12 @@ Examples:
 
     args = parser.parse_args()
 
-    # Determine output file name
     if args.output is None:
         base = os.path.basename(args.rss_file).replace('.fits', '')
         output_file = f"{base}_cube.fits"
     else:
         output_file = args.output
 
-    # Print configuration
     print("="*80)
     print("LLAMAS Simple Cube Constructor")
     print("="*80)
@@ -934,7 +907,6 @@ Examples:
     print("="*80)
 
     try:
-        # Initialize constructor
         constructor = SimpleCubeConstructor(
             fiber_pitch=args.fiber_pitch,
             pixel_size=args.pixel_size,
@@ -942,23 +914,17 @@ Examples:
             grid_method=args.grid_method
         )
 
-        # Load RSS file (includes FIBERMAP)
         constructor.load_rss_file(args.rss_file)
 
-        # Match fibers to IFU positions
         constructor.match_fibers_to_fibermap()
 
-        # Create grids
         constructor.create_wavelength_grid(wave_min=args.wave_min, wave_max=args.wave_max)
         constructor.create_spatial_grid()
 
-        # Construct cube
         constructor.construct_cube(radius=args.radius, min_weight=args.min_weight)
 
-        # Create WCS
         constructor.create_wcs(ra_center=args.ra, dec_center=args.dec)
 
-        # Save
         constructor.save_cube(output_file, overwrite=True)
 
         print("\n" + "="*80)

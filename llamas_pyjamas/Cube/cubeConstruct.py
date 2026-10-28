@@ -1246,8 +1246,7 @@ class CubeConstructor:
     
                 # Put interpolated data into cube
                 self.cube_data[w_idx, :, :] = grid_z
-                
-                # Process all wavelength slices without time limit
+
             except Exception as e:
                 self.logger.warning(f"Interpolation failed for wavelength {self.wavelength_grid[w_idx]}: {e}")
                 # Fall back to nearest grid point method for this slice
