@@ -2,14 +2,14 @@
 
 After the Phase-A per-line refine (:mod:`Sky.skyLineRefine`), a small (~1-3 % of line amplitude) but
 COHERENT residual remains: an across-slit **LSF wing asymmetry** (line tilt / optical aberration), which
-flips sign from one slit edge to the other and is **static/field-independent** (a template built on some
-fields cleans a held-out field). This module calibrates that residual SHAPE once, per camera, as a
-function of slit position and offset-from-line-centre (in the fixed-xshift frame), from many
-frames/fields with positive-outlier rejection (objects move between dithers -> rejected).
+flips sign from one slit edge to the other and is **static/field-independent**. This module calibrates
+that residual SHAPE once, per camera, as a function of slit position and offset-from-line-centre (in
+the fixed-xshift frame), from many frames/fields with positive-outlier rejection (objects move between
+dithers -> rejected).
 
 It is applied by :func:`Sky.skyLineRefine.refine_fibre` as a ``delta * T[cam, slit](offset)`` basis term
-with a per-line FITTED amplitude (held-out tests: fixed amplitude gives ~+1-5 %, fitted ~+18-24 % on top
-of Phase A -- static shape, variable amplitude). Diagnosis/validation: ``Sky/diagnosis/lsf_template_proto.py``.
+with a per-line FITTED amplitude: the shape is static but its amplitude varies, so a fixed amplitude
+does much worse.
 """
 from __future__ import annotations
 

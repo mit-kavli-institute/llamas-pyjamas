@@ -4,20 +4,17 @@ The base B-spline sky model (``skyModel_1d``) is built in the **xshift** coordin
 sky lines are aligned to the pooled template by construction. The production *framework* refinement
 (``Sky/skySubtract.py`` -> ``skyScale.scale_sky_per_fiber``) instead runs on the wavelength-resampled
 RSS, so it re-encodes the per-fibre arc-solution (wavelength) error as a spurious fibre-to-fibre line
-SHIFT -- a field-dependent artifact that does not average down in stacks (diagnosed in
-``Sky/diagnosis/green_pkl_xshift_test.py``: the field-dependent shift collapses to one field-independent
-curve in native/xshift space).
+SHIFT -- a field-dependent artifact that does not average down in stacks.
 
-This module relocates that refinement into the pkl/extraction domain. It reuses the identical, tested
-per-fibre fit (:func:`scale_sky_per_fiber` -- amplitude ``alpha`` + damped derivative shift/width basis)
-but applies it to the **native-pixel** ``counts - sky`` residual against the native ``sky`` template, so
-the derivative basis is d/d(native pixel) ~ d/d(xshift) and the line is already aligned. The fitted
-line-only correction is folded into ``.sky`` (``sky += correction``) so the written RSS ``SKYSUB`` =
-``counts - sky`` carries it. Reversible + config-gated (``sky_line_refine``, default off).
+This module runs that refinement in the pkl/extraction domain instead: the same style of per-fibre fit
+(amplitude ``alpha`` + damped derivative shift/width basis) on the **native-pixel** ``counts - sky``
+residual against the native ``sky`` template, so the derivative basis is d/d(native pixel) ~ d/d(xshift)
+and the line is already aligned. The fitted line-only correction is folded into ``.sky``
+(``sky += correction``) so the written RSS ``SKYSUB`` = ``counts - sky`` carries it. Reversible +
+config-gated (``sky_line_refine``, default off).
 
-This is the amplitude+shift+width relocation. The static per-slit-position LSF-residual *template*
-(the across-slit wing asymmetry left over at the ~12% level, see ``green_pkl_lsf_shape.py``) is a planned
-augmentation layered on top of this.
+An optional static per-slit-position LSF-residual template (:mod:`Sky.skyLineTemplate`) captures the
+across-slit wing asymmetry the derivative terms leave behind.
 """
 from __future__ import annotations
 
@@ -36,8 +33,8 @@ SIGDETECT = 5.0       # OH-line detection sigma on the sky template
 PAD = 3               # pixels of wing added on each side of a detected line segment
 AMP_FLOOR = 50.0      # min line amplitude (counts) to refine a segment
 AMP_CLIP = 0.6        # clip |alpha| (amplitude residual as a fraction of the line)
-CORE_EXCLUDE = 0      # exclude ±this many peak pixels from the fit (0 = off; TESTED HARMFUL — under-
-                     # determines alpha/amplitude. Kept as an option but NOT the ringing fix.)
+CORE_EXCLUDE = 0      # exclude ±this many peak pixels from the fit (0 = off; >0 under-determines
+                     # alpha and does not fix the ringing)
 DERIV_RIDGE = 0.0     # optional ridge on the derivative (β,γ) columns (0 = plain lstsq)
 
 
@@ -69,9 +66,8 @@ def oh_atlas_mask(wave_1d, pad=PAD, flux_frac=3e-4):
     Uses atlas lines within the fibre's range with flux >= ``flux_frac`` x max flux; masks +/- ``pad``
     pixels around each line's nearest pixel. The OH forest has a huge dynamic range, so ``flux_frac``
     must be small (default 3e-4) to reach the faint lines that still matter after the bright ones.
-    NB: on the empirical-2D sky this ~matches sigdetect (~0.33 vs 0.30 OH residual) but does not beat
-    it, because sigdetect runs on the high-S/N empirical sky template (not a noisy PCA basis) and is
-    already clean; the atlas is offered as an alternative / for use when the template is low-S/N."""
+    NB: on a high-S/N sky template sigdetect is already as clean; the atlas is mainly for use when
+    the template is low-S/N."""
     wave = np.asarray(wave_1d, float)
     n = wave.size
     m = np.zeros(n, bool)
@@ -138,10 +134,8 @@ def refine_fibre(counts_1d, sky_1d, *, cont_win=CONT_WIN, sigdetect=SIGDETECT, p
         good = np.isfinite(d) & np.isfinite(sl)
         if good.sum() < 5:
             continue
-        # Exclude the ±core_exclude peak pixels from the FIT (not the correction): on bright lines the
-        # high-freq terms (γ·S″, δ·T) otherwise over-subtract the sharp core → a pos-neg-pos ring. Fitting
-        # only the shoulders/wings still constrains α/β/γ/δ but can't chase the peak. Correction is still
-        # evaluated over all pixels (smoothly through the core).
+        # Optionally exclude the ±core_exclude peak pixels from the FIT (not the correction), so the
+        # high-freq terms (γ·S″, δ·T) cannot chase a bright line's sharp core.
         peak = int(np.nanargmax(sl))
         fit_good = good.copy()
         if core_exclude > 0:

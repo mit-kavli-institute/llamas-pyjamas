@@ -1,9 +1,9 @@
-"""Test RS's constraint: line-shape (kurtosis) should vary SMOOTHLY and SYMMETRICALLY along the slit
+"""Test the constraint that line-shape (kurtosis) varies SMOOTHLY and SYMMETRICALLY along the slit
 (per camera), not randomly. Per green camera, measure per-fibre 5577 excess-kurtosis for each of the 21
 rev02 frames, AVERAGE over frames (LSF is instrument-stable; counts unaffected by sky refine), then test:
   - smoothness: lag-1 autocorrelation of frame-averaged kurtosis vs fibre index (physical slit order)
   - symmetry: quadratic fit k = A*idx^2 + B*idx + C -> curvature sign + vertex + R^2
-A high lag-1 autocorr + good parabola = RS is right (smooth, symmetric-about-centre). Read-only.
+A high lag-1 autocorr + good parabola = smooth, symmetric-about-centre. Read-only.
 """
 import sys, glob, warnings; warnings.filterwarnings('ignore')
 import os as _os  # repo root = three levels up from this diagnosis script

@@ -1,4 +1,4 @@
-"""Upgraded gap-vs-floor test (RS's methodology question): stack the inter-trace gap profile over
+"""Gap-vs-floor test: stack the inter-trace gap profile over
 the 8 J1613 bias-corrected frames (trimmed mean -> sub-ADU sensitivity), and correlate against the
 HIGH-SNR floor template (noJ1613) along-slit profile. Green 1A and 2A."""
 import sys; sys.path.insert(0, '/Users/simcoe/GIT/llamas-pyjamas/.claude/worktrees/exposure-stacking')

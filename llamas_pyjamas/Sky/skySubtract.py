@@ -116,10 +116,9 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
         sky_mask = build_sky_fiber_mask(wl_source, fibermap, config)
         mask = sky_mask.mask
 
-        # 2. Per-fibre OH scaling (in FLUX space). NB scale_sky_per_fiber does not
-        #    use the mask (each fibre is scaled against its own template); only the
-        #    PCA stage below consumes it. Skipped when the pkl-domain sky_line_refine
-        #    already did the OH refinement (config.skip_oh_scale) — avoids double-correction.
+        # 2. Per-fibre OH scaling (in FLUX space; the mask is only used by PCA).
+        #    Skipped when the pkl-domain sky_line_refine already did it, to avoid
+        #    double-correction.
         if getattr(config, "skip_oh_scale", False):
             scale = np.ones(flux.shape[0], dtype=float)
             scale_corr = np.zeros_like(flux)
@@ -153,9 +152,8 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
                                             "N PCA basis fibres")
         out[sky_plane].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
                                              "N PCA components removed")
-        # Honest basis provenance: how the mask above was actually chosen. This
-        # can differ from SKYSEL (config.selection_method): SKYSEL drives the base
-        # B-spline model, while this mask is the framework's (broad) PCA basis.
+        # How the mask above was actually chosen. Can differ from SKYSEL, which
+        # drives the base B-spline model; this mask is the (broad) PCA basis.
         out[sky_plane].header["SKYBASIS"] = (sky_mask.method,
                                              "framework mask method (cf. SKYSEL)")
 

@@ -8,23 +8,18 @@ two stages always agree on what "sky" means.
 
 User-facing selection methods (config key ``sky_selection_method``)
 -------------------------------------------------------------------
-``dimmest``      (default) the ``n_fibres`` faintest finite fibres.  Restores the
-                 original "take the dimmest fibres" intent.
-``middle-third`` legacy: the central third of fibres ranked by brightness
-                 (reproduces the pre-existing ``skyModel_1d`` behaviour exactly).
+``dimmest``      (default) the ``n_fibres`` faintest finite fibres.
+``middle-third`` legacy: the central third of fibres ranked by brightness.
 ``skymap``       fibres whose spatial position falls in a user-supplied sky
                  region — a 2-D FITS *mask* or *flux image* (see ``load_sky_map``).
 ``frame``/``all`` every finite fibre.  Used when the data source is itself a
                  dedicated blank-sky exposure, so all fibres are sky.
 ``manual``       an explicit, user-supplied set of sky fibres (a boolean mask or
-                 a list of live fibre indices) — the seam for future providers
-                 that define sky fibres externally (e.g. from an LSST broadband
-                 image or a hand-drawn region).  Handled by :func:`build_sky_mask`.
+                 a list of live fibre indices), e.g. from an external image or a
+                 hand-drawn region.  Handled by :func:`build_sky_mask`.
 
-The first-class :class:`SkyMask` (a boolean mask + provenance, with FITS
-serialisation) is the reusable, inspectable, persistable representation of a
-selection; :func:`build_sky_mask` is the single provider that produces one for
-every method, so the base 1-D model and the framework agree on what "sky" means.
+:class:`SkyMask` (boolean mask + provenance, with FITS serialisation) represents
+a selection; :func:`build_sky_mask` produces one for every method.
 
 Public API
 ----------
@@ -58,12 +53,10 @@ QUANTILE_LO = 0.05
 QUANTILE_HI = 0.10
 
 # 'stratified' method: bin fibres by slit position (trace-y) and take the
-# faintest few per bin, so the sky model is built from fibres spanning the
-# whole slit. This removes a width bias: the plain faint selections pick the
-# low-throughput SLIT-EDGE fibres, so the pooled model carries edge-LSF and,
-# applied slit-wide, leaves ~2x larger residuals on OH lines (measured green,
-# 2026-07). Object guard: fibres brighter than STRAT_CAP_PCT (global) are
-# excluded first, so a compact object cannot enter any bin.
+# faintest few per bin. Plain faint selections pick low-throughput SLIT-EDGE
+# fibres, whose edge LSF then leaves larger OH residuals slit-wide. Fibres
+# above STRAT_CAP_PCT (global) are excluded first, so a compact object cannot
+# enter any bin.
 STRAT_NBINS = 8        # trace-y bins across the slit
 STRAT_PER_BIN = 5      # faintest fibres kept per bin (=> ~30-40 sky fibres,
                        # enough for robust cross-fibre outlier rejection)
@@ -128,9 +121,8 @@ def select_sky_fibres(brightness, finite, *, method="dimmest", n_fibres=20,
                                        label="skymap")
 
     if method == "middle-third":
-        # Parity with the legacy skyModel_1d: rank ALL fibres by descending
-        # brightness and take the central third (indices n//3 : 2n//3).  The set
-        # of fibres is what matters — the downstream fit re-sorts by wavelength.
+        # Rank ALL fibres by descending brightness and take the central third.
+        # Only the set matters; the downstream fit re-sorts by wavelength.
         order = np.argsort(-brightness)
         sky_start = n // 3
         sky_end = 2 * n // 3
