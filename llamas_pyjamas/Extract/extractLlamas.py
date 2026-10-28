@@ -49,9 +49,8 @@ from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger(__name__)
 
-# Detector noise defaults used for per-fibre variance (F4) when the FITS header
-# does not carry EGAIN/RDNOISE. The Poisson term dominates, so these only set
-# the read-noise floor; override via header keywords when available.
+# Detector noise defaults for the per-fibre variance when neither the header nor
+# the detector table supplies EGAIN/RDNOISE. They only set the read-noise floor.
 DEFAULT_GAIN = 1.0        # e-/ADU
 DEFAULT_READNOISE = 2.5   # e-
 
@@ -64,18 +63,11 @@ def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
     pixel count is method-dependent:
 
     - boxcar: a straight (fractional-weight) sum over the +/-halfwidth aperture, so the RN
-      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels. With the current halfwidth=2.5
-      that is ~5 px, NOT the legacy hard-coded 9 (which came from the old 9-px total window
-      and over-counted RN by sqrt(9/5)=1.34x, worst for the faint blue/red).
-    - optimal/Horne: read noise is profile-WEIGHTED, RN variance = sum(w_i^2)*RN^2 with the
-      optimal weights, i.e. an effective aperture of 1/sum(P_i^2) (< the boxcar width, since
-      the wings are downweighted). The Horne estimator is currently disabled (unstable on
-      blended profiles); until it is rebuilt to expose per-column profile weights we fall
-      back to the boxcar-equivalent width (a conservative over-estimate), preferring an
-      explicit trace.extraction_aperture if one has been set.
-
-    Keeping this method-aware means the RN term stays correct if/when optimal is re-enabled,
-    instead of silently reusing the boxcar straight-sum formula.
+      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels (~5 px at halfwidth=2.5).
+    - optimal/Horne: read noise is profile-WEIGHTED, i.e. an effective aperture of
+      1/sum(P_i^2) (< the boxcar width, since the wings are downweighted). Per-column
+      profile weights are not yet exposed, so this falls back to the boxcar-equivalent
+      width (a conservative over-estimate) unless trace.extraction_aperture is set.
     """
     method = str(method).lower()
     half = float(boxcar_halfwidth)
@@ -117,11 +109,11 @@ class ExtractLlamas:
             trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
             hdu_data (np.ndarray): The HDU data array from the FITS file.
             hdr (dict): Header information from the FITS file.
-            optimal (bool, optional): Legacy switch — True = profile-weighted mean,
-                False = boxcar. Ignored when ``method`` is given.
-            method (str, optional): 'horne' | 'boxcar' | 'optimal'. 'horne' is the
-                variance-weighted, flux-conserving, mask-aware estimator
-                (Horne 1986) built on the bspline profile images.
+            optimal (bool, optional): True = 'optimal' (Horne), False = boxcar.
+                Ignored when ``method`` is given.
+            method (str, optional): 'horne' | 'optimal' | 'boxcar' | 'legacy'.
+                'horne' (alias 'optimal') is the variance-weighted, flux-conserving,
+                mask-aware estimator (Horne 1986) built on the bspline profile images.
 
         Returns:
             None
@@ -184,8 +176,7 @@ class ExtractLlamas:
                 method = 'optimal' if optimal else 'boxcar'
             method = str(method).lower()
             # 'optimal' is the user-facing name for the Horne estimator; the
-            # pre-2026-07 profile-weighted mean survives as 'legacy' for
-            # comparison only.
+            # plain profile-weighted mean is 'legacy', for comparison only.
             if method == 'optimal':
                 method = 'horne'
             print(f'Extraction method: {method}')
@@ -215,16 +206,9 @@ class ExtractLlamas:
                 logger.warning(f"Error accessing dead fibers in LUT: {e}")
 
 
-            # NOTE: dead fibres are NOT skipped here. `ifiber` is a LIVE row index
-            # (0..nfibers-1) but self.dead_fibers holds FIBREMAP positions, so the
-            # old membership test zeroed the wrong rows: for 2A (nfibers=298, dead
-            # [270, 299]) it blanked live row 270, which live_fibre_ids maps to
-            # physical fibre 271 -- a working fibre -- while 299 was out of range
-            # and did nothing; for 2B it blanked physical fibre 50 instead of 49.
-            # The genuinely dead fibres never produced a trace, so they are already
-            # absent from every per-fibre array; there is nothing to skip. The
-            # fibremap expansion happens once at RSS generation (see the note after
-            # this loop). self.dead_fibers is kept for that step.
+            # ifiber is a LIVE row index, but dead_fibers holds fibremap positions.
+            # Dead fibres never produce a trace, so there is nothing to skip here;
+            # the fibremap expansion happens at RSS generation.
             for ifiber in range(trace.nfibers):
                 extracted = np.zeros(self.trace.naxis1)
                 logger.debug(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
@@ -234,10 +218,8 @@ class ExtractLlamas:
                     # flux-conserving, mask-aware.
                     #   F = sum(P*f/V) / sum(P^2/V),  Var(F) = 1/sum(P^2/V)
                     # with the bspline profile P renormalised to sum to 1 per
-                    # column over the VALID pixels — so missing/bad pixels
-                    # renormalise the profile instead of silently biasing the
-                    # flux (the old profile-weighted mean kept dropped pixels'
-                    # weight in the denominator).
+                    # column over the VALID pixels, so missing/bad pixels
+                    # renormalise the profile instead of biasing the flux.
                     ys, xs = np.where(self.trace.fiberimg == ifiber)
                     if ys.size == 0:
                         logger.warning("No profile pixels for fiber #{}".format(ifiber))
@@ -264,8 +246,7 @@ class ExtractLlamas:
                     # Smooth the model along the dispersion axis before it
                     # enters the variance: an unsmoothed F0 makes the weights
                     # track the frame's own noise, decorrelating repeat
-                    # exposures (measured: 4B stability 0.96 -> 0.80). Real
-                    # spectral structure is preserved at the 9-px scale.
+                    # exposures. Real spectral structure survives at 9 px.
                     _k = 9
                     F0s = np.convolve(np.clip(F0, 0, None), np.ones(_k) / _k, mode='same')
 
@@ -301,22 +282,15 @@ class ExtractLlamas:
                 
                 elif method == 'boxcar':
                     # Boxcar extraction with a trace-following aperture and
-                    # FRACTIONAL pixel weights at the aperture edges.  An
-                    # integer-rounded window (the previous implementation)
-                    # jumps by a whole pixel row whenever the trace crosses a
-                    # half-pixel boundary, imprinting discontinuities along
-                    # the spectrum; weighting the edge pixels by their
-                    # geometric overlap keeps the aperture continuous.
+                    # FRACTIONAL pixel weights at the aperture edges, so the
+                    # aperture does not jump a whole row when the trace crosses
+                    # a half-pixel boundary.
                     logger.info("..Boxcar extracting fiber #{}".format(ifiber))
                     extracted = np.zeros(self.trace.naxis1)
                     tracey = self.trace.traces[ifiber,:]
-                    # Aperture half-width [px]. The legacy window was 9 px total
-                    # (half=4.5), but at the ~6.9 px fibre pitch that reaches the
-                    # neighbouring fibres' cores; 2.5 px (validated on-sky
-                    # 2026-07: frame-to-frame flux stability 0.98-0.99) keeps the
-                    # aperture on this fibre. Overridable via
-                    # LLAMAS_BOXCAR_HALFWIDTH (set by reduce.py from the
-                    # boxcar_halfwidth config key).
+                    # Aperture half-width [px]. At the ~6.9 px fibre pitch a wider
+                    # window reaches the neighbouring fibres' cores. Set via
+                    # LLAMAS_BOXCAR_HALFWIDTH (reduce.py's boxcar_halfwidth key).
                     half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
                     ny = self.frame.shape[0]
                     for i in range(self.trace.naxis1):
@@ -339,28 +313,15 @@ class ExtractLlamas:
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape
             logger.info(f'Benchside {benchside} counts shape {self.counts.shape}')
-            # NOTE: dead fibres are NOT inserted into counts here. Every per-fibre
-            # array (counts, wave, xshift, sky, throughput, errors, ...) stays
-            # LIVE-indexed and mutually aligned, so per-fibre operations
-            # (arcTransfer, skyModel) pair the correct rows. Previously only
-            # counts was padded to fibremap indexing while wave/xshift/sky stayed
-            # live, so counts[i] and wave[i] described different fibres after the
-            # first dead fibre (a silent misalignment). The fibermap expansion is
-            # done once, explicitly, at RSS generation via
-            # llamas_pyjamas.Utils.deadfibers (dead_fibers holds the fibremap
-            # positions). self.dead_fibers is preserved for that step.
+            # Dead fibres are NOT inserted here: every per-fibre array (counts,
+            # wave, xshift, sky, errors, ...) stays LIVE-indexed and mutually
+            # aligned. The fibremap expansion happens once at RSS generation via
+            # llamas_pyjamas.Utils.deadfibers, using self.dead_fibers.
 
-            # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
-            # Populates `errors`, which llamasRSS writes to the ERROR extension
-            # and which fibreFlat/skySubtract propagate. Previously unset, so the
-            # ERROR extension was all zeros and no S/N was derivable from products.
-            # Detector gain (e-/ADU) and read noise (e-) are read from the header
-            # when available; the Poisson term dominates either way.
-            # Gain/read-noise resolution: explicit header keyword, then the lab
-            # characterisation table (keyed on the CAMSN serial), then defaults.
-            # The lab values make the ERROR extension honest per detector — most
-            # important in the red where sky is faint and read noise is a larger
-            # fraction of the budget, and for S/N-weighted cube combination.
+            # Per-fibre uncertainty from photon + read noise, written to the ERROR
+            # extension and propagated by fibreFlat/skySubtract. Gain (e-/ADU) and
+            # read noise (e-) come from the header, then the lab table (keyed on
+            # CAMSN), then defaults; read noise matters most in the faint red.
             gain, readnoise, src = props_for_header(
                 self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
             # Method-aware effective aperture for the RN term (see effective_aperture_pix).
