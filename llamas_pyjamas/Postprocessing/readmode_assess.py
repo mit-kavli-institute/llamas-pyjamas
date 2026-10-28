@@ -23,10 +23,6 @@ differences and epoch drift:
   dead cameras), as do detectors whose two bands overlap and detectors with
   no measured baselines.
 
-Validated against known-mode ut20241128-29 frames: SLOW bias 21/21 correct,
-FAST bias 21/21, 1800 s SLOW science 20/20 (one abstention), FAST LDLS flat
-19/20 with the single dissent flagged marginal.
-
 Standalone usage:  python readmode_assess.py file1_mef.fits [file2 ...] [-v]
 """
 

@@ -5,15 +5,13 @@ import sys
 import warnings
 from pathlib import Path
 
-# QA_assess ships inside the llamas_pyjamas source tree. Make that tree importable
-# first, so we run the QA code beside this script regardless of where the editable
-# install's .pth points (it currently targets the flux-cal sky-framework checkout).
+# Make this source tree importable first, so we run the QA code beside this script
+# regardless of where the editable install's .pth points.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-# Importing llamas_pyjamas pulls in the full reduction pipeline (Trace/Cube/Ray),
-# which prints a banner to stdout and emits a pkg_resources deprecation warning at
-# import time. This tool's interface is its exit code (+ optional --report JSON), so
-# swallow that import-time chatter to keep stdout/stderr clean for callers.
+# Importing llamas_pyjamas pulls in the full pipeline, which prints a banner and
+# warnings at import time. This tool's interface is its exit code (+ optional
+# --report JSON), so swallow that chatter to keep stdout/stderr clean.
 with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()), \
         contextlib.redirect_stderr(io.StringIO()):
     warnings.simplefilter("ignore")

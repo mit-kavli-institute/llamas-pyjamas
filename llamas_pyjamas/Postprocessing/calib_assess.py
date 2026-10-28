@@ -5,7 +5,7 @@ Scans a directory of raw LLAMAS MEF files, scores every arc, LDLS flat and
 twilight (sky) flat per channel, and recommends which file to assign to each
 of the nine calibration attributes in ``Utils/reduxSetupGUI.py``
 (red/green/blue x flat/twilight/arc). The goal is to predict, BEFORE a
-multi-hour reduction, the two classic old-data failures:
+multi-hour reduction, the two common calibration failures:
 
 * **Trace failure across a channel** - the pipeline traces fibres with
   ``find_peaks(comb, distance=5, height=100, prominence=500)`` on a 5-column
@@ -20,8 +20,7 @@ multi-hour reduction, the two classic old-data failures:
 * **Arc refinement failure** - ``Arc/arcLlamas.refineArcX`` needs at least 6
   catalog lines matched within a 10 px shift budget per fibre. Weak lamp
   exposures (too few detectable lines), saturated lines, and epoch shifts
-  larger than 10 px (e.g. blue ~ -206 px on 2024 commissioning data) all
-  force per-fibre fallbacks. This script detects lines in each candidate
+  larger than 10 px all force per-fibre fallbacks. This script detects lines in each candidate
   arc, matches them against the ``LUT/{red,green,blue}_peaks.csv`` catalogs,
   and estimates the epoch shift.
 
@@ -33,7 +32,7 @@ Frame classification uses the primary-header PRODCATG when present
 (CAL.R-FLT lamp flat, CAL.R-SKY twilight, CAL.R-ARC arc, CAL.R-BIA bias),
 falling back to OBJECT free-text heuristics, then to the observing log
 (--obs-log, GUI tab-separated or handwritten xlsx, matched by filename
-timestamp) - old data commonly has OBJECT='None' and no PRODCATG, so the log
+timestamp) - older data often has OBJECT='None' and no PRODCATG, so the log
 is often the only source of frame types. Files that remain unclassifiable
 are listed as UNKNOWN for manual review. Blank READ-MDE comes from the log
 when consistent, else is inferred statistically via the sibling
@@ -88,7 +87,7 @@ TRACE_PEAK_KW = dict(distance=5, height=100, prominence=500)
 TRACE_EDGE_LO, TRACE_EDGE_HI = 20, 2020
 # Peaks with prominence in [PROM_CUT, PROM_MARGINAL) are "one bad night from
 # failing"; peaks detected at PROM_FLOOR but below PROM_CUT are fibres the
-# pipeline will drop (the documented F7 failure on red benchsides).
+# pipeline will drop (seen on red benchsides).
 PROM_CUT, PROM_MARGINAL, PROM_FLOOR = 500.0, 1000.0, 150.0
 
 SAT_LEVEL = 63000.0        # QA convention (qa_config_cal.yaml, extract_stats.py)

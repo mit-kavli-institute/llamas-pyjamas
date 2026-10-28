@@ -1,12 +1,11 @@
 """Bring an existing reduction forward onto its final RSS stage.
 
 Reductions made with ``keep_intermediate_rss = true`` hold three files per exposure and channel
-(base, ``_FF``, ``_FF_SKYSUB``). Registration and flux calibration used to land in whichever file
-was opened -- usually the base one -- so the final stage, the one that should be combined, has
-rough header positions and no FLAM. The combiner now refuses that (RegistrationMismatchError,
-MissingFluxCalibrationError). This command, for every exposure/channel in an extraction directory:
+(base, ``_FF``, ``_FF_SKYSUB``). The combiner needs registration and FLAM on the final stage
+(RegistrationMismatchError, MissingFluxCalibrationError), but they may have been applied to
+another stage. This command, for every exposure/channel in an extraction directory:
 
-1. reports duplicate same-stage files (an old consolidated file next to new long names), and with
+1. reports duplicate same-stage files (a consolidated file next to long names), and with
    ``--keep-duplicates`` moves the unwanted ones into ``superseded/``;
 2. compares the primary headers of the stages, and with ``--sync-header-from STAGE`` copies the
    differing keys from that stage (keys recording data changes -- pedestal, heliocentric scaling --

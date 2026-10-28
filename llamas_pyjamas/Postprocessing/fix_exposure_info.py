@@ -286,11 +286,8 @@ def propose_case_a(audit: FileAudit) -> None:
         audit.notes.append("extension EXPTIME values disagree; not used as a donor")
 
     # TEL-block propagation. Verbatim, EXCEPT RA/DEC: the TEL block holds them sexagesimal
-    # ('10:00:47.03'), while RA/DEC are decimal degrees by convention -- their own card comments
-    # say so, and the whole pipeline reads them with float(). Copying the string across produced
-    # headers whose pointing no consumer could parse, which is what silently greyed out the
-    # sensitivity-function action on the mar25 standard: the standard is identified by
-    # crossmatching RA/DEC, so an unreadable pointing means "not a standard".
+    # ('10:00:47.03'), while RA/DEC are decimal degrees and the pipeline reads them with
+    # float(). An unparseable pointing also stops a standard being identified by crossmatch.
     for target, donor in TEL_PROPAGATION:
         if audit.finding(target).fillable:
             d = audit.finding(donor)
@@ -942,11 +939,9 @@ def write_repaired(audit: FileAudit, output_dir: Path, overwrite: bool,
                     set_card(hdu.header, fix.key, fix.value,
                              '[s] Image nominal exposure time')
         # A present-but-blank SEXPTIME/AEXPTIME card poisons downstream
-        # hdr.get(key, fallback) chains: astropy returns Undefined for the
-        # blank card instead of the fallback (reduxSetupGUI reads SEXPTIME
-        # first and then fails on float(Undefined)). Convert blank -> absent
-        # in the copy; filled cards are never touched and SEXPTIME is still
-        # never fabricated.
+        # hdr.get(key, fallback) chains: astropy returns Undefined instead of
+        # the fallback. Convert blank -> absent in the copy; filled cards are
+        # never touched and SEXPTIME is never fabricated.
         for key in ('SEXPTIME', 'AEXPTIME'):
             if card_status(phdr, key).status == 'blank':
                 del phdr[key]

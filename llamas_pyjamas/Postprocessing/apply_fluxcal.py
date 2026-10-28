@@ -1,6 +1,6 @@
 """Apply a sensitivity function to science RSS files, writing FLAM/FLAM_ERR in place.
 
-Phase III CLI. Takes a sensitivity function (built from a standard in CubeViewer) and one or
+Takes a sensitivity function (built from a standard in CubeViewer) and one or
 more science RSS files, and adds flux-calibrated ``FLAM`` / ``FLAM_ERR`` extensions to each —
 in place by default, so no new files are created. The differential atmospheric-extinction
 correction between the science and standard airmasses is applied unless disabled.
