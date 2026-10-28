@@ -5,7 +5,6 @@ import argparse
 import ray
 from llamas_pyjamas.Utils.rayManager import init_ray
 import psutil
-import pkg_resources
 from pathlib import Path
 import logging
 import llamas_pyjamas
@@ -28,7 +27,7 @@ import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 
 # Set up logger
-logger = logging.getLogger('flatProcessing')
+logger = logging.getLogger(__name__)
 
 
 def load_bias_subtracted_flat_2d(flat_fits_file, channel, bench, side, bias_file=None):
@@ -247,7 +246,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
 
     futures = []
     for hdu_index, trace_file in _hdu_trace_pairs:
-        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
+        logger.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
         print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
@@ -404,7 +403,7 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
             image = hdu[index].data
             max_val = np.nanmax(image)
             if np.isnan(image).all() or np.isnan(max_val):
-                logging.warning(f'All values are NaN for HDU {index}. Skipping normalization.')
+                logger.warning(f'All values are NaN for HDU {index}. Skipping normalization.')
                 normalized_image = image
             elif max_val != 0:
                 normalized_image = image / max_val

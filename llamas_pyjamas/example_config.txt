@@ -147,7 +147,7 @@ ray_num_cpus = 8
 # log_retention = 10
 #
 # Show every print/log line in the terminal instead of the compact phase summary
-# (default false). The log file always gets everything.
+# (default false). Both end with a short run report; the log file gets everything.
 # terminal_verbose = false
 #
 # To reclaim Ray scratch left by killed runs:

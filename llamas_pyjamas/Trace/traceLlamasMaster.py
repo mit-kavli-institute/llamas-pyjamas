@@ -47,7 +47,6 @@ import cloudpickle
 from scipy.signal import find_peaks
 from scipy.ndimage import median_filter
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, LUT_DIR, CALIB_DIR, BIAS_DIR
-import pkg_resources
 from pathlib import Path
 import rpdb
 

@@ -38,7 +38,6 @@ from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import traceback
 from typing import Tuple
 import json
-import pkg_resources
 from pathlib import Path
 
 ####################################################################################

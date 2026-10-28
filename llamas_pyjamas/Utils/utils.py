@@ -34,7 +34,7 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
+def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10, console=True):
     """Configure centralized pipeline logging — one file per run.
 
     Sets up handlers on the ``llamas_pyjamas`` parent logger.
@@ -52,6 +52,9 @@ def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     retention : int
         Keep only the newest ``retention`` ``llamas_pipeline_*.log`` files in
         ``log_dir`` (older ones are removed). Set to 0 to disable pruning.
+    console : bool
+        Also echo INFO and above to stderr. False for a curated run, whose
+        terminal handler is attached by ``reduce.py``.
 
     Returns
     -------
@@ -82,16 +85,26 @@ def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     parent_logger.handlers.clear()
     parent_logger.propagate = False
 
+    # Modules imported before this call may have given themselves a standalone
+    # console handler (this module, setup_logger). Drop those so every record goes
+    # through the parent's handlers once, instead of leaking past the log file.
+    for _name, _child in list(logging.root.manager.loggerDict.items()):
+        if _name.startswith('llamas_pyjamas.') and isinstance(_child, logging.Logger):
+            for _h in list(_child.handlers):
+                if type(_h) is logging.StreamHandler:
+                    _child.removeHandler(_h)
+
     fh = logging.FileHandler(log_file)
     fh.setLevel(level)
     fh.setFormatter(logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     parent_logger.addHandler(fh)
 
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-    parent_logger.addHandler(ch)
+    if console:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        parent_logger.addHandler(ch)
 
     parent_logger.info(f"Pipeline logging configured. Log file: {log_file}")
     return log_file

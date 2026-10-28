@@ -37,7 +37,7 @@ import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
 from llamas_pyjamas.File.llamasRSS import (RSS_STAGE_RANK, RSS_STAGE_RE, exposure_id,
-                                           rss_stage, write_rss_manifest)
+                                           exposure_key, rss_stage, write_rss_manifest)
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Utils.utils import (count_trace_fibres, check_header, configure_pipeline_logging,
@@ -57,7 +57,9 @@ import shutil
 _cached_reference_arc = None
 _cached_reference_arc_path = None
 
-logger = logging.getLogger(__name__)
+# Named explicitly: run as a script this module is __main__, whose logger would
+# miss the llamas_pyjamas log file and the curated terminal.
+logger = logging.getLogger('llamas_pyjamas.reduce')
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
@@ -65,7 +67,8 @@ from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
 from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
                                            reduce_twilight_flat,
-                                           apply_fibre_flat_to_rss)
+                                           apply_fibre_flat_to_rss,
+                                           assess_fibre_flat)
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -122,7 +125,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
 
     Checks package directories, required master bias files, required config keys,
     and file/directory path existence before any processing begins.  On failure,
-    prints a clear itemised summary and calls sys.exit(1).
+    logs each error and calls sys.exit(1).
 
     Parameters
     ----------
@@ -161,7 +164,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
 
     if errors:
         for e in errors:
-            print(f"  \u2717  ERROR: {e}")
+            logger.error(f"Pre-flight: {e}")
         print(f"\nPipeline pre-flight check FAILED — {len(errors)} error(s).")
         print("Fix the above issues and re-run.")
         sys.exit(1)
@@ -217,16 +220,15 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
             if not os.path.isfile(p):
                 errors.append(f"'{key}' path does not exist: '{p}'")
 
-    # Directory keys — warn only (pipeline creates them if missing)
+    # Directory keys: the pipeline creates any that are missing, so this is a note.
     dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
                 'flat_field_output_dir', 'log_output_dir', 'cube_output_dir', 'flat_file_dir']
     for key in dir_keys:
         if key in config and config[key]:
             p = config[key]
             if not os.path.isdir(p):
-                warnings.append(
-                    f"'{key}' directory does not exist yet: '{p}' — it will be created."
-                )
+                logger.info(f"Pre-flight: '{key}' directory does not exist yet: '{p}' "
+                            f"— it will be created.")
 
     # ------------------------------------------------------------------
     # 5. LUT reference arc check
@@ -243,10 +245,11 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
+    # Through the logger, so they reach the curated terminal and not just the log.
     for w in warnings:
-        print(f"  \u26a0  WARNING: {w}")
+        logger.warning(f"Pre-flight: {w}")
     for e in errors:
-        print(f"  \u2717  ERROR: {e}")
+        logger.error(f"Pre-flight: {e}")
 
     if errors:
         print(
@@ -633,12 +636,8 @@ def correct_wavelengths(science_extraction_file, soln=None):
     """
     global _cached_reference_arc, _cached_reference_arc_path
 
-    # stdout (not just logger): when run via `python -m llamas_pyjamas.reduce`
-    # this module is `__main__`, whose logger does not propagate into the
-    # llamas_pyjamas log file — prints are the reliable record of which arc
-    # solution was actually used.
-    print(f"correct_wavelengths: soln = "
-          f"{'<in-memory dict>' if isinstance(soln, dict) else repr(soln)}")
+    logger.info(f"correct_wavelengths: soln = "
+                f"{'<in-memory dict>' if isinstance(soln, dict) else repr(soln)}")
 
     if isinstance(soln, dict):
         arcdict = soln
@@ -817,7 +816,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
         # file/console handling (a __main__-based logger would escape to stderr).
         rss_logger = logging.getLogger('llamas_pyjamas.rss')
         rss_gen = RSSgeneration(logger=rss_logger)
-        out = rss_gen.generate_rss(corr_pkl, rss_base)
+        # Flats are never sky-modelled, and a twilight's signal *is* sky.
+        out = rss_gen.generate_rss(corr_pkl, rss_base, subtract_sky=False)
         if out:
             rss_outputs.extend(out)
 
@@ -1374,7 +1374,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     processed_traditional_bases = set()
 
     # Create a single logger for all cube construction
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('llamas_pyjamas.reduce')
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
 
     for rss_file in rss_files:
@@ -1832,6 +1832,73 @@ def cleanup_extraction_pkls(paths, save_pkl):
     return removed
 
 
+def report_fibre_flat(reporter, corrections_file, ff_files, skipped=None):
+    """Show the fibre-flat checks under the current phase and in the final report.
+
+    The checks' warnings go to the log (and the warning tally) once; the terminal
+    shows them in the summary block rather than inline.
+    """
+    ff_files = [f for f in ff_files if os.path.exists(f)]
+    if not (corrections_file and os.path.exists(corrections_file) and ff_files):
+        return
+    try:
+        lines, warnings, report_text = assess_fibre_flat(corrections_file, ff_files, skipped)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"Fibre-flat summary unavailable: {exc}")
+        return
+    for line in lines:
+        logger.info(line)
+    for w in warnings:
+        logger.warning(w, extra={'summarised': True})
+    reporter.summary(lines[0], lines[1:] + [f"⚠️  {w}" for w in warnings])
+    reporter.report('Fibre flat', report_text)
+
+
+_TRACE_SOURCE_LABELS = {
+    'existing_validated': 'existing traces',
+    'existing_partial_fallback': 'existing traces',
+    'generated_validated': 'traced this run',
+    'generated_partial_fallback': 'traced this run',
+    'mastercalib': 'mastercalib traces',
+    'mastercalib_per_camera': 'mastercalib traces',
+}
+
+
+def trace_report_row(trace_source, validation_results=None):
+    """One line on where the traces came from, for the end-of-run report."""
+    source = _TRACE_SOURCE_LABELS.get(trace_source, str(trace_source))
+    if not validation_results:
+        return source
+
+    def _cams(items):
+        by_colour = {}
+        for ch, b, s, *_ in items:
+            by_colour.setdefault(ch, []).append(f"{b}{s}")
+        return ', '.join(f"all {ch}" if len(bss) == 8 else f"{ch} {' '.join(sorted(bss))}"
+                         for ch, bss in by_colour.items())
+
+    fallback = validation_results.get('fallback_used', [])
+    skipped = validation_results.get('unusable_masters', [])
+    n_cams = len(validation_results.get('valid_traces', [])) + len(fallback)
+    text = f"{n_cams} cameras, {source}"
+    if fallback and trace_source != 'mastercalib_per_camera':
+        text += f"; mastercalib for {_cams(fallback)}"
+    if skipped:
+        text += f"; no trace for {_cams(skipped)}"
+    return text
+
+
+def output_report_row(n_frames, written, n_cubes, extraction_path):
+    """One line on what the run produced, for the end-of-run report.
+
+    RSS products are counted per (exposure, channel), however many stage files each has.
+    """
+    rss = {(exposure_key(f), m.group(2)) for f in written
+           for m in [RSS_STAGE_RE.match(os.path.basename(f))] if m}
+    frames = f"{n_frames} science frame" + ("s" if n_frames != 1 else "")
+    return f"{frames} → {len(rss)} RSS, {n_cubes} cubes in {extraction_path}"
+
+
 def main(config_path):
     """
     Main entry point for the data reduction pipeline.
@@ -1930,8 +1997,10 @@ def main(config_path):
         log_dir = config['log_output_dir']
     else:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
-    log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)))
-    logger = logging.getLogger(__name__)
+    terminal_verbose = bool(config.get('terminal_verbose', False))
+    log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)),
+                                          console=terminal_verbose)
+    logger = logging.getLogger('llamas_pyjamas.reduce')
     logger.info(f"Pipeline started. Config: {config_path}")
 
     # ── Curated terminal reporting (terminal_verbose = false, default) ──────
@@ -1950,7 +2019,6 @@ def main(config_path):
     # fit is locally singular (sparse spectrum edges); it handles it internally
     # and the pipeline guards the resulting model, so it is noise too.
     _warnings.filterwarnings('ignore', message='.*NaN found in cholesky_band.*')
-    terminal_verbose = bool(config.get('terminal_verbose', False))
     _sf = config.get('science_files')
     _n_frames = len(_sf) if isinstance(_sf, list) else (1 if _sf else 0)
     # Planned phases: bias, trace, [arc], [flat], extract, wave+sky, finalise.
@@ -1960,11 +2028,18 @@ def main(config_path):
     if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
         _total_phases += 1
     reporter = PipelineReporter(n_frames=_n_frames, enabled=not terminal_verbose)
+    reporter.log_path = log_file
     _orig_stdout = _sys.stdout
-    _restored = {'done': False}
-    if not terminal_verbose:
+    # 'ok' turns True only when the main try block completes, so an early exit
+    # (pre-flight sys.exit, a crash) ends the report with ❌, not ✅.
+    _run_state = {'done': False, 'ok': False, 'message': None}
+    _parent = logging.getLogger('llamas_pyjamas')
+    if terminal_verbose:
+        # Verbose: the console handler prints everything; this one only counts
+        # warnings for the end-of-run report.
+        _parent.addHandler(ReporterLogHandler(reporter))
+    else:
         _sys.stdout = StdoutToLog(logging.getLogger('llamas_pyjamas.stdout'))
-        _parent = logging.getLogger('llamas_pyjamas')
         for _h in list(_parent.handlers):
             if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
                 _parent.removeHandler(_h)
@@ -1980,12 +2055,12 @@ def main(config_path):
             if isinstance(_h, logging.FileHandler):
                 _pw.addHandler(_h)
 
-    def _restore_terminal(ok=True):
-        if _restored['done']:
+    def _restore_terminal():
+        if _run_state['done']:
             return
-        _restored['done'] = True
+        _run_state['done'] = True
         try:
-            reporter.finish(ok=ok)
+            reporter.finish(ok=_run_state['ok'], message=_run_state['message'])
         except Exception:
             pass
         _sys.stdout = _orig_stdout
@@ -1996,6 +2071,9 @@ def main(config_path):
                 pass
     _atexit.register(_restore_terminal)
     reporter.start(total_phases=_total_phases)
+    # Placeholder so Output leads the report; filled in once products exist.
+    reporter.report('Output', f"{_n_frames} science frame" + ("s" if _n_frames != 1 else "")
+                    + " (no products: run did not finish)")
     # Full configuration + run mode -> log file only (console handler is now at
     # WARNING in curated mode; these are too verbose for the terminal).
     logger.info("Configuration: %s", config)
@@ -2016,7 +2094,11 @@ def main(config_path):
                            timeout_s=float(config.get('input_timeout_s', 15)))
 
     # Pre-flight validation — exits cleanly if anything is wrong
-    validate_pipeline_config(config, config_path)
+    try:
+        validate_pipeline_config(config, config_path)
+    except SystemExit:
+        _run_state['message'] = 'pre-flight check failed (errors above)'
+        raise
 
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
@@ -2251,6 +2333,7 @@ def main(config_path):
 
         final_trace_dir = None
         trace_source = None
+        validation_results = None
 
         # Check if we should use existing traces or generate new ones
         if resume and config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
@@ -2426,6 +2509,7 @@ def main(config_path):
         print(f"Trace source: {trace_source}")
         print(f"All pipeline steps will use traces from: {final_trace_dir}")
         print("="*60)
+        reporter.report('Traces', trace_report_row(trace_source, validation_results))
 
         # ── Arc xshift refinement (after trace selection so the 2d
         # method can extract the night's own arc exposures) ──
@@ -3244,6 +3328,9 @@ def main(config_path):
                 print("RESUME: all _FF products present — skipping fibre-to-fibre "
                       "flat correction (set clobber=true to force).")
                 logger.info("Resume: skipping fibre-flat (all _FF present)")
+                report_fibre_flat(reporter,
+                                  os.path.join(flat_field_dir, 'fibre_flat_corrections.fits'),
+                                  [r.replace('.fits', '_FF.fits') for r in _rss_all])
             elif os.path.exists(smooth_models_file):
                 print("\n" + "=" * 60)
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
@@ -3303,7 +3390,7 @@ def main(config_path):
                                 f"No twilight flat for colour(s) "
                                 f"{sorted(missing)}; those benchsides will use "
                                 f"the lamp-derived T_i fallback within the "
-                                f"twilight method.")
+                                f"twilight method.", extra={'summarised': True})
                             print(f"  NOTE: colour(s) {sorted(missing)} have no "
                                   f"twilight flat — lamp-only T_i for those.")
                         twi_extractions = {
@@ -3346,23 +3433,28 @@ def main(config_path):
                         print("Twilight flat not available or failed — "
                               "using lamp-only fallback")
                     else:
+                        # The fibre-flat summary shows this, so it is only counted.
                         logger.warning(
                             "No twilight flat provided (checked twilight_flat and "
                             "{red,green,blue}_twilight_flat). Falling back to "
                             "lamp-only fibre-to-fibre flat. Science cubes will "
                             "contain artificial spatial illumination gradients "
-                            "from the lamp.")
+                            "from the lamp.", extra={'summarised': True})
                     corrections_file = compute_fibre_flat_lamp_only(
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")
 
                 # Apply to the pending RSS files (resume-filtered above).
+                _ff_stats = {}
                 for rss_file in _rss_pending:
                     ff_output = rss_file.replace('.fits', '_FF.fits')
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
-                                           ff_output)
+                                           ff_output, stats=_ff_stats)
                     _run_record['written'].add(os.path.basename(ff_output))
                     print(f"  FF RSS: {os.path.basename(ff_output)}")
+                report_fibre_flat(reporter, corrections_file,
+                                  [r.replace('.fits', '_FF.fits') for r in _rss_all],
+                                  skipped=_ff_stats.get('skipped'))
             else:
                 print("WARNING: Smooth models file not found — "
                       "skipping fibre-to-fibre flat correction")
@@ -3496,6 +3588,8 @@ def main(config_path):
         _manifest = write_rss_manifest(extraction_path, _run_record)
         if _manifest:
             print(f"RSS manifest: {_manifest}")
+        reporter.report('Output', output_report_row(
+            _n_frames, _run_record['written'], len(cube_files), extraction_path))
 
         # Rename the per-exposure pipeline white-light to {exposure_id}_whitelight_fullpipeline.fits
         # -- distinct from the telescope quicklook's {timestamp}_whitelight.fits (left untouched).
@@ -3503,14 +3597,18 @@ def main(config_path):
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"White-light consolidation: {_action} {_detail}")
 
+        _run_state['ok'] = True
+
     except Exception as e:
-        traceback.print_exc()
+        # The full traceback goes to the log; the curated terminal shows one line.
+        if terminal_verbose:
+            traceback.print_exc()
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
+        _run_state['message'] = f"{type(e).__name__}: {e}"[:120]
     finally:
-        # Restore the terminal before teardown so the completion line and any
-        # traceback render normally.
-        _restore_terminal(ok=(_sys.exc_info()[0] is None))
+        # Restore the terminal before teardown so the completion line renders normally.
+        _restore_terminal()
         # Shut Ray down and remove the run scratch dir (honours cleanup_scratch=false).
         # atexit/SIGTERM backstops cover failures before this try and signals.
         cleanup_scratch()

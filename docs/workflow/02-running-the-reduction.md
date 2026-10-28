@@ -74,6 +74,31 @@ Two design points worth knowing downstream:
   data. Stage 9 writes only a *provisional* header-based WCS; [stage 3](03-registration.md) replaces
   it with a Gaia-anchored one.
 
+## What the terminal shows
+
+By default (`terminal_verbose = false`) the terminal shows one line per stage, with a spinner while
+it runs and a tick and elapsed time when it finishes. Everything else goes to the log file.
+
+- **Warnings** print as they happen. Repeats of the same warning within a stage (for example the
+  same message for each of the 24 cameras) print once, followed by `×N more like … — see log`
+  when the stage finishes.
+- **Fibre-flat summary.** After the wavelength and sky stage, a short table shows how flat the sky
+  is within each benchside after the fibre flat (see the [Flat README](../../llamas_pyjamas/Flat/README.md)),
+  with any checks that fired listed under it.
+- **Run report.** Every run ends with a few lines, in verbose mode too:
+
+```
+✅ Done in 42m10s
+   Output      15 science frames → 45 RSS, 30 cubes in /…/extractions
+   Traces      24 cameras, existing traces
+   Fibre flat  twilight · sky scatter after flat 0.8–2.1% (before 2.0–4.8%)
+   Warnings    3 (Sky 2, Pipeline 1) — see log
+   Log         /…/logs/llamas_pipeline_20261028_101500.log
+```
+
+A run that stops early ends with `❌ Failed after …` and the reason (for example a pre-flight
+config error, which is also printed above it).
+
 ## What to check
 
 - **Wavelength QA** in `reduced/QA/` — per-frame HTML/PNG showing the arc solution quality.

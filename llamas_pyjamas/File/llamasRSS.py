@@ -231,8 +231,8 @@ _STAGE_RANK = {s: i for i, s in enumerate(RSS_STAGES)}
 STAGE_HEADER_ALLOWLIST = frozenset({
     'FIBRFLAT', 'FFLATFIL', 'FFMETHD', 'RSSSTAGE', 'HISTORY', 'COMMENT', '',
     'SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'PCOUNT', 'GCOUNT',
-    'CHECKSUM', 'DATASUM',
-})
+    'CHECKSUM', 'DATASUM', 'FFNSKIP',
+} | {f'FFS{q}{b}{s}' for q in 'BAN' for b in '1234' for s in 'AB'})   # fibre-flat sky check
 #: Keys that record a change to the DATA (pedestal, heliocentric WAVE scaling, line refinement).
 #: A difference here cannot be repaired by copying header cards: the stages hold different data.
 STAGE_HEADER_DERIVED = frozenset({
@@ -1039,7 +1039,11 @@ class RSSgeneration:
                 else:
                     flux_stack = counts_stack
                     if subtract_sky and not has_sky:
-                        self.logger.warning(f"subtract_sky=True but sky model is all zeros for channel {channel}. FLUX unchanged.")
+                        # A channel whose cameras are all placeholders has no counts either;
+                        # skyModel_1d already reports those at INFO.
+                        _log = self.logger.warning if np.any(~_no_counts) else self.logger.info
+                        _log(f"No sky model for channel {channel}; SKYSUB = COUNTS "
+                             f"(not sky-subtracted)")
                 
                 # Get array dimensions
                 n_total_fibers, n_pixels = flux_stack.shape
