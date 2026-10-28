@@ -1,36 +1,8 @@
 # llamas_pyjamas/utils.py
 """Utils module for llamas_pyjamas package.
-This module provides various utility functions for logging, file handling,
-data processing, and visualization related to the llamas_pyjamas project.
-Functions:
-    setup_logger(name, log_filename=None):
-        Setup logger with file and console handlers.
-    create_peak_lookup(peaks):
-        Create lookup table mapping peak index to y position.
-    save_combs_to_fits(comb_dict: dict, outfile: str = 'comb_profiles.fits') -> None:
-        Save dictionary of comb profiles to multi-extension FITS file.
-    grab_peak_pos_from_LUT(file, channel, benchside, fiber=None):
-        Retrieve peak positions from a lookup table (LUT) file.
-    create_peak_lookups(peaks, benchside=None):
-        Create lookup dict with special handling for 2A missing fiber.
-    dump_LUT(channel, hdu, trace_obj):
-        Dump lookup table (LUT) data from HDU to a JSON file.
-    flip_b_side_positions():
-        Flip B-side positions in the LUT.
-    flip_positions():
-        Flip positions in the LUT based on predefined criteria.
-    plot_trace(traceobj):
-        Plot trace data from a trace object.
-    plot_traces_on_image(traceobj, data, zscale=False):
-        Plot traces overlaid on raw data with optional zscale.
-    check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir='diagnostics'):
-        Fast scanning function to identify negative values in B-spline fit results.
-    plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
-        Plot individual fiber B-spline fits with original data for inspection.
-    check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
-        Check wavelength ranges in the LLAMAS reference arc calibration file.
-    check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
-        Check wavelength ranges in extraction file and compare to reference arc.
+
+Utility functions for logging, trace and LUT file handling, header checks,
+and flat-field / wavelength diagnostics.
 """
 import os
 import sys
@@ -51,7 +23,6 @@ import pickle
 import cloudpickle
 
 # Module-level logger for utility functions
-# This logger can be used by all functions in this module
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -530,12 +501,7 @@ def flip_b_side_positions()-> None:
             }
         }
     }
-    The function performs the following steps:
-    1. Loads the LUT from 'LUT/traceLUT.json'.
-    2. Iterates over each color ('green', 'blue', 'red').
-    3. For each color, checks if the 'B' side exists in the LUT.
-    4. If the 'B' side exists, flips the fiber positions by reversing the fiber numbers.
-    5. Saves the updated LUT to 'LUT/traceLUT_copy.json'.
+    Reads 'LUT/traceLUT.json' and writes 'LUT/traceLUT_copy.json'.
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.
@@ -586,7 +552,6 @@ def flip_positions()-> None:
     """
 
     # flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
-    #Attempt to check on 23rd Jan 2025
     flipped = {"greenA":False, "greenB":True, "blueA": True, "blueB":False, "redA":False, "redB":True}
     ##temp one
     #flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
@@ -632,10 +597,7 @@ def find_trace_pickle(channel: str, bench: str, side: str, directory: str) -> st
 
     The mastercalib bundle names its files ``LLAMAS_{channel}_{bench}_{side}_traces.pkl``,
     while traces written by ``run_ray_tracing(is_master_calib=True)`` carry a
-    ``LLAMAS_master_`` prefix. Both are in circulation, so every lookup has to try
-    both -- checking only the prefixed form made the fallback unreachable against a
-    stock mastercalib directory, which is how a camera that failed to trace ended up
-    as blank fibres in the RSS instead of mastercalib data.
+    ``LLAMAS_master_`` prefix. Both are in circulation, so every lookup tries both.
 
     Args:
         channel: Colour channel (red/green/blue).
@@ -826,28 +788,19 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
     """
     Validate each trace file individually and copy mastercalib fallback when needed.
 
-    This function checks each trace file for correct fiber count. If a trace has
-    the wrong number of fibers, it automatically copies the corresponding mastercalib
-    trace as a fallback, allowing the pipeline to continue with a hybrid trace set.
+    A trace with the wrong fibre count, or a camera with no pickle at all (failed
+    tracing writes none), gets the mastercalib trace as a per-camera fallback, so
+    ``trace_dir`` must be a COMPLETE trace set, not one channel's worth.
 
-    A camera that failed to trace writes no file at all, so it is also checked for
-    explicitly: any of the 24 (channel, bench, side) cameras with no pickle in
-    ``trace_dir`` gets a mastercalib fallback too. Callers therefore need
-    ``trace_dir`` to be a COMPLETE trace set, not one channel's worth.
-
-    A legacy trace -- written before the tracer checked fibre registration, so it
-    has no ``comb_ok`` attribute -- is also audited (``audit_trace_registration``),
-    because a misregistered comb has the right fibre count. One that fails is
-    renamed to ``<name>.pkl.legacy`` and replaced by the mastercalib trace
+    A legacy trace (no ``comb_ok`` attribute) is also audited with
+    ``audit_trace_registration``, because a misregistered comb has the right fibre
+    count. One that fails is renamed to ``<name>.pkl.legacy`` and replaced
     (``replace_legacy_trace``).
 
-    The fallback is decided per camera, and a mastercalib trace is only copied in if
-    it is usable (``find_usable_master_trace``: right fibre count, and registered if
-    it is itself legacy). A camera left without a usable trace is listed in
-    ``unusable_masters`` and nothing of it is changed; the caller decides whether to
-    go on without it (``confirm_unusable_master_traces``). That covers a bad own
-    trace with no usable master, a missing camera whose master is unusable, and --
-    when ``trace_dir`` IS ``mastercalib_dir`` -- a master that fails the audit.
+    A mastercalib trace is only copied in if ``find_usable_master_trace`` accepts
+    it. A camera left without a usable trace is listed in ``unusable_masters`` and
+    left untouched; the caller decides whether to go on without it
+    (``confirm_unusable_master_traces``).
 
     Args:
         trace_dir: User trace directory to validate. An empty one is filled from
@@ -955,12 +908,8 @@ def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_D
             logger.error(f"Error validating trace file {pkl_file}: {e}")
             continue
 
-    # A camera whose tracing FAILED outright writes no pickle at all, so the loop
-    # above -- which only walks existing files -- never sees it and no fallback is
-    # copied. That is how a failed camera ends up as a block of blank fibres in the
-    # RSS instead of mastercalib data (blue 1A and 4A, 2026-08-31: 598 empty rows).
-    # Now that an unresolvable comb fails the camera rather than guessing, this path
-    # matters more, so cover the missing cameras explicitly.
+    # A camera whose tracing failed writes no pickle, so the loop above never sees
+    # it. Cover missing cameras explicitly, or they become blank fibres in the RSS.
     present = {(ch, b, sd) for ch, b, sd, _ in valid_traces}
     present |= {(ch, b, sd) for ch, b, sd, *_ in invalid_traces}
     present |= {(ch, b, sd) for ch, b, sd, _ in misregistered_traces}
@@ -1168,16 +1117,9 @@ def flip_blue_combs()-> None:
     """
     Flips all blue combs in the lookup table (LUT) file.
     
-    This function reads the LUT JSON file, processes all benchsides ('1A' through '4B')
-    in the blue combs section, and flips those comb arrays. The updated LUT is then 
-    saved back to the JSON file.
-    
-    The function performs the following steps:
-    1. Loads the LUT from 'LUT/traceLUT.json'.
-    2. Checks if 'combs' and 'blue' keys exist in the LUT structure.
-    3. For each benchside (1A-4B) in the blue combs, flips the comb array.
-    4. Saves the updated LUT back to the original file.
-    
+    Reverses each benchside's blue comb array in 'LUT/traceLUT.json' and saves
+    the LUT back in place.
+
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.

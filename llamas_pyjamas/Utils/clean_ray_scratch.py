@@ -1,9 +1,8 @@
 """Standalone cleanup tool for accumulated Ray scratch directories.
 
-Existing users often have a large pile of ``/tmp/ray/session_*`` (and, after the
-temp-dir fix, ``/tmp/llamas_ray/<pid>``) directories left behind by many pipeline
-runs. This script finds and removes them safely, independently of running the
-pipeline.
+Pipeline runs can leave ``/tmp/ray/session_*`` and ``/tmp/llamas_ray/<pid>``
+directories behind. This script finds and removes them safely, independently of
+running the pipeline.
 
 Usage
 -----

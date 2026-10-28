@@ -1,20 +1,20 @@
 """Central Ray scratch / temp-directory lifecycle management for the pipeline.
 
 Ray, left to its defaults, writes session logs, the object-store spill files, and
-the ``runtime_env`` package uploads into ``/tmp/ray/session_<...>``. The LLAMAS
-pipeline initialises Ray several times per run and never cleans any of it up, so
-``/tmp`` fills and the pipeline crashes with "No space left on device" — and the
-junk survives across runs and users.
+the ``runtime_env`` package uploads into ``/tmp/ray/session_<...>`` and never
+removes them, so ``/tmp`` fills across runs until the pipeline fails with "No space
+left on device".
 
 This module gives Ray **one short, per-run, owned scratch directory** (via the
 ``_temp_dir`` argument every ``ray.init`` should pass) so all of that data can be
 bounded and reliably removed — during the run, on normal exit, and on early
 failure. It also provides:
 
+* :func:`init_ray`, the single Ray session shared by the whole run;
 * a pre-flight disk-space gate (:func:`preflight_disk_check`) that warns when space
   is tight and aborts *before any work* when it is guaranteed insufficient;
 * shared discovery / prune helpers used by the standalone ``clean_ray_scratch`` CLI
-  so existing users can reclaim already-accumulated sessions.
+  to reclaim accumulated sessions.
 
 Design notes
 ------------
@@ -28,10 +28,6 @@ Design notes
   ``sys.exit``) plus a ``SIGTERM``/``SIGHUP`` handler (scheduler kills). ``SIGKILL``
   and power loss cannot be trapped and are recovered by :func:`prune_stale` on the
   next run.
-
-This is Phase 1 of the fix: it does not consolidate the multiple Ray sessions into
-one — a future ``init_ray()`` entry point will. It only controls *where* Ray writes
-and *guarantees* the cleanup.
 """
 
 import os
@@ -242,7 +238,7 @@ def prune_run_sessions():
     """Remove finished Ray session dirs under our run dir (bounds mid-run growth).
 
     Safe to call between stages: it skips the currently-active session so a live Ray
-    instance is never disturbed. Replaces the old ad-hoc ``py_modules_files`` globs.
+    instance is never disturbed.
     """
     if _keep_scratch:
         return
@@ -391,7 +387,7 @@ def preflight_disk_check(config, output_dir, temp_dir, input_files):
     min_free_gb = float(cfg.get('min_free_gb', 5))
     factor = float(cfg.get('disk_estimate_factor', 5))
 
-    # Ray object store, clamped to 30% RAM (mirrors the per-stage clamps).
+    # Ray object store, clamped to 30% RAM (as in _object_store_bytes).
     try:
         import psutil
         total_mb = psutil.virtual_memory().total // (1024 * 1024)
@@ -554,7 +550,7 @@ def prune_stale(config=None, hours=6, include_generic=False):
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: single-session consolidation
+# single-session Ray init
 # ---------------------------------------------------------------------------
 def build_runtime_env():
     """The one canonical Ray runtime_env for the whole pipeline.
@@ -589,7 +585,7 @@ def _num_cpus(num_cpus=None):
 
 
 def _object_store_bytes(object_store_mb=None, config=None):
-    """Object-store size in bytes, clamped to ≤30% RAM (mirrors the old per-stage clamp)."""
+    """Object-store size in bytes, clamped to ≤30% RAM."""
     cfg = config or {}
     if object_store_mb is None:
         object_store_mb = int(os.environ.get("LLAMAS_RAY_OBJECT_STORE_MB",

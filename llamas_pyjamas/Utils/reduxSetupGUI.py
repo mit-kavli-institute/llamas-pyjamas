@@ -371,9 +371,8 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         for key, path in new_arcs.items():
             out.append(f'{key} = {path}\n')
 
-    # flux_standard_files assigned but absent from the template goes in an appended line.
-    # An existing config written before this feature has no such key for the substitution
-    # loop above to fill, so without this the standards would be silently dropped on rewrite.
+    # flux_standard_files assigned but absent from the template (e.g. an older config) goes in
+    # an appended line, or the standards would be silently dropped on rewrite.
     if assignments.get('flux_standard') and 'flux_standard_files' not in substituted:
         out.append('\n# Spectrophotometric standard-star exposures (identified in the setup '
                    'GUI by\n# crossmatching the pointing against the bundled catalogue). '

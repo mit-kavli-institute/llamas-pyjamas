@@ -1,20 +1,17 @@
 """Dead-fibre bookkeeping helpers.
 
-Convention (post-2026-07): each camera's spectra are stored as LIVE-indexed
-per-fibre arrays — one row per traced/live fibre, dead fibres absent — for
-EVERY per-fibre array (counts, wave, xshift, sky, throughput, errors, ...).
-This keeps the arrays mutually aligned: row ``k`` is the same physical fibre in
-all of them, so per-fibre operations (arcTransfer, skyModel) pair the right
-rows. The camera's ``dead_fibers`` list holds the FIBERMAP positions of the
-dead fibres; from it we can recover each live row's physical fibre id, or
-expand a live array to fibermap indexing (dead rows re-inserted) when a
-fibermap-aligned product is wanted.
+Convention: each camera's spectra are stored as LIVE-indexed per-fibre arrays —
+one row per traced/live fibre, dead fibres absent — for EVERY per-fibre array
+(counts, wave, xshift, sky, throughput, errors, ...). This keeps the arrays
+mutually aligned: row ``k`` is the same physical fibre in all of them, so
+per-fibre operations (arcTransfer, skyModel) pair the right rows. Mixing live-
+and fibermap-indexed arrays silently misaligns them after the first dead fibre.
 
-Before this convention, only ``counts`` (and a few arrays derived from it) were
-padded to fibermap indexing while ``wave``/``xshift``/``sky`` stayed live, so
-``counts[i]`` and ``wave[i]`` described different fibres after the first dead
-fibre — a silent misalignment. These helpers make the two representations
-explicit and round-trippable.
+The camera's ``dead_fibers`` list holds the FIBERMAP positions of the dead
+fibres; from it we can recover each live row's physical fibre id, or expand a
+live array to fibermap indexing (dead rows re-inserted) when a fibermap-aligned
+product is wanted. These helpers make the two representations explicit and
+round-trippable.
 """
 
 import numpy as np

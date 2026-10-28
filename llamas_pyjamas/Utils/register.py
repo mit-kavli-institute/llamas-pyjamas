@@ -1,4 +1,4 @@
-"""Astrometric registration of LLAMAS exposures (Phase 3).
+"""Astrometric registration of LLAMAS exposures.
 
 Refines the rough header WCS into a star-tied solution and writes per-fibre RA/DEC back into the
 RSS (FIBERMAP + FIBERWCS). Ties together the fibre-space centroiding (Utils.centroid), the WCS
@@ -14,9 +14,9 @@ Per exposure:
   5. recompute per-fibre RA/DEC from the refined WCS and overwrite FIBERMAP/FIBERWCS for every
      channel of the exposure, with updated provenance.
 
-TIER 1 (Gaia present) is implemented here. Tier 2 (relative dither-to-dither when no Gaia) and
-Tier 3 (keep rough) fallback: no match -> the rough solution is left in place (Tier 3); the
-multi-frame relative path is a follow-up increment.
+Tiers: 1 = Gaia (above); 2 = relative dither-to-dither registration onto a common in-field
+source when there are no Gaia stars (:func:`register_block_relative`); 3 = keep the rough header
+WCS when nothing matches.
 """
 
 import logging
@@ -167,10 +167,9 @@ def _match_common_offset(det_sky, gaia, coarse_tol=9.0, tight_tol=2.5):
     """Match detected sources to Gaia via a shared translation offset (robust to the pointing
     error). Returns (det_index, gaia_index) lists. `det_sky`, `gaia` are SkyCoord arrays.
 
-    ``coarse_tol`` seeds the common offset and must admit the *real* TCS pointing error, which on
-    these data runs 4-6" for several fields (GD108 ~1" but J1613/J2151/Feige110 ~4-6", internally
-    consistent across stars and dithers). ``tight_tol`` is the true discriminator: after removing
-    the common offset, genuine matches agree to <2.5" while a wrong-star pairing scatters."""
+    ``coarse_tol`` seeds the common offset and must admit the *real* TCS pointing error, which can
+    be 4-6" (consistent across stars and dithers). ``tight_tol`` is the true discriminator: after
+    removing the common offset, genuine matches agree to <2.5" while a wrong-star pairing scatters."""
     if len(det_sky) == 0 or len(gaia) == 0:
         return [], []
     idx, sep, _ = det_sky.match_to_catalog_sky(gaia)
@@ -438,11 +437,9 @@ def register_exposure(rss_path, *, mag_limit=20.5, radius_arcsec=45.0, band=None
             det_sky = wcs.pixel_to_world(np.array([s.x for s in sources]),
                                          np.array([s.y for s in sources]))
             di, gi = _match_common_offset(det_sky, gaia)
-            # Consensus guard: the real pointing error is 4-6" for several fields, so we cannot use
-            # the shift MAGNITUDE to reject bad matches. Trust a solve only when >=2 stars agree on
-            # a common offset (they already do, via _match_common_offset's tight_tol), OR a single
-            # match that is a dominant source (a standard on-axis). A lone faint match among the
-            # banding is not trusted -> fall back to rough.
+            # Consensus guard: the real pointing error can be 4-6", so the shift MAGNITUDE cannot
+            # reject bad matches. Trust a solve only when >=2 stars agree on a common offset, or a
+            # single match is a dominant source (a standard on-axis); otherwise keep rough.
             consensus = len(di) >= 2 or (len(di) == 1 and
                                          _single_source_is_dominant(xs, ys, flux, sources, di))
             solved = None
@@ -512,8 +509,8 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
     clamped to +-``max_rot_deg`` of the calibrated value -- then HOLDS it and applies per-frame
     TRANSLATION only. The rotator is fixed within a block, so one rotation is physically correct;
     a per-frame 2-star rotation fit is noisy (~0.5 deg scatter) and would let dithers disagree,
-    whereas the block median is stable. This removes the residual rotation (~1-2 deg on these data)
-    that a translation-only solve leaves as a ~1.5" error at the field edge. Frames without a
+    whereas the block median is stable. This removes the residual rotation (~1-2 deg) that a
+    translation-only solve leaves as a ~1.5" error at the field edge. Frames without a
     confident match still inherit the block rotation (a better rough). The caller groups exposures
     into blocks (typically by OBJECT, which encodes the rotator incl. the deliberate _180 flip).
 
@@ -527,7 +524,7 @@ def register_block(rss_paths, *, mag_limit=20.5, radius_arcsec=45.0, band=None,
     # (skipped entirely when the caller supplies a fixed block rotation)
     frames, drots = [], []
     block_gaia = None                                     # a block shares ONE pointing -> query Gaia
-    for p in rss_paths:                                   # once and reuse (8 slow queries -> 1)
+    for p in rss_paths:                                   # once and reuse
         sib = _registration_siblings(p)
         dp = sib.get('green') or next(iter(sib.values()))
         ra, dec, pa, xs, ys, flux, sources, gaia = _detect_and_query(dp, band, mag_limit,
