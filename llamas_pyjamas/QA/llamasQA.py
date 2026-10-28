@@ -366,15 +366,7 @@ def plot_traces_on_image(traceobj: 'TraceLlamas', data: np.ndarray, zscale=False
     Returns:
     --------
     None
-        This function does not return any value. It displays a plot with the traces overlaid on the raw data.
-
-    Notes:
-    ------
-    - The function uses matplotlib for plotting and astropy.visualization for zscale interval.
-    - Each trace is plotted with a unique color from the viridis colormap.
-    - A vertical red dashed line is plotted at the midpoint of the image.
-    - Trace indices are annotated next to the red vertical line.
-    - If an error occurs while plotting a trace line, the error is printed and the plotting stops.
+        Displays the plot; trace indices are annotated at the image midpoint.
     """
     
     fig, ax = plt.subplots(figsize=(12, 8))

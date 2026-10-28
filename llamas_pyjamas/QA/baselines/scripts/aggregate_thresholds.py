@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Phase B aggregation (ROBUST). Turn qa_stats_raw.json into per-detector derived
+"""Phase B aggregation. Turn qa_stats_raw.json into per-detector derived
 thresholds + per-epoch tracking baselines.
 
-Robustness (addressing review findings):
-- Per (type,mode,detector) samples are sigma-clipped (MAD-based) to reject
-  anomalous baseline frames BEFORE deriving limits, so an unscreened outlier can
-  no longer inflate its own cap.
 - Background/level bands use an ABSOLUTE ADU floor (additive quantity), not a
-  relative %: band = median +/- max(K*sigma_robust, FLOOR_ADU).
-- Structure/RMS/saturation caps are robust one-sided: max(median + N*sigma_robust,
-  floor), on the screened sample.
-- The known-bad June-4 odd dark is held out from derivation and validated.
-- Warm-camera flagging is validated against the May-6 warm folder using BOTH the
-  edge-stripe background band and the CCD temperature band (not just shutter).
+  relative %: band = median +/- max(K*sigma_robust, FLOOR_LEVEL).
+- Structure/RMS/saturation are heavy-tailed, so their one-sided caps come from
+  each detector's own unscreened maximum (see heavy_tail_cap).
+- The known-bad odd dark (ODD_TAG) is held out from derivation and validated.
+- Warm-camera flagging is validated against WARM_DIR using BOTH the edge-stripe
+  background band and the CCD temperature band (not just shutter).
 
 Outputs qa_thresholds_derived.json + qa_tracking_baselines.csv.
 """
@@ -98,9 +94,8 @@ def heavy_tail_cap(vals, floor):
     """One-sided cap for HEAVY-TAILED quantities (dark structure/RMS vary frame to
     frame from cosmic rays / hot columns). Uses each detector's OWN unscreened
     maximum x1.5 so naturally-structured detectors keep a high cap and clean ones
-    stay tight -- rather than sigma-clipping away the legit tail and flooring the
-    cap (which false-fails normal frames). Trade-off: a detector whose baseline
-    contains a genuine bad frame gets a loose cap (documented; n is small)."""
+    stay tight; sigma-clipping the legit tail would false-fail normal frames.
+    Trade-off: a detector whose baseline contains a genuine bad frame gets a loose cap."""
     a = np.asarray([v for v in vals if v is not None and np.isfinite(v)], float)
     if a.size == 0:
         return floor
@@ -180,10 +175,9 @@ def main():
     # legacy pooled warm threshold (kept for reference; superseded by per-detector)
     warm_warn = round(float(np.median(temps) + 5 * robust_sigma(temps)), 1) if temps.size else -72.0
 
-    # per-detector healthy baselines: group each camera's own CCD temps and derive
-    # colour-aware warm/fail caps relative to that camera's median. Pooling all
-    # cameras (as the legacy global does) hides the warm-running detectors -- e.g.
-    # 1A.red sits ~-78 C, 12 C above the -90 array median -- so we must go per camera.
+    # Per-detector healthy baselines with colour-aware caps relative to each camera's
+    # median. Pooling hides warm-running detectors (e.g. 1A.red sits ~12 C above the
+    # array median).
     temp_by_det = {}
     for r in normal:
         t = r.get("ccdtemp")

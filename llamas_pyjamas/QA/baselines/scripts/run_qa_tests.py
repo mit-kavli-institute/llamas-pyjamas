@@ -30,18 +30,11 @@ CASES = [
     ("ODD-STRUCTURE arc #2","FAIL",      f"{COMMISH}/LLAMAS_2026-07-10_20-22-58.8_CAL22_mef.fits",           CAL),
     ("Normal commissioning arc", "PASS/WARN", f"{COMMISH}/LLAMAS_2026-07-10_20-22-28.7_CAL22_mef.fits",     CAL),
     ("WARM sci (shutter fault)", "FAIL", f"{WARM}/LLAMAS_2026-05-06_05-10-56.6_SCI22_mef.fits",             SCI),
-    # 06-08-21.4: camera 3A.green is WARMING -- a dark-current glow that the header CCD
-    # temperature does NOT yet show (it reads -92.1, at its -92.9 baseline). The
-    # exposure-normalized background-gradient RATE flags it: 3A.green ~2.1 ADU/s vs a
-    # healthy <=0.06 -> camera_warming_gradient WARN (severity WARN, so overall WARN =
-    # engine exit 0). shutter/temps are otherwise fine. (Was previously mislabelled
-    # "normal", and briefly FAILed under the rejected structure approach.)
+    # 3A.green is warming before its header CCD temperature moves; the gradient-rate
+    # rule must WARN (camera_warming_gradient), so overall WARN = engine exit 0.
     ("WARM sci (3A.green glow)", "PASS/WARN", f"{WARM}/LLAMAS_2026-05-06_06-08-21.4_SCI22_mef.fits",  SCI),
-    # Commissioning science: files store CCDTEMP1 (no underscore) so temp rules now
-    # EVALUATE (were SKIPPED) and temps are healthy. 4A.red has fixed electronic banding
-    # (not a smooth dark-current gradient), so the gradient-rate metric does NOT flag it
-    # -> PASS. Banding != warming; gross banding on unilluminated cals is still caught by
-    # the cal structure FAIL. (Briefly FAILed under the rejected science-structure approach.)
+    # CCDTEMP1 spelling (no underscore); temps healthy. 4A.red has fixed electronic banding,
+    # not a smooth dark-current gradient, so the gradient-rate rule must NOT flag it.
     ("Commissioning sci (4A.red banding)", "PASS/WARN", f"{COMMISH}/LLAMAS_2026-07-11_05-05-22.4_SCI22_mef.fits", SCI),
     ("WARM cal ARC (shutter)",   "FAIL", f"{WARM}/LLAMAS_2026-05-06_05-50-23.7_CAL0_mef.fits",              CAL),
     ("WARM cal BIAS (shutter ok)", "PASS", f"{WARM}/LLAMAS_2026-05-06_05-56-25.8_CAL0_mef.fits",            CAL),
