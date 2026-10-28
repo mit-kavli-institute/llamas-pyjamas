@@ -19,7 +19,7 @@ sky-model level (`corr(floor, SKY) = −0.07`). An earlier apparent flux-depende
 object continuum contaminating source fibres (see caveat below), and vanishes on blank fibres.
 
 In the stacked diffuse regime the striping is ~**1.9e-19 FLAM RMS — about 50% of the faint diffuse
-signal** — so it is the limiting systematic for Lyα work, exactly as expected.
+signal** — so it is the limiting systematic for faint diffuse-emission work, exactly as expected.
 
 ## Evidence
 
@@ -80,7 +80,7 @@ metric is *blind* in blue (continuum sky ≈0, ~30% exact-zero pixels → a spur
 it: **+2.56 counts × 1.6e-19 FLAM/count = 4.1e-19**, matching the measured FLAM residual exactly. And the
 blue **stack striping peaks at the extreme blue end** (3320 Å: 4.4e-18, 6× noise), where the sensfunc is
 largest, falling to ~2e-19 by 3800 Å. So blue is **not a separate mechanism** — it is the same additive
-per-camera sky residual, blown up by the (blue-end-peaked) flux calibration. Lyα (~4000–4300 Å) sits in
+per-camera sky residual, blown up by the (blue-end-peaked) flux calibration. The 4000–4300 Å range sits in
 the moderate-striping region, not the catastrophic blue edge.
 
 ![Per-fibre residual by channel, J1613](figures/verify_J1613.png)

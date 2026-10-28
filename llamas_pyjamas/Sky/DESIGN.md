@@ -126,7 +126,7 @@ individually-toggleable refinement chain — the abstraction deferred from Phase
 1. **Per-camera additive continuum pedestal.** Estimate the positive additive floor from *genuinely
    blank* fibres in line-free pixels (per camera; optionally smooth along the slit) and subtract it.
    Targets the +floor (worst 1A/2A in green, 1A in red).
-   - **CENTRAL RISK — could eat real Lyα.** A per-camera additive pedestal can subtract the very diffuse
+   - **CENTRAL RISK — could subtract real diffuse emission.** A per-camera additive pedestal can subtract the very diffuse
      emission we want. Mitigations: (a) measure the pedestal only from fibres/regions known blank
      (field edge, away from the QSO pair — or a user sky mask / offset field); (b) restrict it to a
      smooth, low-spatial-frequency instrumental component distinct from compact emission; (c) keep it
@@ -145,7 +145,7 @@ individually-toggleable refinement chain — the abstraction deferred from Phase
   fields? Reuse `Sky/diagnosis/{sky_residual_diag,sky_residual_verify,blue_striping_investigation}.py`
   as the before/after test.
 - **Guardrail — real signal preserved:** QSO point-source spectra unchanged; no over-subtraction of
-  diffuse flux; explicitly check the pedestal does not remove real Lyα (test on/off on a field region).
+  diffuse flux; explicitly check the pedestal does not remove real diffuse line emission (test on/off on a field region).
 - **Not bit-identical:** the pipeline has run-to-run non-determinism (WAVE/xshift jitter), so validate
   with the striping-RMS + signal-preservation metrics, not bit-for-bit.
 - **Reversible:** default OFF, separate branch; compare on/off on the same reduction.
@@ -378,7 +378,7 @@ difference images show coherent horizontal-band removal with point sources intac
 
 **Effect on measurements** — a per-fibre constant-in-λ shift: preserves line ratios / EWs / profiles;
 never subtracts a fibre's own flux (neighbour running-median over blank fibres); and because `r` is a
-median over all λ, **diffuse LINE emission (Lyα) is not absorbed** (narrow features don't move the
+median over all λ, **diffuse LINE emission is not absorbed** (narrow features don't move the
 median). It shifts each spectrum's continuum zero-point by ≲ few×10⁻²⁰–10⁻¹⁹.
 
 **⚠ Assumption / when to disable.** It treats the faint-fibre wavelength-averaged level as sky, so it
