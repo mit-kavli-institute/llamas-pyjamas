@@ -180,7 +180,7 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None,
         tbl.header['SIDE'] = data['side']
         tbl.header['NREF'] = (data['n_ref'], 'Fibres used for median reference')
         # Per-benchside provenance: a benchside processed under the twilight
-        # method but lacking twilight data actually used a lamp-only T_i (F1).
+        # method but lacking twilight data actually used a lamp-only T_i.
         if lamp_only_benchsides and ext_name in lamp_only_benchsides:
             tbl.header['METHOD'] = 'lamp_only'
         else:
@@ -482,12 +482,9 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     flux_arr = np.array(flux_list)
 
     # ── 2. Per-bench pre-normalisation ──
-    # Scale each benchside so all benchside medians match the channel-wide
-    # reference level.  This removes detector-level bias-pedestal offsets
-    # BEFORE the polynomial fit so the gradient surface captures the true
-    # sky variation rather than being distorted by artificial detector
-    # discontinuities (the "brick wall" pattern caused by uncorrected bias
-    # pedestal drift between the 24 cameras).
+    # Scale every benchside median to the channel-wide reference level BEFORE
+    # the polynomial fit, so camera-to-camera bias-pedestal offsets (a "brick
+    # wall" pattern) do not distort the sky-gradient surface.
     bs_arr = np.array([bs for bs, fid in keys])
     unique_benchsides = np.unique(bs_arr)
     bs_medians = {}
@@ -565,7 +562,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
                            f"{key}, keeping normalised integral")
             corrected[key] = flux_arr_norm[i]
 
-    # ── Task 4: Re-add fibres absent from FiberMap_LUT using benchside-median ──
+    # ── Re-add fibres absent from FiberMap_LUT using benchside-median ──
     # Rather than keeping raw integrals (which preserve the spatial gradient),
     # apply the median gradient correction factor of the fibre's own benchside.
     benchside_corr_factors = {}
@@ -634,10 +631,8 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     if unmapped_keys:
         logger.info(f"  Unmapped fibres (benchside-median applied): {len(unmapped_keys)}")
 
-    # NOTE: corrected values are intentionally kept at the per-bench-normalised
-    # scale (all benchsides at channel_ref level).  The final rescaling back to
-    # the raw median is deliberately omitted so that downstream Pass 2 can
-    # apply lamp-derived inter-benchside offsets cleanly.
+    # Corrected values deliberately stay at the per-bench-normalised scale (no
+    # rescaling to the raw median): Pass 2 applies the lamp inter-benchside offsets.
 
     diagnostics = {
         'x': x_arr,
@@ -1185,7 +1180,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         n_fibres, n_pix = smooth_arr.shape
         corr_arr = np.ones_like(smooth_arr)
 
-        # ── Compute W_i(λ) from lamp (unchanged) ──
+        # ── Compute W_i(λ) from lamp ──
         w_arr = np.ones_like(smooth_arr)
         n_alive = 0
         for i in range(n_fibres):
@@ -1369,10 +1364,8 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
                                     channel_groups, output_dir)
 
-    # Record which benchsides fell back to the lamp-derived T_i inside the
-    # twilight method (e.g. a colour whose twilight flat was absent), so the
-    # products document per-benchside provenance rather than a single global
-    # method (F1).
+    # Record which benchsides fell back to the lamp-derived T_i (e.g. a colour
+    # with no twilight flat), so the products document per-benchside provenance.
     lamp_fallback_str = ','.join(sorted(lamp_only_benchsides))
     twilight_benchsides = sorted(
         ext_name for ext_name in models if ext_name not in lamp_only_benchsides)
@@ -1396,7 +1389,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Phase 3: Application to science RSS
+# Application to science RSS
 # ──────────────────────────────────────────────────────────────────────────────
 
 def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):

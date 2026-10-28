@@ -117,9 +117,8 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     
     assert type(idxs) == list, 'idxs must be a list of integers'
 
-    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py):
-    # canonical py_modules runtime_env, object store clamped to 30% RAM, temp/spill in
-    # the owned scratch dir. In the pipeline this attaches to reduce.py's session.
+    # Attach to (or start) the shared Ray session (see Utils/rayManager.py); in the
+    # pipeline this is reduce.py's session.
     init_ray()
 
     
@@ -172,7 +171,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     # Validate bias file structure (add placeholders for missing cameras)
     masterbiasfile = validate_for_gui(masterbiasfile)
 
-    masterfile = 'LLAMAS'  # Changed from 'LLAMAS_master' to match both LLAMAS and LLAMAS_master files
+    masterfile = 'LLAMAS'  # matches both LLAMAS_* and LLAMAS_master_* trace files
     extraction_file = os.path.splitext(filename)[0] + '_extractions_flat.pkl'
 
     if type(channel) == str:

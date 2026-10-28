@@ -284,10 +284,9 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         if return_smooth_models:
             smooth_models[fib_idx] = smooth_1d.copy()
 
-        # 1D sensitivity ratio where signal is reliable.
-        # F2: also reject non-finite, negative/zero, and saturated raw counts so
-        # corrupted pixels keep sensitivity 1.0 (no correction) instead of
-        # producing spurious ratios that the clip floors to clip_range[0].
+        # 1D sensitivity ratio where signal is reliable. Non-finite, non-positive
+        # and saturated raw counts keep sensitivity 1.0 rather than a spurious
+        # ratio that the clip would floor to clip_range[0].
         valid = (smooth_1d > signal_threshold) & np.isfinite(raw_1d) & (raw_1d > 0)
         if saturation_threshold is not None:
             valid &= (raw_1d < saturation_threshold)
@@ -461,7 +460,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             )
             
             # Create evaluation grid
-            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))  # was 2* for Higher resolution
+            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))
             y_fit = sset.value(xmodel)[0]
             
             # Evaluate fit quality
@@ -509,7 +508,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             bkpt=manual_bkpt
         )
         
-        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)) # why was this twice the length?
+        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))
         y_fit = sset.value(xmodel)[0]
         y_fit_original = sset.value(xshift_clean)[0]
         residuals = counts_clean - y_fit_original
@@ -657,7 +656,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
 
     # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
-    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated) #why is this here?
+    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated)
     with open(calibrated_flat_file, 'wb') as f:
         pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
@@ -678,7 +677,6 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 5: Generate the 2D maps
     logger.info("Step 5: Generating 2D Pixel-to-Pixel Sensitivity Maps")
     
-    # This calls generate_thresholds, which now uses our updated _generate_single_pixel_map
     pixel_map_results = threshold_processor.generate_thresholds()
     
     # Ensure the results dictionary points to the newly created FITS file
@@ -1184,8 +1182,7 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
             # Handle potential division by zero or invalid values
             with np.errstate(divide='ignore', invalid='ignore'):
                 corrected_data = science_data / pixmap_data
-                # Replace inf and nan with original values (or zeros)
-                # You may want to adjust this behavior
+                # Non-finite ratios keep the uncorrected value
                 corrected_data = np.where(np.isfinite(corrected_data),
                                          corrected_data,
                                          science_data)
