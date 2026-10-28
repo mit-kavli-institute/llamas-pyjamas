@@ -72,11 +72,9 @@ LOG = []
 
 
 # Cache of processed master-bias HDUs, keyed by absolute path (+ mtime). A
-# master bias is ~800 MB / 24 cameras; process_fits_by_color rebuilds the whole
-# file on every call, and _grab_bias_hdu is called once PER CAMERA PER FRAME
-# (bias-first processes ~24 x N frames), so without this the 800 MB file was
-# re-processed hundreds of times (~6 min of the bias-first stage). Holds at most
-# the slow + fast master bias in memory. Per-process (Ray workers get their own).
+# master bias is ~800 MB and _grab_bias_hdu is called once per camera per frame,
+# so re-processing it each call is very slow. Holds at most the slow + fast
+# master bias. Per-process (Ray workers get their own).
 _BIAS_HDU_CACHE = {}
 
 
@@ -274,17 +272,13 @@ def camera_from_header(hdr) -> tuple:
 def clear_stale_traces(headers, outpath, is_master_calib=False) -> list:
     """Delete the trace pickles about to be regenerated, and report which.
 
-    A camera that fails to trace writes no pickle at all -- ``TraceRay`` returns
-    before ``saveTraces`` -- so the PREVIOUS run's file survives in ``outpath``.
-    ``validate_and_fix_trace_fibres`` only checks the fibre COUNT, so a stale,
-    misregistered trace with the right count is then accepted as valid and the
-    mastercalib fallback never engages: on a re-run the failure is invisible.
+    A camera that fails to trace writes no pickle, so a stale file from an
+    earlier run would survive and pass ``validate_and_fix_trace_fibres`` (which
+    only checks the fibre count), silently bypassing the mastercalib fallback.
     Clearing the targets first makes "no trace written" show up as a missing file.
 
-    ``CALIB_DIR`` is never touched. ``run_ray_tracing`` defaults to
-    ``outpath=CALIB_DIR`` with ``is_master_calib=True``, so without that guard a
-    bare CLI invocation would delete the shipped mastercalib set before tracing
-    and leave nothing behind if tracing then failed.
+    ``CALIB_DIR`` is never touched, so a bare CLI run (which defaults to
+    ``outpath=CALIB_DIR``) cannot delete the shipped mastercalib set.
 
     Args:
         headers: iterable of HDU headers for the cameras about to be traced.
@@ -324,15 +318,10 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
     the fibremap: every slot except the known dead ones. Anything landing outside
     that set is spurious and is what gets dropped.
 
-    This replaces trimming by spacing isolation alone. That rule works only when
-    the spurious peak sits several pitches from anything else; it cannot see a
-    ghost that sits ON the comb -- which is exactly the 2A case, where dead fibre
-    299 leaks a faint peak at the regular pitch at the end of the slit. Spacing
-    then has nothing to grab, so the trim fell through to an arbitrary choice and
-    discarded a live mid-slit fibre instead, shifting every fibre after it by one
-    lenslet. Peak height is not a reliable discriminator either: on an
-    under-exposed flat the comb is noise-dominated and the faintest peak is not
-    the ghost.
+    Spacing isolation alone cannot see a ghost that sits ON the comb (e.g. dead
+    fibre 299 on 2A leaks a faint peak at the regular pitch), and peak height is
+    unreliable on an under-exposed flat, where the faintest peak need not be the
+    ghost.
 
     Args:
         indices: candidate trace row indices into ``mid_positions``.
@@ -366,22 +355,11 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
     live = np.array([s for s in range(n_slots) if s not in set(dead)], dtype=int)
 
     # Relative slot of each trace. A running MEDIAN of the gaps tracks the slow
-    # pitch drift across the detector (~1% end to end, i.e. several slots over a
-    # full benchside if ignored) while staying immune to an isolated ghost gap.
-    #
-    # The running median must be fed gaps with the outliers taken OUT. Feeding it
-    # the raw gaps looks safe -- a median shrugs off one bad value -- but only in
-    # the INTERIOR. At either end, mode='nearest' pads the window with the edge
-    # value, so for the last gap the window is ~10 real gaps plus 11 copies of
-    # the outlier itself and the median IS the outlier. The ghost then measures
-    # one pitch wide and is absorbed into the comb as an ordinary neighbour,
-    # which pushes rel.max() one past the slit, makes two anchor offsets score
-    # equally, and drops a live fibre at the far end instead of the ghost --
-    # shifting the whole benchside by one lenslet (green 3B, 2026-08-31: a ghost
-    # 4.2x pitch past the slit end measured as 1.0x, +6.47 px on all 300 fibres).
-    # Interpolating the pitch across outliers keeps the drift tracking intact,
-    # and the raw gaps still supply the numerator, so a genuine dead-fibre gap is
-    # still counted as the two slots it is.
+    # pitch drift across the detector (~1% end to end) while ignoring a ghost gap.
+    # Outlier gaps are interpolated out first: at the ends, mode='nearest' pads
+    # the window with the edge value, so an end-of-slit ghost gap would become
+    # the median and be absorbed as an ordinary neighbour. The raw gaps remain the
+    # numerator, so a genuine dead-fibre gap still counts as two slots.
     gaps = np.diff(pos)
     p0 = float(np.median(gaps))
     single = (gaps > 0.5 * p0) & (gaps < 1.5 * p0)
@@ -408,19 +386,10 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
             f"detected twice")
 
     # Anchor the comb: the integer offset putting the most traces on live slots.
-    #
-    # When the live set has no dead-fibre holes -- every benchside except 2A and
-    # 2B -- several offsets can score identically, and the offset decides WHICH
-    # trace is discarded. Tied offsets are RIGID RELABELLINGS of one another, so
-    # detector positions alone cannot separate them: a comb model has a free zero
-    # point, which makes fitted residuals, longest-contiguous-run and spacing
-    # isolation all invariant under the shift. Picking one by scan order decides
-    # fibre registration on the ~1% pitch drift between the first and last gap,
-    # i.e. on noise -- that is how green 3B lost a live fibre at y=38.7 and kept a
-    # ghost. Refuse instead, per this function's contract, and let mastercalib
-    # supply the camera. The only real discriminator is an absolute prior on the
-    # row of slot 0 (stable to ~1.4 px against a 6.5 px pitch); that would have to
-    # come from mastercalib and is deliberately not wired in here.
+    # Without dead-fibre holes (all benchsides but 2A/2B) several offsets can tie;
+    # they are rigid relabellings, so positions alone cannot separate them and
+    # picking one would decide registration on noise. Ties are broken by the
+    # throughput fingerprint below, or the camera is failed to mastercalib.
     is_live = np.zeros(n_slots + 1, dtype=bool)
     is_live[live] = True
     offsets = np.arange(-int(rel.max()) - 2, n_slots + 2)
@@ -458,11 +427,9 @@ def resolve_trace_slots(indices, mid_positions, expected_count, dead_fibers=(),
             heights is not None and fingerprint is not None:
         # Positions cannot break this tie, but the fibres can: each one's flat
         # throughput is a fixed property of that fibre, so the pattern of fluxes
-        # along the slit is a fingerprint of which slot is which. It is immune to
-        # the whole detector moving (blue 1A/4A shifted 29-39 px between 2025 and
-        # 2026 and still match at lag 0), which rules out a row-position prior.
-        # The discarded candidate is a near-zero ghost, so the right choice
-        # correlates strongly and the wrong one is one slot off (r < 0).
+        # along the slit is a fingerprint of which slot is which, and is immune to
+        # the whole detector shifting (which rules out a row-position prior).
+        # The right choice correlates strongly; the wrong one is a slot off (r < 0).
         ref = np.asarray(fingerprint, dtype=float)
         hts = np.asarray(heights, dtype=float)
         rs = []
@@ -506,11 +473,9 @@ def track_comb_step(comb, prev, prevprev=None, pitch=6.4, accept=1.0,
                     halfwidth=2, max_step=1.0, step_valid=None) -> Tuple[np.ndarray, np.ndarray]:
     """Advance every fibre's centroid by one tracing column.
 
-    The old walk re-centroided each fibre around ``int(previous)`` and accepted
-    any step under 1.5 px. That lets a faint fibre between saturated neighbours
-    creep ~0.3 px per step toward the bright wing (the valley-subtracted comb
-    goes negative there) until it sits on the neighbour one pitch away: 30
-    fibres on blue 4A 2026-09-29, ~224 across the set. Here:
+    A naive re-centroid lets a faint fibre between saturated neighbours creep
+    toward the bright wing (the valley-subtracted comb goes negative there)
+    until it sits on the neighbour one pitch away. To prevent that:
 
     * the guess continues the local tilt (median step of neighbouring fibres)
       and the window is centred on it ROUNDED, not truncated;
@@ -537,11 +502,9 @@ def track_comb_step(comb, prev, prevprev=None, pitch=6.4, accept=1.0,
         guess = prev
     else:
         # Neighbouring fibres share the local tilt, so take the step from the
-        # median of ~17 neighbours rather than each fibre's own last step: a
-        # per-fibre slope turns one noisy centroid into a permanent slope, and a
-        # carried prediction then runs away linearly. Real steps are < 0.6 px.
-        # Only MEASURED steps count: predictions feeding predictions let a whole
-        # neighbourhood drift together (blue 4A bottom rows ran 67 px off).
+        # median of ~17 neighbours rather than each fibre's own last step, which
+        # turns one noisy centroid into a runaway slope. Real steps are < 0.6 px.
+        # Only MEASURED steps count, so predictions cannot feed predictions.
         raw = prev - np.asarray(prevprev, dtype=float)
         ok = np.ones(prev.size, bool) if step_valid is None else np.asarray(step_valid, bool)
         ok &= np.isfinite(raw) & (np.abs(raw) <= max_step)
@@ -718,14 +681,11 @@ def audit_trace_registration(traceobj, dead_fibers=(), fingerprint=None,
                              expected_count=None) -> Optional[str]:
     """Re-run the tracer's registration checks on an already-saved trace object.
 
-    Trace pickles written before these checks existed (no ``comb_ok`` attribute)
-    were only ever checked for their fibre COUNT, and a misregistered comb has the
-    right count: the old 2A mis-trim kept 298 fibres with 129-298 of them on the
-    wrong lenslet. This applies the same three checks the tracer now runs before
-    saving -- slot resolution against the fibremap, comb regularity, and the
-    throughput fingerprint -- to the stored traces and the stored flat (``data``).
-    Old pickles load fine under the current code (the class travels inside the
-    pickle), so this is what makes them safe to reuse, not what makes them load.
+    Legacy pickles (no ``comb_ok`` attribute) were only checked for their fibre
+    count, and a misregistered comb can have the right count. This applies the
+    tracer's three pre-save checks -- slot resolution against the fibremap, comb
+    regularity, and the throughput fingerprint -- to the stored traces and the
+    stored flat (``data``), so legacy pickles are safe to reuse.
 
     Args:
         traceobj: loaded trace object of any version, with ``traces``, ``naxis1``,
@@ -825,7 +785,7 @@ class TraceLlamas:
         Fits a grid to a single x-window.
     find_comb(rownum=None)
         Finds the comb for the given row number.
-    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict
+    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, use_bias=None) -> dict
         Processes data from a specific HDU array.
     profileFit()
         Fits the profile of the data.
@@ -1057,18 +1017,10 @@ class TraceLlamas:
 
         self.comb = tslice - self.y_model
 
-        # F7 ROOT CAUSE (documented; fix deferred as it needs broad re-validation):
-        # Fibre peaks are detected with a FIXED prominence=500/height=100 here,
-        # while the per-channel `self.min_pkheight` computed just above is never
-        # used. Red benchsides have lower comb prominence, so 2-11 faint fibres
-        # fall below prominence=500 and are dropped -> the detected fibre count
-        # (self.nfibers) is short of N_fib, which validate_and_fix_trace_fibres
-        # then rejects, triggering the mastercalib trace fallback (7 red cameras
-        # in the Sunburst run). Recommended fix: make prominence adaptive, e.g.
-        # `prominence = max(150, 0.25*np.nanmedian(self.peak_properties...))` or
-        # a robust fraction of the comb amplitude, then re-validate fibre counts
-        # across ALL 24 benchsides to ensure no spurious peaks are introduced in
-        # blue/green. Not applied here to avoid an unvalidated detection retune.
+        # FIXME: prominence is fixed at 500 and self.min_pkheight is unused. Red
+        # combs have lower prominence, so faint red fibres can be dropped and the
+        # camera falls back to mastercalib. An adaptive prominence (a robust
+        # fraction of the comb amplitude) needs re-validating on all 24 cameras.
         self.peaks, self.peak_properties = find_peaks(self.comb,distance=5,height=100,threshold=None, prominence=500)
         self.pkht = self.peak_properties['peak_heights']
         
@@ -1084,8 +1036,8 @@ class TraceLlamas:
             The data array from the HDU to be processed.
         hdu_header : dict
             The header information associated with the HDU data.
-        find_LUT : bool, optional
-            Flag to determine whether to find and use a Look-Up Table (LUT) for processing (default is False).
+        use_bias : str, optional
+            Path to the master bias file (skipped if the frame has BIASSUB set).
         Returns:
         --------
         dict
@@ -1093,20 +1045,10 @@ class TraceLlamas:
             If an error occurs, returns {"status": "failed", "error": str(e), 'channel': self.channel, 'bench': self.bench, 'side': self.side}.
         Description:
         ------------
-        This method processes the HDU data by performing the following steps:
-        1. Initializes the bspline_ssets list.
-        2. Extracts and processes header information to determine the channel, bench, and side.
-        3. Extracts the dimensions of the data (NAXIS1 and NAXIS2).
-        4. Finds the initial comb for the data to be fitted.
-        5. Updates peaks and peak heights, ensuring they are not too close to the edge.
-        6. Optionally, opens and uses a trace Look-Up Table (LUT) to account for dead fibers.
-        7. Determines the number of fibers and the maximum x-axis value for tracing.
-        8. Fits combs from the midpoint forward and then backward, updating peak positions.
-        9. Defines the coordinates of the trace along the x-axis and fits a spline along the x-axis for each fiber.
-        10. Interpolates the traces to give x, y positions for each fiber along the naxis.
-        Exceptions:
-        -----------
-        If an error occurs during processing, the method catches the exception, logs the error, and returns a dictionary with the status "failed" and the error message.
+        Finds the fibre comb at the detector centre, walks it outwards column by
+        column, fits a trace set per fibre, then trims the traces to the fibremap's
+        live slots and validates the registration. Errors are caught and returned
+        as a "failed" status rather than raised.
         """
         
         try:
@@ -1138,7 +1080,7 @@ class TraceLlamas:
             #print(f'Processing {self.channel} channel, {self.bench} bench, {self.side} side')
             #finding the inital comb for the data we are trying to fit
             
-            ######New code to subtract background from the data
+            ###### Subtract the bias from the data
             # Guard against double subtraction: frames preprocessed by the
             # bias-first step (Bias/biasFirst.py) arrive with BIASSUB set and
             # are already fully bias- and edge-DC-corrected.
@@ -1204,8 +1146,8 @@ class TraceLlamas:
             ######## Walk the comb from the midpoint outwards ########
             # Each column is centroided around a slope-continued guess from the
             # previous two (track_comb_step); points that fail are carried as
-            # predictions and masked out of the fit below, so a fibre can no
-            # longer creep onto its neighbour and drag its fitted trace with it.
+            # predictions and masked out of the fit below, so a fibre cannot
+            # creep onto its neighbour and drag its fitted trace with it.
             mid_index = int(n_tracefit / 2)
             valid = np.zeros(shape=(self.nfibers, n_tracefit), dtype=bool)
             start = np.asarray(self.updated_peaks, dtype=float)
@@ -1247,7 +1189,7 @@ class TraceLlamas:
             self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
             
             # --- Point 2: Enforce monotonic ordering of traces ---
-            # Only catch genuine crossings; a fixed 6 px squeezed the real 6.0-6.4 px pitch.
+            # Only catch genuine crossings; a fixed 6 px gap would squeeze the real 6.0-6.4 px pitch.
             min_gap = 0.75 * pitch  # minimum gap in pixels between adjacent fiber traces
             add_gap = 2
             for col in range(self.traces.shape[1]):
@@ -1293,12 +1235,7 @@ class TraceLlamas:
                     f"edge criteria, {expected_count} expected -- a fibre was missed")
             else:
                 # Trim the excess by matching the comb against the FIBREMAP: every
-                # trace must land on a live slit slot. Spacing isolation alone
-                # cannot see a ghost that sits ON the comb -- 2A's dead fibre 299
-                # leaks a peak at the regular pitch at the end of the slit -- and
-                # the old rule then discarded an arbitrary trace, which on
-                # 2025-03-05 was a live mid-slit fibre (blue slot 126, green/red
-                # slot 169) and on 2026-08-31 was red 2A's slot-0 fibre.
+                # trace must land on a live slit slot (see resolve_trace_slots).
                 keep_indices, _kept_slots = resolve_trace_slots(
                     valid_edge_indices, safe_mid_positions, expected_count,
                     dead_fibers=dead_here, benchside=self.benchside,
@@ -1360,10 +1297,9 @@ class TraceLlamas:
         of ``generate_fallback_bias_hdu`` can hold a fibre (blue 1A's first
         trace sits at row 40). So take the median of the rows beyond both slit
         ends, ``margin`` px (~2 pitches) clear of the outermost traces and
-        ``edge`` rows in from the detector edge. On 2026-09-29 this reads
-        160-305 DN above the true FAST pedestal (scattered lamp light), against
-        up to 620 DN for rows 30-50. Falls back to generate_fallback_bias_hdu
-        when too few off-slit rows exist.
+        ``edge`` rows in from the detector edge. Scattered lamp light still
+        biases this a few hundred DN high, but far less than rows 30-50. Falls
+        back to generate_fallback_bias_hdu when too few off-slit rows exist.
         """
         if not getattr(self, 'bias_pending', False):
             return
@@ -1401,18 +1337,15 @@ class TraceLlamas:
 
         
         # Per-column background from the unilluminated rows below the fibre
-        # bundle (traces span ~130-1950). Replaces the old single-row hack
-        # (ref = data[12,:]) which injected one row's noise into every row and
-        # left row 12 itself unsubtracted. Frames arrive bias-corrected
+        # bundle (traces span ~130-1950). Frames arrive bias-corrected
         # (bias-first), so this only removes residual scattered light.
         bg = np.nanmedian(self.data[4:20, :], axis=0)
         data0 = self.data - bg[None, :]
 
-        # Profile window half-width [px]. Measured trade at the ~6.9 px fibre
-        # pitch (2026-07): 3.0 admits the neighbouring fibres' wings — with a
-        # bright dithering object next door, frame-to-frame flux stability on
-        # blended cameras drops (green 4B 0.97 -> 0.80). 2.0 is the optimum;
-        # the Horne S/N gain comes from variance weighting, not window width.
+        # Profile window half-width [px]. At the ~6.9 px fibre pitch, 3.0 admits
+        # the neighbouring fibres' wings and degrades flux stability next to a
+        # bright object; the Horne S/N gain comes from variance weighting, not
+        # window width.
         PROF_HALFWIDTH = 2.0
 
         fiberimg = np.full(self.data.shape, -1, dtype=int)   # Lists the fiber # of each pixel
@@ -1429,12 +1362,9 @@ class TraceLlamas:
 
             profmask = np.abs(yy) < PROF_HALFWIDTH
 
-            # Normalize out the spectral shape of the lamp for profile fitting.
-            # Per-column flux of THIS fibre from the ORIGINAL background-
-            # subtracted data — the old code divided data_work in place inside
-            # the fibre loop, so each fibre saw data normalized by every
-            # previous fibre's flux, and a near-zero norm at a dead fibre
-            # exploded the column for all subsequent fibres.
+            # Normalize out the spectral shape of the lamp for profile fitting,
+            # using THIS fibre's per-column flux from the original background-
+            # subtracted data (never normalise data0 in place inside the loop).
             colnorm = np.nansum(np.where(profmask, data0, 0.0), axis=0)
             _floor = 0.05 * max(np.nanmedian(colnorm[colnorm > 0]), 1e-3)
             goodcol = np.isfinite(colnorm) & (colnorm > _floor)
@@ -1555,10 +1485,8 @@ class TraceRay(TraceLlamas):
 
         elapsed_time = time.time() - start_time
 
-        # Ray workers are separate processes, so logger output from tracing never
-        # reaches the pipeline's log file -- which is why the comb warnings for the
-        # 2A mis-trim were never seen. Hand the diagnostics back to the driver
-        # instead of relying on log forwarding.
+        # Ray workers are separate processes, so their logger output never
+        # reaches the pipeline's log file. Hand the diagnostics back to the driver.
         result.update({
             'benchside': f'{self.bench}{self.side}',
             'channel': self.channel,
@@ -1676,9 +1604,8 @@ def run_ray_tracing(fitsfile: str, channel: str = None, outpath: str = CALIB_DIR
         results.append(result)
         completed += 1
 
-    # Surface the per-camera trace outcome in the DRIVER's log. Without this the
-    # comb diagnostics stay inside the Ray workers and a silently mis-trimmed or
-    # failed camera is invisible in the pipeline log.
+    # Surface the per-camera trace outcome in the DRIVER's log; otherwise the comb
+    # diagnostics stay inside the Ray workers.
     n_failed = 0
     for res in results:
         if not isinstance(res, dict):

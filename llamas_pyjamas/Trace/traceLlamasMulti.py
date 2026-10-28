@@ -125,7 +125,7 @@ class TraceLlamas:
         Fits a grid to a single x-window.
     find_comb(rownum=None):
         Finds the comb for the given row number.
-    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, find_LUT=False) -> dict:
+    process_hdu_data(hdu_data: np.ndarray, hdu_header: dict, use_bias=None) -> dict:
         Processes data from a specific HDU array.
     profileFit():
         Fits the profile of the fibers.
@@ -344,29 +344,18 @@ class TraceLlamas:
             The data array from the HDU to be processed.
         hdu_header : dict
             The header information associated with the HDU data.
-        find_LUT : bool, optional
-            If True, the function will only find the LUT (Lookup Table) and return without further processing. Default is False.
+        use_bias : str, optional
+            Path to the master bias file; defaults to the slow master bias.
         Returns:
         --------
         dict
             A dictionary containing the status of the processing. If successful, returns {"status": "success"}.
             If an error occurs, returns {"status": "failed", "error": str(e), 'channel': self.channel, 'bench': self.bench, 'side': self.side}.
-        Raises:
-        -------
-        Exception
-            If any error occurs during the processing, it will be caught and logged, and the function will return a failure status.
         Notes:
         ------
-        - The function processes the HDU data by extracting relevant information from the header and data array.
-        - It handles different cases based on the presence of specific header keys ('COLOR', 'CAM_NAME').
-        - The function reads a trace LUT (Lookup Table) from a JSON file and updates peaks and peak heights arrays.
-        - It performs cross-correlation to find offsets and updates the comb and peaks accordingly.
-        - The function fits traces from the midpoint forward and backward, updating the trace array.
-        - It defines the coordinates of the trace along the x-axis and fits a spline along the x-axis for each fiber.
-        - The function interpolates the traces to give x, y positions for each fiber along the naxis.
-        Example:
-        --------
-        result = process_hdu_data(hdu_data, hdu_header, find_LUT=True)
+        The comb is cross-correlated against the master comb in traceLUT.json to
+        seed the peak positions, then traced outwards from the detector centre.
+        Errors are caught and returned as a "failed" status rather than raised.
         """
         """Processes data from a specific HDU array."""
         
@@ -565,7 +554,7 @@ class TraceLlamas:
             self.traces = pydl.traceset2xy(self.tset,xpos=x2, ignore_jump=True)[1]
 
             # --- Point 2: Enforce monotonic ordering of traces ---
-            min_gap = 6  # minimum gap in pixels between adjacent fiber traces £was prev 6
+            min_gap = 6  # minimum gap in pixels between adjacent fiber traces
             add_gap = 2
             for col in range(self.traces.shape[1]):
                 for i in range(1, self.nfibers):
@@ -815,22 +804,15 @@ class TraceRay(TraceLlamas):
     
     def process_hdu_data(self, hdu_data: np.ndarray, hdu_header: dict, outpath: str = None, use_bias: str = None) -> dict:
         """
-        Processes HDU (Header Data Unit) data and performs profile fitting.
+        Processes HDU (Header Data Unit) data, fits the profiles and saves the traces.
         Parameters:
         hdu_data (np.ndarray): The HDU data to be processed.
         hdu_header (dict): The header information associated with the HDU data.
         Returns:
         dict: A dictionary containing the result of the processing, including status and any relevant data.
-        This method performs the following steps:
-        1. Records the start time of the processing.
-        2. Calls the superclass's process_hdu_data method to process the HDU data.
-        3. Performs profile fitting by calling the superclass's profileFit method and stores the results in instance variables.
-        4. Constructs the output file name based on the fitsfile, channel, bench, and side attributes.
-        5. Saves the traces to the constructed output file by calling the superclass's saveTraces method.
-        6. Calculates the elapsed time for the processing.
-        7. Returns the result of the processing if the status is not "success".
         Note:
-        - The method currently has a return statement before checking the result status, which may need to be adjusted.
+        - The status is only checked after profileFit and saveTraces have run, and
+          nothing is returned on success; this may need to be adjusted.
         """
 
         start_time = time.time()
