@@ -1,7 +1,7 @@
 """
 Apply a sensitivity function to a science RSS to produce flux-calibrated spectra.
 
-Phase III of the flux-calibration chain. Given the sensitivity function built from a standard
+The final step of the flux-calibration chain. Given the sensitivity function built from a standard
 (:mod:`llamas_pyjamas.Flux.sensFunc`), this converts a science exposure's sky-subtracted counts
 into physical flux and writes it back into the RSS as new ``FLAM`` / ``FLAM_ERR`` extensions —
 in place, no new files. The instrumental planes are left untouched.
@@ -22,14 +22,12 @@ with a warning and the calibration is only exact when the two airmasses match. T
 curve k(lambda) comes from pypeit's bundled data — the La Silla / CTIO curve, the nearest match
 to Las Campanas, selected by observatory coordinates.
 
-The sky-subtracted plane is read as ``SKYSUB`` with a fallback to ``FLUX``, so this works both
-before and after the planned ``FLUX -> SKYSUB`` rename.
+The sky-subtracted plane is read as ``SKYSUB``, falling back to ``FLUX`` in older files.
 
 Functions
 ---------
 load_lco_extinction   The La Silla/CTIO extinction table for Las Campanas
-skysub_extname        Which extension holds the sky-subtracted plane (SKYSUB or FLUX)
-apply_sensfunc        Add FLAM/FLAM_ERR to a science RSS HDUList
+apply_sensfunc       Add FLAM/FLAM_ERR to a science RSS HDUList
 flux_calibrate_file   Read a science RSS, calibrate, write FLAM/FLAM_ERR back in place
 """
 

@@ -8,7 +8,7 @@ bundled ESO/Oke catalogue (``LUT/standards/``, produced by
 landing within a small radius of a catalogue star is very probably an exposure of that standard.
 
 The bundle carries decimal J2000 coordinates for every star and an Oke reference spectrum for the
-subset that has one (both may26 standards, Feige110 and GD108, do). ICRS-vs-J2000 is well under
+subset that has one. ICRS-vs-J2000 is well under
 0.1 arcsec and negligible against the default 30 arcsec radius, which is itself set generously so
 that the proper motion of nearby white-dwarf standards over the decades since J2000 cannot push a
 real match outside it.
@@ -142,15 +142,11 @@ def ra_dec_from_header(header):
     """Decimal RA/Dec (degrees) from a LLAMAS primary header, or (None, None).
 
     Native LLAMAS writes the pointing as decimal degrees in ``RA``/``DEC`` (ICRS), but a header
-    repaired by :mod:`llamas_pyjamas.Postprocessing.fix_exposure_info` may carry the SEXAGESIMAL
-    string copied from ``TEL RA``/``TEL DEC`` instead -- the card comment still says "decimal deg"
-    while the value reads ``'10:00:47.03'``. Taking ``float()`` of that raises, and this returning
-    (None, None) is what silently greys out "Build Sensitivity Function" on such data: the standard
-    is identified by CROSSMATCH, so an unparseable pointing means no standard, whatever OBJECT says.
-
-    So defer to :func:`llamas_pyjamas.Utils.wcsLlamas.pointing_from_header`, which already handles
-    both forms (decimal first, then ``TEL RA``/``TEL DEC`` as hourangle/deg) and is what gives the
-    RSS fibre WCS the right coordinates on the same files.
+    repaired by :mod:`llamas_pyjamas.Postprocessing.fix_exposure_info` may carry the sexagesimal
+    string copied from ``TEL RA``/``TEL DEC`` instead, while the card comment still says "decimal
+    deg". Standards are identified by crossmatch, so an unparseable pointing means no standard.
+    Defers to :func:`llamas_pyjamas.Utils.wcsLlamas.pointing_from_header`, which handles both
+    forms, as the RSS fibre WCS does.
     """
     if header is None:
         return None, None
