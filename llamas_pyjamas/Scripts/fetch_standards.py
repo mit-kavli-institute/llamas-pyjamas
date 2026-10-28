@@ -15,7 +15,7 @@ Two things are fetched and written under ``LUT/standards/``:
 
 The coordinate list (stanlis) and the flux archive (okestan) are separate ESO products with
 overlapping but not identical membership, so a star can appear in ``index.dat`` with no flux
-file. Both may26 standards (Feige110, GD108) are in Oke, so this bundle covers that night.
+file.
 
 Usage::
 

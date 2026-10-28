@@ -1,6 +1,6 @@
 """Compare two RSS FITS files plane-by-plane — a bit-identical / regression check.
 
-Reduce the SAME exposure on two branches (e.g. the pre-change baseline vs the sky-refine branch),
+Reduce the SAME exposure on two branches (e.g. a baseline vs a feature branch),
 then compare the delivered ``*_RSS_{color}.fits`` files. For a behaviour-preserving refactor every
 shared image plane (SKYSUB / ERROR / FLAM / SKY / SKYRESID / COUNTS / ...) should match exactly;
 extensions present in only one file (e.g. a newly-added SKYMASK) are reported, not counted as a diff.
