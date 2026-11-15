@@ -46,7 +46,11 @@ def test_defaults_match_the_constants_and_the_legacy_id():
                         'neighbor_threshold': LACOSMIC_DEFAULTS['neighbor_threshold']}
     red = LACOSMIC_COLOR_OVERRIDES['red']
     assert d['red']['enabled'] is False and d['red']['cr_threshold'] == red['cr_threshold']
-    assert cosmic.cosmic_ray_id(d) == cosmic.LEGACY_CRID
+    # LEGACY_CRID is the old defaults with flagged pixels replaced; masking them as missing
+    # data is a different identity, so resumed runs redo those frames.
+    assert cosmic.cosmic_ray_id(d, handling='replace') == cosmic.LEGACY_CRID
+    assert cosmic.cosmic_ray_id(d) != cosmic.LEGACY_CRID
+    assert cosmic.CR_HANDLING == 'mask'
     assert settings() == d
 
 
@@ -114,11 +118,12 @@ def test_stamp_and_copy():
     h, g = fits.Header(), fits.Header()
     cosmic.stamp_cosmic_rays(h, settings(cosmic_ray_channels='red, blue'))
     assert h['CRCHAN'] == 'red,blue' and h['CRID'] != cosmic.LEGACY_CRID
+    assert h['CRMODE'] == 'mask'
     cosmic.copy_cosmic_ray_stamps(h, g)
-    assert g['CRID'] == h['CRID'] and g['CRCHAN'] == 'red,blue'
+    assert g['CRID'] == h['CRID'] and g['CRCHAN'] == 'red,blue' and g['CRMODE'] == 'mask'
     cosmic.copy_cosmic_ray_stamps(None, g)                     # older pickles: no header
     cosmic.stamp_cosmic_rays(h, settings(), master_on=False)
-    assert h['CRID'] == 'off' and h['CRCHAN'] == 'none'
+    assert h['CRID'] == 'off' and h['CRCHAN'] == 'none' and h['CRMODE'] == 'off'
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +201,29 @@ def test_process_trace_stamps(tmp_path, captured, monkeypatch):
     assert out['extraction'].hdr['CRWHY'] == 'remove_cosmic_rays false'
 
 
+def test_process_trace_extracts_cosmic_ray_pixels_as_missing(tmp_path, monkeypatch):
+    """L.A.Cosmic's replacement value never reaches the counts: the flagged sample is NaN,
+    flagged MASK_CR_MISSING, and counted in CRNMISS."""
+    from llamas_pyjamas.File.llamasRSS import MASK_CR_MISSING
+    monkeypatch.setenv('LLAMAS_EXTRACT_METHOD', 'boxcar')
+    path, shape = _trace_file(tmp_path)
+
+    def fake(data, **kw):                    # one cosmic ray in the aperture, at column 5
+        mask = np.zeros(data.shape, bool)
+        mask[30, 5] = True
+        cleaned = data.copy()
+        cleaned[30, 5] = -999.0              # a replacement value that must not be used
+        return cleaned, mask
+    monkeypatch.setattr(cosmic, 'remove_cosmics', fake)
+    out = ge.process_trace._function(np.full(shape, 10.0), _header(), path, 1, method='boxcar',
+                                     cosmic_rays=settings(cosmic_ray_channels='red'),
+                                     recipe='science')
+    ext = out['extraction']
+    assert np.isnan(ext.counts[0, 5]) and ext.dq[0, 5] & MASK_CR_MISSING
+    assert np.all(np.isfinite(ext.counts[0, 6:]))
+    assert ext.hdr['CRNMISS'] == 1 and ext.hdr['CRNPART'] == 0
+
+
 # ---------------------------------------------------------------------------
 # Resume
 # ---------------------------------------------------------------------------
@@ -221,6 +249,17 @@ def test_resume_compares_crid_on_the_rss_only(tmp_path):
     assert stale_reason(dict(BIAS, CRID=cosmic.LEGACY_CRID), [bc, rss_old]) == ''
     assert stale_reason(dict(BIAS, CRID=red_on), [bc, rss_old]) == 'cosmic-ray settings changed'
     assert stale_reason(dict(BIAS, CRID='bbb'), [bc]) == ''          # no RSS yet: nothing to check
+    # frames cleaned before cosmic-ray pixels became missing data are redone
+    defaults = settings()
+    replaced = _write(tmp_path / 'Z_RSS_red.fits', **BIAS,
+                      CRID=cosmic.cosmic_ray_id(defaults, handling='replace'))
+    now = dict(BIAS, CRID=cosmic.cosmic_ray_id(defaults))
+    assert stale_reason(now, [bc, replaced]) == 'cosmic-ray settings changed'
+    assert stale_reason(now, [bc, rss_old]) == 'cosmic-ray settings changed'
+    # frames without cleaning are not
+    off = _write(tmp_path / 'W_RSS_red.fits', **BIAS, CRID='off')
+    assert stale_reason(dict(BIAS, CRID=cosmic.cosmic_ray_id(defaults, master_on=False)),
+                        [bc, off]) == ''
     assert stale_reason(dict(BIAS), [bc, rss_new]) == ''             # calibration: no CRID expected
 
 

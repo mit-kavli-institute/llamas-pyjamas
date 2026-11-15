@@ -28,8 +28,13 @@ CHANNEL_PARAMS = {'threshold': 'cr_threshold', 'contrast': 'contrast',
 CONFIG_KEYS = ({'cosmic_ray_channels', 'cosmic_ray_maxiter'}
                | {f'cosmic_ray_{name}_{c}' for name in CHANNEL_PARAMS for c in CHANNELS})
 #: cosmic_ray_id of the behaviour before these settings existed (blue and green at
-#: 6.5 / 5 / 0.7, red off, maxiter 2). Products without a CRID stamp were made this way.
+#: 6.5 / 5 / 0.7, red off, maxiter 2, flagged pixels replaced). Products without a CRID stamp
+#: were made this way.
 LEGACY_CRID = 'ca6a2541d387'
+#: How flagged pixels are used. 'mask' (since 2026-11-15): they are missing data in the
+#: extraction (Extract/README.md). 'replace' (before): L.A.Cosmic's replacement values were
+#: extracted as data. Part of cosmic_ray_id, so a resumed run redoes 'replace' frames.
+CR_HANDLING = 'mask'
 
 
 def default_settings():
@@ -127,16 +132,20 @@ def enabled_channels(settings, master_on=True):
     return [c for c in CHANNELS if settings[c]['enabled']]
 
 
-def cosmic_ray_id(settings, master_on=True):
+def cosmic_ray_id(settings, master_on=True, handling=CR_HANDLING):
     """Short, stable identity of the cleaning applied: 'off', or a hash of the
-    enabled channels' parameters and maxiter (a disabled channel's values don't count).
-    Stamped as CRID so a resumed run can tell when the settings have changed."""
+    enabled channels' parameters, maxiter and how flagged pixels are used (``handling``;
+    a disabled channel's values don't count). Stamped as CRID so a resumed run can tell
+    when the settings have changed. ``handling='replace'`` gives the IDs stamped before
+    flagged pixels became missing data (so ``LEGACY_CRID`` still matches the old defaults)."""
     on = enabled_channels(settings, master_on)
     if not on:
         return 'off'
     text = ';'.join(f"{c}:{settings[c]['cr_threshold']:.6g}/{settings[c]['contrast']:.6g}/"
                     f"{settings[c]['neighbor_threshold']:.6g}" for c in on)
     text += f";maxiter:{int(settings['maxiter'])}"
+    if handling != 'replace':
+        text += f";handling:{handling}"
     return hashlib.sha1(text.encode()).hexdigest()[:12]
 
 
@@ -153,14 +162,17 @@ def describe_settings(settings, master_on=True):
     return text + f" (maxiter {int(settings['maxiter'])}; threshold/contrast/neighbour)"
 
 
-CR_STAMPS = ('CRID', 'CRCHAN')
+CR_STAMPS = ('CRID', 'CRCHAN', 'CRMODE')
 
 
 def stamp_cosmic_rays(header, settings, master_on=True):
-    """Record the cleaning applied in a primary header: CRID (compared on resume) and CRCHAN."""
+    """Record the cleaning applied in a primary header: CRID (compared on resume), CRCHAN
+    and CRMODE (how flagged pixels are used: 'mask' = missing data; 'off' = no cleaning)."""
     header['CRID'] = (cosmic_ray_id(settings, master_on), 'Cosmic-ray settings identity')
     header['CRCHAN'] = (','.join(enabled_channels(settings, master_on)) or 'none',
                         'Channels cleaned of cosmic rays')
+    header['CRMODE'] = (CR_HANDLING if enabled_channels(settings, master_on) else 'off',
+                        'Cosmic-ray pixels: mask = missing data')
 
 
 def copy_cosmic_ray_stamps(source, target):
@@ -210,7 +222,9 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None, header=None,
     Returns
     -------
     cleaned : numpy.ndarray
-        Cleaned 2D image with cosmic rays replaced.
+        2D image with the flagged pixels replaced by L.A.Cosmic. Outside ``mask`` it equals
+        ``data``. The replacements are for display and smooth background estimates only:
+        the extraction treats the flagged pixels as missing data (``ExtractLlamas(cr_mask=)``).
     mask : numpy.ndarray
         Boolean mask where True indicates a cosmic ray pixel.
     """

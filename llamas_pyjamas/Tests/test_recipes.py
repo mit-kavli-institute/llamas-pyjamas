@@ -22,6 +22,12 @@ def test_calibration_recipes_never_clean_cosmic_rays():
     assert RECIPES['science'].cosmic_rays
 
 
+def test_science_like_recipes_are_at_the_cosmic_ray_mask_format():
+    # fmt 2: cosmic-ray pixels are missing data in the extraction
+    for name in ('science', 'standard', 'sky_frame'):
+        assert RECIPES[name].fmt == 2
+
+
 def test_hash_is_stable_and_changes_with_any_field():
     r = get_recipe('lamp_flat')
     assert recipe_hash(r) == recipe_hash('lamp_flat') and len(recipe_hash(r)) == 12

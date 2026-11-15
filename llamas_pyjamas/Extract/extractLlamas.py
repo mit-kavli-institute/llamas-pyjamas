@@ -45,6 +45,8 @@ from pathlib import Path
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 from llamas_pyjamas.Utils.detectorProps import props_for_header
+from llamas_pyjamas.File.llamasRSS import MASK_CR_MISSING, MASK_CR_PARTIAL
+from llamas_pyjamas.Utils.maskedSums import MIN_VALID_FRAC
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +144,7 @@ class ExtractLlamas:
     """
 
     def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True,
-                 method=None, dark=None, dark_noise=0.0) -> None:
+                 method=None, dark=None, dark_noise=0.0, cr_mask=None) -> None:
         """Initialize the ExtractLlamas object.
 
         Args:
@@ -159,6 +161,19 @@ class ExtractLlamas:
                 per-fibre errors; it is not kept on the object.
             dark_noise (float): The master dark's variance per unit single-frame
                 variance (c/N, ``darkLlamas.noise_factor``).
+            cr_mask (np.ndarray, optional): Boolean image of cosmic-ray pixels (True), same
+                shape and orientation as ``hdu_data``. Those pixels are MISSING data, whatever
+                value the frame holds there:
+
+                * boxcar: a sample whose aperture holds any of them (weight > 0) has no data:
+                  counts and error NaN, ``dq`` bit ``MASK_CR_MISSING``;
+                * horne: the sample is measured from the other aperture pixels (bit
+                  ``MASK_CR_PARTIAL``, error inflated by the lost information), unless less
+                  than ``MIN_VALID_FRAC`` of its profile is valid (then NaN and
+                  ``MASK_CR_MISSING``);
+                * legacy: ignored (comparison method only).
+
+                None (or no True pixel) leaves the extraction exactly as without it.
 
         Returns:
             None
@@ -185,6 +200,7 @@ class ExtractLlamas:
             self.sensfunc   = None
             self.flux       = None
             self.flux_err   = None
+            self.dq         = None
 
         else:
 
@@ -197,6 +213,16 @@ class ExtractLlamas:
             
             self.hdr    = hdr
             self.frame  = hdu_data.astype(float)
+            cr = None
+            if cr_mask is not None:
+                cr = np.asarray(cr_mask, dtype=bool)
+                if cr.shape != self.frame.shape:
+                    raise ValueError(f'cr_mask shape {cr.shape} does not match the frame '
+                                     f'{self.frame.shape}')
+                if not cr.any():
+                    cr = None
+            # Per-sample flags for the RSS MASK (File/llamasRSS.py bits), live-indexed.
+            self.dq = np.zeros(shape=(trace.nfibers, trace.naxis1), dtype=np.int16)
             self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
             self.relative_throughput = np.zeros(shape=(trace.nfibers))
 
@@ -285,10 +311,26 @@ class ExtractLlamas:
                     colP = np.zeros(_nx)
                     np.add.at(colP, xs, P)
                     Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
-                    valid = np.isfinite(fpix)
+                    # Cosmic-ray pixels are missing data, like non-finite ones. A column
+                    # with one is measured from the rest of its profile (MASK_CR_PARTIAL),
+                    # or has no data when less than MIN_VALID_FRAC of the profile is left.
+                    crpix = cr[ys, xs] if cr is not None else np.zeros(xs.size, dtype=bool)
+                    valid = np.isfinite(fpix) & ~crpix
+                    cr_lost = cr_part = None
+                    if crpix.any():
+                        cr_hit = np.zeros(_nx, dtype=bool)
+                        cr_hit[xs[crpix]] = True
+                        share = np.zeros(_nx)
+                        np.add.at(share, xs[valid], Pn[valid])
+                        cr_lost = cr_hit & (share < MIN_VALID_FRAC)
+                        cr_part = cr_hit & ~cr_lost
+                        self.dq[ifiber, cr_lost] |= MASK_CR_MISSING
+                        self.dq[ifiber, cr_part] |= MASK_CR_PARTIAL
                     Pn_all, xs_all = Pn, xs
                     xs, Pn, fpix = xs[valid], Pn[valid], fpix[valid]
                     if xs.size == 0:
+                        if cr_lost is not None:
+                            self.counts[ifiber, cr_lost] = np.nan
                         continue
 
                     # Pass 1: profile-weighted flux with constant variance,
@@ -320,6 +362,8 @@ class ExtractLlamas:
                     np.add.at(den_all, xs_all,
                               Pn_all ** 2 / (_rn2 + np.clip(F0s[xs_all] * Pn_all, 0, None)))
                     horne_var_ratio[ifiber, :] = np.where(ok, den_all / np.where(ok, den, 1.0), 1.0)
+                    if cr_lost is not None:
+                        self.counts[ifiber, cr_lost] = np.nan
 
                 elif method == 'legacy':
                     # LEGACY profile-weighted mean (NOT Horne): kept for
@@ -364,11 +408,18 @@ class ExtractLlamas:
                         if j0 < 0 or j1 >= ny:
                             continue   # aperture falls off the detector
                         total = 0.0
+                        hit = False
                         for jj in range(j0, j1 + 1):
                             w = min(hi, jj + 0.5) - max(lo, jj - 0.5)
                             if w > 0:
                                 total += self.frame[jj, i] * min(w, 1.0)
-                        extracted[i] = total
+                                hit = hit or (cr is not None and cr[jj, i])
+                        if hit:
+                            # a cosmic-ray pixel in the aperture: this sample has no data
+                            extracted[i] = np.nan
+                            self.dq[ifiber, i] |= MASK_CR_MISSING
+                        else:
+                            extracted[i] = total
 
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape
@@ -389,11 +440,9 @@ class ExtractLlamas:
             _method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
             _half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
             aperture_pix = effective_aperture_pix(_method, _half, self.trace)
+            # A missing sample (NaN counts) gets a NaN error.
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
-            # Pixels masked inside a Horne aperture carry no information: the column's
-            # flux is measured from the rest, with correspondingly larger variance.
-            var_adu = var_adu * horne_var_ratio
             # The subtracted dark is no longer in the counts, but its shot noise and
             # the master dark's own noise are still in the data.
             if dark is not None and dark.shape == self.frame.shape:
@@ -402,13 +451,17 @@ class ExtractLlamas:
                                                   gain, readnoise, scale, float(dark_noise))
                 logger.info(f'Added master-dark noise to the errors (scale {scale:.4f}, '
                             f'c/N {float(dark_noise):.3f})')
+            # Pixels masked inside a Horne aperture carry no information: the column's
+            # flux is measured from the rest, with correspondingly larger variance (all
+            # of it: photon, read and dark noise).
+            var_adu = var_adu * horne_var_ratio
             self.counts_err = np.sqrt(var_adu).astype(np.float32)
             # At extraction, flux == counts (no flux cal), so the error on the
             # written FLUX/COUNTS is the same array.
             self.errors = self.counts_err.copy()
             logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
                         f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
-                        f'pix, source={src}); median error={np.median(self.counts_err):.3f}')
+                        f'pix, source={src}); median error={np.nanmedian(self.counts_err):.3f}')
 
                     
                 

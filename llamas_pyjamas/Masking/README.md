@@ -1,8 +1,9 @@
 # Masking: cosmic-ray cleaning
 
-`cosmicLlamas.py` removes cosmic rays with L.A.Cosmic (the `lacosmic` package). It runs in
+`cosmicLlamas.py` flags cosmic rays with L.A.Cosmic (the `lacosmic` package). It runs in
 `guiExtract.process_trace` on each camera. That happens after bias, dark, edge DC and the pixel
-flat, and before extraction.
+flat, and before extraction, which treats the flagged pixels as missing data (see "Cleaned
+pixels are missing data" below).
 
 **Only science, flux-standard and sky frames are cleaned.** Lamp flats, twilights and arcs
 never are. On a lamp flat, L.A.Cosmic takes the bright, sharp fibre cores for cosmic rays and
@@ -33,8 +34,27 @@ the single exposure configured for its colour, and a 0.07–0.5 s exposure colle
 - **Pre-flight warnings:** a threshold set for a channel that is off, or a neighbour threshold
   above the detection threshold.
 
-Only science, flux-standard and sky frames follow these settings. Lamp flats keep the package
-defaults (blue and green cleaned), and twilights and arcs are never cleaned.
+Only science, flux-standard and sky frames follow these settings. Lamp flats, twilights and
+arcs are never cleaned (`Utils/recipes.py`).
+
+## Cleaned pixels are missing data
+
+L.A.Cosmic returns a flag image and an image with the flagged pixels replaced by the median of
+their neighbours. **Only the flags are used.** The extraction treats every flagged pixel as
+missing data (`Extract/README.md`): a boxcar sample whose aperture holds one has no data, and a
+Horne sample is measured from the rest of its profile, or has no data when less than half of
+it is left. Such samples are NaN in the RSS with `MASK` bit 256 (`MASK_CR_MISSING`), and the
+cube and spectrum resamplers never interpolate across them, so other fibres and other exposures
+fill them.
+
+Before 2026-11-15 the replacement values were extracted as if they were data. Wherever
+L.A.Cosmic flagged a real sharp feature, the product was biased, with nothing in the RSS to
+show it, and the lowered counts also lowered the error, so inverse-variance co-adds weighted
+those samples up.
+
+**What a false flag costs.** Data, not bias. A real feature flagged in one exposure is filled
+by the other exposures; one flagged in every exposure leaves a gap that the coverage maps show.
+`CRMISSF` in each RSS gives the share of samples lost to cosmic rays.
 
 ## Red
 
@@ -73,9 +93,12 @@ See `Bias/README.md`.
 | Where | Keyword | Meaning |
 |---|---|---|
 | Extension (in the extraction) | `CRCLEAN` | Whether cleaning ran; if not, the reason is in `CRWHY` (`channel off`, `remove_cosmic_rays false`) |
-| Extension (in the extraction) | `CRNPIX`, `CRTHRESH`, `CRCONTR`, `CRNEIGH` | Pixels cleaned, and the thresholds used |
+| Extension (in the extraction) | `CRNPIX`, `CRTHRESH`, `CRCONTR`, `CRNEIGH` | Pixels flagged, and the thresholds used |
 | Primary (extraction and RSS) | `CRID` | Identity of the cleaning: a hash of the enabled channels' thresholds and `maxiter`, or `off` |
 | Primary (extraction and RSS) | `CRCHAN` | Channels cleaned, e.g. `green,blue` |
+| Primary (extraction and RSS) | `CRMODE` | How flagged pixels are used: `mask` (missing data), or `off` |
+| Extension (in the extraction) | `CRNMISS`, `CRNPART` | Samples lost to cosmic rays, and Horne samples measured around them |
+| Primary (RSS) | `CRMISS`, `CRPART`, `CRMISSF` | The same, summed over the channel, and `CRMISS` as a % of samples with counts |
 
 A resumed run compares each science, standard and sky RSS's `CRID` with the current settings. A
 frame whose settings changed is redone: its products move into `{output_dir}/stale/<timestamp>/`,
@@ -84,4 +107,7 @@ as for a changed dark.
   existing reductions are only redone if the settings now differ from that default.
 - **What changes the ID:** the thresholds of a channel that is off don't count, so tuning a
   disabled red never triggers a redo.
+- **How flagged pixels are used is part of the ID.** Frames cleaned before cosmic-ray pixels
+  became missing data (and RSS files without `CRID`) are redone on resume; frames with cleaning
+  off (`CRID = off`) are not.
 - **Masks:** the cosmic-ray masks are written to `{mask_output_dir or extraction_output_dir}/masks/`.

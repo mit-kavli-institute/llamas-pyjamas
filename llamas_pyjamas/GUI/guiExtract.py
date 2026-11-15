@@ -27,6 +27,7 @@ from llamas_pyjamas.Image.WhiteLightModule import WhiteLight, WhiteLightFits, Wh
 import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
+from llamas_pyjamas.File.llamasRSS import MASK_CR_MISSING, MASK_CR_PARTIAL
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
 from llamas_pyjamas.Bias import (BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu,
                                  camera_of_header, verify_camera_hdu)
@@ -499,8 +500,8 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
                 background=cr_background, mask=cr_ignore, settings=cosmic_rays
             )
             entry = (cosmic_rays or default_cr_settings())[color]
-            header['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
-            header['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+            header['CRCLEAN'] = (True, 'Cosmic rays flagged with L.A.Cosmic')
+            header['CRNPIX'] = (int(cr_mask.sum()), 'CR pixels flagged (missing data)')
             header['CRTHRESH'] = (entry['cr_threshold'], 'L.A.Cosmic cr_threshold (sigma)')
             header['CRCONTR'] = (entry['contrast'], 'L.A.Cosmic contrast')
             header['CRNEIGH'] = (entry['neighbor_threshold'], 'L.A.Cosmic neighbor_threshold')
@@ -509,9 +510,17 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
 
-        # Create an ExtractLlamas object with bias-subtracted data
+        # Create an ExtractLlamas object with bias-subtracted data. Outside cr_mask the
+        # cleaned image equals the original; inside it the pixels are missing data, so
+        # L.A.Cosmic's replacement values never enter a measurement.
         extraction = ExtractLlamas(tracer, bias_subtracted_data, header, method=method,
-                                   dark=dark_img, dark_noise=dark_noise)
+                                   dark=dark_img, dark_noise=dark_noise, cr_mask=cr_mask)
+        if cr_mask is not None:
+            dq = extraction.dq
+            header['CRNMISS'] = (int(((dq & MASK_CR_MISSING) != 0).sum()),
+                                 'samples lost to cosmic rays (MASK 256)')
+            header['CRNPART'] = (int(((dq & MASK_CR_PARTIAL) != 0).sum()),
+                                 'samples measured around cosmic rays (MASK 128)')
 
         return {
             'extraction': extraction,
@@ -851,6 +860,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdu_data = hdu[hdu_idx].data
             if is_placeholder_camera(hdu_data):
                 result['extraction'].counts[:] = 0.0
+                if getattr(result['extraction'], 'dq', None) is not None:
+                    result['extraction'].dq[:] = 0
                 logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
 
         # Record the cosmic-ray cleaning applied (CRID is what a resumed run compares)
@@ -1006,7 +1017,8 @@ def box_extract(file, flat=False, remove_cosmic_rays=True, mask_output_dir=None)
                 with open(file, mode='rb') as f:
                     tracer = pickle.load(f)
 
-                extraction = ExtractLlamas(tracer, bias_subtracted, hdu[hdu_index].header, optimal=False)
+                extraction = ExtractLlamas(tracer, bias_subtracted, hdu[hdu_index].header,
+                                           optimal=False, cr_mask=cr_masks.get(hdu_index))
                 extraction_list.append(extraction)
                 
             except Exception as e:

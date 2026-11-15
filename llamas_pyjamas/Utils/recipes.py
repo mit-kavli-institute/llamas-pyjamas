@@ -63,12 +63,14 @@ RECIPES = {
     # A lamp flat extracted through the pixel flat for a fibre-flat RSS (no twilight).
     'dome_flat': Recipe('dome_flat', cosmic_rays=False, pixel_flat=True, dark=False,
                         sky_subtract=False),
+    # Science-like frames. fmt 2: cosmic-ray pixels are missing data in the extraction
+    # (NaN + MASK_CR_MISSING), not L.A.Cosmic's replacement values.
     'science': Recipe('science', cosmic_rays=True, pixel_flat=True, dark=True,
-                      sky_subtract=True),
+                      sky_subtract=True, fmt=2),
     'standard': Recipe('standard', cosmic_rays=True, pixel_flat=True, dark=True,
-                       sky_subtract=True),
+                       sky_subtract=True, fmt=2),
     'sky_frame': Recipe('sky_frame', cosmic_rays=True, pixel_flat=True, dark=True,
-                        sky_subtract=False),
+                        sky_subtract=False, fmt=2),
 }
 
 CALIBRATION_RECIPES = ('lamp_flat', 'twilight', 'arc', 'dome_flat')
@@ -179,7 +181,7 @@ def recipe_for_frame(header):
 
 
 #: Keys copied from an extraction's primary header into its recipe sidecar.
-SIDECAR_KEYS = ('RECIPE', 'RCPHASH', 'PIPEVER', 'FIBIDS', 'CRCLEAN', 'CRID', 'CRCHAN')
+SIDECAR_KEYS = ('RECIPE', 'RCPHASH', 'PIPEVER', 'FIBIDS', 'CRCLEAN', 'CRID', 'CRCHAN', 'CRMODE')
 
 
 def sidecar_path(pkl_path):
