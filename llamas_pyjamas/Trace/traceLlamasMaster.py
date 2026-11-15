@@ -52,7 +52,8 @@ import rpdb
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
-from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, BiasCameraMissingError, generate_fallback_bias_hdu
+from llamas_pyjamas.Bias import (BiasNotFoundError, BiasReadModeError, BiasCameraMissingError,
+                                 generate_fallback_bias_hdu, match_camera_hdu)
 
 logger = logging.getLogger(__name__)
 
@@ -152,69 +153,12 @@ def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,
         if bias_mode is not None and bias_mode.strip().upper() != required_readmode.upper():
             raise BiasReadModeError(required_readmode, bias_mode, dir)
 
-    # First try to match by header keywords (robust to non-standard extension order)
-    target_color = color.lower()
-    target_bench = str(bench)
-    target_side = side.upper()
-    for hdu in bias_hdus[1:]:
-        hdr = hdu.header
-        if 'COLOR' in hdr and 'BENCH' in hdr and 'SIDE' in hdr:
-            if (str(hdr['BENCH']) == target_bench and
-                str(hdr['SIDE']).upper() == target_side and
-                str(hdr['COLOR']).lower() == target_color):
-                logger.info(
-                    f"Bias HDU matched by header: {target_bench}{target_side} {target_color}"
-                )
-                return hdu
-        elif 'CAM_NAME' in hdr:
-            camname = hdr['CAM_NAME']
-            cam_color = camname.split('_')[1].lower()
-            cam_bench = camname.split('_')[0][0]
-            cam_side = camname.split('_')[0][1].upper()
-            if cam_color == target_color and cam_bench == target_bench and cam_side == target_side:
-                logger.info(
-                    f"Bias HDU matched by CAM_NAME: {target_bench}{target_side} {target_color}"
-                )
-                return hdu
-
-    # Every extension identifies its camera, yet none matched: the camera is
-    # simply absent from this bias file. The index lookup below would only return
-    # a neighbouring camera, so say so directly.
-    if len(bias_hdus) > 1 and all(
-            ('COLOR' in h.header and 'BENCH' in h.header and 'SIDE' in h.header)
-            or 'CAM_NAME' in h.header for h in bias_hdus[1:]):
-        raise BiasCameraMissingError(dir, target_bench, target_side, target_color)
-
-    # Fall back to standard index lookup if header match fails
-    try:
-        bias_idx = idx_lookup.get((target_color, target_bench, target_side))
-        print(f"Bias index: {bias_idx} for {bench}/{side}/{color}")
-    except Exception:
-        raise ValueError(f"Invalid bench/side/color combination: {bench}/{side}/{color}")
-
-    if bias_idx is None or bias_idx >= len(bias_hdus):
-        raise ValueError(
-            f"Bias index lookup failed for {bench}/{side}/{color} in file {dir}"
-        )
-
-    logger.warning(
-        f"Bias HDU matched by index only (header match failed): {target_bench}{target_side} {target_color}"
-    )
-    bias_hdu = bias_hdus[bias_idx]
-
-    # Verify the index-matched HDU actually corresponds to the requested camera
-    hdr = bias_hdu.header
-    matched_color = hdr.get('COLOR', '').lower() if 'COLOR' in hdr else None
-    matched_bench = str(hdr.get('BENCH', '')) if 'BENCH' in hdr else None
-    matched_side = hdr.get('SIDE', '').upper() if 'SIDE' in hdr else None
-
-    if matched_color != target_color or matched_bench != target_bench or matched_side != target_side:
-        logger.warning(
-            f"Bias index lookup returned wrong camera for {target_bench}{target_side} {target_color}: "
-            f"got {matched_bench}{matched_side} {matched_color} at index {bias_idx}"
-        )
-        raise BiasCameraMissingError(dir, target_bench, target_side, target_color)
-
+    # Header match, then a header-verified index lookup (shared with the master
+    # dark, Bias.match_camera_hdu). None means this camera is absent from the file;
+    # the index lookup would only return a neighbouring camera, so say so directly.
+    bias_hdu = match_camera_hdu(bias_hdus, bench, side, color, source=dir)
+    if bias_hdu is None:
+        raise BiasCameraMissingError(dir, str(bench), side.upper(), color.lower())
     return bias_hdu
 
 

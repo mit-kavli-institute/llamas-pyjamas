@@ -9,6 +9,12 @@ BiasNotFoundError        -- raised when a bias FITS file cannot be read/located.
 BiasReadModeError        -- raised when bias read-mode does not match science frame.
 generate_fallback_bias_hdu -- returns a valid fits.ImageHDU even when no bias
                               file is available.
+camera_of_header         -- (bench, side, color) of an extension header.
+match_camera_hdu         -- the extension of a calibration file for one camera,
+                            matched by header (the master bias and master dark
+                            both go through it).
+verify_camera_hdu        -- re-confirms a calibration extension's camera just
+                            before it is subtracted.
 
 The BiasLlamas class (master bias stacking) is in llamasBias.py and is not
 re-exported here to avoid circular imports with astropy during Ray worker init.
@@ -17,6 +23,8 @@ re-exported here to avoid circular imports with astropy during Ray worker init.
 import logging
 import numpy as np
 from astropy.io import fits
+
+from llamas_pyjamas.constants import idx_lookup
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +94,83 @@ class BiasCameraMissingError(BiasNotFoundError):
             f"Master bias '{path}' has no extension for {bench}{side} {color}; "
             f"the file is missing this camera."
         )
+
+
+# ---------------------------------------------------------------------------
+# Camera matching for per-camera calibrations (master bias, master dark)
+# ---------------------------------------------------------------------------
+
+def camera_of_header(header):
+    """(bench, side, color) of an extension header, from COLOR/BENCH/SIDE or else CAM_NAME.
+
+    Missing parts come back as ''. bench is a str, side upper case, color lower case.
+    """
+    if 'COLOR' in header and 'BENCH' in header and 'SIDE' in header:
+        return (str(header['BENCH']).strip(), str(header['SIDE']).strip().upper(),
+                str(header['COLOR']).strip().lower())
+    if 'CAM_NAME' in header:
+        parts = str(header['CAM_NAME']).split('_')
+        bench = parts[0][0] if parts and parts[0] else ''
+        side = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
+        color = parts[1].lower() if len(parts) >= 2 else ''
+        return bench, side, color
+    return '', '', ''
+
+
+def _names_camera(header):
+    return ('COLOR' in header and 'BENCH' in header and 'SIDE' in header) or 'CAM_NAME' in header
+
+
+def match_camera_hdu(hdus, bench, side, color, source=''):
+    """The extension of a calibration file that belongs to one camera.
+
+    Matching order (the master bias has always been matched this way):
+    1. COLOR/BENCH/SIDE header keywords, then CAM_NAME;
+    2. if every extension names its camera and none is this one, the camera is
+       absent: return None;
+    3. otherwise the standard extension index, accepted only if that extension's
+       COLOR, BENCH and SIDE all name this camera; anything else returns None.
+
+    Raises ValueError when the index lookup itself fails. Callers decide what an
+    absent camera means (the master bias raises BiasCameraMissingError).
+    """
+    target = (str(bench), str(side).upper(), str(color).lower())
+    for hdu in hdus[1:]:
+        if _names_camera(hdu.header) and camera_of_header(hdu.header) == target:
+            logger.info(f"{source}: matched {target[0]}{target[1]} {target[2]} by header")
+            return hdu
+
+    if len(hdus) > 1 and all(_names_camera(h.header) for h in hdus[1:]):
+        return None
+
+    idx = idx_lookup.get((target[2], target[0], target[1]))
+    print(f"Bias index: {idx} for {bench}/{side}/{color}")
+    if idx is None or idx >= len(hdus):
+        raise ValueError(f"Index lookup failed for {bench}/{side}/{color} in file {source}")
+    logger.warning(f"{source}: {target[0]}{target[1]} {target[2]} matched by index only "
+                   f"(header match failed)")
+    hdr = hdus[idx].header
+    found = (str(hdr['BENCH']) if 'BENCH' in hdr else None,
+             str(hdr['SIDE']).upper() if 'SIDE' in hdr else None,
+             str(hdr['COLOR']).lower() if 'COLOR' in hdr else None)
+    if found != target:
+        logger.warning(f"{source}: index lookup returned the wrong camera for "
+                       f"{target[0]}{target[1]} {target[2]}: got {found} at index {idx}")
+        return None
+    return hdus[idx]
+
+
+def verify_camera_hdu(header, bench, side, color):
+    """True unless the extension header names a different camera.
+
+    The last check before a calibration array is subtracted: compares
+    BENCH/SIDE/COLOR (or CAM_NAME) with the frame's camera. A header with no
+    camera keywords cannot contradict, and passes.
+    """
+    found = camera_of_header(header)
+    if not all(found):
+        return True
+    return found == (str(bench), str(side).upper(), str(color).lower())
 
 
 # ---------------------------------------------------------------------------

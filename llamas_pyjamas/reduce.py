@@ -29,6 +29,7 @@ import traceback
 import multiprocessing
 import logging
 import gc
+import time
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
@@ -50,6 +51,13 @@ from llamas_pyjamas.Trace.masterShift import describe_shift
 from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+from llamas_pyjamas.Bias.biasFirst import (bias_correct_frame, dark_summary, expected_provenance,
+                                           resolve_master_bias_file)
+from llamas_pyjamas.Bias.biasFirstResume import CALIBRATION_ROLES, is_product_of, redo_stale_frames
+from llamas_pyjamas.Bias.darkLlamas import (DEFAULT_TOLERANCE, build_master_dark,
+                                            check_dark_files, group_darks, match_dark)
+from llamas_pyjamas.Masking.cosmicLlamas import (copy_cosmic_ray_stamps, cosmic_ray_id,
+                                                 cosmic_ray_settings, describe_settings)
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
 from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
@@ -209,7 +217,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # ------------------------------------------------------------------
     file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
                  'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
-                 'blue_twilight_flat']
+                 'blue_twilight_flat', 'dark_files']
     if config.get('generate_new_wavelength_soln') is True:
         file_keys.append('arc_file')
 
@@ -221,6 +229,28 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
         for p in paths:
             if not os.path.isfile(p):
                 errors.append(f"'{key}' path does not exist: '{p}'")
+
+    # Dark frames: each must be a dark (a mistagged science frame would be
+    # subtracted from the science). Not run through validate_input_files, which
+    # edits files in place.
+    darks = [p for p in (config.get('dark_files') or []) if os.path.isfile(p)]
+    if darks:
+        dark_errors, dark_warnings = check_dark_files(darks)
+        errors += dark_errors
+        warnings += dark_warnings
+    # Cosmic-ray settings: checked here so a bad value stops the run before any
+    # extraction (a worker would otherwise drop the camera silently).
+    _cr, cr_errors, cr_warnings = cosmic_ray_settings(config)
+    errors += cr_errors
+    warnings += cr_warnings
+
+    try:
+        tol = float(config.get('dark_exptime_tolerance', DEFAULT_TOLERANCE))
+        if not 0 < tol < 1:
+            errors.append(f"'dark_exptime_tolerance' must be between 0 and 1, got {tol}")
+    except (TypeError, ValueError):
+        errors.append(f"'dark_exptime_tolerance' is not a number: "
+                      f"{config.get('dark_exptime_tolerance')!r}")
 
     # Directory keys: the pipeline creates any that are missing, so this is a note.
     dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
@@ -485,7 +515,7 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                    trace_dir=None, mastercalib_trace_dir=None,
                    remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None,
-                   whitelight_hex=True):
+                   whitelight_hex=True, cosmic_rays=None):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -501,6 +531,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         edge_bias: Optional dict controlling the per-frame edge-bias (DC offset)
             correction (see build_edge_bias_config); forwarded to GUI_extract.
             None => process_trace uses its built-in defaults (Tier 1 on).
+        cosmic_rays: Per-channel cosmic-ray settings (Masking.cosmicLlamas.
+            cosmic_ray_settings); None => package defaults. Forwarded to GUI_extract.
 
     Returns:
         str: Path to extraction file
@@ -526,7 +558,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias,
-                whitelight_hex=whitelight_hex
+                whitelight_hex=whitelight_hex,
+                cosmic_rays=cosmic_rays
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -540,7 +573,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             remove_cosmic_rays=remove_cosmic_rays,
             mask_output_dir=mask_output_dir,
             edge_bias=edge_bias,
-            whitelight_hex=whitelight_hex
+            whitelight_hex=whitelight_hex,
+            cosmic_rays=cosmic_rays
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -616,7 +650,8 @@ def build_edge_bias_config(config, extraction_path, flat_field_dir=None):
 
 
 def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_dir,
-                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None):
+                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None,
+                       cosmic_rays=None):
     """Extract a dedicated blank-sky MEF and return a ``*_corrected_extractions.pkl``.
 
     Mirrors the science extraction path (validate -> optional flat-correct ->
@@ -649,11 +684,12 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
         sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
         trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
         remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir,
-        edge_bias=build_edge_bias_config(config, extraction_path))
+        edge_bias=build_edge_bias_config(config, extraction_path), cosmic_rays=cosmic_rays)
     if not extracted:
         raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
 
-    corr_extractions, _ = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    corr_extractions, ext_hdr = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    copy_cosmic_ray_stamps(ext_hdr, sky_primary_hdr)
     base_name = os.path.splitext(os.path.basename(extracted))[0]
     sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
     save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
@@ -1956,6 +1992,152 @@ def trace_report_row(trace_source, validation_results=None):
     return text
 
 
+#: Calibration keys that go through bias-first, and their role.
+BIAS_FIRST_CALIBRATIONS = {
+    'red_flat_file': 'flat', 'green_flat_file': 'flat', 'blue_flat_file': 'flat',
+    'red_arc_file': 'arc', 'green_arc_file': 'arc', 'blue_arc_file': 'arc',
+    'twilight_flat': 'twilight', 'red_twilight_flat': 'twilight',
+    'green_twilight_flat': 'twilight', 'blue_twilight_flat': 'twilight',
+}
+
+
+def _as_list(value):
+    """A config value as a list of strings: split on commas, or the list's items."""
+    if isinstance(value, str):
+        return [s.strip() for s in value.split(',') if s.strip()]
+    if isinstance(value, (list, tuple)):
+        return [s for s in value if isinstance(s, str) and s.strip()]
+    return []
+
+
+def bias_first_frames(config):
+    """{raw path: role} for every frame bias-first will correct.
+
+    Roles: 'science' (science and folded flux standards), 'sky', or a calibration
+    role. A file listed both as a calibration and as science/sky takes the
+    science/sky role, so it gets the dark.
+    """
+    roles = {}
+    for key, role in BIAS_FIRST_CALIBRATIONS.items():
+        path = config.get(key)
+        if isinstance(path, str) and path and os.path.exists(path):
+            roles[path] = role
+    for role, key in (('sky', 'sky_frame_files'), ('science', 'science_files')):
+        for path in _as_list(config.get(key)):
+            if os.path.exists(path):
+                if roles.get(path) in CALIBRATION_ROLES:
+                    print(f"NOTE: {os.path.basename(path)} is listed as a calibration and as "
+                          f"{role}; it is corrected once, as {role} (with the dark).")
+                roles[path] = role
+    return roles
+
+
+def prepare_master_darks(config, frame_roles, slow_bias, fast_bias, output_dir, qa_dir):
+    """Match each science/sky frame to a dark group and build the master darks it needs.
+
+    Returns ``{raw path: (MasterDark or None, scale or None, note)}``; ``note`` says
+    why there is no dark, or warns about the scale. Calibration frames get no dark.
+    """
+    out = {f: (None, None, 'calibration frame') for f, r in frame_roles.items()
+           if r in CALIBRATION_ROLES}
+    targets = [f for f, r in frame_roles.items() if r not in CALIBRATION_ROLES]
+    darks = config.get('dark_files') or []
+    if not darks:
+        for f in targets:
+            out[f] = (None, None, 'no darks listed')
+        return out
+    tol = float(config.get('dark_exptime_tolerance', DEFAULT_TOLERANCE))
+    groups = group_darks(darks)
+    print("DARK FRAMES")
+    for g in groups:
+        print(f"  {g.label} x {len(g.files)}"
+              + ("   WARNING: fewer than 3, see Bias/README.md" if len(g.files) < 3 else ""))
+    masters = {}
+    print(f"Dark matching (same read mode, exposure within {tol:.0%}):")
+    for f in targets:
+        hdr = fits.getheader(f, 0)
+        group, scale, note = match_dark(hdr, groups, tol)
+        if group is not None:
+            key = (group.mode, group.rexptime)
+            if key not in masters:
+                bias_path = resolve_master_bias_file(fits.getheader(group.files[0], 0),
+                                                     slow_bias, fast_bias)
+                masters[key] = build_master_dark(group, bias_path,
+                                                 os.path.join(output_dir, 'darks'), qa_dir)
+            out[f] = (masters[key], scale, note)
+        else:
+            out[f] = (None, None, note)
+        print(f"  {os.path.basename(f)}  {str(hdr.get('OBJECT') or ''):20s} "
+              + (f"-> {group.label} darks, scale {scale:.4f}" if group else f"NOT corrected: {note}")
+              + (f"  WARNING: {note}" if group is not None and note else ""))
+        if group is None:
+            logger.warning(f"No dark for {os.path.basename(f)}: {note}")
+        elif note:
+            logger.warning(f"Dark for {os.path.basename(f)}: {note}")
+    return out
+
+
+def describe_redo(summary):
+    """Terminal line for a resumed run that redid out-of-date frames ('' if none)."""
+    stale = summary.get('stale') or {}
+    if not stale:
+        return ''
+    reasons = sorted({reason for _role, reason in stale.values()})
+    where = os.path.relpath(summary['stale_dir'], os.path.dirname(os.path.dirname(summary['stale_dir'])))
+    if summary['scope'] == 'all':
+        return (f"Calibration frames out of date ({'; '.join(reasons)}): redoing the whole "
+                f"reduction; {summary['moved']} old files and folders moved to {where}")
+    return (f"Redoing {len(summary['redo'])} frame(s) out of date ({'; '.join(reasons)}); "
+            f"{summary['moved']} old files and folders moved to {where}")
+
+
+def dark_report_row(frame_dark, frame_roles, corrected):
+    """One line on the dark subtraction, for the end-of-run report.
+
+    ``corrected`` maps raw paths to their bias-corrected files.
+    """
+    targets = [f for f, r in frame_roles.items() if r not in CALIBRATION_ROLES]
+    if not targets:
+        return ''
+    if all(frame_dark.get(f, (None, None, ''))[2] == 'no darks listed' for f in targets):
+        return 'none listed (dark current left to the edge-DC constant)'
+    full, partly, missed, flagged, labels = [], [], [], [], set()
+    for f in targets:
+        name = os.path.basename(f)
+        master, _scale, note = frame_dark.get(f, (None, None, ''))
+        rows = []
+        try:
+            rows = dark_summary(corrected.get(f, f))
+        except Exception:                                          # noqa: BLE001
+            pass
+        applied = [r for r in rows if r[1]]
+        dead = [r for r in rows if not r[1] and r[2] == 'dead camera in this frame']
+        others = [r for r in rows if not r[1] and r not in dead]
+        if master is None or not applied:
+            missed.append(f"{name} ({note or (others[0][2] if others else 'no dark')})")
+            continue
+        labels.add(f"{master.label} x {master.ncombine}")
+        if others:
+            partly.append(f"{name}: {', '.join(f'{c} ({why})' for c, _a, why in others)}")
+        else:
+            full.append(name)
+        flagged += [f"{name} {c} {flags}" for c, _a, flags in applied if flags != 'none']
+
+    def _few(items):
+        return ', '.join(items[:3]) + (f" +{len(items) - 3} more" if len(items) > 3 else '')
+
+    text = f"subtracted on {len(full) + len(partly)}/{len(targets)} frames"
+    if labels:
+        text += f" ({', '.join(sorted(labels))})"
+    if partly:
+        text += f"; cameras without a dark: {_few(partly)}"
+    if missed:
+        text += f"; not corrected: {_few(missed)}"
+    if flagged:
+        text += f"; flagged: {_few(flagged)}"
+    return text
+
+
 def output_report_row(n_frames, written, n_cubes, extraction_path):
     """One line on what the run produced, for the end-of-run report.
 
@@ -1987,7 +2169,8 @@ def main(config_path):
         Configuration: {...}
     """
     print(f"Loading configuration from {config_path}")
-    # You can add functionality here as needed.
+    # Files modified from here on were made by this run (a resumed run never moves them).
+    run_start = time.time()
     with open(config_path, 'r') as f:
         config = {}
         for line in f:
@@ -2041,6 +2224,12 @@ def main(config_path):
         # UnboundLocalError. The full merged config is logged once logging is set up.
         print(f"Folded {len(_std_list)} flux-standard exposure(s) into the science "
               f"extraction list")
+
+    # dark_files: a single entry parses as a string.
+    _darks = config.get('dark_files')
+    if _darks:
+        config['dark_files'] = [d for d in ([_darks] if isinstance(_darks, str) else _darks)
+                                if str(d).strip()]
 
     # (full configuration is logged to the file once logging is set up, below)
 
@@ -2158,7 +2347,7 @@ def main(config_path):
     # Fail fast if any input lives on an unresponsive filesystem (an offline cloud
     # mount or dead network share); otherwise the first os.stat below blocks
     # indefinitely with no message. Missing files are reported by later checks.
-    check_inputs_reachable(get_input_files_from_config(config),
+    check_inputs_reachable(get_input_files_from_config(config) + list(config.get('dark_files') or []),
                            timeout_s=float(config.get('input_timeout_s', 15)))
 
     # Pre-flight validation — exits cleanly if anything is wrong
@@ -2188,10 +2377,8 @@ def main(config_path):
     # Parse cosmic ray removal configuration
     remove_cosmic_rays = config.get('remove_cosmic_rays', True)
     mask_output_dir = config.get('mask_output_dir', None)
-    if remove_cosmic_rays:
-        logger.info("Cosmic ray removal enabled (L.A.Cosmic)")
-    else:
-        logger.info("Cosmic ray removal disabled")
+    cr_settings, _cr_errors, _cr_warnings = cosmic_ray_settings(config)
+    logger.info(f"Cosmic rays (L.A.Cosmic): {describe_settings(cr_settings, remove_cosmic_rays)}")
 
     # Parse CRR cube configuration (defaults to True if not specified)
     use_crr_cube = config.get('CRR_cube', False)  # Default to True
@@ -2327,17 +2514,70 @@ def main(config_path):
 
     # ── BIAS-FIRST PREPROCESSING (unconditional) ────────────────────────────
     # Bias subtraction is ALWAYS the first data operation for EVERY frame, before
-    # flat division, tracing or extraction: the READ-MDE 2D master bias plus the
-    # per-frame edge DC, written to {output_dir}/bias_corrected/ with BIASSUB/EDGE*
-    # stamps so downstream stages skip their own bias handling. Not configurable:
-    # dividing the flat into a frame still carrying its ~500 DN pedestal turns
-    # percent-level flat structure into tens-of-DN fake emission lines.
-    from llamas_pyjamas.Bias.biasFirst import bias_correct_frame
+    # flat division, tracing or extraction: the READ-MDE 2D master bias, then (for
+    # science, flux-standard and sky frames with a matched dark) scale x master
+    # dark, then the per-frame edge DC, written to {output_dir}/bias_corrected/
+    # with BIASSUB/DARK*/EDGE* stamps so downstream stages skip their own bias
+    # handling. Not configurable: dividing the flat into a frame still carrying its
+    # ~500 DN pedestal turns percent-level flat structure into tens-of-DN fake
+    # emission lines. See Bias/README.md.
     reporter.phase("🧾", "Bias subtraction")
     print("\n" + "=" * 60)
-    print("BIAS-FIRST PREPROCESSING (master bias + edge DC, before all else)")
+    print("BIAS-FIRST PREPROCESSING (master bias + dark + edge DC, before all else)")
     print("=" * 60)
     _bias_corr_dir = os.path.join(output_dir, 'bias_corrected')
+
+    frame_roles = bias_first_frames(config)
+    frame_dark = prepare_master_darks(config, frame_roles, slow_bias_file, fast_bias_file,
+                                      output_dir, config['qa_output_dir'])
+    if remove_cosmic_rays and cr_settings['red']['enabled']:
+        _no_dark = [os.path.basename(f) for f, r in frame_roles.items()
+                    if r not in CALIBRATION_ROLES and frame_dark[f][0] is None]
+        if _no_dark:
+            logger.warning(
+                f"Red cosmic-ray cleaning is on but {len(_no_dark)} frame(s) have no dark "
+                f"({', '.join(_no_dark[:3])}{' …' if len(_no_dark) > 3 else ''}); on these, "
+                f"red flags hot pixels and sky-line cores (see Masking/README.md)")
+
+    # Resume: a frame corrected by an older bias step, against another master bias
+    # or without the dark this run subtracts would otherwise be reused by name at
+    # every later stage. Move its products aside so the normal resume rebuilds them.
+    redo_summary = {}
+    if resume:
+        _expected_prov = {
+            raw: (role, expected_provenance(fits.getheader(raw, 0), slow_bias_file,
+                                            fast_bias_file, *frame_dark[raw][:2]))
+            for raw, role in frame_roles.items()}
+        # Science, standard and sky RSS also record the cosmic-ray cleaning (CRID).
+        _crid = cosmic_ray_id(cr_settings, remove_cosmic_rays)
+        for _raw, (_role, _exp) in _expected_prov.items():
+            if _role not in CALIBRATION_ROLES:
+                _exp['CRID'] = _crid
+        _mask_dir = config.get('mask_output_dir') or extraction_path
+        _cube_dir = config.get('cube_output_dir') or os.path.join(output_dir, 'cubes')
+        _protected = [p for v in config.values() for p in _as_list(v)
+                      if isinstance(p, str) and os.path.isfile(p)]
+        redo_summary = redo_stale_frames(
+            _expected_prov,
+            dirs=[output_dir, _bias_corr_dir, extraction_path, os.path.join(extraction_path, 'masks'),
+                  _mask_dir, os.path.join(_mask_dir, 'masks'), _cube_dir, config['qa_output_dir']],
+            calib_dirs={'trace_dir': config.get('trace_output_dir'),
+                        'extraction_dir': extraction_path,
+                        'flat_dir': config.get('flat_field_output_dir',
+                                               os.path.join(extraction_path, 'flat')),
+                        'qa_dir': config['qa_output_dir']},
+            output_dir=output_dir, protected=_protected, since=run_start,
+            sky_used=(config.get('sky_selection_method') == 'frame'
+                      and not config.get('sky_extraction_file')),
+            empirical_sky=bool(config.get('sky_empirical_2d', False)))
+        _redo_line = describe_redo(redo_summary)
+        if _redo_line:
+            print(_redo_line)
+            for _raw, (_role, _why) in sorted(redo_summary['stale'].items()):
+                print(f"  out of date: {os.path.basename(_raw)} ({_role}): {_why}")
+            reporter.note(_redo_line)
+
+    bias_corrected_of = {}
 
     def _bias_first(path):
         """Bias-correct one raw frame (resume-aware); returns the new path."""
@@ -2348,19 +2588,19 @@ def main(config_path):
             os.path.splitext(os.path.basename(path))[0] + '_bias_corrected.fits')
         if resume and os.path.exists(_expected):
             print(f"RESUME: reusing bias-corrected {os.path.basename(_expected)}")
+            bias_corrected_of[path] = _expected
             return _expected
-        return bias_correct_frame(
+        _dark, _scale, _note = frame_dark.get(path, (None, None, 'calibration frame'))
+        bias_corrected_of[path] = bias_correct_frame(
             path, _bias_corr_dir,
             slow_bias=slow_bias_file, fast_bias=fast_bias_file,
             trace_dir=config.get('trace_output_dir'),
             mastercalib_trace_dir=CALIB_DIR,
-            edge_bias=edge_bias_cfg)
+            edge_bias=edge_bias_cfg, dark=_dark, dark_note=_note)
+        return bias_corrected_of[path]
 
     # Calibration frames (single-path keys)
-    for _k in ('red_flat_file', 'green_flat_file', 'blue_flat_file',
-               'red_arc_file', 'green_arc_file', 'blue_arc_file',
-               'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
-               'blue_twilight_flat'):
+    for _k in BIAS_FIRST_CALIBRATIONS:
         if config.get(_k):
             config[_k] = _bias_first(config[_k])
 
@@ -2377,6 +2617,7 @@ def main(config_path):
         config['science_files'] = [_bias_first(_f) for _f in _sci]
     elif _sci:
         config['science_files'] = _bias_first(_sci)
+    reporter.report('Dark', dark_report_row(frame_dark, frame_roles, bias_corrected_of))
     print("=" * 60 + "\n")
 
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
@@ -3010,7 +3251,8 @@ def main(config_path):
                     remove_cosmic_rays=remove_cosmic_rays,
                     mask_output_dir=mask_output_dir,
                     edge_bias=edge_bias_cfg,
-                    whitelight_hex=config.get('whitelight_hex', True)
+                    whitelight_hex=config.get('whitelight_hex', True),
+                    cosmic_rays=cr_settings
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -3031,7 +3273,8 @@ def main(config_path):
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias_cfg,
-                whitelight_hex=config.get('whitelight_hex', True)
+                whitelight_hex=config.get('whitelight_hex', True),
+                cosmic_rays=cr_settings
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
@@ -3075,7 +3318,8 @@ def main(config_path):
                     sky_frame_files[0], extraction_path,
                     slow_bias_file, fast_bias_file, final_trace_dir,
                     remove_cosmic_rays, mask_output_dir, config,
-                    flat_pixel_maps=flat_pixel_maps if use_flat else None)
+                    flat_pixel_maps=flat_pixel_maps if use_flat else None,
+                    cosmic_rays=cr_settings)
             else:
                 print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
                       "falling back to 'quantile'")
@@ -3089,7 +3333,7 @@ def main(config_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
 
             # Correct wavelengths for each extraction file
-            corr_extractions, _ = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            corr_extractions, ext_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict'))
 
             # Per-fibre throughput from the twilight (sky) flat, extracted with
             # the same method as the science (default on; twilight_throughput =
@@ -3112,6 +3356,9 @@ def main(config_path):
             # authoritative source of RA/DEC and pointing, not the intermediate pkl chain.
             with fits.open(orig_science_file) as _sci_hdul:
                 primary_hdr = _sci_hdul[0].header.copy()
+            # ...but the cosmic-ray cleaning was recorded at extraction (CRID/CRCHAN),
+            # and a resumed run compares CRID on the RSS.
+            copy_cosmic_ray_stamps(ext_hdr, primary_hdr)
 
             # Save the corrected extractions using the current file's base name
             base_name = os.path.splitext(os.path.basename(correction_path))[0]
@@ -3236,7 +3483,10 @@ def main(config_path):
                                 orig_science, extraction_path,
                                 trace_dir=final_trace_dir,
                                 mastercalib_trace_dir=CALIB_DIR,
-                                edge_bias=edge_bias_cfg
+                                remove_cosmic_rays=remove_cosmic_rays,
+                                mask_output_dir=mask_output_dir,
+                                edge_bias=edge_bias_cfg,
+                                cosmic_rays=cr_settings
                             )
                             noflat_corr_dict, noflat_hdr = correct_wavelengths(
                                 noflat_extracted, soln=config.get('arcdict'))

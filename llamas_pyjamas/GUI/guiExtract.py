@@ -28,11 +28,16 @@ import time
 
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.DataModel.validate import get_placeholder_extension_indices, validate_for_gui
-from llamas_pyjamas.Bias import BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu
+from llamas_pyjamas.Bias import (BiasNotFoundError, BiasReadModeError, generate_fallback_bias_hdu,
+                                 camera_of_header, verify_camera_hdu)
 from llamas_pyjamas.Bias.biasChecking import (build_interfibre_mask,
                                               build_topbottom_stripe_mask,
                                               measure_edge_dc_offset)
-from llamas_pyjamas.Masking.cosmicLlamas import clean_cosmic_rays, save_cosmic_ray_masks
+from llamas_pyjamas.Masking.cosmicLlamas import (clean_cosmic_rays, cosmic_ray_enabled,
+                                                 save_cosmic_ray_masks, stamp_cosmic_rays)
+from llamas_pyjamas.Masking.cosmicLlamas import default_settings as default_cr_settings
+from llamas_pyjamas.Bias.darkLlamas import (cosmic_ray_inputs, load_master_dark_camera,
+                                            noise_factor)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -329,24 +334,12 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
         logger.info(f"No bias file path received for {bench}{side} {color}; using inter-fibre fallback")
 
     if bias is not None:
-        # --- Bench/side/color verification before subtraction ---
-        bias_bench = str(bias.header.get('BENCH', '')).strip()
-        bias_side  = str(bias.header.get('SIDE',  '')).strip().upper()
-        bias_color = str(bias.header.get('COLOR', '')).strip().lower()
-        # CAM_NAME fallback if individual keywords are absent
-        if not (bias_bench and bias_side and bias_color) and 'CAM_NAME' in bias.header:
-            cam = bias.header['CAM_NAME']
-            parts = cam.split('_')
-            bias_color = parts[1].lower() if len(parts) >= 2 else ''
-            bias_bench = parts[0][0] if parts else ''
-            bias_side  = parts[0][1].upper() if parts and len(parts[0]) >= 2 else ''
-
-        if (bias_bench and bias_side and bias_color and
-                (bias_bench != str(bench) or bias_side != str(side).upper() or
-                 bias_color != str(color).lower())):
+        # --- Bench/side/color verification before subtraction (shared with the dark) ---
+        if not verify_camera_hdu(bias.header, bench, side, color):
+            got = camera_of_header(bias.header)
             logger.error(
                 f"Bias BSC mismatch: expected {bench}{side} {color}, "
-                f"got {bias_bench}{bias_side} {bias_color} — using inter-fibre fallback"
+                f"got {got[0]}{got[1]} {got[2]} — using inter-fibre fallback"
             )
             bias = None
 
@@ -408,7 +401,7 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
 # governed by `num_cpus`; opt in with `ray_task_memory_mb` (applied at dispatch).
 @ray.remote
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
-                  remove_cosmic_rays=True, edge_bias=None):
+                  remove_cosmic_rays=True, edge_bias=None, cosmic_rays=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
 
@@ -466,22 +459,54 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         bias_subtracted_data, edge_stats = _apply_edge_bias(
             bias_subtracted_data, tracer, header, bench, side, color, edge_bias)
 
-        # Cosmic ray removal (after bias subtraction, before extraction)
+        # A master dark subtracted at bias-first is no longer in the counts, but its
+        # noise is: load it (matched and confirmed by header, like the bias) for the
+        # cosmic-ray noise model and the per-fibre errors.
+        dark_img, dark_noise = None, 0.0
+        if header.get('DARKSUB', False):
+            dark_data, info = load_master_dark_camera(header.get('DARKFILE'), header,
+                                                      darkid=header.get('DARKID'))
+            if dark_data is not None and dark_data.shape == bias_subtracted_data.shape:
+                dark_img = float(header.get('DARKSCL', 1.0)) * dark_data
+                dark_noise = noise_factor(info['ncombine'], info['method'])
+                header['DARKVAR'] = (True, 'Master dark noise added to the errors')
+            else:
+                reason = info['reason'] if dark_data is None else f'shape {dark_data.shape}'
+                logger.warning(f"{bench}{side} {color}: master dark unavailable at extraction "
+                               f"({reason}); its noise is not in the errors")
+                header['DARKVAR'] = (False, 'Master dark noise NOT in the errors')
+
+        # Cosmic ray removal (after bias subtraction, before extraction), for the
+        # channels and thresholds in ``cosmic_rays`` (package defaults when None).
         cr_mask = None
-        if remove_cosmic_rays:
+        if not remove_cosmic_rays:
+            header['CRCLEAN'] = (False, 'No cosmic-ray cleaning (see CRWHY)')
+            header['CRWHY'] = ('remove_cosmic_rays false', 'Why no cosmic-ray cleaning')
+        elif not cosmic_ray_enabled(color, cosmic_rays):
+            header['CRCLEAN'] = (False, 'No cosmic-ray cleaning (see CRWHY)')
+            header['CRWHY'] = ('channel off', 'Why no cosmic-ray cleaning')
+        else:
+            cr_background, cr_ignore = (cosmic_ray_inputs(dark_img) if dark_img is not None
+                                        else (None, None))
             bias_subtracted_data, cr_mask = clean_cosmic_rays(
                 bias_subtracted_data,
-                color=color, bench=bench, side=side, header=header
+                color=color, bench=bench, side=side, header=header,
+                background=cr_background, mask=cr_ignore, settings=cosmic_rays
             )
+            entry = (cosmic_rays or default_cr_settings())[color]
             header['CRCLEAN'] = (True, 'Cosmic rays cleaned with L.A.Cosmic')
             header['CRNPIX'] = (int(cr_mask.sum()), 'Number of CR pixels cleaned')
+            header['CRTHRESH'] = (entry['cr_threshold'], 'L.A.Cosmic cr_threshold (sigma)')
+            header['CRCONTR'] = (entry['contrast'], 'L.A.Cosmic contrast')
+            header['CRNEIGH'] = (entry['neighbor_threshold'], 'L.A.Cosmic neighbor_threshold')
 
         # Compute detector background AFTER bias subtraction
         detector_background = compute_detector_background(bias_subtracted_data, rows=(30, 50))
         print(f"{bench}{side} {color}: Detector bg after bias = {detector_background:.2f}")
 
         # Create an ExtractLlamas object with bias-subtracted data
-        extraction = ExtractLlamas(tracer, bias_subtracted_data, header, method=method)
+        extraction = ExtractLlamas(tracer, bias_subtracted_data, header, method=method,
+                                   dark=dark_img, dark_noise=dark_noise)
 
         return {
             'extraction': extraction,
@@ -579,8 +604,8 @@ def compute_detector_background(data, rows=(30, 50)):
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
                 method=None, trace_dir=None, mastercalib_trace_dir=None,
-                remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False,
-                edge_bias=None, whitelight_hex=True) -> None:
+                remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False, cosmic_rays=None,
+                edge_bias=None, whitelight_hex=True) -> tuple:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -606,6 +631,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     trace_dir (str, optional): User trace directory for real extensions. Defaults to None.
     mastercalib_trace_dir (str, optional): Mastercalib trace directory for placeholder extensions.
                                            Defaults to CALIB_DIR if None.
+    cosmic_rays (dict, optional): Per-channel cosmic-ray settings
+                                  (``Masking.cosmicLlamas.cosmic_ray_settings``); None uses
+                                  the package defaults. Stamped as CRID/CRCHAN.
 
     Returns:
     Tuple[str, int]: (extraction_file_path, number_of_placeholder_extensions)
@@ -773,7 +801,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
 
-            future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method=method, use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias)
+            future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method=method, use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias, cosmic_rays=cosmic_rays)
             futures.append(future)
 
         # Wait for all remote tasks to complete
@@ -808,6 +836,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             if is_placeholder_camera(hdu_data):
                 result['extraction'].counts[:] = 0.0
                 logger.info(f"Extension {hdu_idx}: Placeholder camera set to 0 (no real data)")
+
+        # Record the cosmic-ray cleaning applied (CRID is what a resumed run compares)
+        # before the masks, the extraction pickle and the white light are written.
+        stamp_cosmic_rays(primary_hdr, cosmic_rays or default_cr_settings(), remove_cosmic_rays)
 
         # Save cosmic ray masks if CR removal was enabled
         if remove_cosmic_rays:

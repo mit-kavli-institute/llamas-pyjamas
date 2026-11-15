@@ -27,9 +27,68 @@ Example:
             print(f"Camera {ext.bench}-{ext.side}-{ext.channel}: {ext.data.shape}")
 """
 import logging
+import os
+import re
+
+import numpy as np
 from astropy.io import fits # type: ignore
 
 logger = logging.getLogger(__name__)
+
+_DATASEC_RE = re.compile(r'\[(\d+):(\d+),\s*(\d+):(\d+)\]')
+
+
+def header_color(header):
+    """Lower-case channel of an extension, from COLOR or else CAM_NAME; None if neither."""
+    if 'COLOR' in header:
+        return str(header['COLOR']).lower()
+    if 'CAM_NAME' in header:
+        return header['CAM_NAME'].split('_')[1].lower()
+    return None
+
+
+def datasec_slices(header, shape):
+    """(rows, cols) slices of the DATASEC region, or the whole array.
+
+    A DATASEC that doesn't parse, or that runs past the data, is ignored, exactly as in
+    ``process_fits_by_color``.
+    """
+    match = _DATASEC_RE.match(str(header.get('DATASEC', '')))
+    if match:
+        x1, x2, y1, y2 = map(int, match.groups())
+        if x2 <= shape[1] and y2 <= shape[0]:
+            return slice(y1 - 1, y2), slice(x1 - 1, x2)
+    return slice(0, shape[0]), slice(0, shape[1])
+
+
+def orient_by_color(data, color):
+    """Flip a detector image between raw and pipeline orientation.
+
+    Blue is flipped in x and y, green in x, red not at all. Each flip is its own inverse,
+    so the same call takes a pipeline-orientation image back to raw orientation.
+    """
+    if color == 'blue':
+        return np.flipud(np.fliplr(data))
+    if color == 'green':
+        return np.fliplr(data)
+    return data
+
+
+def trim_and_orient(data, header):
+    """The DATASEC region of a raw extension in pipeline orientation (as process_fits_by_color)."""
+    rows, cols = datasec_slices(header, data.shape)
+    return orient_by_color(data[rows, cols], header_color(header))
+
+
+def to_raw(oriented, header, raw):
+    """Copy of ``raw`` (float32) with its DATASEC region replaced by ``oriented``, flipped back.
+
+    Rows and columns outside DATASEC (the metadata row) are left as they are.
+    """
+    out = np.array(raw, dtype=np.float32)
+    rows, cols = datasec_slices(header, out.shape)
+    out[rows, cols] = orient_by_color(oriented, header_color(header))
+    return out
 ##############################################################
 
 class llamasOneCamera:

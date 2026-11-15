@@ -77,6 +77,47 @@ def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
     return 2.0 * half
 
 
+def aperture_sum(image, traces, half):
+    """Sum of ``image`` over each fibre's boxcar aperture, column by column.
+
+    Uses the boxcar extraction's trace-following aperture of +/-``half`` px with
+    fractional edge weights. ``traces`` is (nfibers, ncols) of row positions;
+    NaN positions give 0. Returns (nfibers, ncols).
+    """
+    image = np.asarray(image, dtype=float)
+    ny, nx = image.shape
+    y = np.asarray(traces, dtype=float)
+    cols = np.broadcast_to(np.arange(y.shape[1]) % nx, y.shape)
+    lo, hi = y - half, y + half
+    j0 = np.floor(lo + 0.5)
+    out = np.zeros(y.shape)
+    with np.errstate(invalid='ignore'):
+        for k in range(int(np.ceil(2.0 * half)) + 2):
+            j = j0 + k
+            w = np.minimum(np.minimum(hi, j + 0.5) - np.maximum(lo, j - 0.5), 1.0)
+            ok = np.isfinite(w) & (w > 0) & (j >= 0) & (j < ny)
+            jj = np.where(ok, j, 0).astype(int)
+            out += np.where(ok, image[jj, cols] * np.where(ok, w, 0.0), 0.0)
+    return out
+
+
+def dark_variance(scaled_dark, traces, half, aperture_pix, gain, readnoise, scale, c_over_n):
+    """Per-fibre variance (DN^2) added by subtracting ``scale x master dark``.
+
+    The dark's own shot noise in the frame, plus the master dark's noise scaled by
+    ``scale^2``: with S = the scaled dark summed over the aperture (clipped at 0),
+
+        var = S/g + scale*(c/N)*S/g + scale^2*(c/N)*A*RN^2/g^2
+
+    where c/N is the master dark's variance per unit single-frame variance (see
+    ``darkLlamas.noise_factor``), A the aperture pixel count, g the gain (e-/ADU)
+    and RN the read noise (e-).
+    """
+    S = np.clip(aperture_sum(np.clip(scaled_dark, 0.0, None), traces, half), 0.0, None)
+    return (S / gain + scale * c_over_n * S / gain
+            + scale ** 2 * c_over_n * aperture_pix * (readnoise / gain) ** 2)
+
+
 class ExtractLlamas:
     """A class used to extract data from LLAMAS observations.
 
@@ -101,7 +142,7 @@ class ExtractLlamas:
     """
 
     def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True,
-                 method=None) -> None:
+                 method=None, dark=None, dark_noise=0.0) -> None:
         """Initialize the ExtractLlamas object.
 
         Args:
@@ -113,6 +154,11 @@ class ExtractLlamas:
             method (str, optional): 'horne' | 'optimal' | 'boxcar' | 'legacy'.
                 'horne' (alias 'optimal') is the variance-weighted, flux-conserving,
                 mask-aware estimator (Horne 1986) built on the bspline profile images.
+            dark (np.ndarray, optional): The scaled master dark already subtracted from
+                ``hdu_data`` (pipeline orientation). Only used to add its noise to the
+                per-fibre errors; it is not kept on the object.
+            dark_noise (float): The master dark's variance per unit single-frame
+                variance (c/N, ``darkLlamas.noise_factor``).
 
         Returns:
             None
@@ -330,6 +376,14 @@ class ExtractLlamas:
             aperture_pix = effective_aperture_pix(_method, _half, self.trace)
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            # The subtracted dark is no longer in the counts, but its shot noise and
+            # the master dark's own noise are still in the data.
+            if dark is not None and dark.shape == self.frame.shape:
+                scale = float(hdr.get('DARKSCL', 1.0))
+                var_adu = var_adu + dark_variance(dark, self.trace.traces, _half, aperture_pix,
+                                                  gain, readnoise, scale, float(dark_noise))
+                logger.info(f'Added master-dark noise to the errors (scale {scale:.4f}, '
+                            f'c/N {float(dark_noise):.3f})')
             self.counts_err = np.sqrt(var_adu).astype(np.float32)
             # At extraction, flux == counts (no flux cal), so the error on the
             # written FLUX/COUNTS is the same array.

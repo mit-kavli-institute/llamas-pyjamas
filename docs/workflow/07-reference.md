@@ -73,6 +73,8 @@ quote paths**). The authoritative, annotated list is
 | `red_arc_file` / … , `refine_arc`, `generate_new_wavelength_soln` | wavelength-solution controls |
 | `flux_standard_files` | standard-star exposures for the sensitivity function |
 | `slow_bias_file` / `fast_bias_file` | master bias per readout mode |
+| `dark_files`, `dark_exptime_tolerance` | raw dark frames, and how close (fraction, default 0.10) their requested exposure must be to a frame's |
+| `remove_cosmic_rays`, `cosmic_ray_channels`, `cosmic_ray_threshold_{c}` / `_contrast_{c}` / `_neighbor_threshold_{c}`, `cosmic_ray_maxiter` | cosmic-ray cleaning: master switch, channels (default blue, green) and per-channel L.A.Cosmic thresholds ([details](../../llamas_pyjamas/Masking/README.md)) |
 | `output_dir`, `trace_output_dir`, `extraction_output_dir`, `cube_output_dir` | output locations |
 | `extraction_method` (`boxcar`/`horne`/`optimal`), `boxcar_halfwidth` | extraction |
 | `sky_subtract`, `sky_selection_method` | sky subtraction |

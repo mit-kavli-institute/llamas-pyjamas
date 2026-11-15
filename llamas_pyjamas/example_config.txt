@@ -27,11 +27,31 @@
 #slow_bias_file = /path/to/your/slow_master_bias.fits
 #fast_bias_file = /path/to/your/fast_master_bias.fits
 
+# Raw dark frames. Science, standard and sky frames get the master dark with their read
+# mode and an exposure within dark_exptime_tolerance (default 0.10). See Bias/README.md.
+#dark_files = /path/to/dark1_mef.fits, /path/to/dark2_mef.fits, /path/to/dark3_mef.fits
+#dark_exptime_tolerance = 0.10
+
 #==============================================================================
 # COSMIC RAY REMOVAL
 #==============================================================================
 # L.A.Cosmic cosmic-ray removal before extraction (default: True)
 remove_cosmic_rays = True
+
+# Channels to clean (red, green, blue or none; default blue, green) and per-channel
+# thresholds: detection (sigma), contrast, neighbour (sigma). Red is best with darks.
+# Changing these on a resumed run redoes the affected frames. See Masking/README.md.
+#cosmic_ray_channels = blue, green
+#cosmic_ray_threshold_red = 10
+#cosmic_ray_contrast_red = 9
+#cosmic_ray_neighbor_threshold_red = 0.7
+#cosmic_ray_threshold_green = 6.5
+#cosmic_ray_contrast_green = 5
+#cosmic_ray_neighbor_threshold_green = 0.7
+#cosmic_ray_threshold_blue = 6.5
+#cosmic_ray_contrast_blue = 5
+#cosmic_ray_neighbor_threshold_blue = 0.7
+#cosmic_ray_maxiter = 2
 
 # Output directory for cosmic-ray masks (default: {extraction_output_dir}/masks/)
 #mask_output_dir = /path/to/custom/mask/output
@@ -39,8 +59,8 @@ remove_cosmic_rays = True
 #==============================================================================
 # BIAS-FIRST PREPROCESSING (always on, not configurable)
 #==============================================================================
-# Every frame is bias-subtracted first (master bias + per-frame edge DC offset)
-# and written to {output_dir}/bias_corrected/. Dividing a flat into a frame that
+# Every frame is bias-subtracted first (master bias, dark if matched, per-frame edge DC
+# offset) and written to {output_dir}/bias_corrected/. Dividing a flat into a frame that
 # still carries its bias pedestal would imprint fake emission features.
 
 #==============================================================================
@@ -63,7 +83,7 @@ twilight_throughput = true
 #==============================================================================
 # The CCDs have no overscan and the bias level drifts with temperature, so a
 # per-frame DC offset is measured from unilluminated pixels and subtracted on top
-# of the master bias.
+# of the master bias (and the dark, after which it is a small residual).
 #
 # Master switch (default true).
 edge_bias_dc_correction = true
