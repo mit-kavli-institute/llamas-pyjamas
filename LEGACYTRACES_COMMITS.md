@@ -125,11 +125,11 @@ SHAs are filled in after each phase.
 
 | Step | Subject | What it does | Depends on / products |
 |---|---|---|---|
-| R0 + A0 | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
-| A1 | Apply the fibre throughput once: divide the RSS by C_i over the throughput it already removed | See below. | On R0 + A0. Needs a clobber re-run; sensfuncs must be rebuilt from re-reduced standards. |
-| A2 | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
-| A3 | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
-| A4 | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
+| R0 + A0 `6e55b00` | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
+| A1 `a8691ee` | Apply the fibre throughput once: divide the RSS by C_i over the throughput it already removed | See below. | On R0 + A0. Needs a clobber re-run; sensfuncs must be rebuilt from re-reduced standards. |
+| A2 `3def65f` | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
+| A3 `84cca12` | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
+| A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
