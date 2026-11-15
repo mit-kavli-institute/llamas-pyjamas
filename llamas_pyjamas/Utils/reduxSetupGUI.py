@@ -150,6 +150,7 @@ CONFIG_CATALOG = [
     ('Flat', [
         ('flat_field_method', 'enum', 'simple', ['simple', 'bspline'], 'Pixel-flat construction method.'),
         ('apply_flat_field_correction', 'bool', 'true', None, 'Master switch for flat-field correction.'),
+        ('lamp_flat_combine', 'bool', 'true', None, "Combine each lamp flat's set of identical exposures (rejects cosmic rays)."),
         ('apply_pixel_flat', 'bool', 'true', None, 'Divide the 2D pixel flat into the raw frame before extraction.'),
         ('apply_fibre_flat', 'bool', 'true', None, 'Apply the fibre-to-fibre flat on the RSS.'),
         ('flat_clip_min', 'float', '0.90', None, 'Lower clip for the flat sensitivity map.'),

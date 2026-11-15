@@ -131,6 +131,7 @@ SHAs are filled in after each phase.
 | A3 `84cca12` | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
 | A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
 | B1 | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
+| B2 | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -189,6 +190,17 @@ SHAs are filled in after each phase.
   every colour. It was skipped on resume and wrote RSS files nothing read. Path (ii)
   (`reduce_twilight_flat`, now removed) reduced the twilights again for T_i on every run.
 - The dome-flat RSS is still made when no twilight is configured.
+
+**B2: lamp-flat sets combined.**
+- `Flat/flatCombine.py` finds each configured flat's set of identical exposures from the raw
+  headers. On 20261015_16 it finds 16-34-26.8/44.5/35-08.4 and 16-38-38.0/39-02.9/39-31.4.
+- Every exposure is bias-corrected, then the set is combined: matched by header, scaled,
+  and median-combined via `Bias/darkLlamas.combine_frames`.
+- The result is `bias_corrected/<stem>_x<N>_bias_corrected.fits`, which tracing and the flat
+  stage use.
+- Cosmic rays in lamp flats are now rejected by the combine, not by L.A.Cosmic.
+- A comma list in `{colour}_flat_file` gives the set explicitly, and
+  `lamp_flat_combine = false` turns combining off.
 
 ## Not committed (left untracked on purpose)
 
