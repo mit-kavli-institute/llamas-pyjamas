@@ -188,17 +188,14 @@ def process_fits_by_color(fits_file, output_file=None):
 
     Args:
         fits_file: Path to the FITS file.
-        output_file: Path to save the processed FITS file. If None, defaults to
-                     input filename with '_trimmed' suffix.
+        output_file: Path to also save the processed FITS file to. If None (the
+                     default), nothing is written: the pipeline only uses the returned
+                     HDUs, and a ``_trimmed`` copy of every frame read cost 0.4 GB each.
 
     Returns:
-        tuple: (HDUList, str) containing the processed HDU list and output file path,
-               or (None, None) if processing fails.
+        tuple: (HDUList, str or None) containing the processed HDU list and the written
+               path (None when nothing was written), or (None, None) if processing fails.
     """
-    from astropy.io import fits
-    import numpy as np
-    import os
-
     try:
         # Open the FITS file
         with fits.open(fits_file) as hdul:
@@ -208,70 +205,22 @@ def process_fits_by_color(fits_file, output_file=None):
             # Add the primary HDU without changes
             result_hdus.append(hdul[0].copy())
 
-            # Process each extension HDU
+            # Trim to DATASEC and flip each extension (trim_and_orient, shared with
+            # bias-first and the dark so the three can never disagree).
             for i in range(1, len(hdul)):
                 hdu = hdul[i].copy()  # Create a copy to avoid modifying the original
-
-                if 'DATASEC' in hdu.header:
-                    datasec = hdu.header['DATASEC']
-
-                    # Parse the DATASEC string '[x1:x2, y1:y2]'
-                    import re
-                    match = re.match(r'\[(\d+):(\d+),\s*(\d+):(\d+)\]', datasec)
-                    if match:
-                        x1, x2, y1, y2 = map(int, match.groups())
-
-                        # Convert from FITS 1-based indexing to Python 0-based indexing
-                        x1 -= 1
-                        y1 -= 1
-
-                        # Trim the data
-                        original_shape = hdu.data.shape
-                        if x2 <= original_shape[1] and y2 <= original_shape[0]:
-                            hdu.data = hdu.data[y1:y2, x1:x2]
-                            # print(f"Trimmed HDU {i} from {original_shape} to {hdu.data.shape} based on DATASEC={datasec}")
-                        else:
-                            logger.warning(f"Warning: DATASEC dimensions {datasec} exceed data dimensions {original_shape} for HDU {i}")
-                
-                # Check if the HDU has data
                 if hdu.data is not None:
-                    # Determine the color
-                    color = None
-
-                    # If COLOR is in the header, use it directly
-                    if 'COLOR' in hdu.header:
-                        color = hdu.header['COLOR'].lower()
-                        side  = hdu.header['SIDE']
-                    # If COLOR is not in the header but CAM_NAME is, extract color from CAM_NAME
-                    elif 'CAM_NAME' in hdu.header:
-                        camname = hdu.header['CAM_NAME']
-                        color = camname.split('_')[1].lower()
-                        side = camname.split('_')[0][1]
-
-                    # Apply transformations based on color if we have determined it
-                    if color:
-                        if color == 'blue':
-                            # Flip both x and y axes
-                            #hdu.data = np.flip(hdu.data, (0, 1))
-                            hdu.data = np.fliplr(hdu.data)
-                            hdu.data = np.flipud(hdu.data)
-                        elif color == 'green':
-                            # Flip only x axis (flip horizontally)
-                            hdu.data = np.fliplr(hdu.data)
-                        # No change for red
-
-
+                    match = _DATASEC_RE.match(str(hdu.header.get('DATASEC', '')))
+                    if match and (int(match.group(2)) > hdu.data.shape[1]
+                                  or int(match.group(4)) > hdu.data.shape[0]):
+                        logger.warning(f"Warning: DATASEC dimensions {hdu.header['DATASEC']} "
+                                       f"exceed data dimensions {hdu.data.shape} for HDU {i}")
+                    hdu.data = trim_and_orient(hdu.data, hdu.header)
                 result_hdus.append(hdu)
 
-        # Determine output filename
-        if output_file is None:
-            base_name = os.path.basename(fits_file)
-            name, ext = os.path.splitext(base_name)
-            output_file = os.path.join(os.path.dirname(fits_file), f"{name}_trimmed{ext}")
-
-        # Write the processed FITS file
-        result_hdus.writeto(output_file, overwrite=True)
-        print(f"Processed FITS file saved to: {output_file}")
+        if output_file is not None:
+            result_hdus.writeto(output_file, overwrite=True)
+            print(f"Processed FITS file saved to: {output_file}")
 
         return result_hdus, output_file
 

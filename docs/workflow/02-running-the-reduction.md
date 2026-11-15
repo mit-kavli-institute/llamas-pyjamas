@@ -21,6 +21,51 @@ The pipeline is **resume-aware**: it reuses on-disk products from a previous run
 an interruption picks up where it left off. Set `clobber = true` in the config to force everything
 from scratch. Heavy steps run in parallel via [Ray](https://www.ray.io/) (tune with `ray_num_cpus`).
 
+## Disk space
+
+A night needs a lot of disk. Each frame's extraction pickle carries all 24 cameras' traces
+(about 3 GB), and every frame leaves float32 copies of itself and three RSS stages. A 15-frame night
+with 3 twilights and 3 arcs needs roughly 160 GB at its peak. Outputs go to `output_dir`. If that is
+not set, they go to `reduced/` next to the first science file.
+
+Ray fails earlier than a full disk. It refuses to create or spill objects once its scratch disk is
+more than **95% full**, i.e. with about 50 GB still free on a 1 TB disk. On macOS that disk is
+usually the same one as your outputs.
+
+**Pre-flight check.** Before anything is written, the pipeline estimates what the run will write
+and compares it with the space really free on each disk it writes to. Products that already exist
+cost nothing, so a resumed run needs less. It prints a `DISK SPACE` report and then:
+
+- **enough room:** it carries on;
+- **space may run out:** it asks `Proceed anyway, or terminate the run? [p/t]`. Without a terminal
+  (a batch or background run) it terminates;
+- **not even the calibrations fit:** it stops without asking.
+
+The estimate comes from measured product sizes (`Utils/diskSpace.py`):
+
+| Product | Size at peak |
+|---|---|
+| Bias-corrected or flat-corrected copy of a frame | 2 × the raw file (float32) |
+| Extraction pickle | the night's 24 trace pickles × 1.05 (about 3 GB) |
+| Science, standard or sky frame | its extraction, 3 RSS stages × 3 colours × 0.25 GB, a cosmic-ray mask, and 0.12 GB per cube colour with `generate_cubes` |
+| Twilight flat | 3 extraction pickles, 2 flat-corrected copies, a 3-colour RSS |
+| Arc (night arcs) | 1 extraction pickle |
+| Traces, flat products | 24 × 120 MB; 5 GB |
+| Ray scratch | the object store (30% of RAM) + 1 extraction pickle |
+
+| Key | Default | Meaning |
+|---|---|---|
+| `disk_margin` | 1.2 | Safety factor on the estimate |
+| `min_free_gb` | 5 | GB kept free on a disk that holds no Ray scratch |
+| `skip_disk_check` | false | Skip the check and its prompt |
+| `scratch_dir` | unset | Put Ray's spill folder on a larger disk |
+
+**Finder versus the real free space.** Finder's "available" figure counts purgeable space:
+cloud-drive copies (Box, iCloud, Google Drive) and snapshots, which macOS frees only on demand.
+Ray and this check count only the space that is really free, as `df -h` shows it.
+
+If a run still fills the disk, it ends with `❌ Failed after …: out of disk space: N GB free on …`.
+
 ## What happens, in order
 
 Each stage writes a product to disk and stamps its headers so later runs can skip it.

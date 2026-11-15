@@ -46,9 +46,13 @@ from llamas_pyjamas.Utils.utils import check_header, configure_pipeline_logging,
 from llamas_pyjamas.Trace.traceValidation import (copy_mastercalib_trace, count_trace_fibres,
                                                   validate_and_fix_trace_fibres,
                                                   confirm_unusable_master_traces,
-                                                  set_aside_legacy_traces)
+                                                  set_aside_legacy_traces, slim_bloated_traces)
 from llamas_pyjamas.Trace.masterShift import describe_shift
-from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
+from llamas_pyjamas.Utils.rayManager import (resolve_run_temp_dir, prune_stale, check_inputs_reachable,
+                                             cleanup_scratch, init_ray, object_store_bytes,
+                                             ray_spill_folder)
+from llamas_pyjamas.Utils.diskSpace import (DiskSpaceError, disk_full_message, disk_space_gate,
+                                            estimate_disk_use, is_disk_full)
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
 from llamas_pyjamas.Bias.biasFirst import (bias_correct_frame, dark_summary, expected_provenance,
@@ -251,6 +255,14 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     except (TypeError, ValueError):
         errors.append(f"'dark_exptime_tolerance' is not a number: "
                       f"{config.get('dark_exptime_tolerance')!r}")
+
+    if 'disk_estimate_factor' in config:
+        warnings.append("'disk_estimate_factor' is no longer used: the disk-space check now "
+                        "estimates each product (its safety factor is disk_margin)")
+
+    out_errors, out_warnings = output_dir_checks(config)
+    errors += out_errors
+    warnings += out_warnings
 
     # Directory keys: the pipeline creates any that are missing, so this is a note.
     dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
@@ -888,10 +900,17 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
 
         # Step 2: extract (bias subtraction is handled inside run_extraction)
         # run_extraction returns only a basename (from GUI_extract); join with output_dir
-        pkl_basename = run_extraction(corr_file, output_dir,
-                                      slow_bias=slow_bias, fast_bias=fast_bias,
-                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
-                                      remove_cosmic_rays=False, edge_bias=edge_bias)
+        try:
+            pkl_basename = run_extraction(corr_file, output_dir,
+                                          slow_bias=slow_bias, fast_bias=fast_bias,
+                                          trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
+                                          remove_cosmic_rays=False, edge_bias=edge_bias)
+        except Exception as exc:
+            if is_disk_full(exc):
+                raise
+            logger.warning(f"Extraction of {os.path.basename(corr_file)} failed: {exc}",
+                           exc_info=True)
+            pkl_basename = None
         if not pkl_basename:
             print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
             continue
@@ -2032,6 +2051,128 @@ def bias_first_frames(config):
     return roles
 
 
+#: Where outputs went when output_dir was unset, before 2026-11-14: inside the package.
+OLD_DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, 'reduced')
+
+
+def default_output_dir(config):
+    """``<folder of the first science frame>/reduced``, the output_dir when none is set."""
+    science = _as_list(config.get('science_files'))
+    if not science:
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(science[0])), 'reduced')
+
+
+def frames_in_old_default(config):
+    """This run's frames that already have bias-corrected products in the old default folder."""
+    folder = os.path.join(OLD_DEFAULT_OUTPUT_DIR, 'bias_corrected')
+    if not os.path.isdir(folder):
+        return []
+    names = os.listdir(folder)
+    keys = list(BIAS_FIRST_CALIBRATIONS) + ['science_files', 'sky_frame_files']
+    frames = {p for key in keys for p in _as_list(config.get(key))}
+    return sorted(raw for raw in frames
+                  if any(is_product_of(n, exposure_id(raw)) for n in names))
+
+
+def output_dir_checks(config):
+    """Pre-flight ``(errors, warnings)`` for an unset output_dir, which defaults to the night.
+
+    The default folder must be writable. Frames that already have products in the old default
+    (inside the package) are named, since a resume would otherwise silently start afresh.
+    """
+    errors, warnings = [], []
+    night_out = None if config.get('output_dir') else default_output_dir(config)
+    if not night_out:
+        return errors, warnings
+    night = os.path.dirname(night_out)
+    if not (os.path.isdir(night) and os.access(night, os.W_OK)):
+        errors.append(f"output_dir is not set, and its default '{night_out}' (next to the "
+                      f"science frames) is not writable. Set output_dir.")
+        return errors, warnings
+    print(f"output_dir is not set: writing to {night_out}")
+    old = frames_in_old_default(config)
+    if old:
+        warnings.append(
+            f"{len(old)} of this run's frames have products in {OLD_DEFAULT_OUTPUT_DIR} (the "
+            f"default output_dir before 2026-11-14). This run writes to {night_out}; to resume "
+            f"from them instead, set output_dir = {OLD_DEFAULT_OUTPUT_DIR}")
+    return errors, warnings
+
+
+def disk_folders(config, output_dir, ray_temp_dir):
+    """The folders a run writes to, for the disk-space check (defaults as in ``main``)."""
+    extraction = config.get('extraction_output_dir') or os.path.join(output_dir, 'extractions')
+    return {'output': output_dir,
+            'bias_corrected': os.path.join(output_dir, 'bias_corrected'),
+            'traces': config.get('trace_output_dir') or os.path.join(output_dir, 'traces'),
+            'extractions': extraction,
+            'flat': config.get('flat_field_output_dir') or os.path.join(extraction, 'flat'),
+            'arcs': os.path.join(output_dir, 'arcs'),
+            'lut': LUT_DIR,
+            'ray': ray_spill_folder(config, ray_temp_dir)}
+
+
+def products_done(folders):
+    """``done(kind, raw)`` for the disk estimate: does that product already exist on disk?
+
+    Mirrors the resume checks of each stage. An existing product costs no new space, whether
+    it is reused or overwritten.
+    """
+    listings = {}
+
+    def names(folder):
+        if folder not in listings:
+            listings[folder] = os.listdir(folder) if os.path.isdir(folder) else []
+        return listings[folder]
+
+    def has(folder, raw, marker):
+        exp = exposure_id(raw)
+        return any(exp in n and marker in n for n in names(folder))
+
+    def done(kind, raw):
+        if kind == 'bias_corrected':
+            stem = os.path.splitext(os.path.basename(raw))[0]
+            return f"{stem}_bias_corrected.fits" in names(folders['bias_corrected'])
+        if kind == 'science':
+            return _has_rss_product(folders['extractions'], exposure_id(raw))
+        if kind == 'sky':
+            return has(folders['extractions'], raw, '_corrected_extractions.pkl')
+        if kind == 'twilight_flat':
+            return has(os.path.join(folders['flat'], 'twilight'), raw, '_RSS_')
+        if kind == 'twilight_fibre':
+            return has(os.path.join(folders['extractions'], 'twilight'), raw, '_extract.pkl')
+        if kind == 'arc':
+            return has(folders['arcs'], raw, '_extract.pkl')
+        if kind == 'traces':
+            return sum(n.endswith('_traces.pkl') for n in names(folders['traces'])) >= 24
+        if kind == 'flat':
+            return {'pixel_maps.fits', 'flat_smooth_models.fits'} <= set(names(folders['flat']))
+        if kind == 'darks':
+            return any(n.startswith('master_dark_')
+                       for n in names(os.path.join(folders['output'], 'darks')))
+        if kind == 'refined_arc':
+            return os.path.exists(os.path.join(folders['lut'], 'LLAMAS_reference_arc_refined2d.pkl'))
+        return False
+
+    return done
+
+
+def check_run_disk_space(config, folders, interactive=None):
+    """The pre-flight disk-space check (``Utils/diskSpace.py``) for this run.
+
+    Raises:
+        DiskSpaceError: too little space, or the user chose to terminate.
+    """
+    darks = [p for p in config.get('dark_files') or [] if os.path.isfile(p)]
+    items = estimate_disk_use(
+        bias_first_frames(config), folders, products_done(folders), config,
+        dark_groups=len(group_darks(darks)) if darks else 0,
+        object_store_bytes=object_store_bytes(config))
+    return disk_space_gate(items, config, interactive=interactive,
+                           folder_names={path: name for name, path in folders.items()})
+
+
 def prepare_master_darks(config, frame_roles, slow_bias, fast_bias, output_dir, qa_dir):
     """Match each science/sky frame to a dark group and build the master darks it needs.
 
@@ -2431,10 +2572,9 @@ def main(config_path):
     print(f"Configuring Ray per-task memory reservation to {ray_task_memory_mb} MB")
 
 
-    if not config.get('output_dir'):
-        output_dir = os.path.join(BASE_DIR, 'reduced')
-    else:
-        output_dir = config.get('output_dir')
+    output_dir = (config.get('output_dir') or default_output_dir(config)
+                  or OLD_DEFAULT_OUTPUT_DIR)
+    config['output_dir'] = output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     # Wavelength/xshift QA (QA/waveQA.py): per-run HTML report + CSV scorecard.
@@ -2445,17 +2585,29 @@ def main(config_path):
                                or os.path.join(output_dir, 'QA'))
     print(f"Wavelength QA: enabled={wavelength_qa}, dir={config['qa_output_dir']}")
 
-    # Pre-flight disk-space gate: warn when space is tight, abort *before any work*
-    # when it is guaranteed insufficient (so no partial output is left behind).
-    _preflight_inputs = []
-    for _k in ('science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
-               'arc_file', 'flat_file'):
-        _v = config.get(_k)
-        if isinstance(_v, list):
-            _preflight_inputs.extend(_v)
-        elif _v:
-            _preflight_inputs.append(_v)
-    preflight_disk_check(config, output_dir, ray_temp_dir, _preflight_inputs)
+    # Disk space. Trace pickles carrying a frozen copy of the master bias (saved before
+    # Bias/biasCache.py) are slimmed first: bias-first loads them and the estimate uses
+    # their size. Then every volume the run writes to is checked; with too little room
+    # the user is asked whether to go on (Utils/diskSpace.py).
+    run_folders = disk_folders(config, output_dir, ray_temp_dir)
+    if os.path.isdir(run_folders['traces']):
+        for _path, _old, _new in slim_bloated_traces(run_folders['traces']):
+            print(f"Slimmed {os.path.basename(_path)}: {_old / 1e9:.2f} GB -> "
+                  f"{_new / 1e9:.2f} GB (it carried a copy of the master bias)")
+
+    def _disk_gate():
+        if config.get('skip_disk_check'):
+            print("Disk-space check skipped (skip_disk_check = true).")
+            return
+        with reporter.paused():
+            try:
+                check_run_disk_space(config, run_folders)
+            except DiskSpaceError as exc:
+                logger.error(f"Disk space: {exc}")
+                _run_state['message'] = str(exc)[:120]
+                raise SystemExit(1)
+
+    _disk_gate()
 
     # Start THE one Ray session for this run with the canonical config (object store
     # clamped to 30% RAM, py_modules bundle uploaded once, temp/spill in the owned
@@ -2576,6 +2728,9 @@ def main(config_path):
             for _raw, (_role, _why) in sorted(redo_summary['stale'].items()):
                 print(f"  out of date: {os.path.basename(_raw)} ({_role}): {_why}")
             reporter.note(_redo_line)
+        if redo_summary.get('stale'):
+            # The moved products are still on disk, and these frames now need space again.
+            _disk_gate()
 
     bias_corrected_of = {}
 
@@ -2806,13 +2961,19 @@ def main(config_path):
                                 print(f"RESUME: reusing extracted night arc for {_ch}: {_base}")
                             else:
                                 print(f"Extracting night arc for {_ch}: {os.path.basename(_f)}")
-                                run_extraction(_f, arc_extract_dir,
-                                               slow_bias=slow_bias_file,
-                                               fast_bias=fast_bias_file,
-                                               trace_dir=final_trace_dir,
-                                               mastercalib_trace_dir=CALIB_DIR,
-                                               remove_cosmic_rays=False,
-                                               edge_bias=edge_bias_cfg)
+                                try:
+                                    run_extraction(_f, arc_extract_dir,
+                                                   slow_bias=slow_bias_file,
+                                                   fast_bias=fast_bias_file,
+                                                   trace_dir=final_trace_dir,
+                                                   mastercalib_trace_dir=CALIB_DIR,
+                                                   remove_cosmic_rays=False,
+                                                   edge_bias=edge_bias_cfg)
+                                except Exception as _arc_exc:
+                                    if is_disk_full(_arc_exc):
+                                        raise
+                                    logger.warning(f"Night-arc extraction for {_ch} failed: "
+                                                   f"{_arc_exc}", exc_info=True)
                             if os.path.exists(_pkl):
                                 line_source[_ch] = _pkl
                             else:
@@ -3399,6 +3560,7 @@ def main(config_path):
             # Optionally run sky subtraction, populating the .sky attribute on each fiber
             sky_subtract = config.get('sky_subtract', True)
             rss_input_file = savefile
+            sky1d_file = None
             if sky_subtract:
                 print(f"Running sky subtraction on {os.path.basename(savefile)} "
                       f"(selection='{sky_selection_method}', "
@@ -3508,6 +3670,8 @@ def main(config_path):
                             except OSError:
                                 pass
                         except Exception as _nf_err:
+                            if is_disk_full(_nf_err):
+                                raise
                             import traceback as _tb
                             print(f"WARNING: NOFLAT extraction failed: {_nf_err}")
                             _tb.print_exc()
@@ -3544,9 +3708,10 @@ def main(config_path):
             gc.collect()
 
             # Extraction pkls (~GB each) are removed once the RSS is written, which carries
-            # everything downstream needs and is the resume anchor. Set
-            # save_extraction_pkl = true to keep them for inspection.
-            for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file],
+            # everything downstream needs and is the resume anchor. That includes the sky1d
+            # pkl when the line-refined one superseded it. Set save_extraction_pkl = true to
+            # keep them for inspection.
+            for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file, sky1d_file],
                                                 config.get('save_extraction_pkl', False)):
                 print(f"Removed extraction pkl (save_extraction_pkl=false): "
                       f"{os.path.basename(_pkl)}")
@@ -3681,6 +3846,8 @@ def main(config_path):
                         print(f"Fibre flat computed (twilight + lamp method; "
                               f"colours: {sorted(used_colors)})")
                     except Exception as e:
+                        if is_disk_full(e):
+                            raise
                         print(f"WARNING: Twilight reduction failed: {e}")
                         logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
                         print("Falling back to lamp-only fibre flat")
@@ -3876,6 +4043,10 @@ def main(config_path):
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
         _run_state['message'] = f"{type(e).__name__}: {e}"[:120]
+        if is_disk_full(e):
+            _run_state['message'] = disk_full_message(
+                [run_folders['output'], run_folders['traces'], run_folders['extractions'],
+                 run_folders['ray']], ray_folders=(run_folders['ray'],))[:120]
     finally:
         # Restore the terminal before teardown so the completion line renders normally.
         _restore_terminal()

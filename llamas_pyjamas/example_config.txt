@@ -132,6 +132,9 @@ science_files = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/L
 #optional output directories for the trace generation and extraction files
 #If these directories do not already exist they will be created at the time of processing
 
+# Root of all outputs (default: <folder of the first science file>/reduced)
+#output_dir = path/to/night/reduced
+
 trace_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/traces
 extraction_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/extractions
 cube_output_dir = /Users/slh/Documents/Projects/Magellan_dev/LLAMAS/testing/fresh_test/cubes
@@ -155,12 +158,12 @@ ray_num_cpus = 8
 # Also remove stale /tmp/ray/session_* dirs at startup; may affect other Ray apps (default: false).
 # prune_ray_sessions = false
 #
-# --- Pre-flight disk-space gate (optional) ----------------------------------
-# Minimum free space in GB on the temp and output volumes to start (default 5).
+# --- Pre-flight disk-space check (optional) ---------------------------------
+# GB kept free on each output disk (default 5; Ray keeps 5% of its scratch disk free).
 # min_free_gb = 5
-# Multiplier on total input size used to warn about output size (default 5).
-# disk_estimate_factor = 5
-# Skip the disk-space check (default false).
+# Safety factor on the estimated disk use (default 1.2).
+# disk_margin = 1.2
+# Skip the disk-space check and its prompt (default false).
 # skip_disk_check = false
 #
 # Seconds to wait for each input file to respond before aborting, e.g. an offline

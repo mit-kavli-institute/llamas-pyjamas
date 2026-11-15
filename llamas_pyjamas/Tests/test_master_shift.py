@@ -226,7 +226,7 @@ def write_flat(path, cameras):
     return str(path)
 
 
-def test_read_flat_cameras_matches_the_tracer(tmp_path):
+def test_read_flat_cameras_matches_the_tracer_and_writes_nothing(tmp_path):
     data = np.arange(64 * 32, dtype=float).reshape(64, 32)
     path = write_flat(tmp_path / 'flat_mef.fits', [('red', 1, 'A', data),
                                                    ('blue', 1, 'A', data),
@@ -236,6 +236,7 @@ def test_read_flat_cameras_matches_the_tracer(tmp_path):
     np.testing.assert_array_equal(cams[('blue', '1', 'A')][0], data[::-1, ::-1])
     assert not cams[('red', '1', 'A')][2] and cams[('red', '2', 'B')][2]
     assert set(read_flat_cameras(path, 'blue')) == {('blue', '1', 'A')}
+    assert sorted(os.listdir(tmp_path)) == ['flat_mef.fits']
 
 
 @pytest.fixture(scope='module')

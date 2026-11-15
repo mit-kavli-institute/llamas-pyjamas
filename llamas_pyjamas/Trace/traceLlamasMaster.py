@@ -21,7 +21,6 @@ Example:
 """
 import os
 import sys
-import tempfile
 from   astropy.io import fits
 import scipy
 import numpy as np
@@ -39,7 +38,7 @@ from pypeit.bspline.bspline import bspline
 import pickle, h5py
 import logging
 import ray
-from llamas_pyjamas.Utils.rayManager import get_ray_temp_dir, init_ray
+from llamas_pyjamas.Utils.rayManager import init_ray
 from typing import List, Set, Dict, Tuple, Optional
 import multiprocessing
 import argparse
@@ -54,6 +53,10 @@ from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.constants import idx_lookup
 from llamas_pyjamas.Bias import (BiasNotFoundError, BiasReadModeError, BiasCameraMissingError,
                                  generate_fallback_bias_hdu, match_camera_hdu)
+# The master-bias cache lives outside this module on purpose: this module is pickled by
+# value, so any data held in its globals is written into every saved trace (see
+# Bias/biasCache.py).
+from llamas_pyjamas.Bias.biasCache import load_master_bias_hdus as _load_bias_hdus_cached
 
 logger = logging.getLogger(__name__)
 
@@ -69,36 +72,6 @@ class TraceCombError(RuntimeError):
 
 
 LOG = []
-
-
-# Cache of processed master-bias HDUs, keyed by absolute path (+ mtime). A
-# master bias is ~800 MB and _grab_bias_hdu is called once per camera per frame,
-# so re-processing it each call is very slow. Holds at most the slow + fast
-# master bias. Per-process (Ray workers get their own).
-_BIAS_HDU_CACHE = {}
-
-
-def _load_bias_hdus_cached(path):
-    """process_fits_by_color(path) with a per-path cache keyed on mtime."""
-    try:
-        key = os.path.abspath(path)
-        mt = os.path.getmtime(path) if os.path.exists(path) else None
-    except Exception:
-        key, mt = str(path), None
-    hit = _BIAS_HDU_CACHE.get(key)
-    if hit is not None and hit[0] == mt:
-        return hit[1]
-    _tmp_fd, _tmp_path = tempfile.mkstemp(suffix='.fits', prefix='llrs_bias_',
-                                          dir=get_ray_temp_dir())
-    os.close(_tmp_fd)
-    try:
-        bias_hdus, _ = process_fits_by_color(path, output_file=_tmp_path)
-    finally:
-        if os.path.exists(_tmp_path):
-            os.remove(_tmp_path)
-    if bias_hdus is not None:
-        _BIAS_HDU_CACHE[key] = (mt, bias_hdus)
-    return bias_hdus
 
 
 def _grab_bias_hdu(bench=None, side=None, color=None, benchside=None,

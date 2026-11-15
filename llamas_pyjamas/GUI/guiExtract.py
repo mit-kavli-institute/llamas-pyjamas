@@ -636,7 +636,13 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                                   the package defaults. Stamped as CRID/CRCHAN.
 
     Returns:
-    Tuple[str, int]: (extraction_file_path, number_of_placeholder_extensions)
+    tuple: (extraction_file, white_light_file): the extraction pickle's file name (in
+    ``output_dir``) and the white-light image written next to it.
+
+    Raises:
+    Any error from the extraction, after logging it. A full disk surfaces as Ray's
+    ``OutOfDiskError`` / ``ObjectStoreFullError`` (see ``Utils/diskSpace.is_disk_full``);
+    it used to be swallowed into a ``None`` return, which callers then failed to unpack.
     """
     start_time = time.perf_counter()  # Start timer
 
@@ -897,8 +903,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             print(f"{'='*60}\n")
 
     except Exception as e:
-        traceback.print_exc()
-        return
+        logger.error(f"Extraction of {os.path.basename(str(file))} failed: "
+                     f"{type(e).__name__}: {e}")
+        raise
 
     end_time = time.perf_counter()  # End timer
     elapsed = end_time - start_time

@@ -239,6 +239,25 @@ built the 2026 masters. They used to be in
 `Utils/utils.py`. They moved so they can import the tracer at module top: the tracer
 imports `Utils`, so importing it from `utils.py` was circular.
 
+### Trace pickles carry the tracer's module
+
+`llamas_pyjamas/__init__.py` registers `traceLlamasMaster` with
+`cloudpickle.register_pickle_by_value`. Every saved trace therefore includes the tracer's
+code, together with any module-level data its methods reach. So **no data may live in
+`traceLlamasMaster`'s globals**.
+
+The master-bias cache used to live there, and it ended up in every trace saved after
+bias-first had filled it:
+- each green shifted-master trace was 1.73 GB instead of 0.12 GB;
+- every extraction carries its traces, so extractions grew from about 3 GB to 14 GB.
+
+The cache now lives in `Bias/biasCache.py`, which is pickled by reference.
+
+At the start of a run, `traceValidation.slim_bloated_traces` re-saves any current-format
+trace over 400 MB that still carries the cache, with its data unchanged. Byte copies of a
+packaged master and old-format traces are left as they are. The packaged
+`mastercalib/` traces each still carry an older 185 MB copy of a bias.
+
 `from llamas_pyjamas.Trace import ...` gives the current tracer (`traceLlamasMaster`).
 The v1.0.0 tracer (`traceLlamasMulti`) is only reachable by its module path.
 
