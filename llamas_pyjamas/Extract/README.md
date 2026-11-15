@@ -49,3 +49,24 @@ extractor.saveSpectra()
 ```
 
 Note: The parallel processing features using Ray are currently under development and not yet available for production use.
+
+## Horne (optimal) extraction and masked pixels
+
+`method = 'horne'` (alias `optimal`) uses the bspline profile `P` of each fibre:
+`F = Σ_valid(P·f/V) / Σ_valid(P²/V)`.
+
+**`P` is normalised to 1 over the whole aperture in every column.** Pixels that are NaN or
+otherwise invalid then drop out of both sums, and `F` stays unbiased.
+
+Before 2026-11-14, `P` was renormalised over the valid pixels only. That returned `F` times
+the valid share of the profile: a column with its peak pixel masked came out ~30% low.
+
+**Masked pixels raise the error.** The information they carried is lost, so each column's
+variance is multiplied by `Σ_all(P²/V) / Σ_valid(P²/V)`. This ratio is 1 when nothing is
+masked. The error model itself (photon plus read noise over the effective aperture) is
+unchanged. `Tests/test_horne_masking.py` checks both the flux and the error growth.
+
+The tracer can also leave `P = 0` on aperture pixels whose flat value was an outlier. On
+20261015_16 this removed no measurable profile share (0.000% on the green 4B, green 1A,
+red 1A and blue 3B traces), so the traces are unchanged.
+

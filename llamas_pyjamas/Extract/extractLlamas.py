@@ -208,6 +208,9 @@ class ExtractLlamas:
 
             self.counts     = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.counts_err = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            # Horne only: per column, the variance inflation from pixels masked inside the
+            # aperture, sum_all(P^2/V) / sum_valid(P^2/V) (1 when nothing is masked).
+            horne_var_ratio = np.ones(shape=(trace.nfibers, trace.naxis1))
             self.sky        = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.sensfunc   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.flux       = np.zeros(shape=(trace.nfibers,trace.naxis1))
@@ -261,24 +264,32 @@ class ExtractLlamas:
                 if method == 'horne':
                     # Horne (1986) optimal extraction: variance-weighted,
                     # flux-conserving, mask-aware.
-                    #   F = sum(P*f/V) / sum(P^2/V),  Var(F) = 1/sum(P^2/V)
-                    # with the bspline profile P renormalised to sum to 1 per
-                    # column over the VALID pixels, so missing/bad pixels
-                    # renormalise the profile instead of biasing the flux.
+                    #   F = sum_valid(P*f/V) / sum_valid(P^2/V)
+                    # with the bspline profile P normalised to sum to 1 per column over
+                    # the WHOLE aperture. Masked or non-finite pixels then simply drop
+                    # out of both sums and F stays unbiased. (Renormalising P over the
+                    # valid pixels only, as before 2026-11-14, returned F x the valid
+                    # share of the profile.) The information they carried is lost: the
+                    # column's variance grows by sum_all(P^2/V) / sum_valid(P^2/V).
                     ys, xs = np.where(self.trace.fiberimg == ifiber)
                     if ys.size == 0:
                         logger.warning("No profile pixels for fiber #{}".format(ifiber))
                         continue
                     P = self.trace.profimg[ys, xs]
                     fpix = self.frame[ys, xs]
-                    good = np.isfinite(fpix) & np.isfinite(P) & (P > 0)
-                    ys, xs, P, fpix = ys[good], xs[good], P[good], fpix[good]
+                    inprof = np.isfinite(P) & (P > 0)
+                    ys, xs, P, fpix = ys[inprof], xs[inprof], P[inprof], fpix[inprof]
                     if xs.size == 0:
                         continue
-                    # per-column profile normalisation over valid pixels
+                    # per-column profile normalisation over the whole aperture
                     colP = np.zeros(_nx)
                     np.add.at(colP, xs, P)
                     Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
+                    valid = np.isfinite(fpix)
+                    Pn_all, xs_all = Pn, xs
+                    xs, Pn, fpix = xs[valid], Pn[valid], fpix[valid]
+                    if xs.size == 0:
+                        continue
 
                     # Pass 1: profile-weighted flux with constant variance,
                     # used only to build the MODEL-based variance. Weighting by
@@ -305,6 +316,10 @@ class ExtractLlamas:
                     ok = den > 0
                     self.counts[ifiber, :] = np.where(ok, num / np.where(ok, den, 1.0), 0.0)
                     self.counts_err[ifiber, :] = np.where(ok, 1.0 / np.sqrt(np.where(ok, den, 1.0)), 0.0)
+                    den_all = np.zeros(_nx)
+                    np.add.at(den_all, xs_all,
+                              Pn_all ** 2 / (_rn2 + np.clip(F0s[xs_all] * Pn_all, 0, None)))
+                    horne_var_ratio[ifiber, :] = np.where(ok, den_all / np.where(ok, den, 1.0), 1.0)
 
                 elif method == 'legacy':
                     # LEGACY profile-weighted mean (NOT Horne): kept for
@@ -376,6 +391,9 @@ class ExtractLlamas:
             aperture_pix = effective_aperture_pix(_method, _half, self.trace)
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            # Pixels masked inside a Horne aperture carry no information: the column's
+            # flux is measured from the rest, with correspondingly larger variance.
+            var_adu = var_adu * horne_var_ratio
             # The subtracted dark is no longer in the counts, but its shot noise and
             # the master dark's own noise are still in the data.
             if dark is not None and dark.shape == self.frame.shape:

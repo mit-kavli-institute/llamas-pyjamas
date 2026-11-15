@@ -132,6 +132,7 @@ SHAs are filled in after each phase.
 | A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
 | B1 | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
 | B2 | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
+| B3 | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -201,6 +202,16 @@ SHAs are filled in after each phase.
 - Cosmic rays in lamp flats are now rejected by the combine, not by L.A.Cosmic.
 - A comma list in `{colour}_flat_file` gives the set explicitly, and
   `lamp_flat_combine = false` turns combining off.
+
+**B3: Horne normalisation.**
+- `Extract/extractLlamas.py` normalises the profile over the whole aperture. It used to
+  renormalise over the valid pixels only, which returned F × the valid profile share, biased
+  low wherever pixels were NaN or masked.
+- Each column's variance now grows by the information lost to masking:
+  `Σ_all(P²/V) / Σ_valid(P²/V)`.
+- `Tests/test_horne_masking.py`: the old code fails 3 of its 4 cases.
+- Measured on 20261015_16 traces, the tracer zeroes no profile pixels (0.000%), so the
+  tracer is unchanged.
 
 ## Not committed (left untracked on purpose)
 
