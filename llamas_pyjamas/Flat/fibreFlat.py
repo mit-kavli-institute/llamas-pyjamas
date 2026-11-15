@@ -55,7 +55,7 @@ from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
     MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
 from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
 from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
-from llamas_pyjamas.Utils.recipes import CalibrationRecipeError  # noqa: E402
+from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, stamp_recipe  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -296,6 +296,20 @@ def _ti_header(ti_values, n_fallback=0):
     return cards
 
 
+def _provenance(smooth_models_file, recipe):
+    """Primary-header cards for a corrections file: its recipe and the smooth models used.
+
+    ``recipe`` is ``twilight`` (T_i from a twilight) or ``lamp_flat`` (lamp only).
+    ``SMRCPHS`` is the smooth models' own recipe hash, so a corrections file made from
+    out-of-date smooth models can be recognised.
+    """
+    cards = stamp_recipe({}, recipe)
+    cards['SMTHFILE'] = os.path.basename(smooth_models_file)
+    cards['SMRCPHS'] = (str(fits.getheader(smooth_models_file, 0).get('RCPHASH', 'none')),
+                        'RCPHASH of the smooth models used')
+    return cards
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Branch B: Lamp-only fallback
 # ──────────────────────────────────────────────────────────────────────────────
@@ -407,8 +421,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
     # Write corrections FITS
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(corrections, output_path, method='lamp_only',
-                            header_extra={'SMTHFILE': os.path.basename(
-                                smooth_models_file)})
+                            header_extra=_provenance(smooth_models_file, 'lamp_flat'))
     return output_path
 
 
@@ -1091,7 +1104,7 @@ def _compute_lamp_benchside_offsets(models):
 
 def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                                 output_dir, integration_range=None,
-                                poly_order=None):
+                                poly_order=None, header_extra=None):
     """Compute fibre-to-fibre flat using twilight spatial + lamp wavelength shape.
 
     For each benchside:
@@ -1438,11 +1451,12 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(
         corrections, output_path, method='twilight',
-        header_extra={'SMTHFILE': os.path.basename(smooth_models_file),
+        header_extra={**_provenance(smooth_models_file, 'twilight'),
                       'LAMPONLY': (lamp_fallback_str,
                                    'benchsides using lamp-only T_i fallback'),
                       'NTWIBS': (len(twilight_benchsides),
-                                 'n benchsides using twilight T_i')},
+                                 'n benchsides using twilight T_i'),
+                      **(header_extra or {})},
         lamp_only_benchsides=lamp_only_benchsides)
     return output_path
 

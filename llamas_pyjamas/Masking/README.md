@@ -4,6 +4,13 @@
 `guiExtract.process_trace` on each camera. That happens after bias, dark, edge DC and the pixel
 flat, and before extraction.
 
+**Only science, flux-standard and sky frames are cleaned.** Lamp flats, twilights and arcs
+never are. On a lamp flat, L.A.Cosmic takes the bright, sharp fibre cores for cosmic rays and
+lowers them. Up to 460,000 pixels per green or blue detector were changed on 20261015_16. This
+left about 9,400 false narrow dips in the green fibre flat, and each one becomes a fake emission
+bump in the science. Cosmic rays in calibration frames are rejected by combining exposures
+instead (`Flat/README.md`).
+
 ## Settings
 
 | Config key | Default | Meaning |

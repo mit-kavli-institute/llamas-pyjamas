@@ -3841,6 +3841,10 @@ def main(config_path):
                                 'fibre_flat_integration_range'),
                             poly_order=config.get(
                                 'fibre_flat_poly_order', None),
+                            header_extra={
+                                f'TWIFIL{c[0].upper()}': (os.path.basename(f),
+                                                          f'{c} twilight flat')
+                                for f, cs in files_to_colors.items() for c in cs},
                         )
                         del twi_extractions, merged_ext, merged_meta
                         gc.collect()

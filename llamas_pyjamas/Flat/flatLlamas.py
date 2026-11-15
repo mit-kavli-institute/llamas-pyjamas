@@ -17,6 +17,7 @@ import pickle
 from datetime import datetime
 from scipy.ndimage import median_filter, gaussian_filter
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 
 
 # Default per-channel signal thresholds for the simple pixel flat method
@@ -679,6 +680,9 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     logger.info("Step 5: Generating 2D Pixel-to-Pixel Sensitivity Maps")
     
     pixel_map_results = threshold_processor.generate_thresholds()
+    stamp_lamp_flat_products(
+        [threshold_processor.map_filename],
+        {'red': red_flat_file, 'green': green_flat_file, 'blue': blue_flat_file})
     
     # Ensure the results dictionary points to the newly created FITS file
     results = {
@@ -690,6 +694,24 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     }
 
     return results
+
+
+def stamp_lamp_flat_products(paths, flat_files):
+    """Record the lamp-flat recipe and input flats in the primary header of each product.
+
+    ``flat_files`` is ``{channel: path}``. Products are made with no cosmic-ray cleaning
+    (recipe ``lamp_flat``), recorded as CRCLEAN = False.
+    """
+    for path in paths:
+        if not path or not os.path.exists(path):
+            continue
+        with fits.open(path, mode='update') as hdul:
+            header = hdul[0].header
+            stamp_recipe(header, 'lamp_flat')
+            header['CRCLEAN'] = (False, 'Lamp flat not cosmic-ray cleaned')
+            for channel, flat in sorted(flat_files.items()):
+                header[f'FLATFIL{channel[0].upper()}'] = (
+                    os.path.basename(str(flat)) if flat else 'none', f'{channel} lamp flat')
 
 
 def smooth_model_table(ext_obj, smooth_models):
@@ -1048,6 +1070,10 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     except Exception as _um_exc:
         logger.warning(f"Failed to write unillum_mask.fits ({_um_exc}); "
                        f"edge-bias Tier 2 will fall back to stripes only")
+
+    stamp_lamp_flat_products(
+        [pixel_map_path, smooth_models_path, unillum_mask_path],
+        {'red': red_flat_file, 'green': green_flat_file, 'blue': blue_flat_file})
 
     logger.info(f"Pixel flat processing complete: {pixel_map_path}")
     logger.info(f"Smooth models saved to: {smooth_models_path}")

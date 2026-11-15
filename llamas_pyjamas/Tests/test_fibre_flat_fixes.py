@@ -5,6 +5,7 @@ extractions are live-indexed, so above fibre 49 a row number and a physical fibr
 differ by one.
 """
 
+import ast
 import os
 from types import SimpleNamespace
 
@@ -15,12 +16,14 @@ from astropy.io import fits
 from llamas_pyjamas.File.llamasRSS import RSSStageError
 from llamas_pyjamas.Flat.fibreFlat import (apply_fibre_flat_to_rss, compute_fibre_flat_twilight,
                                            _load_smooth_models)
-from llamas_pyjamas.Flat.flatLlamas import smooth_model_table, _write_smooth_models_fits
+from llamas_pyjamas.Flat import flatProcessing
+from llamas_pyjamas.Flat.flatLlamas import (smooth_model_table, stamp_lamp_flat_products,
+                                            _write_smooth_models_fits)
 from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, flux_calibrate_file
 from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
 from llamas_pyjamas.Tests.rss_fixtures import N_WAVE as RSS_NWAVE, write_rss
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids, live_row_index
-from llamas_pyjamas.Utils.recipes import CalibrationRecipeError
+from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, check_recipe, recipe_hash
 
 N_WAVE = 400
 N_LIVE = 297
@@ -180,3 +183,37 @@ def test_flux_calibration_needs_the_same_ffver(tmp_path, sens_ffver, ok):
     else:
         with pytest.raises(SensfuncStageError, match='FFVER'):
             flux_calibrate_file(path, sens, apply_extinction=False)
+
+
+# --- A2: no cosmic-ray cleaning on lamp flats ------------------------------------------
+
+def test_lamp_flat_extraction_never_cleans_cosmic_rays():
+    """Every process_trace call in Flat/flatProcessing.py passes remove_cosmic_rays=False."""
+    tree = ast.parse(open(flatProcessing.__file__).read())
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == 'remote'
+             and getattr(n.func.value, 'id', None) == 'process_trace']
+    assert calls
+    for call in calls:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert 'remove_cosmic_rays' in kw and kw['remove_cosmic_rays'].value is False
+
+
+def test_flat_products_record_the_lamp_flat_recipe(tmp_path):
+    path = write_models(tmp_path)
+    stamp_lamp_flat_products([path], {'red': '/x/red.fits', 'green': '/x/g.fits',
+                                      'blue': None})
+    header = fits.getheader(path, 0)
+    assert check_recipe(header, 'lamp_flat')
+    assert header['CRCLEAN'] is False and header['FLATFILG'] == 'g.fits'
+    assert header['FLATFILB'] == 'none'
+
+
+def test_corrections_record_their_twilight_and_smooth_models(tmp_path):
+    models = write_models(tmp_path)
+    stamp_lamp_flat_products([models], {'green': 'flat.fits'})
+    corr = compute_fibre_flat_twilight(twilight_extraction(), models, str(tmp_path),
+                                       header_extra={'TWIFILG': 'twi.fits'})
+    header = fits.getheader(corr, 0)
+    assert check_recipe(header, 'twilight')
+    assert header['SMRCPHS'] == recipe_hash('lamp_flat') and header['TWIFILG'] == 'twi.fits'

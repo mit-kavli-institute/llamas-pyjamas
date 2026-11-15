@@ -61,6 +61,20 @@ twice: the sky scatter within each benchside went from about 2% to 9–19%.
 The `_FF` products record this as `FFVER = 2`. An RSS without `THRUPUT` is refused. A sensfunc
 must come from a standard at the same `FFVER` as the science (`Flux/fluxCalibrate.py`).
 
+### Provenance of the flat products
+
+`pixel_maps.fits`, `flat_smooth_models.fits` and `unillum_mask.fits` carry the following in
+their primary header:
+- the `lamp_flat` recipe stamp (`RECIPE`, `RCPHASH`, `PIPEVER`, `FIBIDS`; see
+  `Utils/recipes.py`);
+- `CRCLEAN = False`: lamp flats are never cosmic-ray cleaned;
+- `FLATFILR`/`FLATFILG`/`FLATFILB`: the flat used for each colour.
+
+`fibre_flat_corrections.fits` carries:
+- the `twilight` recipe stamp, or `lamp_flat` for the lamp-only fallback;
+- `TWIFILR`/`TWIFILG`/`TWIFILB`: the twilight used for each colour;
+- `SMRCPHS`: the recipe hash of the smooth models it was made from.
+
 ### Fibre ids
 
 **Every per-fibre table is keyed by physical fibre id.** This covers `FIBER_ID` in

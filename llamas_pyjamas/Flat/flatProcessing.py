@@ -251,7 +251,10 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
-        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+        # No cosmic-ray cleaning: L.A.Cosmic takes bright, sharp fibre cores for cosmic rays
+        # and lowers them, leaving false dips in the pixel flat and the fibre flat.
+        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal',
+                                      use_bias=masterbiasfile, remove_cosmic_rays=False)
         futures.append(future)
     
     _extractions = ray.get(futures)

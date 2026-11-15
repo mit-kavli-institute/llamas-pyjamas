@@ -127,6 +127,7 @@ SHAs are filled in after each phase.
 |---|---|---|---|
 | R0 + A0 | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
 | A1 | Apply the fibre throughput once: divide the RSS by C_i over the throughput it already removed | See below. | On R0 + A0. Needs a clobber re-run; sensfuncs must be rebuilt from re-reduced standards. |
+| A2 | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -147,6 +148,14 @@ SHAs are filled in after each phase.
 - `_FF` files carry `FFVER = 2`, and an RSS without `THRUPUT` is refused.
 - Flux calibration refuses a sensfunc whose `ffver` differs from the science's. CubeViewer
   records `ffver` when it builds a sensfunc.
+
+**A2: no cosmic-ray cleaning on lamp flats.**
+- `Flat/flatProcessing.py` passes `remove_cosmic_rays=False`. Before, `process_trace`
+  defaulted to cleaning, so L.A.Cosmic lowered bright green and blue fibre cores. That left
+  about 9,400 false dips in the green flat (a fake-emission risk), and 1.8% of green
+  pixel-flat pixels at the 0.90 clip floor.
+- The flat products carry the `lamp_flat` recipe, `CRCLEAN=False` and `FLATFIL<c>`.
+- The corrections file carries the `twilight` recipe, `TWIFIL<c>` and `SMRCPHS`.
 
 ## Not committed (left untracked on purpose)
 
