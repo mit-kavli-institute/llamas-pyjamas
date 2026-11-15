@@ -223,9 +223,11 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
             wavelength = wave_data
     
     # Convert to CRR format (transpose from LLAMAS [n_wave, n_fiber] to CRR [n_fiber, n_wave])
-    flux_crr = flux_data.T  # Shape: (n_fiber, n_wave)
-    error_crr = error_data.T
     mask_crr = mask_data.T
+    # A masked sample has zero weight in CRR, but 0 x NaN is still NaN in its matrix products,
+    # so one missing sample (e.g. a cosmic-ray gap) would blank its whole wavelength slice.
+    flux_crr = np.where(mask_crr, flux_data.T, 0.0)  # Shape: (n_fiber, n_wave)
+    error_crr = error_data.T
     
     # Convert error to inverse variance
     ivar_crr = np.zeros_like(error_crr)

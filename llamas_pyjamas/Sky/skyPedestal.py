@@ -26,6 +26,8 @@ import logging
 import numpy as np
 from scipy.ndimage import median_filter
 
+from llamas_pyjamas.Utils.maskedSums import row_total
+
 logger = logging.getLogger(__name__)
 
 # Defaults (overridable via the pipeline config).
@@ -232,9 +234,9 @@ def _blank_mask_frac(sci, pct):
     if tp is not None:
         tp = np.asarray(tp, float)
         with np.errstate(divide="ignore", invalid="ignore"):
-            bright = np.nansum(np.where(tp[:, None] > 0, counts / tp[:, None], np.nan), axis=1)
+            bright = np.nan_to_num(row_total(np.where(tp[:, None] > 0, counts / tp[:, None], np.nan)))
     else:
-        bright = np.nansum(counts, axis=1)
+        bright = np.nan_to_num(row_total(counts))
     finite = np.isfinite(bright) & (bright != 0)
     dead = getattr(sci, "dead_fibers", None) or []
     for d in dead:
@@ -258,9 +260,9 @@ def _blank_mask(sci, n_fibres):
     if tp is not None:
         tp = np.asarray(tp, float)
         with np.errstate(divide="ignore", invalid="ignore"):
-            bright = np.nansum(np.where(tp[:, None] > 0, counts / tp[:, None], np.nan), axis=1)
+            bright = np.nan_to_num(row_total(np.where(tp[:, None] > 0, counts / tp[:, None], np.nan)))
     else:
-        bright = np.nansum(counts, axis=1)
+        bright = np.nan_to_num(row_total(counts))
     finite = np.isfinite(bright) & (bright != 0)
     dead = getattr(sci, "dead_fibers", None) or []
     for d in dead:
@@ -459,7 +461,7 @@ def apply_pedestal_file(sky1d_file, config):
 def _rss_blank_mask(counts_cam, pct):
     """Array-based blank-fibre mask for one camera's RSS block: faintest ``pct`` percent of live
     fibres (brightness = summed counts; RSS carries no throughput, matching the pkl tp-absent path)."""
-    bright = np.nansum(np.asarray(counts_cam, float), axis=1)
+    bright = np.nan_to_num(row_total(np.asarray(counts_cam, float)))
     finite = np.isfinite(bright) & (bright != 0)
     if not finite.any():
         return finite

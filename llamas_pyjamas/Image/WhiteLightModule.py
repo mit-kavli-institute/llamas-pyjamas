@@ -25,6 +25,7 @@ from scipy.spatial import cKDTree
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 from llamas_pyjamas.Utils.utils import find_trace_pickle
+from llamas_pyjamas.Utils.maskedSums import row_total
 from llamas_pyjamas.QA import plot_ds9
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, BIAS_DIR
 from astropy.io import fits
@@ -441,8 +442,9 @@ def WhiteLight(extraction_array: list, metadata: list, ds9plot=True,
                 continue
 
 
-            # thisflux = np.nansum(extraction.counts[ifib])
-            thisflux = np.nansum(counts[ifib])
+            # A missing sample (cosmic-ray gap, NaN) is left out, not counted as zero; a fibre
+            # with no data at all stays 0 as before.
+            thisflux = np.nan_to_num(row_total(counts[ifib]))
             flux = np.append(flux, thisflux)
             xdata = np.append(xdata,x)
             ydata = np.append(ydata,y)
@@ -1442,8 +1444,8 @@ def WhiteLightHex(extraction_file, ds9plot=False, median=False, mask=None,
                 logger.error(traceback.format_exc())
                 continue
 
-            # Get fiber value
-            thisflux = np.nansum(counts[ifib])
+            # Get fiber value (missing samples left out, not counted as zero)
+            thisflux = np.nan_to_num(row_total(counts[ifib]))
             if mask is not None and len(mask) > 0:
                 thisflux = thisflux * (1 - mask[ifib])
                 

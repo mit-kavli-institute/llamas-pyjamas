@@ -276,6 +276,7 @@ its SHA with `git log --oneline --grep "<subject>"`.
 | Step | Subject | What it does | Depends on / products |
 |---|---|---|---|
 | C1 | Register cosmic-ray MASK bits and label cosmic-ray gaps in the RSS | `MASK_CR_PARTIAL` (128, informational) and `MASK_CR_MISSING` (256, bad); `no_bridge_mask` (`MASK_NO_BRIDGE_BITS`); `generate_rss` labels a NaN sample that carries 256 as a cosmic-ray gap instead of `MASK_NO_COUNTS`; primary cards `CRMISS`, `CRPART`, `CRMISSF`; MASK-bit table in `File/README.md`; fixture `write_rss(cr_missing=...)`. | No product change until C4 (nothing sets the bits yet). |
+| C2 | Leave missing samples out of extraction-pickle consumers instead of counting them as zero | `Utils/maskedSums.row_total` (mean of finite × N) and `interp_missing` (line detection only). `skyModel_1d`'s sky-fibre brightness used `np.sum`, so one NaN sample dropped a fibre and a camera could fall back to the channel-global sky; sky-line refinement, waveQA, the white light and the sky/pedestal blank-fibre tallies no longer read a gap as a dip or a zero. The CRR adapter zeroes masked flux (0×NaN blanked whole slices); note it already fails on the current RSS orientation. New `Tests/test_cr_missing_consumers.py`; a gap stays NaN with its bit, without spreading, through ff, ff_skysub and FLAM. | Identical output while no sample is NaN; ready for C4. |
 
 ## Not committed (left untracked on purpose)
 

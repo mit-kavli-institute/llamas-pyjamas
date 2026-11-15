@@ -16,6 +16,7 @@ import logging
 import numpy as np
 
 from llamas_pyjamas.Sky.skySelect import SkyMask, build_sky_mask
+from llamas_pyjamas.Utils.maskedSums import row_total
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ def _decode_column(col):
 
 
 def white_light(counts: np.ndarray) -> np.ndarray:
-    """Per-fibre white-light brightness proxy = nansum over wavelength.
+    """Per-fibre white-light brightness proxy = total over wavelength, with missing (NaN)
+    samples left out rather than counted as zero (:func:`~llamas_pyjamas.Utils.maskedSums.row_total`).
 
     Parameters
     ----------
@@ -46,7 +48,7 @@ def white_light(counts: np.ndarray) -> np.ndarray:
         ``(n_fiber,)`` white-light flux; non-finite fibres map to ``-inf`` so
         they sort to the faint (rejected) end.
     """
-    wl = np.nansum(counts, axis=1)
+    wl = row_total(counts)
     wl[~np.isfinite(wl)] = -np.inf
     return wl
 

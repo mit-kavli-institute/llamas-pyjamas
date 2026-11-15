@@ -8,6 +8,7 @@ from llamas_pyjamas.Extract.extractLlamas import save_extractions
 import llamas_pyjamas.Arc.arcLlamas as arc
 import llamas_pyjamas.Sky.skySelect as skySelect
 from llamas_pyjamas.QA import plot_ds9
+from llamas_pyjamas.Utils.maskedSums import interp_missing, row_total
 from llamas_pyjamas.config import OUTPUT_DIR, CALIB_DIR, LUT_DIR
 from pypeit.core.fitting import iterfit, robust_fit
 from pypeit.core.wavecal.wvutils import arc_lines_from_spec
@@ -95,10 +96,10 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
 
             for tf in range(t_lo, t_hi):
                 xs = scispec[fits_ext].xshift[tf, :]
-                ct = np.nan_to_num(scispec[fits_ext].counts[tf, :], nan=0.0,
-                                   posinf=0.0, neginf=0.0)
-                template_xshift = np.append(template_xshift, xs)
-                template_counts = np.append(template_counts, ct)
+                ct = scispec[fits_ext].counts[tf, :]
+                ok = np.isfinite(xs) & np.isfinite(ct)      # missing samples are left out
+                template_xshift = np.append(template_xshift, xs[ok])
+                template_counts = np.append(template_counts, ct[ok])
 
             # Sort by xshift and bin onto a uniform grid via median in each bin
             sort_t  = np.argsort(template_xshift)
@@ -132,8 +133,9 @@ def refineSkyX(science_extraction_file, channels=None, ref_fiber=150, fiber_half
             n_fallback = 0
 
             for ifiber in range(nfibers):
-                spec        = np.nan_to_num(scispec[fits_ext].counts[ifiber, :],
-                                            nan=0.0, posinf=0.0, neginf=0.0)
+                # Missing samples are interpolated for line finding only, so a gap does not
+                # read as a dip.
+                spec        = interp_missing(scispec[fits_ext].counts[ifiber, :])
                 quad_xshift = scispec[fits_ext].xshift[ifiber, :]
 
                 # Detect peaks in this fiber
@@ -353,7 +355,9 @@ def skyModel_1d(science_extraction_file, color, sky_extraction_file=None, show_p
                 for thisfiber in range(sky_metadata[i]['nfibers']):
                     fiber = np.append(fiber, thisfiber)
                     extension = np.append(extension, i)
-                    tt = np.sum(sky[i].counts[thisfiber]/sky[i].relative_throughput[thisfiber])
+                    # A missing sample (cosmic-ray gap, NaN) must not drop the whole fibre
+                    # from the sky selection, nor count as zero.
+                    tt = row_total(sky[i].counts[thisfiber]/sky[i].relative_throughput[thisfiber])
                     counts = np.append(counts, tt)
 
         # Cast index arrays for fibre lookups.

@@ -132,6 +132,40 @@ def resample_bad(ref_wave, wave, bad):
     return b > 0
 
 
+def row_total(values):
+    """Per-row total that treats non-finite samples as missing, not as zero.
+
+    ``mean(finite) * N`` along the last axis: identical to the plain sum when nothing is missing,
+    and NaN for a row with no finite sample. For a fibre's brightness over its whole spectrum,
+    where a few missing samples (e.g. cosmic-ray gaps) must not lower the total.
+    """
+    values = np.asarray(values, dtype=float)
+    fin = np.isfinite(values)
+    n_fin = fin.sum(axis=-1)
+    total = np.where(fin, values, 0.0).sum(axis=-1)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return np.where(n_fin > 0, total * values.shape[-1] / np.maximum(n_fin, 1), np.nan)
+
+
+def interp_missing(spec):
+    """Copy of a 1-D spectrum with non-finite samples linearly interpolated from their finite
+    neighbours (ends held at the nearest finite value; all-NaN gives zeros).
+
+    For line DETECTION only (peak finding, continuum fits), where a gap would read as a false
+    dip. Never use the result as a measurement.
+    """
+    spec = np.asarray(spec, dtype=float)
+    fin = np.isfinite(spec)
+    if fin.all():
+        return spec.copy()
+    if not fin.any():
+        return np.zeros_like(spec)
+    x = np.arange(spec.size)
+    out = spec.copy()
+    out[~fin] = np.interp(x[~fin], x[fin], spec[fin])
+    return out
+
+
 def fibre_band_flux(flux, wave, bad, lo, hi, *, min_frac=MIN_VALID_FRAC):
     """Per-fibre band flux over ``[lo, hi]``: :func:`band_integral` within the fibres' common
     coverage. The one implementation behind the viewer's fibre totals, registration's source

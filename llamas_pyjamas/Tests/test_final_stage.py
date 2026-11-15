@@ -17,7 +17,7 @@ import pytest
 from astropy.io import fits
 
 from llamas_pyjamas.File.llamasRSS import (
-    DuplicateStageError, MASK_NO_COUNTS, MASK_NOT_FLAT_FIELDED, MixedStageError,
+    DuplicateStageError, MASK_CR_MISSING, MASK_NO_COUNTS, MASK_NOT_FLAT_FIELDED, MixedStageError,
     RegistrationMismatchError, RSSStageError, StageHeaderMismatchError,
     check_stage_consistency, exposure_key, final_rss, final_siblings, rss_stage, stage_files,
     wcs_quality, write_rss_manifest)
@@ -806,3 +806,31 @@ def test_sky_penalty_cli(tmp):
     assert main([files[('base', 'green')], '--cube', '--sky-penalty', '1.5', '-o', out]) == 0
     assert fits.getheader(out)['SKYPEN'] == 1.5
     assert main([files[('base', 'green')], '--stage', 'ff', '--sky-penalty', '1.5', '-o', out]) == 2
+
+
+def test_cosmic_ray_gap_survives_every_stage_without_spreading(tmp):
+    """A sample lost to a cosmic ray keeps MASK_CR_MISSING and stays NaN through the fibre flat,
+    the sky framework and flux calibration, and no other sample becomes NaN."""
+    from llamas_pyjamas.Flat.fibreFlat import apply_fibre_flat_to_rss
+    from llamas_pyjamas.Sky.skySubtract import subtract_sky_rss
+    from llamas_pyjamas.Sky.skyConfig import SkySubtractConfig
+    from llamas_pyjamas.Flux.fluxCalibrate import flux_calibrate_file
+
+    gap = (slice(5, 6), slice(100, 103))
+    base = write_rss(stage_name(tmp, 'green', 'base'), cr_missing=gap)
+    corr = _corrections(os.path.join(tmp, 'corr.fits'), benchsides=('1A', '1B'))
+    ff = apply_fibre_flat_to_rss(base, corr, stage_name(tmp, 'green', 'ff'))
+    sky = subtract_sky_rss(ff, config=SkySubtractConfig(method='scaled', qa_plots=False))
+    flux_calibrate_file(sky, _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub', 'ffver': 2}),
+                        apply_extinction=False)
+    expect = np.zeros((len(FIBER_IDS), N_WAVE), bool)
+    expect[gap] = True
+    for path in (ff, sky):
+        with fits.open(path) as h:
+            assert np.all(h['MASK'].data[gap] & MASK_CR_MISSING)
+            assert np.array_equal((h['MASK'].data & MASK_CR_MISSING) != 0, expect)
+            for ext in ('SKYSUB', 'ERROR'):
+                assert np.array_equal(np.isnan(h[ext].data), expect), (path, ext)
+    with fits.open(sky) as h:
+        for ext in ('FLAM', 'FLAM_ERR'):
+            assert np.array_equal(np.isnan(h[ext].data), expect), ext
