@@ -8,6 +8,14 @@ pair-minimum of the master dark (Bias/darkLlamas.combine_frames).
 
 Combining does not fix saturated pixels, which stay saturated in every frame.
 
+**Headers are not enough to trust an exposure.** On 20261015_16 the two exposures taken
+after the configured 0.07 s green/blue flat have the same requested and shutter times, yet
+their data are 6-7x brighter in blue, saturated in green and blank or saturated in red.
+So, per camera, an exposure joins the combine only if it looks like the configured one
+(:func:`consistency`): fibre profile correlated at r >= MIN_PROFILE_R, brightness within
+SCALE_RANGE of it (LDLS drift is ~20%), and no more saturated. The configured frame is
+always the reference, and a camera left with only that frame keeps it unchanged.
+
 The set of a configured flat is found from the raw headers: the same OBJECT, requested
 exposure (REXPTIME), read mode, date and lamp, selector and filter-wheel states, taken
 within ``window_s`` of one another. A comma-separated list in ``{colour}_flat_file`` gives
@@ -34,6 +42,14 @@ FLAT_KEYS = {'red': 'red_flat_file', 'green': 'green_flat_file', 'blue': 'blue_f
 SET_KEYS = ('OBJECT', 'REXPTIME', 'READ-MDE', 'DATE-OBS')
 #: Pixels above this (DN, bias-corrected) set each frame's scale to the first.
 LIT_DN = 1000.0
+#: An exposure must match the configured one to be combined with it (per camera): its
+#: fibre profile (median over the central 200 columns, along y) correlated at least this
+#: well, its brightness within this factor range, and at most this much more of its area
+#: at or above SATURATED_DN.
+MIN_PROFILE_R = 0.98
+SCALE_RANGE = (2.0 / 3.0, 1.5)
+MAX_EXTRA_SATURATED = 0.01
+SATURATED_DN = 60000.0
 DEFAULT_GAIN = 1.0
 DEFAULT_READNOISE = 2.5
 
@@ -102,7 +118,10 @@ def resolve_lamp_flat_sets(config):
                 config[key] = files[0]
                 sets[colour] = files
         elif isinstance(value, str) and value and os.path.exists(value):
-            sets[colour] = find_lamp_flat_set(value) if combine else [value]
+            # The configured frame first: it is the reference the others must match.
+            others = [f for f in (find_lamp_flat_set(value) if combine else [])
+                      if os.path.abspath(f) != os.path.abspath(value)]
+            sets[colour] = [value] + others
     return sets
 
 
@@ -113,22 +132,44 @@ def combined_flat_name(raw_paths):
 
 
 def _scale_to(reference, data):
-    """Factor that brings ``data`` to ``reference``'s level, from their lit pixels (1 if none)."""
+    """Factor that brings ``data`` to ``reference``'s level, from their lit pixels (NaN if none)."""
     lit = np.isfinite(reference) & np.isfinite(data) & (reference > LIT_DN) & (data > LIT_DN)
     if lit.sum() < 1000:
-        return 1.0
+        return np.nan
     return float(np.median(reference[lit] / data[lit]))
+
+
+def consistency(reference, data):
+    """``(scale, None)`` if ``data`` is a usable copy of ``reference``, else ``(scale, reason)``."""
+    mid = reference.shape[1] // 2
+    cols = slice(max(0, mid - 100), mid + 100)
+    rp = np.nanmedian(reference[:, cols], axis=1)
+    dp = np.nanmedian(data[:, cols], axis=1)
+    scale = _scale_to(reference, data)
+    if not (np.std(rp) > 0 and np.std(dp) > 0):
+        return scale, 'no fibre structure'
+    r = float(np.corrcoef(rp, dp)[0, 1])
+    if not r >= MIN_PROFILE_R:
+        return scale, f'profile r={r:.2f}'
+    if not SCALE_RANGE[0] <= scale <= SCALE_RANGE[1]:
+        return scale, f'brightness x{1 / scale:.2f}' if scale > 0 else 'no light'
+    extra = np.mean(data >= SATURATED_DN) - np.mean(reference >= SATURATED_DN)
+    if extra > MAX_EXTRA_SATURATED:
+        return scale, f'{extra:.0%} more saturated'
+    return scale, None
 
 
 def combine_lamp_flats(corrected_paths, out_path, raw_names=None):
     """Combine bias-corrected exposures of one lamp-flat set into ``out_path``.
 
-    Each camera is matched across the frames by its header, never by extension index. The
-    frames are scaled to the first one's level over their lit pixels, then combined with
-    ``Bias.darkLlamas.combine_frames`` (median of 3 or more, 5-sigma pair-minimum for 2). A
-    camera missing from any frame keeps the first frame's data. The output keeps the
-    first frame's headers (bias-first stamps included) and adds NCOMBINE, COMBMETH,
-    FLSCALES and, on the primary, FLATIN<n> and the ``lamp_flat`` recipe stamp.
+    The first path is the configured frame, the reference. Each camera is matched across
+    the frames by its header, never by extension index. Per camera, an exposure is used
+    only if :func:`consistency` accepts it; the accepted ones are scaled to the reference's
+    level over their lit pixels and combined with ``Bias.darkLlamas.combine_frames``
+    (median of 3 or more, 5-sigma pair-minimum for 2). A camera left with the reference
+    alone keeps its data unchanged. The output keeps the reference's headers (bias-first
+    stamps included) and adds NCOMBINE, COMBMETH, FLSCALES and FLREJECT per camera and, on
+    the primary, FLATIN<n>, NREJECT and the ``lamp_flat`` recipe stamp.
     """
     raw_names = raw_names or [os.path.basename(p) for p in corrected_paths]
     hduls = [fits.open(p) for p in corrected_paths]
@@ -136,6 +177,7 @@ def combine_lamp_flats(corrected_paths, out_path, raw_names=None):
         primary = hduls[0][0].copy()
         out = fits.HDUList([primary])
         methods = set()
+        rejected = {name: [] for name in raw_names[1:]}
         for hdu in hduls[0][1:]:
             if hdu.data is None:
                 out.append(hdu.copy())
@@ -145,29 +187,45 @@ def combine_lamp_flats(corrected_paths, out_path, raw_names=None):
                       for h, p in zip(hduls[1:], corrected_paths[1:])]
             ref = np.asarray(hdu.data, dtype=np.float32)
             new = fits.ImageHDU(data=ref, header=hdu.header.copy())
-            if any(o is None or o.data is None or o.data.shape != ref.shape for o in others):
-                logger.warning(f"Lamp-flat combine: {bench}{side} {color} is missing or differs "
-                               f"in a frame; keeping {raw_names[0]} alone")
-                new.header['NCOMBINE'] = (1, 'Lamp-flat exposures combined')
-                out.append(new)
-                continue
-            frames = [ref] + [np.asarray(o.data, dtype=np.float32) for o in others]
-            scales = [1.0] + [_scale_to(ref, f) for f in frames[1:]]
-            gain, readnoise, _ = props_for_header(hdu.header, DEFAULT_GAIN, DEFAULT_READNOISE)
-            combined, method = combine_frames([f * s for f, s in zip(frames, scales)],
-                                              gain, readnoise, 0.0)
+            frames, scales, reasons = [ref], [1.0], []
+            for o, name in zip(others, raw_names[1:]):
+                if o is None or o.data is None or o.data.shape != ref.shape:
+                    why = 'camera missing'
+                else:
+                    data = np.asarray(o.data, dtype=np.float32)
+                    scale, why = consistency(ref, data)
+                    if why is None:
+                        frames.append(data)
+                        scales.append(scale)
+                        continue
+                rejected[name].append(f'{color}{bench}{side} ({why})')
+                reasons.append(f'{name[18:28]}: {why}')
+            if len(frames) == 1:
+                method = 'single'                   # never filtered: it is the flat itself
+            else:
+                gain, readnoise, _ = props_for_header(hdu.header, DEFAULT_GAIN, DEFAULT_READNOISE)
+                new.data, method = combine_frames([f * s for f, s in zip(frames, scales)],
+                                                  gain, readnoise, 0.0)
             methods.add(method)
-            new.data = combined
             new.header['NCOMBINE'] = (len(frames), 'Lamp-flat exposures combined')
             new.header['COMBMETH'] = (method, 'Combine method (Bias/darkLlamas)')
             new.header['FLSCALES'] = (','.join(f'{s:.4f}' for s in scales),
-                                      'Scale applied to each exposure')
+                                      'Scale applied to each exposure used')
+            if reasons:
+                new.header['FLREJECT'] = ('; '.join(reasons)[:60], 'Exposures not combined, why')
             out.append(new)
         header = out[0].header
         stamp_recipe(header, 'lamp_flat')
         header['CRCLEAN'] = (False, 'Lamp flat not cosmic-ray cleaned')
-        header['NCOMBINE'] = (len(corrected_paths), 'Lamp-flat exposures combined')
-        header['COMBMETH'] = (','.join(sorted(methods)) or 'none', 'Combine method')
+        header['NCOMBINE'] = (len(corrected_paths), 'Lamp-flat exposures in the set')
+        header['COMBMETH'] = (','.join(sorted(methods)) or 'none', 'Combine methods used')
+        header['NREJECT'] = (sum(len(v) for v in rejected.values()),
+                             'camera-exposures not combined (inconsistent)')
+        for name, cams in rejected.items():
+            if cams:
+                logger.warning(f"Lamp-flat combine: {name} not used on {len(cams)} camera(s), "
+                               f"inconsistent with {raw_names[0]}: {', '.join(cams[:4])}"
+                               f"{' …' if len(cams) > 4 else ''}")
         for k, name in enumerate(raw_names, start=1):
             header[f'FLATIN{k}'] = (name, 'Lamp-flat exposure')
         out.writeto(out_path, overwrite=True)

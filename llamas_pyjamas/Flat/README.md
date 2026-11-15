@@ -64,6 +64,18 @@ The result, `bias_corrected/<first stem>_x<N>_bias_corrected.fits`, replaces the
 Tracing and the flat stage both use it. It records `NCOMBINE`, `COMBMETH`, `FLSCALES` and
 `FLATIN<n>`, and carries the `lamp_flat` recipe stamp.
 
+**Not every exposure in a set is usable, so each is checked against the configured one.**
+On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical
+headers but blank, saturated or 6× brighter data. Per camera, an exposure is combined only
+if all of these hold (`flatCombine.consistency`):
+- its fibre profile correlates with the configured frame's at r ≥ 0.98;
+- its brightness is within ×2/3–1.5 of it;
+- it is not more saturated.
+
+The configured frame is always the reference. A camera left with that frame alone keeps it
+unchanged, recorded as `COMBMETH = single`. `FLREJECT` and `NREJECT` record what was left
+out, and why.
+
 **This is how cosmic rays are rejected in a lamp flat; L.A.Cosmic never runs on one.**
 Combining does not fix saturation: a saturated core is saturated in every exposure.
 
