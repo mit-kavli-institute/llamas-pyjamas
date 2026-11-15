@@ -130,6 +130,7 @@ SHAs are filled in after each phase.
 | A2 `3def65f` | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
 | A3 `84cca12` | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
 | A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
+| B1 | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -176,6 +177,18 @@ SHAs are filled in after each phase.
   - an `_FF` or consolidated RSS below `FFVER` 2.
 - If there are any, the run stops and asks for `clobber = true`.
 - On the 20261015_16 products from before these fixes, it refuses all 49.
+
+**B1: one twilight reduction.**
+- `Flat/fibreFlat.reduce_twilights` reduces each distinct twilight once: pixel flat,
+  `twilight` recipe, wavelength calibration. It saves `<flat>/twilight/<stem>_twilight.pkl`,
+  reused while its `.json` sidecar matches the recipe, the frame and the pixel flat.
+- The RSS throughput (`reduce.twilight_throughputs` / `apply_twilight_throughput`) and the
+  fibre flat's T_i (`load_twilights`) both read those pickles, each camera from its own
+  colour's twilight.
+- Before, path (i) (`_process_flat_for_rss`) fed the throughput from the newest pickle for
+  every colour. It was skipped on resume and wrote RSS files nothing read. Path (ii)
+  (`reduce_twilight_flat`, now removed) reduced the twilights again for T_i on every run.
+- The dome-flat RSS is still made when no twilight is configured.
 
 ## Not committed (left untracked on purpose)
 

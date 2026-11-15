@@ -14,8 +14,10 @@ import pytest
 from astropy.io import fits
 
 from llamas_pyjamas.File.llamasRSS import RSSStageError
+from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
 from llamas_pyjamas.Flat.fibreFlat import (apply_fibre_flat_to_rss, assess_fibre_flat,
-                                           compute_fibre_flat_twilight, _load_smooth_models,
+                                           compute_fibre_flat_twilight, load_twilights,
+                                           reduce_twilights, _load_smooth_models,
                                            _narrow_cards, _twilight_dip_cards)
 from llamas_pyjamas.Flat import flatProcessing
 from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, clip_fraction_cards,
@@ -24,7 +26,9 @@ from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, clip_fraction_car
 from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, flux_calibrate_file
 from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
 from llamas_pyjamas.Tests.rss_fixtures import N_WAVE as RSS_NWAVE, stage_name, write_rss
-from llamas_pyjamas.reduce import stale_products
+import llamas_pyjamas.reduce as reduce_mod
+from llamas_pyjamas.reduce import (apply_twilight_throughput, stale_products,
+                                   twilight_throughputs)
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids, live_row_index
 from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, check_recipe, recipe_hash
 
@@ -363,3 +367,94 @@ def test_stale_products_are_listed_and_current_ones_pass(tmp_path):
 
 def test_nothing_is_stale_in_an_empty_folder(tmp_path):
     assert stale_products(str(tmp_path), str(tmp_path / 'flat')) == []
+
+
+# --- B1: one twilight reduction for the throughput and T_i ------------------------------
+
+def cameras(level_by_channel, n=40):
+    """Extraction objects for 1A of each channel, counts = level x (1 + fibre pattern)."""
+    exts = []
+    for ch, level in level_by_channel.items():
+        counts = level * np.tile((1 + 0.1 * np.sin(np.arange(n)))[:, None], (1, 2048))
+        exts.append(SimpleNamespace(counts=counts, wave=np.tile(np.linspace(4700, 7000, 2048), (n, 1)),
+                                    channel=ch, bench='1', side='A', dead_fibers=[],
+                                    trace=SimpleNamespace(nfibers=n)))
+    return exts
+
+
+@pytest.fixture
+def fake_pipeline(monkeypatch, tmp_path):
+    """Stand-ins for the pixel flat, extraction and wavelength steps; counts the calls."""
+    calls = []
+    levels = {'twi_a.fits': {'red': 100.0, 'green': 100.0, 'blue': 100.0},
+              'twi_b.fits': {'red': 900.0, 'green': 900.0, 'blue': 900.0}}
+
+    def flat(path, maps, out_dir):
+        calls.append(os.path.basename(path))
+        out = os.path.join(out_dir, os.path.basename(path) + '_flat.fits')
+        open(out, 'w').close()
+        return out, None
+
+    def extract(path, out_dir, **kw):
+        assert kw['remove_cosmic_rays'] is False
+        out = os.path.join(out_dir, os.path.basename(path) + '_extract.pkl')
+        open(out, 'w').close()
+        return out
+
+    def wavelengths(path, soln=None):
+        name = os.path.basename(path).split('_flat')[0]
+        exts = cameras(levels[name])
+        return ({'extractions': exts, 'metadata': [{'channel': e.channel, 'bench': '1',
+                                                    'side': 'A'} for e in exts]}, fits.Header())
+
+    monkeypatch.setattr(reduce_mod, 'apply_flat_field_correction', flat)
+    monkeypatch.setattr(reduce_mod, 'run_extraction', extract)
+    monkeypatch.setattr(reduce_mod, 'correct_wavelengths', wavelengths)
+    pixmap = str(tmp_path / 'pixel_maps.fits')
+    fits.PrimaryHDU().writeto(pixmap)
+    for name in levels:
+        open(tmp_path / name, 'w').close()
+    return calls, pixmap
+
+
+def run_twilights(tmp_path, pixmap, by_colour):
+    return reduce_twilights({c: str(tmp_path / f) if f else None for c, f in by_colour.items()},
+                            pixmap, 'traces', None, None, str(tmp_path / 'flat'))
+
+
+def test_each_twilight_is_reduced_once_and_reused(tmp_path, fake_pipeline):
+    calls, pixmap = fake_pipeline
+    pkls = run_twilights(tmp_path, pixmap, {'red': 'twi_a.fits', 'green': 'twi_b.fits',
+                                            'blue': 'twi_b.fits'})
+    assert sorted(calls) == ['twi_a.fits', 'twi_b.fits']        # twi_b once for two colours
+    assert pkls['green'] == pkls['blue'] != pkls['red']
+    assert not any(f.endswith('_extract.pkl') or f.endswith('_flat.fits')
+                   for f in os.listdir(tmp_path / 'flat' / 'twilight'))   # intermediates gone
+    header = ExtractLlamas.loadExtraction(pkls['red'])['primary_header']
+    assert check_recipe(header, 'twilight') and header['TWIFILE'] == 'twi_a.fits'
+
+    run_twilights(tmp_path, pixmap, {'red': 'twi_a.fits', 'green': 'twi_b.fits'})
+    assert len(calls) == 2                                        # cached: nothing re-reduced
+    os.utime(pixmap, (1, 1))                                      # a different pixel flat
+    run_twilights(tmp_path, pixmap, {'red': 'twi_a.fits'})
+    assert calls[-1] == 'twi_a.fits' and len(calls) == 3
+
+
+def test_throughput_and_t_i_come_from_each_colours_twilight(tmp_path, fake_pipeline):
+    _, pixmap = fake_pipeline
+    pkls = run_twilights(tmp_path, pixmap, {'red': 'twi_a.fits', 'green': 'twi_b.fits'})
+    tp = twilight_throughputs(pkls)
+    assert set(tp) == {('red', '1', 'A'), ('green', '1', 'A')}
+    assert tp[('red', '1', 'A')][1] == 'twi_a.fits' and tp[('green', '1', 'A')][1] == 'twi_b.fits'
+    merged = load_twilights(pkls)
+    by_channel = {m['channel']: e for e, m in zip(merged['extractions'], merged['metadata'])}
+    assert set(by_channel) == {'red', 'green'}
+    assert np.median(by_channel['red'].counts) < 200 < np.median(by_channel['green'].counts)
+
+    science = {'extractions': cameras({'red': 1.0, 'green': 1.0, 'blue': 1.0}),
+               'metadata': [{'channel': c, 'bench': '1', 'side': 'A'}
+                            for c in ('red', 'green', 'blue')]}
+    assert apply_twilight_throughput(science, tp) == 2            # blue has no twilight
+    red = science['extractions'][0]
+    assert red.throughput_source == 'twi_a.fits'
+    np.testing.assert_allclose(red.relative_throughput, tp[('red', '1', 'A')][0])

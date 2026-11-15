@@ -47,6 +47,25 @@ The flat module is typically run after bias correction and before spectral extra
 `fibre_flat_corrections.fits`, and `apply_fibre_flat_to_rss` divides each RSS by it to make the
 `_FF` files.
 
+### One twilight reduction
+
+**Each twilight flat is reduced once** (`reduce_twilights`), right after the flat stage:
+1. the pixel flat is applied;
+2. the frame is extracted with the `twilight` recipe (no cosmic-ray cleaning);
+3. it is wavelength-calibrated;
+4. it is saved as `<flat dir>/twilight/<stem>_twilight.pkl`.
+
+A sidecar `.json` records the recipe hash, the frame and the pixel flat. The pickle is reused
+while they all match, so a resumed run does not reduce the twilights again.
+
+**Both throughputs come from that one pickle.** Each colour uses the twilight configured for it
+(`{red,green,blue}_twilight_flat`, else `twilight_flat`):
+- the per-fibre throughput the RSS is divided by (`reduce.twilight_throughputs`);
+- the fibre flat's T_i (`load_twilights` → `compute_fibre_flat_twilight`).
+
+Before 2026-11-14 the twilights were reduced twice, by two code paths. The RSS throughput came
+from whichever twilight pickle was newest, for every colour.
+
 ### Throughput is applied once
 
 The RSS writer already divides each fibre by its throughput: the `relative_throughput` from the

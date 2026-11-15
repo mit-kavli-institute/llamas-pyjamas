@@ -11,6 +11,7 @@ applied to science RSS files by dividing the FLUX and ERROR arrays.
 """
 
 import os
+import json
 import logging
 from collections import defaultdict
 import numpy as np
@@ -20,6 +21,7 @@ from datetime import datetime
 from numpy.polynomial.polynomial import polyvander2d
 from scipy.ndimage import label, median_filter
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 logger = logging.getLogger(__name__)
 
 # Bounds for the correction factor — prevents catastrophic edge divisions
@@ -72,7 +74,8 @@ from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
     MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
 from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
 from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
-from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, stamp_recipe  # noqa: E402
+from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, recipe_hash,  # noqa: E402
+                                          stamp_recipe)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -544,66 +547,105 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 # Branch A: Twilight + Lamp
 # ──────────────────────────────────────────────────────────────────────────────
 
-def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
-                         slow_bias, output_dir, fast_bias=None, edge_bias=None):
-    """Reduce a twilight flat: bias/P2P correct, extract, wavelength calibrate.
+def _twilight_cache_key(twilight_file, p2p_map_file):
+    """What a cached twilight reduction must match to be reused: recipe, input, pixel flat."""
+    st = os.stat(p2p_map_file)
+    return {'rcphash': recipe_hash('twilight'), 'source': os.path.basename(twilight_file),
+            'pixmap': os.path.basename(p2p_map_file), 'pixmap_size': st.st_size,
+            'pixmap_mtime': round(st.st_mtime, 3)}
 
-    Reuses existing pipeline infrastructure for each step.
 
-    Parameters
-    ----------
-    twilight_file : str
-        Path to raw twilight flat FITS (MEF).
-    p2p_map_file : str
-        Path to pixel-to-pixel flat map (``pixel_maps.fits``).
-    trace_dir : str
-        Directory containing trace pickle files.
-    arc_soln : object or None
-        Arc solution dict, or None to use reference arc.
-    slow_bias : str or None
-        Path to SLOW-mode master bias FITS file.
-    output_dir : str
-        Output directory for intermediates.
-    fast_bias : str or None
-        Path to FAST-mode master bias FITS file.
-
-    Returns
-    -------
-    extraction_dict : dict
-        Calibrated extraction dict with keys ``'extractions'``,
-        ``'metadata'``, ``'primary_header'``.
-    """
+def _reduce_one_twilight(twilight_file, p2p_map_file, twi_dir, trace_dir, arc_soln,
+                         slow_bias, fast_bias, edge_bias, mastercalib_trace_dir):
+    """Reduce one twilight to a wavelength-calibrated extraction pickle (reused if current)."""
+    # Imported here: reduce imports this module at its top (circular import).
     from llamas_pyjamas.reduce import (apply_flat_field_correction,
                                        run_extraction, correct_wavelengths)
 
+    stem = os.path.splitext(os.path.basename(twilight_file))[0]
+    pkl = os.path.join(twi_dir, f'{stem}_twilight.pkl')
+    sidecar = pkl.replace('.pkl', '.json')
+    key = _twilight_cache_key(twilight_file, p2p_map_file)
+    if os.path.exists(pkl) and os.path.exists(sidecar):
+        with open(sidecar) as fh:
+            if json.load(fh) == key:
+                logger.info(f"Twilight: reusing {os.path.basename(pkl)}")
+                return pkl
+
     logger.info(f"Reducing twilight flat: {twilight_file}")
-    twi_output_dir = os.path.join(output_dir, 'twilight')
-    os.makedirs(twi_output_dir, exist_ok=True)
-
-    # Step 1: Apply P2P pixel map to twilight frame
-    logger.info("Twilight: applying P2P pixel map correction")
-    corrected_file, _ = apply_flat_field_correction(
-        twilight_file, [p2p_map_file], twi_output_dir)
+    corrected_file, _ = apply_flat_field_correction(twilight_file, [p2p_map_file], twi_dir)
     if corrected_file is None:
-        raise RuntimeError("Failed to apply P2P correction to twilight flat")
-    logger.info(f"Twilight P2P-corrected: {corrected_file}")
-
-    # Step 2: Extract using lamp traces
-    logger.info("Twilight: extracting 1D spectra using lamp traces")
+        raise RuntimeError(f"Failed to apply the pixel flat to {os.path.basename(twilight_file)}")
     extraction_file = run_extraction(
-        corrected_file, twi_output_dir,
-        slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir,
+        corrected_file, twi_dir, slow_bias=slow_bias, fast_bias=fast_bias,
+        trace_dir=trace_dir, mastercalib_trace_dir=mastercalib_trace_dir,
         remove_cosmic_rays=False, edge_bias=edge_bias)
-    logger.info(f"Twilight extraction: {extraction_file}")
+    extraction_path = os.path.join(twi_dir, extraction_file)
+    extraction_dict, primary_hdr = correct_wavelengths(extraction_path, soln=arc_soln)
+    primary_hdr = primary_hdr if primary_hdr is not None else fits.Header()
+    stamp_recipe(primary_hdr, 'twilight')
+    primary_hdr['TWIFILE'] = (os.path.basename(twilight_file), 'Twilight flat')
+    save_extractions(extraction_dict['extractions'], primary_header=primary_hdr,
+                     savefile=os.path.basename(pkl), save_dir=twi_dir)
+    with open(sidecar, 'w') as fh:
+        json.dump(key, fh)
+    # The uncalibrated pickle and the flat-divided frame are only intermediates.
+    for path in (extraction_path, corrected_file):
+        if path and os.path.abspath(path) != os.path.abspath(pkl) and os.path.exists(path):
+            os.remove(path)
+    logger.info(f"Twilight reduced: {os.path.basename(pkl)}")
+    return pkl
 
-    # Step 3: Wavelength calibration
-    logger.info("Twilight: applying wavelength calibration")
-    extraction_path = os.path.join(twi_output_dir, extraction_file)
-    extraction_dict, primary_hdr = correct_wavelengths(
-        extraction_path, soln=arc_soln)
-    logger.info("Twilight wavelength calibration complete")
 
-    return extraction_dict
+def reduce_twilights(twilight_by_colour, p2p_map_file, trace_dir, arc_soln, slow_bias,
+                     output_dir, fast_bias=None, edge_bias=None, mastercalib_trace_dir=None):
+    """Reduce each distinct twilight flat once; return ``{colour: calibrated pickle}``.
+
+    One reduction feeds both uses of the twilight: the per-fibre ``relative_throughput``
+    the RSS is divided by (``reduce.twilight_throughputs``) and the fibre flat's T_i
+    (:func:`compute_fibre_flat_twilight`), so the two always come from the same frame,
+    reduced the same way. Each frame gets the pixel flat, is extracted with the
+    ``twilight`` recipe (no cosmic-ray cleaning) and wavelength-calibrated. The pickle,
+    ``<output_dir>/twilight/<stem>_twilight.pkl``, is reused while its sidecar
+    ``.json`` matches the recipe, the frame and the pixel flat.
+
+    ``twilight_by_colour`` is ``{colour: path or None}`` (``reduce.resolve_twilight_files``);
+    colours without a twilight are left out of the result.
+    """
+    twi_dir = os.path.join(output_dir, 'twilight')
+    os.makedirs(twi_dir, exist_ok=True)
+    reduced, out = {}, {}
+    for colour, path in twilight_by_colour.items():
+        if not path or not os.path.exists(path):
+            continue
+        if path not in reduced:
+            reduced[path] = _reduce_one_twilight(path, p2p_map_file, twi_dir, trace_dir,
+                                                 arc_soln, slow_bias, fast_bias, edge_bias,
+                                                 mastercalib_trace_dir)
+        out[colour] = reduced[path]
+    return out
+
+
+def load_twilights(twilight_pkls):
+    """Merge the reduced twilights into one extraction dict, each camera from its colour's file.
+
+    ``twilight_pkls`` is ``{colour: pickle}`` from :func:`reduce_twilights`. Returns the dict
+    :func:`compute_fibre_flat_twilight` takes, or None when there are no twilights.
+    """
+    by_file = defaultdict(list)
+    for colour, pkl in twilight_pkls.items():
+        by_file[pkl].append(colour)
+    exts, metas, primary = [], [], None
+    for pkl, colours in by_file.items():
+        twi = ExtractLlamas.loadExtraction(pkl)
+        primary = twi.get('primary_header', primary)
+        for ext, meta in zip(twi['extractions'], twi['metadata']):
+            if meta['channel'] in colours:
+                exts.append(ext)
+                metas.append(meta)
+    if not exts:
+        return None
+    return {'extractions': exts, 'metadata': metas, 'primary_header': primary}
 
 
 _DEFAULT_POLY_ORDER = {'blue': 4, 'green': 3, 'red': 2}
@@ -1231,7 +1273,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     Parameters
     ----------
     twilight_extractions : dict
-        Calibrated twilight extractions (from ``reduce_twilight_flat``).
+        Calibrated twilight extractions (from :func:`load_twilights`).
     smooth_models_file : str
         Path to ``flat_smooth_models.fits``.
     output_dir : str

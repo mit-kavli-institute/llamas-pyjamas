@@ -83,7 +83,7 @@ from llamas_pyjamas.Utils.recipes import recipe_problem
 from llamas_pyjamas.Flat.fibreFlat import (FFVER,
                                            compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
-                                           reduce_twilight_flat,
+                                           reduce_twilights, load_twilights,
                                            apply_fibre_flat_to_rss,
                                            assess_fibre_flat)
 
@@ -599,51 +599,53 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
     return extraction_file_path
 
 
-def apply_twilight_throughput(extraction_dict, twilight_dir):
-    """Set per-fibre relative_throughput from the twilight (sky) flat extraction.
+def twilight_throughputs(twilight_pkls):
+    """Per-fibre relative throughput of every camera, from its colour's reduced twilight.
 
-    The twilight illuminates the fibres with the same geometry as the night sky
-    (unlike the lamp), and is extracted with the same method as the science in
-    the same run, so its per-fibre response is directly applicable. Objects
-    never contaminate it (dedicated sky-illuminated frames).
-
-    Finds the newest twilight extraction pickle in ``twilight_dir`` and, for
-    every camera present in both, replaces ``relative_throughput`` with the
-    fibre's median twilight counts normalised to the camera median (clipped to
-    [0.1, 3.0]; out-of-range/dead fibres get 1.0). Cameras without a twilight
-    counterpart keep their existing (arc-carried) values.
-
-    Returns the number of cameras updated (0 => nothing done / no twilight).
+    ``twilight_pkls`` is ``{colour: pickle}`` (``Flat.fibreFlat.reduce_twilights``): the
+    same reduction the fibre flat's T_i comes from. A fibre's throughput is its median
+    twilight counts over columns 700:1500 divided by the camera median; values outside
+    0.1-3 (dead or bad fibres) are set to 1. Returns
+    ``{(channel, bench, side): (throughput, source file name)}``.
     """
-    import glob as _glob
-    cands = sorted(
-        _glob.glob(os.path.join(twilight_dir, '*_extract_corrected_extractions.pkl'))
-        + _glob.glob(os.path.join(twilight_dir, '*_extract.pkl')),
-        key=os.path.getmtime, reverse=True)
-    if not cands:
-        return 0
-    twi = ExtractLlamas.loadExtraction(cands[0])
-    twi_map = {}
-    for e, m in zip(twi['extractions'], twi['metadata']):
-        twi_map[(m['channel'], str(m['bench']), str(m['side']).upper())] = e
+    by_file = {}
+    for colour, pkl in twilight_pkls.items():
+        by_file.setdefault(pkl, []).append(colour)
+    out = {}
+    for pkl, colours in by_file.items():
+        twi = ExtractLlamas.loadExtraction(pkl)
+        source = str((twi.get('primary_header') or {}).get('TWIFILE', os.path.basename(pkl)))
+        for e, m in zip(twi['extractions'], twi['metadata']):
+            if m['channel'] not in colours:
+                continue
+            counts = np.asarray(e.counts, dtype=float)
+            wl = np.nanmedian(counts[:, 700:1500], axis=1)
+            good = np.isfinite(wl) & (wl > 0)
+            if good.sum() < 30:
+                continue
+            tp = wl / np.nanmedian(wl[good])
+            tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
+            out[(m['channel'], str(m['bench']), str(m['side']).upper())] = (tp, source)
+        del twi
+    return out
+
+
+def apply_twilight_throughput(extraction_dict, twilight_tp):
+    """Set each camera's ``relative_throughput`` from its colour's twilight.
+
+    ``twilight_tp`` is :func:`twilight_throughputs`'s result. Cameras without a twilight
+    keep their existing (arc-carried) values. Returns the number of cameras updated.
+    """
     n_done = 0
     for e, m in zip(extraction_dict['extractions'], extraction_dict['metadata']):
-        et = twi_map.get((m['channel'], str(m['bench']), str(m['side']).upper()))
-        if et is None:
+        entry = twilight_tp.get((m['channel'], str(m['bench']), str(m['side']).upper()))
+        if entry is None:
             continue
-        counts = np.asarray(et.counts, dtype=float)
-        wl = np.nanmedian(counts[:, 700:1500], axis=1)
-        good = np.isfinite(wl) & (wl > 0)
-        if good.sum() < 30:
-            continue
-        tp = wl / np.nanmedian(wl[good])
-        tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
+        tp, source = entry
         n = min(np.asarray(e.counts).shape[0], tp.size)
         e.relative_throughput = tp[:n].copy()
-        e.throughput_source = os.path.basename(cands[0])   # recorded as the RSS TPSRC
+        e.throughput_source = source                       # recorded as the RSS TPSRC
         n_done += 1
-    logger.info(f"apply_twilight_throughput: updated {n_done} cameras from "
-                f"{os.path.basename(cands[0])}")
     return n_done
 
 
@@ -3115,6 +3117,7 @@ def main(config_path):
         if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
             reporter.phase("💡", "Flat field")
         flat_pixel_maps = []
+        twilight_pkls = {}     # {colour: reduced twilight pickle}, set after the flat stage
         flat_field_method = config.get('flat_field_method', 'simple')
         # Resume: if pixel_maps.fits and flat_smooth_models.fits (needed by the
         # fibre-flat stage) both exist, skip the expensive flat extraction and
@@ -3219,32 +3222,11 @@ def main(config_path):
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flat when specified (per-colour aware).
-            twilight_by_color = resolve_twilight_files(config)
-            twilight_files = list(dict.fromkeys(
-                f for f in twilight_by_color.values() if f))  # distinct, ordered
-            twilight_file = twilight_files[0] if twilight_files else None
+            # Twilights are reduced once after this stage (reduce_twilights). With none
+            # configured, a dome-flat RSS is made instead.
+            twilight_file = next((f for f in resolve_twilight_files(config).values() if f), None)
 
-            if twilight_files and flat_pixel_maps:
-                print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
-                twi_dir = os.path.join(flat_field_dir, 'twilight')
-                os.makedirs(twi_dir, exist_ok=True)
-                twi_rss = _process_flat_for_rss(
-                    twilight_files,
-                    flat_pixel_maps, twi_dir,
-                    trace_dir=final_trace_dir,
-                    arc_dict_config=config.get('arcdict'),
-                    timestamp=timestamp_ff, label='twilight',
-                    slow_bias=slow_bias_file, fast_bias=fast_bias_file,
-                    edge_bias=edge_bias_cfg,
-                )
-                if twi_rss:
-                    config['flat_rss_outputs'] = twi_rss
-                    print(f"  Twilight flat RSS: {twi_rss}")
-                else:
-                    print("  WARNING: Twilight flat RSS generation failed.")
-
-            if not config['flat_rss_outputs']:
+            if twilight_file is None:
                 # Fallback: dome flats — also need pixel correction before extraction
                 dome_files = [config.get('red_flat_file'),
                               config.get('green_flat_file'),
@@ -3286,6 +3268,26 @@ def main(config_path):
 
         if flat_pixel_maps:
             report_pixel_flat(reporter, flat_pixel_maps[0])
+
+        # Each twilight is reduced once; the RSS throughput and the fibre flat's T_i both
+        # come from that reduction (Flat.fibreFlat.reduce_twilights).
+        twilight_by_colour = resolve_twilight_files(config)
+        if flat_pixel_maps and any(twilight_by_colour.values()):
+            try:
+                twilight_pkls = reduce_twilights(
+                    twilight_by_colour, flat_pixel_maps[0], final_trace_dir,
+                    config.get('arcdict'), slow_bias_file, _flat_field_dir,
+                    fast_bias=fast_bias_file, edge_bias=edge_bias_cfg,
+                    mastercalib_trace_dir=CALIB_DIR)
+                print("Twilight flats: " + ", ".join(
+                    f"{c}={os.path.basename(p)}" for c, p in sorted(twilight_pkls.items())))
+            except Exception as exc:
+                if is_disk_full(exc):
+                    raise
+                logger.warning(f"Twilight reduction failed: {exc}", exc_info=True)
+                print(f"WARNING: Twilight reduction failed ({exc}); the RSS keeps the "
+                      f"arc-carried throughput and the fibre flat falls back to the lamp")
+                twilight_pkls = {}
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")
@@ -3577,6 +3579,10 @@ def main(config_path):
                 sky_selection_method = 'stratified'
 
         reporter.phase("🌌", "Wavelength & sky subtraction")
+        # Per-fibre throughput from the twilights (default on; twilight_throughput = false
+        # keeps the arc-carried lamp values). Computed once for all frames.
+        twilight_tp = (twilight_throughputs(twilight_pkls)
+                       if config.get('twilight_throughput', True) and twilight_pkls else {})
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             reporter.frame(index + 1, len(science_pkl_pairs), _frame_label(orig_science_file))
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
@@ -3590,16 +3596,11 @@ def main(config_path):
             # the same method as the science (default on; twilight_throughput =
             # false reverts to the arc-carried lamp values).
             if config.get('twilight_throughput', True):
-                _twi_dir = os.path.join(
-                    config.get('flat_field_output_dir',
-                               os.path.join(extraction_path, 'flat')), 'twilight')
-                _n_twi = apply_twilight_throughput(corr_extractions, _twi_dir) \
-                    if os.path.isdir(_twi_dir) else 0
+                _n_twi = apply_twilight_throughput(corr_extractions, twilight_tp)
                 if _n_twi:
                     print(f"Twilight throughput applied to {_n_twi} cameras")
                 else:
-                    print("Twilight throughput: no twilight extraction found — "
-                          "keeping arc-carried values")
+                    print("Twilight throughput: no reduced twilight — keeping arc-carried values")
 
             corr_extraction_list = corr_extractions['extractions']
 
@@ -3882,33 +3883,12 @@ def main(config_path):
                     print(f"Using twilight flat(s): {summary}")
                     logger.info(f"Twilight flats (per colour): {summary}")
                     try:
-                        merged_ext, merged_meta = [], []
-                        merged_primary = None
-                        used_colors = set()
-                        for tfile, colors in files_to_colors.items():
-                            twi = reduce_twilight_flat(
-                                tfile,
-                                flat_pixel_maps[0] if flat_pixel_maps else None,
-                                final_trace_dir,
-                                config.get('arcdict'),
-                                slow_bias_file,
-                                extraction_path,
-                                fast_bias=fast_bias_file,
-                                edge_bias=edge_bias_cfg,
-                            )
-                            merged_primary = twi.get('primary_header',
-                                                     merged_primary)
-                            # Keep only the channels this file is assigned to, so
-                            # a per-colour twilight flat contributes only its
-                            # colour(s) to the merged set.
-                            for ext, meta in zip(twi['extractions'],
-                                                 twi['metadata']):
-                                if meta['channel'] in colors:
-                                    merged_ext.append(ext)
-                                    merged_meta.append(meta)
-                                    used_colors.add(meta['channel'])
-                            del twi
-                            gc.collect()
+                        # The twilights reduced after the flat stage, each camera from
+                        # its colour's file (the same reduction the RSS throughput used).
+                        twi_extractions = load_twilights(twilight_pkls)
+                        if twi_extractions is None:
+                            raise RuntimeError("no reduced twilight (see the flat stage)")
+                        used_colors = {m['channel'] for m in twi_extractions['metadata']}
                         missing = {'red', 'green', 'blue'} - used_colors
                         if missing:
                             logger.warning(
@@ -3918,11 +3898,6 @@ def main(config_path):
                                 f"twilight method.", extra={'summarised': True})
                             print(f"  NOTE: colour(s) {sorted(missing)} have no "
                                   f"twilight flat — lamp-only T_i for those.")
-                        twi_extractions = {
-                            'extractions': merged_ext,
-                            'metadata': merged_meta,
-                            'primary_header': merged_primary,
-                        }
                         corrections_file = compute_fibre_flat_twilight(
                             twi_extractions, smooth_models_file,
                             flat_field_dir,
@@ -3935,7 +3910,7 @@ def main(config_path):
                                                           f'{c} twilight flat')
                                 for f, cs in files_to_colors.items() for c in cs},
                         )
-                        del twi_extractions, merged_ext, merged_meta
+                        del twi_extractions
                         gc.collect()
                         print(f"Fibre flat computed (twilight + lamp method; "
                               f"colours: {sorted(used_colors)})")
@@ -3949,10 +3924,6 @@ def main(config_path):
                         # Best-effort cleanup of any partial intermediates.
                         try:
                             del twi_extractions
-                        except NameError:
-                            pass
-                        try:
-                            del merged_ext, merged_meta
                         except NameError:
                             pass
                         gc.collect()
