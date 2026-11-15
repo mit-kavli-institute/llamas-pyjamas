@@ -126,6 +126,7 @@ SHAs are filled in after each phase.
 | Step | Subject | What it does | Depends on / products |
 |---|---|---|---|
 | R0 + A0 | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
+| A1 | Apply the fibre throughput once: divide the RSS by C_i over the throughput it already removed | See below. | On R0 + A0. Needs a clobber re-run; sensfuncs must be rebuilt from re-reduced standards. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -136,6 +137,16 @@ SHAs are filled in after each phase.
 - Fixes the 2A/2B off-by-one, where 28 + 248 fibres got their neighbour's flat and the last
   fibre got none. `twilightTie` is fixed the same way.
 - Both products carry `FIBIDS='physical'`, and older files are refused.
+
+**A1: throughput applied once.**
+- The RSS writer records each row's throughput divisor in a FIBERMAP `THRUPUT` column and
+  its source in `TPSRC`.
+- `apply_fibre_flat_to_rss` divides by `C_i / THRUPUT`, so the fibre throughput is divided
+  out once instead of twice. Simulated on 20261015_16, this takes the sky scatter from
+  9–19% to 1.6–5%.
+- `_FF` files carry `FFVER = 2`, and an RSS without `THRUPUT` is refused.
+- Flux calibration refuses a sensfunc whose `ffver` differs from the science's. CubeViewer
+  records `ffver` when it builds a sensfunc.
 
 ## Not committed (left untracked on purpose)
 

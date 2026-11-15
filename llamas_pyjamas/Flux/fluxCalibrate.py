@@ -207,6 +207,19 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
             raise SensfuncStageError(msg + ' Rebuild the sensfunc at the matching stage.')
         logger.warning(msg + ' Proceeding (allow_stage_mismatch).')
         override = True
+    elif sens_flat and sci_flat:
+        # Both flat-fielded: they must also share the fibre-flat version. Before FFVER 2 the
+        # flat applied the fibre throughput twice, which a sensfunc absorbs only on average.
+        sci_ffver = int(header.get('FFVER', 1))
+        sens_ffver = int(sensfunc.meta.get('ffver', 1))
+        if sci_ffver != sens_ffver:
+            msg = (f'{name} was built from a standard flat-fielded at FFVER {sens_ffver}, but '
+                   f'the science is at FFVER {sci_ffver}: before FFVER 2 the fibre throughput '
+                   f'was divided out twice.')
+            if not allow_stage_mismatch:
+                raise SensfuncStageError(msg + ' Rebuild the sensfunc from a re-reduced standard.')
+            logger.warning(msg + ' Proceeding (allow_stage_mismatch).')
+            override = True
 
     sky_name = skysub_extname(hdul)
     skysub = np.asarray(hdul[sky_name].data, dtype=float)

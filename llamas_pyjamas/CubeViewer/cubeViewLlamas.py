@@ -965,6 +965,7 @@ class CubeViewerWindow(QMainWindow):
             try:
                 stage = rss_stage(self._path)
                 stage_meta = {'rssstage': stage, 'fibrflat': stage != 'base',
+                              'ffver': int(fits.getheader(self._path, 0).get('FFVER', 1)),
                               'stdfile': os.path.basename(self._path)}
                 final = final_rss(self._path)
                 if os.path.abspath(final) != os.path.abspath(self._path):

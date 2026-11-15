@@ -12,8 +12,13 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from llamas_pyjamas.Flat.fibreFlat import compute_fibre_flat_twilight, _load_smooth_models
+from llamas_pyjamas.File.llamasRSS import RSSStageError
+from llamas_pyjamas.Flat.fibreFlat import (apply_fibre_flat_to_rss, compute_fibre_flat_twilight,
+                                           _load_smooth_models)
 from llamas_pyjamas.Flat.flatLlamas import smooth_model_table, _write_smooth_models_fits
+from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, flux_calibrate_file
+from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
+from llamas_pyjamas.Tests.rss_fixtures import N_WAVE as RSS_NWAVE, write_rss
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids, live_row_index
 from llamas_pyjamas.Utils.recipes import CalibrationRecipeError
 
@@ -99,3 +104,79 @@ def test_row_labelled_smooth_models_are_refused(tmp_path):
         del h[0].header['FIBIDS']
     with pytest.raises(CalibrationRecipeError, match='extraction row'):
         _load_smooth_models(path)
+
+
+# --- A1: throughput applied once ------------------------------------------------------
+
+def _rss_divided_by(tmp_path, true_tp, rss_tp):
+    """Base RSS whose raw sky is true_tp x sky, already divided by rss_tp (as the RSS
+    writer divides by relative_throughput), with rss_tp recorded in THRUPUT."""
+    path = write_rss(str(tmp_path / 'x_RSS_green.fits'), thruput=rss_tp)
+    sky = 300.0 + 80.0 * np.sin(np.linspace(0, 6, RSS_NWAVE))
+    with fits.open(path, mode='update') as h:
+        raw = true_tp[:, None] * sky
+        h['COUNTS'].data[:] = raw / rss_tp[:, None]
+        h['SKY'].data[:] = 0.0
+        h['SKYSUB'].data[:] = raw / rss_tp[:, None]
+        h['ERROR'].data[:] = 0.5
+    return path, sky
+
+
+def _corrections(tmp_path, true_tp):
+    hdus = [fits.PrimaryHDU()]
+    hdus[0].header['METHOD'] = 'twilight'
+    hdus[0].header['FIBIDS'] = 'physical'
+    for k, bs in enumerate(('1A', '1B')):
+        cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),
+                fits.Column(name='CORRECTION', format=f'{RSS_NWAVE}D',
+                            array=np.tile(true_tp[30 * k:30 * (k + 1), None], RSS_NWAVE)),
+                fits.Column(name='WAVE', format=f'{RSS_NWAVE}D',
+                            array=np.tile(np.linspace(4700.0, 7000.0, RSS_NWAVE), (30, 1))),
+                fits.Column(name='FLAGS', format='I', array=np.zeros(30, dtype=np.int16))]
+        h = fits.BinTableHDU.from_columns(cols)
+        h.header['EXTNAME'] = f'green_{bs[0]}_{bs[1]}'
+        hdus.append(h)
+    path = str(tmp_path / 'fibre_flat_corrections.fits')
+    fits.HDUList(hdus).writeto(path, overwrite=True)
+    return path
+
+
+def test_flat_divides_out_the_throughput_once(tmp_path):
+    rng = np.random.default_rng(1)
+    true_tp = rng.uniform(0.75, 1.25, 60)
+    rss_tp = true_tp * rng.uniform(0.98, 1.02, 60)       # the RSS's own, slightly different
+    base, sky = _rss_divided_by(tmp_path, true_tp, rss_tp)
+    out = apply_fibre_flat_to_rss(base, _corrections(tmp_path, true_tp),
+                                  str(tmp_path / 'x_RSS_green_FF.fits'))
+    with fits.open(out) as h:
+        flat = h['SKYSUB'].data
+        assert h[0].header['FFVER'] == 2
+        assert h[0].header['FFSA1A'] < 0.5            # flat sky after the flat
+    # every fibre is back to the sky itself: the throughput was divided out exactly once
+    np.testing.assert_allclose(flat, np.tile(sky, (60, 1)), rtol=1e-5)
+
+
+def test_rss_without_thruput_is_refused(tmp_path):
+    true_tp = np.ones(60)
+    base, _ = _rss_divided_by(tmp_path, true_tp, true_tp)
+    with fits.open(base) as h:
+        cols = [c for c in h['FIBERMAP'].columns if c.name != 'THRUPUT']
+        h['FIBERMAP'] = fits.BinTableHDU.from_columns(cols, name='FIBERMAP')
+        h.writeto(base, overwrite=True)
+    with pytest.raises(RSSStageError, match='THRUPUT'):
+        apply_fibre_flat_to_rss(base, _corrections(tmp_path, true_tp),
+                                str(tmp_path / 'x_RSS_green_FF.fits'))
+
+
+@pytest.mark.parametrize('sens_ffver, ok', [(2, True), (1, False)])
+def test_flux_calibration_needs_the_same_ffver(tmp_path, sens_ffver, ok):
+    path = write_rss(str(tmp_path / 'x_RSS_green_FF.fits'), stage='ff', header={'FFVER': 2})
+    w = np.linspace(4600, 7100, 200)
+    sens = SensFunc(channels={'green': SensChannel('green', w, np.full(200, 1e-16),
+                                                   np.full(200, 1e-16), np.ones(200, bool))},
+                    meta={'fibrflat': True, 'rssstage': 'ff', 'ffver': sens_ffver})
+    if ok:
+        flux_calibrate_file(path, sens, apply_extinction=False)
+    else:
+        with pytest.raises(SensfuncStageError, match='FFVER'):
+            flux_calibrate_file(path, sens, apply_extinction=False)

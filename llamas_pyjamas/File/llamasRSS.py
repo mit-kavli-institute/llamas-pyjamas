@@ -231,8 +231,8 @@ _STAGE_RANK = {s: i for i, s in enumerate(RSS_STAGES)}
 STAGE_HEADER_ALLOWLIST = frozenset({
     'FIBRFLAT', 'FFLATFIL', 'FFMETHD', 'RSSSTAGE', 'HISTORY', 'COMMENT', '',
     'SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'PCOUNT', 'GCOUNT',
-    'CHECKSUM', 'DATASUM', 'FFNSKIP',
-} | {f'FFS{q}{b}{s}' for q in 'BAN' for b in '1234' for s in 'AB'})   # fibre-flat sky check
+    'CHECKSUM', 'DATASUM', 'FFNSKIP', 'FFVER',
+} | {f'FFS{q}{b}{s}' for q in 'BANT' for b in '1234' for s in 'AB'})  # fibre-flat sky check
 #: Keys that record a change to the DATA (pedestal, heliocentric WAVE scaling, line refinement).
 #: A difference here cannot be repaired by copying header cards: the stages hold different data.
 STAGE_HEADER_DERIVED = frozenset({
@@ -816,6 +816,10 @@ class RSSgeneration:
                 all_sky = []
                 fiber_ids = []
                 benchsides = []
+                # Per-row throughput divisor and where it came from: the fibre flat
+                # divides by C_i / THRUPUT, so the throughput is applied once.
+                all_tp = []
+                tp_sources = set()
                 # Tally per-fibre sky provenance (1=channel-global fallback,
                 # 2=no sky available) for SKY-extension header keywords.
                 n_sky_fallback_total = 0
@@ -978,6 +982,8 @@ class RSSgeneration:
                     errors = errors / tp
 
                     # Add data for each fiber
+                    all_tp.append(throughput)
+                    tp_sources.add(str(getattr(obj, 'throughput_source', 'arc')))
                     all_flux.append(counts)
                     all_errors.append(errors)
                     all_waves.append(waves)
@@ -1205,12 +1211,17 @@ class RSSgeneration:
                     fits.Column(name='BENCHSIDE', format='10A', array=np.array(benchsides)),
                     fits.Column(name='FIBER_TYPE', format='10A', array=np.array(fiber_types)),
                     fits.Column(name='RA', format='D', array=np.array(fiber_ras)),
-                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs))
+                    fits.Column(name='DEC', format='D', array=np.array(fiber_decs)),
+                    # The throughput each row was divided by (the fibre flat undoes it)
+                    fits.Column(name='THRUPUT', format='E',
+                                array=np.concatenate(all_tp).astype(np.float32)),
                 ]
 
                 fibermap_hdu = fits.BinTableHDU.from_columns(fibermap_cols)
                 fibermap_hdu.header['EXTNAME'] = 'FIBERMAP'
                 hdul.append(fibermap_hdu)
+                hdul[0].header['TPSRC'] = (', '.join(sorted(tp_sources))[:60],
+                                           'Source of FIBERMAP THRUPUT')
                 self.logger.info(f"Added FIBERMAP binary table with {len(fiber_ids)} entries")
 
                 # Extension - FIBERWCS: fibre-map (x,y) + plate-solved RA/DEC + astrometry

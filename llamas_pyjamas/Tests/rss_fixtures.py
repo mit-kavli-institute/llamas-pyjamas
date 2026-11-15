@@ -53,7 +53,7 @@ def _sky(nwave):
 def write_rss(path, *, stage='base', channel='green', registered=False, wcs_method=None,
               wcs_refined=None, fiberwcs=True, flam=False, noflat=False, rsstage=None,
               header=None, mask_bits=None, zero_counts=None, seed=0, nfib=N_FIB,
-              nwave=N_WAVE):
+              nwave=N_WAVE, thruput=None):
     """Write a synthetic RSS channel file and return its path.
 
     ``stage`` sets the structural markers; ``rsstage`` writes an RSSSTAGE card (default: the
@@ -114,6 +114,9 @@ def write_rss(path, *, stage='base', channel='green', registered=False, wcs_meth
         fits.Column(name='FIBER_TYPE', format='10A', array=np.array(['UNKNOWN'] * nfib)),
         fits.Column(name='RA', format='D', array=ra[:nfib]),
         fits.Column(name='DEC', format='D', array=dec[:nfib]),
+        # the per-row throughput the planes were divided by (1: none)
+        fits.Column(name='THRUPUT', format='E',
+                    array=np.ones(nfib) if thruput is None else np.asarray(thruput)),
     ])
     fm.header['EXTNAME'] = 'FIBERMAP'
     hdus.append(fm)

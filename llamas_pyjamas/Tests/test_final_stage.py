@@ -609,7 +609,7 @@ def test_propagation_base_ff_skysub_consolidate_promote(tmp):
     with pytest.raises(RegistrationMismatchError):
         check_stage_consistency(sky)
     sens = os.path.join(tmp, 'sens.fits')
-    _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub'}).save(sens)
+    _sensfunc({'fibrflat': True, 'rssstage': 'ff_skysub', 'ffver': 2}).save(sens)
     os.remove(corr)
     results, n_problem = promote_directory(tmp, sensfunc_path=sens, apply_extinction=False)
     assert n_problem == 0, results

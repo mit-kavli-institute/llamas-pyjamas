@@ -45,6 +45,11 @@ FF_RESIDUAL_MAX_NOISE_PCT = FF_RESIDUAL_CEILING_PCT / 3
 
 BENCHSIDES = tuple(f"{b}{s}" for b in '1234' for s in 'AB')
 
+# Version of the _FF products, stamped as FFVER. 2 (2026-11-14): the flat divides by
+# C_i / THRUPUT; before, it divided by C_i on top of the RSS throughput, which applied the
+# fibre throughput twice. A sensfunc must come from a standard at the same FFVER.
+FFVER = 2
+
 # RSS MASK bitmask flags written by apply_fibre_flat_to_rss (registry in File/llamasRSS.py)
 from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
     MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
@@ -1545,6 +1550,15 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
             for bs in fibermap['BENCHSIDE']
         ])
         fiber_ids = fibermap['FIBER_ID']
+        # The RSS planes were already divided by each fibre's throughput (THRUPUT), and
+        # C_i holds the same throughput (T_i) times its wavelength shape, so the flat
+        # divides by C_i / THRUPUT: the throughput is applied once.
+        if 'THRUPUT' not in fibermap.names:
+            raise RSSStageError(
+                f'{os.path.basename(rss_file)} does not record the throughput its rows were '
+                f'divided by (FIBERMAP THRUPUT), so the fibre flat would divide it out a second '
+                f'time. It predates 2026-11-14: re-run with clobber = true.')
+        row_tp = np.asarray(fibermap['THRUPUT'], dtype=float)
 
         n_applied = 0
         n_skipped = 0
@@ -1597,7 +1611,9 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
                     f"extrapolated with boundary values ({left_val:.4f}, {right_val:.4f})"
                 )
 
-            # Apply correction: divide flux; propagate flat variance into error
+            # Apply correction: divide flux by C_i / tp; propagate flat variance into error
+            tp = row_tp[row_idx] if np.isfinite(row_tp[row_idx]) and row_tp[row_idx] > 0 else 1.0
+            c_i = np.asarray(c_i, dtype=float) / tp
             safe_c = np.where(np.isfinite(c_i) & (c_i > 0), c_i, 1.0)
             if counts is not None:
                 level = _band_sky_level(counts[row_idx], error[row_idx],
@@ -1608,7 +1624,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
 
             var_c_arr = corr_data.get('correction_var')
             if var_c_arr is not None:
-                var_c_row = var_c_arr[match_idx]
+                var_c_row = var_c_arr[match_idx] / tp ** 2
                 if len(var_c_row) != len(safe_c):
                     # Resample variance onto the (possibly interpolated) science grid
                     var_c_row = np.interp(wave_data[row_idx],
@@ -1654,6 +1670,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
                                       'Fibre flat corrections file')
         primary.header['FFMETHD'] = (corr_method, 'Fibre flat method')
         primary.header['RSSSTAGE'] = ('ff', 'RSS processing stage (see rss_stage)')
+        primary.header['FFVER'] = (FFVER, 'Fibre-flat version (2: divides by C_i/THRUPUT)')
         primary.header['HISTORY'] = (f'Fibre flat applied: {n_applied} fibres '
                                      f'corrected ({corr_method})')
         primary.header['FFNSKIP'] = (n_skipped, 'fibres without a fibre-flat correction')

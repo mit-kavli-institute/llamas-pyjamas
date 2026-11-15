@@ -47,6 +47,20 @@ The flat module is typically run after bias correction and before spectral extra
 `fibre_flat_corrections.fits`, and `apply_fibre_flat_to_rss` divides each RSS by it to make the
 `_FF` files.
 
+### Throughput is applied once
+
+The RSS writer already divides each fibre by its throughput: the `relative_throughput` from the
+twilight (`twilight_throughput = true`) or carried from the arc. It records that divisor in the
+FIBERMAP column `THRUPUT`, and its source in the primary card `TPSRC`. The sky model uses the
+same throughput.
+
+`C_i = T_i × W_i` holds the same fibre throughput again (`T_i`), so `apply_fibre_flat_to_rss`
+divides by `C_i / THRUPUT`. Before 2026-11-14 it divided by `C_i`, which applied the throughput
+twice: the sky scatter within each benchside went from about 2% to 9–19%.
+
+The `_FF` products record this as `FFVER = 2`. An RSS without `THRUPUT` is refused. A sensfunc
+must come from a standard at the same `FFVER` as the science (`Flux/fluxCalibrate.py`).
+
 ### Fibre ids
 
 **Every per-fibre table is keyed by physical fibre id.** This covers `FIBER_ID` in
@@ -90,3 +104,6 @@ The checks, from categorical to per-fibre:
 | primary header of each `_FF` RSS | `FFSB<bs>`, `FFSA<bs>` | sky scatter within benchside `<bs>` before and after the flat, % |
 | | `FFSN<bs>` | noise on one fibre's sky level, % |
 | | `FFNSKIP` | fibres without a correction |
+| | `FFVER` | fibre-flat version; 2 = divides by `C_i / THRUPUT` |
+| FIBERMAP of each RSS | `THRUPUT` | the throughput the row was divided by when the RSS was written |
+| primary header of each RSS | `TPSRC` | where `THRUPUT` came from: a twilight extraction, or `arc` |

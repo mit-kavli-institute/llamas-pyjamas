@@ -637,6 +637,7 @@ def apply_twilight_throughput(extraction_dict, twilight_dir):
         tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
         n = min(np.asarray(e.counts).shape[0], tp.size)
         e.relative_throughput = tp[:n].copy()
+        e.throughput_source = os.path.basename(cands[0])   # recorded as the RSS TPSRC
         n_done += 1
     logger.info(f"apply_twilight_throughput: updated {n_done} cameras from "
                 f"{os.path.basename(cands[0])}")
