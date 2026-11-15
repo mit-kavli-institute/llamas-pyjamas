@@ -23,7 +23,8 @@ from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, clip_fraction_car
                                             stamp_lamp_flat_products, _write_smooth_models_fits)
 from llamas_pyjamas.Flux.fluxCalibrate import SensfuncStageError, flux_calibrate_file
 from llamas_pyjamas.Flux.sensFunc import SensChannel, SensFunc
-from llamas_pyjamas.Tests.rss_fixtures import N_WAVE as RSS_NWAVE, write_rss
+from llamas_pyjamas.Tests.rss_fixtures import N_WAVE as RSS_NWAVE, stage_name, write_rss
+from llamas_pyjamas.reduce import stale_products
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids, live_row_index
 from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, check_recipe, recipe_hash
 
@@ -333,3 +334,32 @@ def test_assess_pixel_flat_flags_a_colour_with_lowered_cores(tmp_path):
     assert lines[0].startswith('Pixel flat: corrected pixels at the clip floor')
     assert len(warnings) == 1 and 'Pixel flat green: median 2.00%' in warnings[0]
     assert 'clip floor red 0.01%, green 2.00%, blue 0.02%' == report
+
+
+# --- A4: stale products are refused on resume -------------------------------------------
+
+def test_stale_products_are_listed_and_current_ones_pass(tmp_path):
+    ext = tmp_path / 'extractions'
+    flat = ext / 'flat'
+    flat.mkdir(parents=True)
+    old_map = str(flat / 'pixel_maps.fits')
+    fits.PrimaryHDU().writeto(old_map)                       # before recipe stamps
+    models = write_models(flat)                              # stamped below
+    stamp_lamp_flat_products([models], {'green': 'flat.fits'})
+    write_rss(stage_name(str(ext), 'green', 'base'))         # current: has THRUPUT
+    old_base = write_rss(stage_name(str(ext), 'red', 'base'))
+    with fits.open(old_base) as h:                           # an RSS from before THRUPUT
+        cols = [c for c in h['FIBERMAP'].columns if c.name != 'THRUPUT']
+        h['FIBERMAP'] = fits.BinTableHDU.from_columns(cols, name='FIBERMAP')
+        h.writeto(old_base, overwrite=True)
+    write_rss(stage_name(str(ext), 'green', 'ff'), stage='ff', header={'FFVER': 2})
+    old_ff = write_rss(stage_name(str(ext), 'blue', 'ff'), stage='ff')   # no FFVER
+
+    stale = dict(stale_products(str(ext), str(flat)))
+    assert set(stale) == {old_map, old_base, old_ff}
+    assert 'no recipe stamp' in stale[old_map]
+    assert 'THRUPUT' in stale[old_base] and 'divided out twice' in stale[old_ff]
+
+
+def test_nothing_is_stale_in_an_empty_folder(tmp_path):
+    assert stale_products(str(tmp_path), str(tmp_path / 'flat')) == []

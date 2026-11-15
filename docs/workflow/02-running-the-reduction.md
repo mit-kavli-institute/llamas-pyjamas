@@ -21,6 +21,19 @@ The pipeline is **resume-aware**: it reuses on-disk products from a previous run
 an interruption picks up where it left off. Set `clobber = true` in the config to force everything
 from scratch. Heavy steps run in parallel via [Ray](https://www.ray.io/) (tune with `ray_num_cpus`).
 
+**A resumed run refuses products made by an older version of the pipeline.** Before any work it
+checks the flat products, the fibre-flat corrections and every RSS in the output folder. It
+lists the ones that cannot be reused, then stops. Re-run with `clobber = true` to rebuild them.
+
+The checks:
+- calibration products must carry their current recipe stamp (`RECIPE`/`RCPHASH`; see
+  `Utils/recipes.py`);
+- a base RSS must record its throughput (FIBERMAP `THRUPUT`);
+- a fibre-flat-fielded RSS must be at the current `FFVER`.
+
+Reusing older products would mix the old fibre-flat errors into the new output: the throughput
+divided twice, fibres shifted by one above a dead fibre, and cosmic-ray-cleaned lamp flats.
+
 ## Disk space
 
 A night needs a lot of disk. Each frame's extraction pickle carries all 24 cameras' traces

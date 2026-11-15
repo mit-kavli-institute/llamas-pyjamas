@@ -79,7 +79,9 @@ from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_p
 from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
                                             process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
-from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
+from llamas_pyjamas.Utils.recipes import recipe_problem
+from llamas_pyjamas.Flat.fibreFlat import (FFVER,
+                                           compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
                                            reduce_twilight_flat,
                                            apply_fibre_flat_to_rss,
@@ -1953,6 +1955,50 @@ def cleanup_extraction_pkls(paths, save_pkl):
     return removed
 
 
+#: Flat products a resumed run reuses, and the recipe each must carry.
+FLAT_PRODUCT_RECIPES = (('pixel_maps.fits', 'lamp_flat'),
+                        ('flat_smooth_models.fits', 'lamp_flat'),
+                        ('unillum_mask.fits', 'lamp_flat'))
+
+
+def stale_products(extraction_path, flat_field_dir):
+    """``[(path, reason)]`` of products a resumed run would reuse that older code made.
+
+    Flat products must carry their current recipe stamp (Utils/recipes.py). A base RSS
+    must record the throughput its rows were divided by (FIBERMAP THRUPUT), and a fibre-
+    flat-fielded RSS must be at the current FFVER: before FFVER 2 the fibre throughput was
+    divided out twice.
+    """
+    stale = []
+    for name, recipe in FLAT_PRODUCT_RECIPES:
+        path = os.path.join(flat_field_dir, name)
+        if os.path.exists(path):
+            why = recipe_problem(fits.getheader(path, 0), recipe)
+            if why:
+                stale.append((path, why))
+    corr = os.path.join(flat_field_dir, 'fibre_flat_corrections.fits')
+    if os.path.exists(corr):
+        header = fits.getheader(corr, 0)
+        why = recipe_problem(header, 'lamp_flat' if header.get('METHOD') == 'lamp_only'
+                             else 'twilight')
+        if why:
+            stale.append((corr, why))
+    for path in sorted(glob.glob(os.path.join(extraction_path, '*_RSS_*.fits'))):
+        try:
+            stage = rss_stage(path)
+            with fits.open(path) as hdul:
+                ffver = int(hdul[0].header.get('FFVER', 1))
+                has_tp = 'FIBERMAP' in hdul and 'THRUPUT' in hdul['FIBERMAP'].columns.names
+        except Exception:                                     # noqa: BLE001 - not an RSS
+            continue
+        if stage == 'base' and not has_tp:
+            stale.append((path, "no FIBERMAP THRUPUT (the throughput its rows were divided by)"))
+        elif stage != 'base' and ffver < FFVER:
+            stale.append((path, f"fibre flat FFVER {ffver}, now {FFVER}: the fibre throughput "
+                                f"was divided out twice"))
+    return stale
+
+
 def report_pixel_flat(reporter, pixel_map_file):
     """Show how much of the pixel flat sits at its clip floor (Flat.flatLlamas.assess_pixel_flat)."""
     if not (pixel_map_file and os.path.exists(pixel_map_file)):
@@ -2677,6 +2723,26 @@ def main(config_path):
         config['extraction_output_dir'] = extraction_path
     else:
         extraction_path = config['extraction_output_dir']
+
+    # A resumed run must not reuse products that older code made: they would mix fibre-
+    # flat versions, recipes or fibre-id conventions into this run's output.
+    if resume:
+        _stale = stale_products(extraction_path,
+                                config.get('flat_field_output_dir',
+                                           os.path.join(extraction_path, 'flat')))
+        if _stale:
+            print(f"\n{len(_stale)} product(s) in this output folder were made by an older "
+                  f"version of the pipeline and cannot be reused:")
+            for _path, _why in _stale[:20]:
+                print(f"  ✗ {os.path.basename(_path)}: {_why}")
+            if len(_stale) > 20:
+                print(f"  … and {len(_stale) - 20} more")
+            print("Re-run with clobber = true to rebuild them (or point output_dir elsewhere).")
+            logger.error(f"Resume refused: {len(_stale)} stale product(s), e.g. "
+                         f"{os.path.basename(_stale[0][0])} ({_stale[0][1]})")
+            _run_state['message'] = (f"{len(_stale)} product(s) from an older pipeline version; "
+                                     f"re-run with clobber = true")
+            raise SystemExit(1)
 
     # Per-frame edge-bias (DC offset) settings, threaded into every extraction so
     # science and flats are corrected identically. See build_edge_bias_config.
