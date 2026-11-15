@@ -30,6 +30,15 @@ def live_fibre_ids(n_live, dead_fibers):
     return [i for i in range(total) if i not in deadset]
 
 
+def live_row_index(n_live, dead_fibers):
+    """``{physical fibre id: live row}`` for a camera with ``n_live`` live rows.
+
+    The inverse of :func:`live_fibre_ids`: use it to find a physical fibre's row in a
+    LIVE-indexed array (extraction counts, wave, ...). Dead fibres are absent.
+    """
+    return {fid: row for row, fid in enumerate(live_fibre_ids(n_live, dead_fibers))}
+
+
 def insert_dead_fibre_rows(arr, dead_fibers, fill=0.0):
     """Expand a LIVE-indexed array to FIBERMAP indexing.
 

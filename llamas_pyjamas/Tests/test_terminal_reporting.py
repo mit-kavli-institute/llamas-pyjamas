@@ -165,6 +165,7 @@ def _science_rss(tmp, throughput, seed=1):
 def _corrections_per_fibre(path, factors, benchsides=('1A', '1B')):
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['METHOD'] = 'twilight'
+    hdus[0].header['FIBIDS'] = 'physical'
     for k, bs in enumerate(benchsides):
         f = factors[30 * k:30 * (k + 1)]
         cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),

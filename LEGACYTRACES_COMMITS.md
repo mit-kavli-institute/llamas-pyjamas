@@ -114,9 +114,28 @@ The commit that adds this file comes after these five. Its SHA appears in `git l
 
 ## 3. Fibre-flat fixes (plan of 2026-11-14)
 
-These are added as each step is committed: R0 recipes, A0–A4 (fibre ids, throughput once,
-no cosmic-ray cleaning on lamp flats, QA, stale-product refusal) and B1–B4 (one twilight
-reduction, lamp-flat combine, Horne normalisation, recipe enforcement).
+Background: on 20261015_16 the fibre flat raised the sky scatter within each benchside from
+1.4–4.8% to 9–19%. Three causes were found:
+- the fibre throughput was divided out twice;
+- fibre ids were off by one above a dead fibre;
+- the lamp flats were cosmic-ray cleaned, which planted false dips in them.
+
+Each step below is one commit. Find a step's SHA with `git log --oneline --grep "<subject>"`;
+SHAs are filled in after each phase.
+
+| Step | Subject | What it does | Depends on / products |
+|---|---|---|---|
+| R0 + A0 | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
+
+**R0 + A0: physical fibre ids and processing recipes.**
+- `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
+  stamps. The rest of the plan uses them.
+- The smooth models (`Flat/flatLlamas.smooth_model_table`) and the corrections are keyed by
+  **physical** fibre id, as the RSS is.
+- `fibreFlat` maps each id to its live twilight row with `Utils/deadfibers.live_row_index`.
+- Fixes the 2A/2B off-by-one, where 28 + 248 fibres got their neighbour's flat and the last
+  fibre got none. `twilightTie` is fixed the same way.
+- Both products carry `FIBIDS='physical'`, and older files are refused.
 
 ## Not committed (left untracked on purpose)
 

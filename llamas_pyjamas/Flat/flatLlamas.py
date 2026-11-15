@@ -16,6 +16,7 @@ from pypeit.core.fitting import iterfit
 import pickle
 from datetime import datetime
 from scipy.ndimage import median_filter, gaussian_filter
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
 
 
 # Default per-channel signal thresholds for the simple pixel flat method
@@ -691,6 +692,24 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     return results
 
 
+def smooth_model_table(ext_obj, smooth_models):
+    """``(fiber_ids, smooth, wave)`` for the rows of one camera that have a smooth model.
+
+    The extraction is live-indexed (dead fibres absent) and ``smooth_models`` is keyed by
+    that row. ``fiber_ids`` are the physical fibre ids (fibremap positions) of those rows,
+    the ids the RSS FIBERMAP uses, so the fibre flat lands on the right fibre above a dead
+    one. The three arrays are aligned row for row.
+    """
+    n_rows = ext_obj.counts.shape[0]
+    physical = live_fibre_ids(n_rows, getattr(ext_obj, 'dead_fibers', []) or [])
+    rows = [r for r in range(n_rows) if r in smooth_models]
+    wave = [ext_obj.wave[r, :] if ext_obj.wave is not None
+            else np.full(ext_obj.counts.shape[1], np.nan) for r in rows]
+    return (np.array([physical[r] for r in rows], dtype=np.int32),
+            np.array([smooth_models[r] for r in rows], dtype=np.float64),
+            np.array(wave, dtype=np.float64))
+
+
 def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
                               gaussian_sigma=2.0):
     """Write lamp smooth models to a multi-extension FITS file.
@@ -713,6 +732,7 @@ def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
     primary = fits.PrimaryHDU()
     primary.header['FILTSZ'] = (filter_size, 'Median filter kernel size')
     primary.header['GSIGMA'] = (gaussian_sigma, 'Gaussian smoothing sigma')
+    primary.header['FIBIDS'] = ('physical', 'FIBER_ID is the fibremap position')
     primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
     primary.header['HISTORY'] = 'Smooth lamp-envelope models from P2P flat step'
     hdul = fits.HDUList([primary])
@@ -990,24 +1010,12 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
         except Exception as _um_exc:
             logger.warning(f"  {ext_name}: unillum mask build failed ({_um_exc})")
 
-        # Build FIBER_ID list keyed by physical ID, excluding dead fibres
-        dead_set = set(getattr(ext_obj, 'dead_fibers', []) or [])
-        total_fibers = ext_obj.counts.shape[0]
-        alive_ids = [i for i in range(total_fibers) if i not in dead_set]
-
-        # Collect smooth models and wavelength arrays for alive fibres only
-        alive_smooth = []
-        alive_wave = []
-        for fid in alive_ids:
-            if fid in smooth_models:
-                alive_smooth.append(smooth_models[fid])
-                alive_wave.append(ext_obj.wave[fid, :] if ext_obj.wave is not None
-                                  else np.full(ext_obj.counts.shape[1], np.nan))
+        alive_ids, alive_smooth, alive_wave = smooth_model_table(ext_obj, smooth_models)
 
         all_smooth_data[ext_name] = {
-            'fiber_ids': np.array(alive_ids, dtype=np.int32),
-            'smooth': np.array(alive_smooth, dtype=np.float64),
-            'wave': np.array(alive_wave, dtype=np.float64),
+            'fiber_ids': alive_ids,
+            'smooth': alive_smooth,
+            'wave': alive_wave,
             'channel': channel,
             'bench': bench,
             'side': side,

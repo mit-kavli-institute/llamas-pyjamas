@@ -47,6 +47,21 @@ The flat module is typically run after bias correction and before spectral extra
 `fibre_flat_corrections.fits`, and `apply_fibre_flat_to_rss` divides each RSS by it to make the
 `_FF` files.
 
+### Fibre ids
+
+**Every per-fibre table is keyed by physical fibre id.** This covers `FIBER_ID` in
+`flat_smooth_models.fits`, in `fibre_flat_corrections.fits` and in the RSS FIBERMAP. The physical
+id is the fibre's fibremap position.
+
+**Extractions are indexed by live row.** Dead fibres are absent, so above a dead fibre the row
+number and the physical id differ. The two are converted with `Utils/deadfibers.py`:
+`live_fibre_ids` gives row → id, and `live_row_index` gives id → row.
+
+Both flat products record the convention as `FIBIDS = 'physical'`. Files made before
+2026-11-14 labelled fibres by row, so above the dead fibre on 2A (fibre 270) and 2B (fibre 49)
+each fibre got its neighbour's correction. Those files are refused; rebuild them with
+`clobber = true`.
+
 ### Checks reported after the fibre flat
 
 `assess_fibre_flat` reads the header cards below and prints a summary under the wavelength and

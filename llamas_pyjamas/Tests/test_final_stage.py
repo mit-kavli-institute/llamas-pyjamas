@@ -184,6 +184,7 @@ def test_stage_keywords_are_not_mismatches(tmp):
 def _corrections(path, channel='green', benchsides=('1A',), factor=2.0, flags=None):
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['METHOD'] = 'twilight'
+    hdus[0].header['FIBIDS'] = 'physical'
     lo, hi = {'green': (4700.0, 7000.0)}[channel]
     for bs in benchsides:
         n = int(np.sum(BENCHSIDES == bs))
@@ -286,6 +287,7 @@ def _twilight_inputs(tmp, zero_frac_by_fid):
     from types import SimpleNamespace
     wave = np.linspace(4700.0, 7000.0, N_WAVE)
     hdus = [fits.PrimaryHDU()]
+    hdus[0].header['FIBIDS'] = 'physical'
     exts, meta = [], []
     for side in ('A', 'B'):
         cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),

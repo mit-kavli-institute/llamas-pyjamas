@@ -130,6 +130,7 @@ def _write_flat_smooth_models(path):
     """Uniform-throughput smooth models (so lamp C≈1, isolating the twilight tie)."""
     base = 1000.0 + 200.0 * np.sin(np.linspace(0, np.pi, N_WAVE))
     hdul = fits.HDUList([fits.PrimaryHDU()])
+    hdul[0].header['FIBIDS'] = 'physical'
     for bs in BENCHSIDES:
         smooth = np.tile(base, (N_FIB, 1))
         cols = [

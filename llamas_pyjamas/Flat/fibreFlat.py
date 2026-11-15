@@ -49,6 +49,8 @@ BENCHSIDES = tuple(f"{b}{s}" for b in '1234' for s in 'AB')
 from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
     MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
 from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
+from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
+from llamas_pyjamas.Utils.recipes import CalibrationRecipeError  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -66,6 +68,11 @@ def _load_smooth_models(smooth_models_file):
     """
     models = {}
     with fits.open(smooth_models_file) as hdul:
+        if hdul[0].header.get('FIBIDS') != 'physical':
+            raise CalibrationRecipeError(
+                f"{os.path.basename(smooth_models_file)} labels fibres by extraction row, "
+                f"not physical fibre id, so fibres above a dead fibre would get their "
+                f"neighbour's flat. Rebuild the flat products (re-run with clobber = true).")
         for ext in hdul[1:]:
             ext_name = ext.header['EXTNAME']
             models[ext_name] = {
@@ -164,6 +171,7 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None,
     primary = fits.PrimaryHDU()
     primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
     primary.header['METHOD'] = (method, 'Fibre flat method')
+    primary.header['FIBIDS'] = ('physical', 'FIBER_ID is the fibremap position')
     primary.header['HISTORY'] = f'Fibre-to-fibre flat corrections ({method})'
     if header_extra:
         for k, v in header_extra.items():
@@ -1155,26 +1163,15 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
             twi_counts = twi_ext.counts
             twi_wave = twi_ext.wave
-            dead_set = set(getattr(twi_ext, 'dead_fibers', []) or [])
-            total_twi = twi_counts.shape[0]
-
-            # Handle wave/counts shape mismatch (dead fibre expansion)
-            n_wave_rows = twi_wave.shape[0] if twi_wave is not None else 0
-            wave_expanded = (n_wave_rows == total_twi)
-            if not wave_expanded and n_wave_rows > 0:
-                fid_to_wave_row = {}
-                wave_row = 0
-                for phys_id in range(total_twi):
-                    if phys_id in dead_set:
-                        continue
-                    if wave_row < n_wave_rows:
-                        fid_to_wave_row[phys_id] = wave_row
-                        wave_row += 1
-                logger.debug(f"  {ext_name}: wave/counts shape mismatch "
-                             f"(wave={n_wave_rows}, counts={total_twi}), "
-                             f"mapped {len(fid_to_wave_row)} alive fibres")
-            else:
-                fid_to_wave_row = None
+            if twi_wave is None or twi_wave.shape[0] != twi_counts.shape[0]:
+                logger.warning(f"  {ext_name}: twilight wave and counts rows differ; "
+                               f"using the lamp-derived inter-bench offset as T_i")
+                lamp_only_benchsides.add(ext_name)
+                continue
+            # Twilight rows are live-indexed (dead fibres absent); fiber_ids are
+            # physical fibre ids, so look each one's row up.
+            row_of = live_row_index(twi_counts.shape[0],
+                                    getattr(twi_ext, 'dead_fibers', []) or [])
 
             # Determine integration window
             if integration_range and channel in integration_range:
@@ -1190,18 +1187,11 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
             # Integrate twilight per fibre
             for fid in fiber_ids:
-                if fid >= total_twi or fid in dead_set:
+                row = row_of.get(int(fid))
+                if row is None:
                     continue
-
-                if fid_to_wave_row is not None:
-                    wave_idx = fid_to_wave_row.get(fid)
-                    if wave_idx is None:
-                        continue
-                else:
-                    wave_idx = fid
-
-                tw = twi_wave[wave_idx] if twi_wave is not None else None
-                tc = twi_counts[fid]
+                tw = twi_wave[row]
+                tc = twi_counts[row]
 
                 if tw is not None and np.any(np.isfinite(tw)):
                     # mean(valid) x N over the window: a zero-filled or non-finite sample
@@ -1499,6 +1489,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
     corr_lookup = {}  # ext_name → {'fiber_ids', 'correction', 'wave', 'flags', 'correction_var'}
     with fits.open(corrections_file) as corr_hdul:
         corr_method = corr_hdul[0].header.get('METHOD', 'unknown')
+        if corr_hdul[0].header.get('FIBIDS') != 'physical':
+            raise CalibrationRecipeError(
+                f"{os.path.basename(corrections_file)} labels fibres by extraction row, not "
+                f"physical fibre id, so it would put the wrong flat on fibres above a dead "
+                f"fibre. Rebuild it (re-run with clobber = true).")
         for ext in corr_hdul[1:]:
             if ext.header.get('EXTNAME', '').endswith('_REF'):
                 continue  # Skip reference spectrum extensions

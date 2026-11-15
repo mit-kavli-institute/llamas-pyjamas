@@ -44,6 +44,7 @@ from llamas_pyjamas.Flat.fibreFlat import (
     CORRECTION_CLAMP,
     MIN_REF_FLUX,
 )
+from llamas_pyjamas.Utils.deadfibers import live_row_index
 
 logger = logging.getLogger(__name__)
 
@@ -352,30 +353,19 @@ def _load_corrections(corrections_file):
 
 
 def _twilight_spectrum(twi_ext, fid):
-    """Return (wave, counts) for physical fibre *fid*, handling dead-fibre packing."""
+    """Return (wave, counts) for physical fibre *fid*.
+
+    Twilight rows are live-indexed (dead fibres absent), so the physical id is mapped to
+    its row with the camera's ``dead_fibers``.
+    """
     counts = twi_ext.counts
     wave = twi_ext.wave
-    total = counts.shape[0]
-    if fid >= total:
+    if wave is None or wave.shape[0] != counts.shape[0]:
         return None, None
-    dead_set = set(getattr(twi_ext, 'dead_fibers', []) or [])
-    if fid in dead_set:
+    row = live_row_index(counts.shape[0], getattr(twi_ext, 'dead_fibers', []) or []).get(int(fid))
+    if row is None:
         return None, None
-    n_wave_rows = wave.shape[0] if wave is not None else 0
-    if wave is None:
-        return None, None
-    if n_wave_rows == total:
-        return wave[fid], counts[fid]
-    # Compacted wave rows (alive-only): map physical id → wave row
-    wave_row = 0
-    for phys in range(total):
-        if phys in dead_set:
-            continue
-        if phys == fid:
-            return (wave[wave_row] if wave_row < n_wave_rows else None,
-                    counts[fid])
-        wave_row += 1
-    return None, None
+    return wave[row], counts[row]
 
 
 def compute_twilight_tie(twilight_extractions, lamp_corrections_file,
