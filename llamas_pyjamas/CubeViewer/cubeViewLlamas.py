@@ -61,6 +61,7 @@ from llamas_pyjamas.CubeViewer.cubeViewPick import ElementPicker
 from llamas_pyjamas.CubeViewer.cubeViewRSS import RSSScene
 from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_ORDER, SpectralScene, Spectrum
 from llamas_pyjamas.CubeViewer.cubeViewSpecPlot import SpectrumPanel
+from llamas_pyjamas.Utils.recipes import LEGACY_EXTMETH, normalise_method
 
 logger = logging.getLogger(__name__)
 
@@ -964,8 +965,10 @@ class CubeViewerWindow(QMainWindow):
         if self._path:
             try:
                 stage = rss_stage(self._path)
+                _hdr0 = fits.getheader(self._path, 0)
                 stage_meta = {'rssstage': stage, 'fibrflat': stage != 'base',
-                              'ffver': int(fits.getheader(self._path, 0).get('FFVER', 1)),
+                              'ffver': int(_hdr0.get('FFVER', 1)),
+                              'extmeth': normalise_method(_hdr0.get('EXTMETH', LEGACY_EXTMETH)),
                               'stdfile': os.path.basename(self._path)}
                 final = final_rss(self._path)
                 if os.path.abspath(final) != os.path.abspath(self._path):

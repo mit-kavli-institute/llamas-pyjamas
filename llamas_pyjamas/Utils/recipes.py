@@ -97,14 +97,96 @@ def pipeline_version():
     return str(getattr(sys.modules.get('llamas_pyjamas'), '__version__', 'unknown'))
 
 
-def stamp_recipe(header, recipe):
-    """Write RECIPE, RCPHASH, PIPEVER and FIBIDS into a FITS header (or dict); returns it."""
+#: Extraction methods recorded as EXTMETH ('optimal' is the user-facing alias of 'horne').
+EXTRACT_METHODS = ('horne', 'boxcar', 'legacy')
+#: Method of products made before EXTMETH was recorded: the pipeline default until 2026-11-15.
+LEGACY_EXTMETH = 'boxcar'
+#: Header keys that record the extraction method.
+EXTRACTION_STAMPS = ('EXTMETH', 'EXTHW')
+
+
+def normalise_method(method):
+    """'horne' for 'optimal' (its user-facing alias), otherwise the lower-case name."""
+    m = str(method).strip().lower()
+    return 'horne' if m == 'optimal' else m
+
+
+def run_extraction_method():
+    """``(method, boxcar half-width or None)`` of this run, or None outside a pipeline run.
+
+    From ``LLAMAS_EXTRACT_METHOD`` and ``LLAMAS_BOXCAR_HALFWIDTH``, which reduce.py sets for
+    every extraction of a run (mixing methods breaks the per-fibre throughput calibration).
+    """
+    method = os.environ.get('LLAMAS_EXTRACT_METHOD')
+    if not method:
+        return None
+    method = normalise_method(method)
+    half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5')) if method == 'boxcar' else None
+    return method, half
+
+
+def stamp_extraction_method(header, method=None, halfwidth=None):
+    """Write EXTMETH (and EXTHW for boxcar) into a header (or dict); returns it.
+
+    ``method`` None takes the run's (:func:`run_extraction_method`); outside a run nothing is
+    written.
+    """
+    if method is None:
+        run = run_extraction_method()
+        if run is None:
+            return header
+        method, halfwidth = run
+    method = normalise_method(method)
+    header['EXTMETH'] = (method, 'Extraction method (Extract/README.md)')
+    if method == 'boxcar':
+        if halfwidth is None:
+            halfwidth = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
+        header['EXTHW'] = (float(halfwidth), 'Boxcar aperture half-width [px]')
+    return header
+
+
+def extraction_method_problem(header, run=None):
+    """Why a product was extracted differently from this run, or None.
+
+    ``run`` is ``(method, boxcar half-width)``; None takes :func:`run_extraction_method`, and
+    outside a run nothing is checked. A product without EXTMETH counts as ``LEGACY_EXTMETH``
+    (the default it was made with); a boxcar product without EXTHW is not checked for width.
+    """
+    run = run if run is not None else run_extraction_method()
+    if run is None:
+        return None
+    method, half = run
+    method = normalise_method(method)
+    stamped = _value(header, 'EXTMETH')
+    found = normalise_method(stamped or LEGACY_EXTMETH)
+    if found != method:
+        note = '' if stamped else ' (no EXTMETH stamp: the old default)'
+        return f"extracted with {found}{note}; this run extracts with {method}"
+    found_half = _value(header, 'EXTHW')
+    if method == 'boxcar' and half is not None and found_half is not None \
+            and abs(float(found_half) - float(half)) > 1e-6:
+        return f"boxcar half-width {float(found_half):g} px; this run uses {float(half):g} px"
+    return None
+
+
+def copy_extraction_method(source, target):
+    """Copy EXTMETH/EXTHW from one header to another (where the source has them)."""
+    for key in EXTRACTION_STAMPS:
+        if source is not None and key in source:
+            target[key] = (source[key], source.comments[key]) if hasattr(source, 'comments') \
+                else source[key]
+
+
+def stamp_recipe(header, recipe, method=None, halfwidth=None):
+    """Write RECIPE, RCPHASH, PIPEVER, FIBIDS and the extraction method (EXTMETH, EXTHW;
+    :func:`stamp_extraction_method`) into a FITS header (or dict); returns it."""
     if isinstance(recipe, str):
         recipe = get_recipe(recipe)
     header['RECIPE'] = (recipe.name, 'Processing recipe (Utils/recipes.py)')
     header['RCPHASH'] = (recipe_hash(recipe), 'Hash of the recipe and product format')
     header['PIPEVER'] = (pipeline_version(), 'llamas_pyjamas version')
     header['FIBIDS'] = (recipe.fibre_ids, 'Fibre-id convention of per-fibre tables')
+    stamp_extraction_method(header, method, halfwidth)
     return header
 
 
@@ -128,7 +210,7 @@ def recipe_problem(header, expected):
                 f"(RCPHASH {found}, now {recipe_hash(recipe)})")
     if not recipe.cosmic_rays and _value(header, 'CRCLEAN'):
         return f"cosmic-ray cleaned (CRCLEAN=True), which recipe {expected!r} forbids"
-    return None
+    return extraction_method_problem(header)
 
 
 def check_recipe(header, expected, what='product', strict=True):
@@ -181,7 +263,8 @@ def recipe_for_frame(header):
 
 
 #: Keys copied from an extraction's primary header into its recipe sidecar.
-SIDECAR_KEYS = ('RECIPE', 'RCPHASH', 'PIPEVER', 'FIBIDS', 'CRCLEAN', 'CRID', 'CRCHAN', 'CRMODE')
+SIDECAR_KEYS = ('RECIPE', 'RCPHASH', 'PIPEVER', 'FIBIDS', 'CRCLEAN', 'CRID', 'CRCHAN', 'CRMODE',
+                'EXTMETH', 'EXTHW')
 
 
 def sidecar_path(pkl_path):

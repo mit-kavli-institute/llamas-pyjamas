@@ -88,3 +88,19 @@ calibration frame could inherit:
 **When to bump `fmt`:** whenever a code change makes a recipe's products different. Their
 hash then changes, and older products are rebuilt instead of reused.
 
+**The extraction method is recorded too.** `stamp_recipe` writes `EXTMETH` (`horne`, `boxcar`
+or `legacy`; `optimal` is recorded as `horne`) and, for boxcar, `EXTHW` (the aperture
+half-width), taken from the run (`run_extraction_method`, i.e. `extraction_method` in the
+config). Every per-fibre flux depends on the method, so products from different methods must
+never be mixed:
+- `recipe_problem`/`check_recipe` refuse a calibration product extracted with another method
+  than the run's, so a resumed run lists it in `stale_products` and stops;
+- the RSS primary carries `EXTMETH`/`EXTHW` (`copy_extraction_method`), and a resumed run redoes
+  a science, standard or sky frame extracted with another method (`stale_reason`);
+- the sensfunc records `extmeth`, and flux calibration refuses one from a standard extracted
+  differently from the science;
+- the twilight cache key includes the method.
+
+A product without `EXTMETH` counts as `boxcar` (`LEGACY_EXTMETH`), the default it was made with.
+Outside a pipeline run (the GUI quick look) nothing is stamped or checked.
+

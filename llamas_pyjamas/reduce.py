@@ -79,8 +79,9 @@ from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_p
 from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
                                             process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
-from llamas_pyjamas.Utils.recipes import (check_recipe, read_recipe_sidecar, recipe_problem,
-                                          sidecar_path)
+from llamas_pyjamas.Utils.recipes import (check_recipe, copy_extraction_method,
+                                          read_recipe_sidecar, recipe_problem,
+                                          run_extraction_method, sidecar_path)
 from llamas_pyjamas.Flat.fibreFlat import (FFVER,
                                            compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
@@ -715,6 +716,7 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
 
     corr_extractions, ext_hdr = correct_wavelengths(extracted, soln=config.get('arcdict'))
     copy_cosmic_ray_stamps(ext_hdr, sky_primary_hdr)
+    copy_extraction_method(ext_hdr, sky_primary_hdr)
     base_name = os.path.splitext(os.path.basename(extracted))[0]
     sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
     save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
@@ -2912,11 +2914,15 @@ def main(config_path):
             raw: (role, expected_provenance(fits.getheader(raw, 0), slow_bias_file,
                                             fast_bias_file, *frame_dark[raw][:2]))
             for raw, role in frame_roles.items()}
-        # Science, standard and sky RSS also record the cosmic-ray cleaning (CRID).
+        # Science, standard and sky RSS also record the cosmic-ray cleaning (CRID) and the
+        # extraction method (EXTMETH/EXTHW).
         _crid = cosmic_ray_id(cr_settings, remove_cosmic_rays)
+        _extract = run_extraction_method()
         for _raw, (_role, _exp) in _expected_prov.items():
             if _role not in CALIBRATION_ROLES:
                 _exp['CRID'] = _crid
+                if _extract is not None:
+                    _exp['EXTMETH'], _exp['EXTHW'] = _extract
         _mask_dir = config.get('mask_output_dir') or extraction_path
         _cube_dir = config.get('cube_output_dir') or os.path.join(output_dir, 'cubes')
         _protected = [p for v in config.values() for p in _as_list(v)
@@ -3736,9 +3742,10 @@ def main(config_path):
             # authoritative source of RA/DEC and pointing, not the intermediate pkl chain.
             with fits.open(orig_science_file) as _sci_hdul:
                 primary_hdr = _sci_hdul[0].header.copy()
-            # ...but the cosmic-ray cleaning was recorded at extraction (CRID/CRCHAN),
-            # and a resumed run compares CRID on the RSS.
+            # ...but the cosmic-ray cleaning and the extraction method were recorded at
+            # extraction (CRID/CRCHAN, EXTMETH/EXTHW), and a resumed run compares them on the RSS.
             copy_cosmic_ray_stamps(ext_hdr, primary_hdr)
+            copy_extraction_method(ext_hdr, primary_hdr)
 
             # Save the corrected extractions using the current file's base name
             base_name = os.path.splitext(os.path.basename(correction_path))[0]

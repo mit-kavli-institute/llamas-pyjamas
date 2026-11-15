@@ -41,6 +41,7 @@ from astropy.io import fits
 from llamas_pyjamas.File.llamasRSS import (RSS_STAGES, RSSStageError, check_stage_consistency,
                                            final_rss, rss_stage, skysub_extname)
 from llamas_pyjamas.Flux.sensFunc import SensFunc
+from llamas_pyjamas.Utils.recipes import LEGACY_EXTMETH, normalise_method
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,19 @@ def apply_sensfunc(hdul: fits.HDUList, sensfunc: SensFunc,
                 raise SensfuncStageError(msg + ' Rebuild the sensfunc from a re-reduced standard.')
             logger.warning(msg + ' Proceeding (allow_stage_mismatch).')
             override = True
+
+    # The standard and the science must be extracted the same way: the methods' per-fibre
+    # fluxes differ systematically, which a sensfunc would carry into the science.
+    sci_method = normalise_method(header.get('EXTMETH', LEGACY_EXTMETH))
+    sens_method = normalise_method(sensfunc.meta.get('extmeth', LEGACY_EXTMETH))
+    if sci_method != sens_method:
+        msg = (f'{name} was built from a standard extracted with {sens_method}, but the '
+               f'science was extracted with {sci_method}.')
+        if not allow_stage_mismatch:
+            raise SensfuncStageError(msg + ' Rebuild the sensfunc from a standard reduced '
+                                           'with the same extraction method.')
+        logger.warning(msg + ' Proceeding (allow_stage_mismatch).')
+        override = True
 
     sky_name = skysub_extname(hdul)
     skysub = np.asarray(hdul[sky_name].data, dtype=float)

@@ -75,7 +75,8 @@ from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
 from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
 from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
 from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, check_recipe,  # noqa: E402
-                                          recipe_hash, stamp_recipe, write_recipe_sidecar)
+                                          recipe_hash, run_extraction_method, stamp_recipe,
+                                          write_recipe_sidecar)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -551,9 +552,11 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 def _twilight_cache_key(twilight_file, p2p_map_file):
     """What a cached twilight reduction must match to be reused: recipe, input, pixel flat."""
     st = os.stat(p2p_map_file)
+    run = run_extraction_method()
     return {'rcphash': recipe_hash('twilight'), 'source': os.path.basename(twilight_file),
             'pixmap': os.path.basename(p2p_map_file), 'pixmap_size': st.st_size,
-            'pixmap_mtime': round(st.st_mtime, 3)}
+            'pixmap_mtime': round(st.st_mtime, 3),
+            'extraction': list(run) if run is not None else None}
 
 
 def _reduce_one_twilight(twilight_file, p2p_map_file, twi_dir, trace_dir, arc_soln,

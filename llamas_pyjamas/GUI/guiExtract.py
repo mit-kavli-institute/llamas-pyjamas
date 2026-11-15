@@ -867,7 +867,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         # Record the cosmic-ray cleaning applied (CRID is what a resumed run compares)
         # before the masks, the extraction pickle and the white light are written.
         stamp_cosmic_rays(primary_hdr, cosmic_rays or default_cr_settings(), remove_cosmic_rays)
-        stamp_recipe(primary_hdr, recipe)
+        # ... and the extraction method this pickle was made with (EXTMETH/EXTHW).
+        stamp_recipe(primary_hdr, recipe, method=method)
         primary_hdr['CRCLEAN'] = (bool(remove_cosmic_rays), 'Cosmic-ray cleaning allowed')
 
         # Save cosmic ray masks if CR removal was enabled

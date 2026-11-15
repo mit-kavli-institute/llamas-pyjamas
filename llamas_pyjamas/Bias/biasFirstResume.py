@@ -33,6 +33,7 @@ from llamas_pyjamas.Bias.biasFirst import provenance_of
 from llamas_pyjamas.config import BIAS_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.File.llamasRSS import exposure_id
 from llamas_pyjamas.Masking.cosmicLlamas import LEGACY_CRID
+from llamas_pyjamas.Utils.recipes import EXTRACTION_STAMPS, extraction_method_problem
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +122,13 @@ def stale_reason(expected, products):
     The bias-first stamps are compared on every checked product. ``CRID`` (the
     cosmic-ray cleaning, stamped at extraction) is compared on RSS files only, and
     only when ``expected`` has it; an RSS without it was made with the cleaning
-    that predates the setting (``LEGACY_CRID``).
+    that predates the setting (``LEGACY_CRID``). Likewise ``EXTMETH``/``EXTHW`` (the
+    extraction method): an RSS without them was extracted with ``LEGACY_EXTMETH``.
     """
-    bias_expected = {k: v for k, v in expected.items() if k != 'CRID'}
+    bias_expected = {k: v for k, v in expected.items()
+                     if k != 'CRID' and k not in EXTRACTION_STAMPS}
     cosmic_rays_changed = False
+    method_changed = False
     for path in products:
         name = os.path.basename(path)
         if not _is_checked(name):
@@ -138,6 +142,9 @@ def stale_reason(expected, products):
             if 'CRID' in expected and '_RSS' in name \
                     and header.get('CRID', LEGACY_CRID) != expected['CRID']:
                 cosmic_rays_changed = True
+            if 'EXTMETH' in expected and '_RSS' in name and extraction_method_problem(
+                    header, (expected['EXTMETH'], expected.get('EXTHW'))):
+                method_changed = True
             continue
         if found['BFVER'] is None or found['BFVER'] < expected['BFVER']:
             return 'made by the older bias step'
@@ -150,7 +157,9 @@ def stale_reason(expected, products):
         if found['DARKID'] != bias_expected['DARKID']:
             return 'master dark changed'
         return 'dark scale changed'
-    return 'cosmic-ray settings changed' if cosmic_rays_changed else ''
+    if cosmic_rays_changed:
+        return 'cosmic-ray settings changed'
+    return 'extraction method changed' if method_changed else ''
 
 
 def calibration_products(trace_dir, extraction_dir, flat_dir, output_dir, qa_dir, scan):

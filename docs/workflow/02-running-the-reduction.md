@@ -27,12 +27,16 @@ lists the ones that cannot be reused, then stops. Re-run with `clobber = true` t
 
 The checks:
 - calibration products must carry their current recipe stamp (`RECIPE`/`RCPHASH`; see
-  `Utils/recipes.py`);
+  `Utils/recipes.py`) and have been extracted with this run's `extraction_method` (`EXTMETH`);
 - a base RSS must record its throughput (FIBERMAP `THRUPUT`);
 - a fibre-flat-fielded RSS must be at the current `FFVER`.
 
 Reusing older products would mix the old fibre-flat errors into the new output: the throughput
 divided twice, fibres shifted by one above a dead fibre, and cosmic-ray-cleaned lamp flats.
+
+Science, standard and sky frames are not refused but **redone**: their products move to
+`stale/<timestamp>/` when the bias, dark, cosmic-ray settings (`CRID`, which includes how
+flagged pixels are used) or extraction method (`EXTMETH`) differ from this run's.
 
 ## Disk space
 
