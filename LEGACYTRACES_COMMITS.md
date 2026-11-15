@@ -134,8 +134,8 @@ SHAs are filled in after each phase.
 | B2 `7ed8748` | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
 | B3 `a1f1ccf` | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
 | B4 `b81ea8c` | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
-| B2 fix | Combine only the lamp-flat exposures that match the configured one | On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical headers but blank, saturated or 6× brighter data; the B2 median made all 16 green/blue cameras untraceable. Per camera, an exposure is now used only if its fibre profile (r ≥ 0.98), brightness (×2/3–1.5) and saturation match the configured frame, which is always the reference. | On B2 (`7ed8748`). |
-| — | Add fibre-flat acceptance and arc cosmic-ray check scripts | `Scripts/ffcheck/fibreflat_acceptance.py <output_dir>` prints the per-benchside acceptance numbers; `arc_cr_check.py` checks the arcs' recipe and cosmic-ray stamps. | Read-only scripts. |
+| B2 fix `7c3ed9e` | Combine only the lamp-flat exposures that match the configured one | On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical headers but blank, saturated or 6× brighter data; the B2 median made all 16 green/blue cameras untraceable. Per camera, an exposure is now used only if its fibre profile (r ≥ 0.98), brightness (×2/3–1.5) and saturation match the configured frame, which is always the reference. | On B2 (`7ed8748`). |
+| `79aaec5` | Add fibre-flat acceptance and arc cosmic-ray check scripts | `Scripts/ffcheck/fibreflat_acceptance.py <output_dir>` prints the per-benchside acceptance numbers; `arc_cr_check.py` checks the arcs' recipe and cosmic-ray stamps. | Read-only scripts. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -227,6 +227,32 @@ SHAs are filled in after each phase.
 - Stale arcs are refused on resume.
 - `reduce.report_recipes` prints the recipe of every calibration product at the end of a
   run, plus the science cosmic-ray summary.
+
+### Verification on 20261015_16 (2026-11-15)
+
+The full re-run went into `<night>/reduced_fffix/` (1h01m, every stage completed). Its logs
+and config are in `reduced_fffix/logs/`. Numbers below are from
+`Scripts/ffcheck/fibreflat_acceptance.py`, before (`reduced/`) → after (`reduced_fffix/`):
+
+| Check | Before | After |
+|---|---|---|
+| Sky scatter within benchside after the fibre flat | 9–19% | 1.7–4.1% (RSS throughput alone: 1.4–4.7%) |
+| Benchsides over the provisional 3% | 24/24 | 6/24 |
+| Fibre ids match RSS, 2A/2B | no | yes, all 24 |
+| Fibres not flat-fielded (FFNSKIP) | 2 per channel | 0 |
+| Narrow C_i features > 5%, green | 9,398 | 3 |
+| Narrow C_i features > 5%, blue / red | 4,177 / 21 | 2,149 / 37 |
+| Pixel-flat clip floor, green / blue / red | 1.8% / 1.0% / 0.01% | 0.02% / 0.58% / 0.00% |
+| Arc residual rms, refined fibres | 0.449 px, 298/298 | 0.449 px, 298/298 |
+| Recipe matrix | — | 13/13 as expected |
+
+**Still open:**
+- **Blue `W_i` structure.** The remaining blue features cluster at detector x ≈ 1740–1820,
+  near the blue dichroic cut-off, and are half dips and half spikes. The twilight does not
+  show them. This is likely the 12-px lamp smoothing, or registration against the
+  reference, at a steep edge (follow-up: `flat_filter_size`).
+- **Green after the flat vs the RSS throughput alone.** After the flat, green is about 1%
+  above the throughput alone on every benchside. Red is below it on all 8.
 
 ## Not committed (left untracked on purpose)
 
