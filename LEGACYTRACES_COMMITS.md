@@ -134,6 +134,7 @@ SHAs are filled in after each phase.
 | B2 `7ed8748` | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
 | B3 `a1f1ccf` | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
 | B4 `b81ea8c` | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
+| — | Add fibre-flat acceptance and arc cosmic-ray check scripts | `Scripts/ffcheck/fibreflat_acceptance.py <output_dir>` prints the per-benchside acceptance numbers; `arc_cr_check.py` checks the arcs' recipe and cosmic-ray stamps. | Read-only scripts. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
