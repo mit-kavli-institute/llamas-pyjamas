@@ -86,6 +86,10 @@ red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/t
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 blue_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 
+# A camera that fails to trace gets its master trace shifted onto these flats.
+# false: accept the shift when the fibre fingerprint is inconclusive (see Trace/README.md).
+shifted_master_require_fingerprint = true
+
 #Twilight flat for the fibre-to-fibre flat field. If missing, the lamp flats above are used.
 twilight_flat =  /Users/slh/Library/CloudStorage/Box-Box/slhughes/Llamas_Commissioning_Data/ut20260106/LLAMAS_2026-01-06_23-49-00.7_CAL22_mef.fits
 

@@ -22,6 +22,7 @@ Example:
 
 import os
 import re
+import glob
 import argparse
 import pickle
 import traceback
@@ -40,9 +41,12 @@ from llamas_pyjamas.File.llamasRSS import (RSS_STAGE_RANK, RSS_STAGE_RE, exposur
                                            exposure_key, rss_stage, write_rss_manifest)
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import (count_trace_fibres, check_header, configure_pipeline_logging,
-                                       setup_logger, find_trace_pickle, validate_and_fix_trace_fibres,
-                                       confirm_unusable_master_traces)
+from llamas_pyjamas.Utils.utils import check_header, configure_pipeline_logging, setup_logger
+from llamas_pyjamas.Trace.traceValidation import (copy_mastercalib_trace, count_trace_fibres,
+                                                  validate_and_fix_trace_fibres,
+                                                  confirm_unusable_master_traces,
+                                                  set_aside_legacy_traces)
+from llamas_pyjamas.Trace.masterShift import describe_shift
 from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
@@ -51,8 +55,6 @@ from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine
 from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
 from astropy.io import fits
 import numpy as np
-
-import shutil
 
 _cached_reference_arc = None
 _cached_reference_arc_path = None
@@ -267,6 +269,73 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     return True
 
 
+FLAT_KEYS = ('red_flat_file', 'green_flat_file', 'blue_flat_file')
+
+
+def missing_flat_files(config) -> list:
+    """The flat config keys that are unset or point at no file."""
+    return [key for key in FLAT_KEYS
+            if not config.get(key) or not os.path.exists(config.get(key))]
+
+
+def night_flats(config) -> dict:
+    """``{channel: path}`` of the configured flats that exist, for shifted masters."""
+    return {key.split('_')[0]: config[key] for key in FLAT_KEYS
+            if config.get(key) and os.path.exists(config[key])}
+
+
+def require_fingerprint(config) -> bool:
+    """``shifted_master_require_fingerprint`` (default true)."""
+    return str(config.get('shifted_master_require_fingerprint', True)).strip().lower() \
+        not in ('false', '0', 'no')
+
+
+def new_shifted_masters(validation_results) -> list:
+    """Shifted masters written by this validation (not already counted as valid)."""
+    valid_paths = {v[3] for v in validation_results.get('valid_traces', [])
+                   if isinstance(v, tuple) and len(v) > 3}
+    return [e for e in validation_results.get('shifted_masters', []) if e[4] not in valid_paths]
+
+
+def print_shifted_masters(validation_results):
+    """List the cameras whose mastercalib trace was shifted onto this night's flat."""
+    for channel, bench, side, *_, record in validation_results.get('shifted_masters', []):
+        print(f"  ✓ {channel}{bench}{side}: mastercalib trace shifted onto this night's flat "
+              f"({describe_shift(record)})")
+
+
+def report_trace_validation(validation_results, label, reporter):
+    """Print what ``validate_and_fix_trace_fibres`` found and fixed in a trace set.
+
+    Then ask about any camera left with no usable trace: proceed without it, or
+    terminate the run (``confirm_unusable_master_traces``).
+    """
+    invalid = validation_results['invalid_traces']
+    missing = validation_results['missing_traces']
+    fallback = validation_results['fallback_used']
+
+    print(f"⚠️  Found {len(invalid)} {label} trace(s) with incorrect fiber counts")
+    if missing:
+        print(f"⚠️  {len(missing)} camera(s) have no trace file")
+    print(f"✓  Copied {len(fallback)} mastercalib fallback trace(s)")
+    if validation_results.get('shifted_masters'):
+        print(f"✓  {len(validation_results['shifted_masters'])} mastercalib trace(s) shifted "
+              f"onto this night's flats")
+    for channel, bench, side, expected, actual in invalid:
+        print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+    for channel, bench, side in missing:
+        print(f"  ✗ {channel}{bench}{side}: no trace file")
+    for channel, bench, side, *_ in fallback:
+        print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+    print_shifted_masters(validation_results)
+
+    with reporter.paused():
+        confirm_unusable_master_traces(validation_results['unusable_masters'])
+    shifted = new_shifted_masters(validation_results)
+    print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} "
+          f"{label} + {len(shifted)} shifted mastercalib + {len(fallback)} mastercalib)")
+
+
 def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
     """
     Copy mastercalib traces for placeholder extensions identified in a flat file.
@@ -302,19 +371,14 @@ def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, plac
             if cam_channel != channel.lower():
                 continue
 
-            # Target filename (user trace naming convention)
-            user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
-            user_trace_path = os.path.join(trace_dir, user_trace_file)
-
-            # Copy mastercalib trace to user trace directory. The bundle ships the
-            # unprefixed name while locally generated master traces carry
-            # "LLAMAS_master_", so accept either.
+            # Copied only if usable (right fibre count; an old-format master must pass
+            # the registration audit). If not, the camera is left without a trace and
+            # the validation after tracing reports it and asks whether to go on.
             try:
-                master_trace_path = find_trace_pickle(channel, bench, side, CALIB_DIR)
+                copy_mastercalib_trace(channel.lower(), str(bench), str(side), CALIB_DIR, trace_dir)
             except FileNotFoundError as exc:
-                print(f"  ✗ WARNING: {exc}")
+                print(f"  ✗ WARNING: {channel}{bench}{side}: {exc}")
             else:
-                shutil.copy2(master_trace_path, user_trace_path)
                 print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
                 traces_copied += 1
 
@@ -1878,9 +1942,13 @@ def trace_report_row(trace_source, validation_results=None):
                          for ch, bss in by_colour.items())
 
     fallback = validation_results.get('fallback_used', [])
+    shifted = validation_results.get('shifted_masters', [])
     skipped = validation_results.get('unusable_masters', [])
-    n_cams = len(validation_results.get('valid_traces', [])) + len(fallback)
+    n_cams = (len(validation_results.get('valid_traces', [])) + len(fallback)
+              + len(new_shifted_masters(validation_results)))
     text = f"{n_cams} cameras, {source}"
+    if shifted:
+        text += f"; shifted master for {_cams(shifted)}"
     if fallback and trace_source != 'mastercalib_per_camera':
         text += f"; mastercalib for {_cams(fallback)}"
     if skipped:
@@ -2334,75 +2402,56 @@ def main(config_path):
         final_trace_dir = None
         trace_source = None
         validation_results = None
+        trace_dir = config.get('trace_output_dir')
 
-        # Check if we should use existing traces or generate new ones
-        if resume and config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
-            # Check if trace files exist in the specified directory
-            import glob
-            existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
+        # Reuse this night's traces if allowed and they are current-format. Otherwise
+        # trace the night from its flats with the current tracer (traceLlamasMaster).
+        retrace = True
+        if resume and config.get('use_existing_traces', True) and os.path.exists(trace_dir):
+            existing_traces = glob.glob(os.path.join(trace_dir, '*.pkl'))
             if existing_traces:
-                print(f"Found {len(existing_traces)} existing trace files in {config.get('trace_output_dir')}")
-
-                # Validate existing traces with per-trace fallback
+                print(f"Found {len(existing_traces)} existing trace files in {trace_dir}")
                 print("Validating existing traces...")
                 validation_results = validate_and_fix_trace_fibres(
-                    config.get('trace_output_dir'),
-                    mastercalib_dir=CALIB_DIR
-                )
-
-                if validation_results['all_valid']:
-                    print("✓ All existing traces validated successfully")
-                    final_trace_dir = config.get('trace_output_dir')
-                    trace_source = "existing_validated"
+                    trace_dir, mastercalib_dir=CALIB_DIR, flats=night_flats(config),
+                    require_fingerprint=require_fingerprint(config))
+                legacy = validation_results['legacy_traces']
+                if legacy:
+                    # Old-format traces are never reused. Nothing has been changed yet,
+                    # so stopping here for want of flats leaves the folder untouched.
+                    print(f"⚠️  {len(legacy)} trace(s) in {trace_dir} were written by an older "
+                          f"pipeline version and are not reused")
+                    for channel, bench, side, path in legacy:
+                        print(f"  ✗ {channel}{bench}{side}: {os.path.basename(path)}")
+                    missing_flats = missing_flat_files(config)
+                    if missing_flats:
+                        raise RuntimeError(
+                            f"{trace_dir} holds traces from an older pipeline version, which are "
+                            f"not reused, and there are no flats to re-trace from: set "
+                            f"{', '.join(missing_flats)} in the config. No files were changed.")
+                    print("Re-tracing this night from its flats with the current tracer")
+                    for original, backup in set_aside_legacy_traces([path for *_, path in legacy]):
+                        print(f"  set aside {os.path.basename(original)} as {os.path.basename(backup)}")
+                    validation_results = None
                 else:
-                    # Some traces invalid - fallbacks were copied
-                    invalid_count = len(validation_results['invalid_traces'])
-                    fallback_count = len(validation_results['fallback_used'])
-
-                    missing_count = len(validation_results.get('missing_traces', []))
-                    misreg_count = len(validation_results.get('misregistered_traces', []))
-
-                    print(f"⚠️  Found {invalid_count} trace(s) with incorrect fiber counts")
-                    if missing_count:
-                        print(f"⚠️  {missing_count} camera(s) produced no trace at all")
-                    if misreg_count:
-                        print(f"⚠️  {misreg_count} legacy trace(s) fail the fibre-registration check")
-                    print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
-
-                    # Print details about invalid traces
-                    for channel, bench, side, expected, actual in validation_results['invalid_traces']:
-                        print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
-
-                    for channel, bench, side in validation_results.get('missing_traces', []):
-                        print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
-
-                    for channel, bench, side, reason in validation_results.get('misregistered_traces', []):
-                        print(f"  ✗ {channel}{bench}{side}: legacy trace misregistered ({reason})")
-
-                    # Print details about fallbacks used
-                    for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
-                        print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
-
-                    # A camera with no usable trace and no usable mastercalib stand-in: ask
-                    # whether to go on without it (or stop the run).
-                    with reporter.paused():
-                        confirm_unusable_master_traces(validation_results.get('unusable_masters', []))
-
-                    # Still use trace_output_dir (now contains mix of user + mastercalib)
-                    final_trace_dir = config.get('trace_output_dir')
-                    trace_source = "existing_partial_fallback"
-
-                    print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} user + {fallback_count} mastercalib)")
+                    retrace = False
+                    final_trace_dir = trace_dir
+                    if validation_results['all_valid']:
+                        print("✓ All existing traces validated successfully")
+                        print_shifted_masters(validation_results)
+                        trace_source = "existing_validated"
+                    else:
+                        report_trace_validation(validation_results, 'existing', reporter)
+                        trace_source = "existing_partial_fallback"
+            elif missing_flat_files(config):
+                print("No existing trace files and no flats to trace from; using mastercalib")
+                retrace = False
             else:
-                print("No existing trace files found in specified directory")
-                final_trace_dir = None  # Will generate new or fallback
-                trace_source = "existing_missing"
-        else:
+                print("No existing trace files found; tracing this night from its flats")
+
+        if retrace:
             print("Generating new traces...")
             logger.info("Stage: Generating new traces")
-
-            # Validate flat field files before trace generation
-            
 
             print("Validating flat field files...")
             red_flat_validated = validate_and_fix_extensions(
@@ -2422,59 +2471,30 @@ def main(config_path):
             )
 
             generate_traces(red_flat_validated, green_flat_validated, blue_flat_validated,
-                           config.get('trace_output_dir'),
-                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
+                           trace_dir, slow_bias=slow_bias_file, fast_bias=fast_bias_file)
 
-            # Validate newly generated traces with per-trace fallback
             print("Validating newly generated traces...")
+            # A camera that failed to trace gets its mastercalib trace shifted onto its flat.
+            shift_onto = {'red': red_flat_validated, 'green': green_flat_validated,
+                          'blue': blue_flat_validated}
             validation_results = validate_and_fix_trace_fibres(
-                config.get('trace_output_dir'),
-                mastercalib_dir=CALIB_DIR
-            )
+                trace_dir, mastercalib_dir=CALIB_DIR, flats=shift_onto,
+                require_fingerprint=require_fingerprint(config))
+            if validation_results['legacy_traces']:
+                # Old-format files the re-trace did not overwrite, e.g. LLAMAS_master_*
+                # names, which clear_stale_traces leaves alone. Every fresh trace has comb_ok.
+                set_aside_legacy_traces([path for *_, path in validation_results['legacy_traces']])
+                validation_results = validate_and_fix_trace_fibres(
+                    trace_dir, mastercalib_dir=CALIB_DIR, flats=shift_onto,
+                    require_fingerprint=require_fingerprint(config))
 
+            final_trace_dir = trace_dir
             if validation_results['all_valid']:
                 print("✓ Generated traces validated successfully")
-                final_trace_dir = config.get('trace_output_dir')
                 trace_source = "generated_validated"
             else:
-                # Some traces invalid - fallbacks were copied
-                invalid_count = len(validation_results['invalid_traces'])
-                fallback_count = len(validation_results['fallback_used'])
-
-                missing_count = len(validation_results.get('missing_traces', []))
-                misreg_count = len(validation_results.get('misregistered_traces', []))
-
-                print(f"⚠️  Found {invalid_count} generated trace(s) with incorrect fiber counts")
-                if missing_count:
-                    print(f"⚠️  {missing_count} camera(s) produced no trace at all")
-                if misreg_count:
-                    print(f"⚠️  {misreg_count} legacy trace(s) fail the fibre-registration check")
-                print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
-
-                # Print details about invalid traces
-                for channel, bench, side, expected, actual in validation_results['invalid_traces']:
-                    print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
-
-                for channel, bench, side in validation_results.get('missing_traces', []):
-                    print(f"  ✗ {channel}{bench}{side}: tracing failed, no file written")
-
-                for channel, bench, side, reason in validation_results.get('misregistered_traces', []):
-                    print(f"  ✗ {channel}{bench}{side}: legacy trace misregistered ({reason})")
-
-                # Print details about fallbacks used
-                for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
-                    print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
-
-                # A camera with no usable trace and no usable mastercalib stand-in: ask
-                # whether to go on without it (or stop the run).
-                with reporter.paused():
-                    confirm_unusable_master_traces(validation_results.get('unusable_masters', []))
-
-                # Still use trace_output_dir (now contains mix of user + mastercalib)
-                final_trace_dir = config.get('trace_output_dir')
+                report_trace_validation(validation_results, 'generated', reporter)
                 trace_source = "generated_partial_fallback"
-
-                print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} generated + {fallback_count} mastercalib)")
 
         # Final fallback to mastercalib if needed
         if final_trace_dir is None:

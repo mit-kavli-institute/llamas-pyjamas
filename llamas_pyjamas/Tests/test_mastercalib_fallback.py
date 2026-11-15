@@ -16,7 +16,8 @@ import pickle
 import numpy as np
 import pytest
 
-from llamas_pyjamas.Utils.utils import copy_mastercalib_trace, find_trace_pickle
+from llamas_pyjamas.Trace.traceValidation import copy_mastercalib_trace
+from llamas_pyjamas.Utils.utils import find_trace_pickle
 
 
 class _Trace:
