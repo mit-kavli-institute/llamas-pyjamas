@@ -240,22 +240,24 @@ def test_assess_quiet_when_the_flat_works(tmp):
     assert warnings == []
     assert lines[0].startswith("Fibre flat (twilight)")
     assert lines[2].split()[0] == 'green' and lines[2].split()[1] == '1.0'
-    assert 'sky scatter after flat 1.0–1.0% (before 3.0–3.0%)' in report
+    assert 'sky scatter after flat 1.0–1.0% (throughput only 3.0–3.0%)' in report
 
 
 def test_assess_says_plainly_when_the_ceiling_fails_everywhere(tmp):
     _, warnings, report = assess_fibre_flat(*_assess_inputs(tmp, after=15.0, before=3.0))
-    assert len(warnings) == 1
-    assert f'exceeds the {FF_RESIDUAL_CEILING_PCT:g}% ceiling (provisional) on 8/8' in warnings[0]
-    assert 'higher than before the flat on 8/8' in warnings[0]
-    assert 'not flattening the sky' in warnings[0]
+    # relative (worse than the RSS throughput alone) and absolute (ceiling), in that order
+    assert len(warnings) == 2
+    assert 'more sky scatter than the RSS throughput alone on 8/8' in warnings[0]
+    assert f'exceeds the {FF_RESIDUAL_CEILING_PCT:g}% ceiling (provisional) on 8/8' in warnings[1]
+    assert 'not flattening the sky' in warnings[1]
     assert 'over 3% on 8/8 ⚠️' in report
 
 
 def test_assess_names_the_benchsides_over_the_ceiling(tmp):
     _, warnings, _ = assess_fibre_flat(*_assess_inputs(tmp, ff_cards={'FFSA3B': 6.5}))
-    assert len(warnings) == 1 and 'on 1/8 benchsides: green 3B 6.5%' in warnings[0]
-    assert 'not flattening' not in warnings[0]
+    assert len(warnings) == 2 and 'green 3B 3.0→6.5%' in warnings[0]
+    assert 'on 1/8 benchsides: green 3B 6.5%' in warnings[1]
+    assert 'not flattening' not in warnings[1]
 
 
 def test_assess_relative_outlier_lamp_only_fallback_and_fibre_outliers(tmp):

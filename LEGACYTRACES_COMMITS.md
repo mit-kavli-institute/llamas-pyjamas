@@ -128,6 +128,7 @@ SHAs are filled in after each phase.
 | R0 + A0 | Key fibre-flat tables by physical fibre id and add processing recipes | See below. | Needs a clobber re-run: older flat products are refused. |
 | A1 | Apply the fibre throughput once: divide the RSS by C_i over the throughput it already removed | See below. | On R0 + A0. Needs a clobber re-run; sensfuncs must be rebuilt from re-reduced standards. |
 | A2 | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
+| A3 | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -156,6 +157,16 @@ SHAs are filled in after each phase.
   pixel-flat pixels at the 0.90 clip floor.
 - The flat products carry the `lamp_flat` recipe, `CRCLEAN=False` and `FLATFIL<c>`.
 - The corrections file carries the `twilight` recipe, `TWIFIL<c>` and `SMRCPHS`.
+
+**A3: QA, layered and never tuned to pass.**
+- **Sky scatter at three levels:** raw (`FFSB`), RSS throughput only (`FFST`) and after the
+  flat (`FFSA`). A relative warning fires when the flat does worse than the throughput alone.
+- **Narrow structure in the lamp shape `W_i`:** `WINRMS` and `WINDIP`, with a provisional 1%
+  ceiling.
+- **Twilight cross-check of the `W_i` dips:** `WIDIPN` and `WIDIPTW`.
+- **Pixel-flat clip-floor share:** `FCLIPLO` per detector, with relative warnings within and
+  across colours (`assess_pixel_flat`, reported after the flat stage).
+- Each of these would have caught the bugs fixed in A0–A2.
 
 ## Not committed (left untracked on purpose)
 

@@ -18,6 +18,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clip
 from datetime import datetime
 from numpy.polynomial.polynomial import polyvander2d
+from scipy.ndimage import label, median_filter
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,22 @@ FF_RESIDUAL_CEILING_PCT = 3.0
 FF_RESIDUAL_MAX_NOISE_PCT = FF_RESIDUAL_CEILING_PCT / 3
 
 BENCHSIDES = tuple(f"{b}{s}" for b in '1234' for s in 'AB')
+
+# Narrow structure in the lamp shape W_i: each fibre's W_i divided by its running median
+# over NARROW_WINDOW pixels, minus 1, on the central 80% of its range. A working flat's
+# narrow structure is at the level of twilight-to-twilight repeatability (0.3-1%), so the
+# ceiling is PROVISIONAL, set from that, not from current runs. NARROW_DIP_PCT counts
+# line-like dips (each becomes an emission bump when the science is divided by C_i).
+NARROW_WINDOW = 25
+NARROW_CEILING_PCT = 1.0
+NARROW_DIP_PCT = 5.0
+# A W_i dip deeper than TWILIGHT_DIP_PCT should also be in an independent twilight (the
+# fibre divided by the median of its +-TWILIGHT_NEIGHBOURS neighbours, which removes the
+# solar spectrum) at no less than half its depth. More than TWILIGHT_UNCONFIRMED_MAX of
+# them missing there (PROVISIONAL) means the lamp put them in, not the fibre.
+TWILIGHT_DIP_PCT = 2.0
+TWILIGHT_NEIGHBOURS = 4
+TWILIGHT_UNCONFIRMED_MAX = 0.2
 
 # Version of the _FF products, stamped as FFVER. 2 (2026-11-14): the flat divides by
 # C_i / THRUPUT; before, it divided by C_i on top of the RSS throughput, which applied the
@@ -251,12 +268,14 @@ def _robust_scatter_pct(values):
     return float(1.4826 * np.median(np.abs(v - med)) / med * 100)
 
 
-def _band_sky_level(counts, error, wave, good, correction):
-    """One fibre's sky level before and after the flat, and the noise on it.
+def _band_sky_level(counts, error, wave, good, correction, tp=1.0):
+    """One fibre's sky level raw, with the RSS throughput only, after the flat, and its noise.
 
-    The level is the median COUNTS over the central 80% of the fibre's wavelength
-    range. Returns ``(before, after, fractional_noise)``, or None for a fibre with
-    too little usable data.
+    The level is the median over the central 80% of the fibre's wavelength range of:
+    COUNTS x ``tp`` (raw: no throughput correction), COUNTS (the RSS throughput ``tp``
+    only) and COUNTS / ``correction`` (after the flat). Returns
+    ``(raw, throughput_only, after, fractional_noise)``, or None for a fibre with too
+    little usable data.
     """
     ok = good & np.isfinite(wave) & (wave > 0) & np.isfinite(counts) & (counts != 0)
     if np.sum(ok) < 50:
@@ -273,7 +292,103 @@ def _band_sky_level(counts, error, wave, good, correction):
     err = err[np.isfinite(err)]
     # Noise on a median of n samples ~ 1.2533 x the noise on their mean.
     noise = 1.2533 * float(np.sqrt(np.sum(err ** 2))) / err.size / before if err.size else np.nan
-    return before, after, noise
+    return before * tp, before, after, noise
+
+
+def _narrow(values, wave):
+    """One fibre's narrow structure: values / running median - 1, NaN outside the central 80%."""
+    values = np.asarray(values, dtype=float)
+    wave = np.asarray(wave, dtype=float)
+    out = np.full(values.shape, np.nan)
+    ok = np.isfinite(values) & (values > 0) & np.isfinite(wave) & (wave > 0)
+    if ok.sum() < 3 * NARROW_WINDOW:
+        return out
+    lo, hi = wave[ok].min(), wave[ok].max()
+    band = ok & (wave >= lo + 0.1 * (hi - lo)) & (wave <= hi - 0.1 * (hi - lo))
+    ratio = np.full(values.shape, np.nan)
+    ratio[ok] = values[ok] / median_filter(values[ok], NARROW_WINDOW, mode='nearest') - 1
+    out[band] = ratio[band]
+    return out
+
+
+def _dips(narrow, depth_pct):
+    """Index arrays of the contiguous runs where ``narrow`` is below -depth_pct %."""
+    lab, n = label(np.nan_to_num(narrow, nan=0.0) < -depth_pct / 100)
+    return [np.flatnonzero(lab == k) for k in range(1, n + 1)]
+
+
+def _narrow_cards(w_rows, wave_rows):
+    """Header cards on the narrow structure of a benchside's W_i (``WINRMS``, ``WINDIP``)."""
+    rms, n_dips = [], 0
+    for w, wv in zip(w_rows, wave_rows):
+        r = _narrow(w, wv)
+        r = r[np.isfinite(r)]
+        if r.size < NARROW_WINDOW:
+            continue
+        rms.append(1.4826 * np.median(np.abs(r - np.median(r))) * 100)
+        n_dips += len(_dips(_narrow(w, wv), NARROW_DIP_PCT))
+    if not rms:
+        return {}
+    return {'WINRMS': (round(float(np.median(rms)), 3),
+                       'median narrow rms of W_i, % (robust)'),
+            'WINDIP': (n_dips, f'narrow W_i dips deeper than {NARROW_DIP_PCT:g}%')}
+
+
+def _twilight_dip_cards(w_rows, wave_rows, fiber_ids, twi_ext):
+    """Header cards checking the W_i dips of a benchside against its twilight.
+
+    Each twilight fibre, resampled to a common grid, is divided by the median of its
+    +-TWILIGHT_NEIGHBOURS neighbours, which removes the solar spectrum. A W_i dip deeper
+    than TWILIGHT_DIP_PCT counts as unconfirmed when that ratio's mean over the dip is
+    less than half the dip's mean depth. ``WIDIPN`` dips tested, ``WIDIPTW`` the fraction
+    unconfirmed.
+    """
+    counts, wave = twi_ext.counts, twi_ext.wave
+    if wave is None or wave.shape[0] != counts.shape[0]:
+        return {}
+    row_of = live_row_index(counts.shape[0], getattr(twi_ext, 'dead_fibers', []) or [])
+    rows = [row_of.get(int(f)) for f in fiber_ids]
+    finite = wave[np.isfinite(wave) & (wave > 0)]
+    if finite.size == 0:
+        return {}
+    grid = np.linspace(finite.min(), finite.max(), counts.shape[1])
+    resampled = np.full((len(rows), grid.size), np.nan)
+    for i, row in enumerate(rows):
+        if row is None:
+            continue
+        ok = np.isfinite(wave[row]) & (wave[row] > 0) & np.isfinite(counts[row]) & (counts[row] > 0)
+        if ok.sum() > 10:
+            order = np.argsort(wave[row][ok])
+            resampled[i] = np.interp(grid, wave[row][ok][order], counts[row][ok][order],
+                                     left=np.nan, right=np.nan)
+    n_tested = n_missing = 0
+    k = TWILIGHT_NEIGHBOURS
+    for i, (w, wv) in enumerate(zip(w_rows, wave_rows)):
+        if not np.any(np.isfinite(resampled[i])):
+            continue
+        dips = _dips(_narrow(w, wv), TWILIGHT_DIP_PCT)
+        if not dips:
+            continue
+        neighbours = np.vstack([resampled[max(0, i - k):i], resampled[i + 1:i + k + 1]])
+        with np.errstate(all='ignore'):
+            ratio = resampled[i] / np.nanmedian(neighbours, axis=0)
+        twi = _narrow(ratio, grid)
+        good = np.isfinite(twi)
+        if good.sum() < NARROW_WINDOW:
+            continue
+        twi_native = np.interp(wv, grid[good], twi[good], left=np.nan, right=np.nan)
+        w_narrow = _narrow(w, wv)
+        for dip in dips:
+            depth, seen = np.nanmean(w_narrow[dip]), np.nanmean(twi_native[dip])
+            if not (np.isfinite(depth) and np.isfinite(seen)):
+                continue
+            n_tested += 1
+            n_missing += seen > 0.5 * depth
+    if not n_tested:
+        return {'WIDIPN': (0, f'W_i dips > {TWILIGHT_DIP_PCT:g}% tested against the twilight')}
+    return {'WIDIPN': (n_tested, f'W_i dips > {TWILIGHT_DIP_PCT:g}% tested against the twilight'),
+            'WIDIPTW': (round(n_missing / n_tested, 3),
+                        'fraction of those the twilight does not show')}
 
 
 def _ti_header(ti_values, n_fallback=0):
@@ -403,7 +518,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
             'reference': reference,
             # TODO: populate from lamp photon noise when available
             'correction_var': np.zeros_like(corr_arr),
-            'header': _ti_header(ti_values),
+            'header': {**_ti_header(ti_values), **_narrow_cards(corr_arr, wave_arr)},
         }
 
         # Collect for cross-bench diagnostics
@@ -1382,8 +1497,11 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
             'fibre_flags': fibre_flags,
             # TODO: populate from twilight/lamp photon noise when available
             'correction_var': np.zeros_like(corr_arr),
-            'header': _ti_header(t_i.values(),
-                                 0 if ext_name in lamp_only_benchsides else n_fallback),
+            'header': {**_ti_header(t_i.values(),
+                                    0 if ext_name in lamp_only_benchsides else n_fallback),
+                       **_narrow_cards(w_arr, wave_arr),
+                       **(_twilight_dip_cards(w_arr, wave_arr, fiber_ids, twi_lookup[ext_name])
+                          if ext_name in twi_lookup else {})},
         }
 
         if channel not in channel_refs:
@@ -1468,17 +1586,18 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=None):
     """Apply fibre-to-fibre flat correction to a science RSS file.
 
-    Divides FLUX and ERROR by the correction factor ``C_i(λ)`` for each
-    fibre, producing a new RSS file with ``_FF.fits`` suffix.
+    Divides the sky-subtracted plane and ERROR by ``C_i(λ) / THRUPUT`` for each fibre,
+    producing a new RSS file with ``_FF.fits`` suffix. THRUPUT is the throughput the RSS
+    rows were already divided by, so the fibre throughput is applied once.
 
-    It also measures how flat the sky is within each benchside, before and after
-    the correction, as an independent check of the flat. Per fibre, the sky level
-    is the median COUNTS over the central 80% of its wavelength range; the
-    benchside value is the robust scatter (1.4826 x MAD) of those levels, in %.
-    Objects in a few fibres do not move a MAD. These go to the primary header as
-    ``FFSB<bs>`` (before), ``FFSA<bs>`` (after) and ``FFSN<bs>`` (the median noise
-    on one fibre's level, %, which says whether the frame can resolve the
-    residual), with ``FFNSKIP`` for fibres left uncorrected.
+    It also measures how flat the sky is within each benchside, as an independent check
+    of the flat. Per fibre, the sky level is the median over the central 80% of its
+    wavelength range; the benchside value is the robust scatter (1.4826 x MAD) of those
+    levels, in %. Objects in a few fibres do not move a MAD. These go to the primary
+    header as ``FFSB<bs>`` (raw, no throughput correction), ``FFST<bs>`` (the RSS
+    throughput only), ``FFSA<bs>`` (after the flat) and ``FFSN<bs>`` (the median noise on
+    one fibre's level, %, which says whether the frame can resolve the residual), with
+    ``FFNSKIP`` for fibres left uncorrected.
 
     Parameters
     ----------
@@ -1631,7 +1750,7 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
             safe_c = np.where(np.isfinite(c_i) & (c_i > 0), c_i, 1.0)
             if counts is not None:
                 level = _band_sky_level(counts[row_idx], error[row_idx],
-                                        wave_data[row_idx], good_pix[row_idx], safe_c)
+                                        wave_data[row_idx], good_pix[row_idx], safe_c, tp)
                 if level is not None:
                     sky_levels[bs].append(level)
             flux[row_idx] /= safe_c
@@ -1689,14 +1808,15 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
                                      f'corrected ({corr_method})')
         primary.header['FFNSKIP'] = (n_skipped, 'fibres without a fibre-flat correction')
         for bs in BENCHSIDES:
-            for key in (f'FFSB{bs}', f'FFSA{bs}', f'FFSN{bs}'):
+            for key in (f'FFSB{bs}', f'FFST{bs}', f'FFSA{bs}', f'FFSN{bs}'):
                 primary.header.remove(key, ignore_missing=True)
-            rows = np.array(sky_levels.get(bs, []), dtype=float).reshape(-1, 3)
-            before, after = _robust_scatter_pct(rows[:, 0]), _robust_scatter_pct(rows[:, 1])
-            noise = float(np.nanmedian(rows[:, 2])) * 100 if len(rows) else np.nan
-            if not np.all(np.isfinite([before, after, noise])):
+            rows = np.array(sky_levels.get(bs, []), dtype=float).reshape(-1, 4)
+            raw, tp_only, after = (_robust_scatter_pct(rows[:, j]) for j in range(3))
+            noise = float(np.nanmedian(rows[:, 3])) * 100 if len(rows) else np.nan
+            if not np.all(np.isfinite([raw, tp_only, after, noise])):
                 continue
-            primary.header[f'FFSB{bs}'] = (round(before, 3), f'{bs} sky scatter before fibre flat, %')
+            primary.header[f'FFSB{bs}'] = (round(raw, 3), f'{bs} sky scatter, raw (no throughput), %')
+            primary.header[f'FFST{bs}'] = (round(tp_only, 3), f'{bs} sky scatter, RSS throughput only, %')
             primary.header[f'FFSA{bs}'] = (round(after, 3), f'{bs} sky scatter after fibre flat, %')
             primary.header[f'FFSN{bs}'] = (round(noise, 3), f'{bs} noise on one fibre sky level, %')
         out_hdul.append(primary)
@@ -1809,7 +1929,7 @@ def assess_fibre_flat(corrections_file, ff_files, skipped=None):
             if method == 'lamp_only' or ext.header.get('METHOD') == 'lamp_only':
                 lamp_only.append(key)
 
-    after, before = defaultdict(list), defaultdict(list)
+    after, before, tp_only = defaultdict(list), defaultdict(list), defaultdict(list)
     faint = set()
     n_skip_per_file = []
     for path in ff_files:
@@ -1826,6 +1946,8 @@ def assess_fibre_flat(corrections_file, ff_files, skipped=None):
             if n is not None and n < FF_RESIDUAL_MAX_NOISE_PCT:
                 after[(ch, bs)].append(a)
                 before[(ch, bs)].append(b)
+                # FFST (RSS throughput only) exists from FFVER 2; before that FFSB was it.
+                tp_only[(ch, bs)].append(hdr.get(f'FFST{bs}', b))
             else:
                 faint.add((ch, bs))
 
@@ -1833,20 +1955,36 @@ def assess_fibre_flat(corrections_file, ff_files, skipped=None):
                if any(k[0] == c for k in list(ti) + list(after) + list(faint))]
     resid = {k: float(np.median(v)) for k, v in after.items()}
     resid_before = {k: float(np.median(v)) for k, v in before.items()}
+    resid_tp = {k: float(np.median(v)) for k, v in tp_only.items()}
 
     def cam(key):
         return f"{key[0]} {key[1]}"
 
     # ── Table ──
     label = 'lamp only' if method == 'lamp_only' else method
+    def span(values, ch):
+        v = [values[(ch, bs)] for bs in BENCHSIDES if (ch, bs) in values]
+        return f"{min(v):.1f}–{max(v):.1f}" if v else '—'
+
     lines = [f"Fibre flat ({label}): sky scatter within each benchside after the flat, %",
-             f"{'':7}" + ''.join(f"{bs:>6}" for bs in BENCHSIDES) + "   before"]
+             f"{'':7}" + ''.join(f"{bs:>6}" for bs in BENCHSIDES) + f"   {'raw':<10}tp only"]
     for ch in colours:
         cells = ''.join(f"{resid[(ch, bs)]:6.1f}" if (ch, bs) in resid else f"{'—':>6}"
                         for bs in BENCHSIDES)
-        b = [resid_before[(ch, bs)] for bs in BENCHSIDES if (ch, bs) in resid_before]
-        b_text = f"{min(b):.1f}–{max(b):.1f}" if b else '—'
-        lines.append(f"{ch:<7}{cells}   {b_text}")
+        lines.append(f"{ch:<7}{cells}   {span(resid_before, ch):<10}{span(resid_tp, ch)}")
+    narrow = {k: h['WINRMS'] for k, h in ti.items() if 'WINRMS' in h}
+    if narrow:
+        n_dips = sum(int(h.get('WINDIP', 0) or 0) for h in ti.values())
+        lines.append(f"Lamp shape W_i: narrow rms {min(narrow.values()):.2f}–"
+                     f"{max(narrow.values()):.2f}% (provisional ceiling "
+                     f"{NARROW_CEILING_PCT:g}%), {n_dips} dips deeper than {NARROW_DIP_PCT:g}%")
+    tested = {k: (int(h['WIDIPN']), float(h.get('WIDIPTW', 0.0))) for k, h in ti.items()
+              if int(h.get('WIDIPN', 0) or 0) > 0}
+    if tested:
+        n_t = sum(n for n, _ in tested.values())
+        n_m = sum(round(n * f) for n, f in tested.values())
+        lines.append(f"Twilight check: {n_m}/{n_t} W_i dips deeper than {TWILIGHT_DIP_PCT:g}% "
+                     f"are not in the twilight")
     if faint - set(resid):
         lines.append(f"— : sky too faint to measure (noise on a fibre's level ≥ "
                      f"{FF_RESIDUAL_MAX_NOISE_PCT:.1f}%)")
@@ -1887,15 +2025,29 @@ def assess_fibre_flat(corrections_file, ff_files, skipped=None):
                                 f"(other {ch} benchsides' median {np.median(others):.1f}%)")
 
     over = sorted(k for k, v in resid.items() if v > FF_RESIDUAL_CEILING_PCT)
-    worse = [k for k in resid if resid[k] > resid_before.get(k, np.inf)]
+    worse = sorted(k for k in resid if resid[k] > resid_tp.get(k, np.inf))
+    if worse:
+        warnings.append(f"The fibre flat leaves more sky scatter than the RSS throughput alone "
+                        f"on {len(worse)}/{len(resid)} benchsides: "
+                        f"{_cam_list(f'{cam(k)} {resid_tp[k]:.1f}→{resid[k]:.1f}%' for k in worse)}")
+
+    rough = sorted(k for k, v in narrow.items() if v > NARROW_CEILING_PCT)
+    if rough:
+        warnings.append(f"Narrow structure in the lamp shape W_i above {NARROW_CEILING_PCT:g}% "
+                        f"(provisional) on {len(rough)}/{len(narrow)} benchsides: "
+                        f"{_cam_list(f'{cam(k)} {narrow[k]:.2f}%' for k in rough)}")
+    unseen = sorted(k for k, (n, f) in tested.items() if f > TWILIGHT_UNCONFIRMED_MAX)
+    if unseen:
+        warnings.append(f"W_i dips deeper than {TWILIGHT_DIP_PCT:g}% that the twilight does not "
+                        f"show (more than {TWILIGHT_UNCONFIRMED_MAX:.0%}, provisional) on "
+                        f"{_cam_list(f'{cam(k)} {tested[k][1]:.0%} of {tested[k][0]}' for k in unseen)}"
+                        f": the lamp flat put them there, and each becomes a fake emission bump")
     if over:
         n = len(resid)
         msg = (f"Sky scatter after the flat exceeds the {FF_RESIDUAL_CEILING_PCT:g}% ceiling "
                f"(provisional) on {len(over)}/{n} benchsides")
         if len(over) < n:
             msg += f": {_cam_list(f'{cam(k)} {resid[k]:.1f}%' for k in over)}"
-        if worse:
-            msg += f"; it is higher than before the flat on {len(worse)}/{n}"
         if len(over) == n:
             msg += " — the fibre flat is not flattening the sky"
         warnings.append(msg)
@@ -1911,9 +2063,11 @@ def assess_fibre_flat(corrections_file, ff_files, skipped=None):
     if resid:
         report = (f"{label} · sky scatter after flat {min(resid.values()):.1f}–"
                   f"{max(resid.values()):.1f}%")
-        if resid_before:
-            report += (f" (before {min(resid_before.values()):.1f}–"
-                       f"{max(resid_before.values()):.1f}%)")
+        if resid_tp:
+            report += (f" (throughput only {min(resid_tp.values()):.1f}–"
+                       f"{max(resid_tp.values()):.1f}%)")
+        if narrow:
+            report += f" · W_i narrow rms ≤ {max(narrow.values()):.2f}%"
         if over:
             report += f" · over {FF_RESIDUAL_CEILING_PCT:g}% on {len(over)}/{len(resid)} ⚠️"
     else:

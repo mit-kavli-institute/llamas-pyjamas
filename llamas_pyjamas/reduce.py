@@ -76,7 +76,8 @@ _cached_reference_arc_path = None
 logger = logging.getLogger('llamas_pyjamas.reduce')
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
-from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
+                                            process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
 from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
@@ -1952,6 +1953,25 @@ def cleanup_extraction_pkls(paths, save_pkl):
     return removed
 
 
+def report_pixel_flat(reporter, pixel_map_file):
+    """Show how much of the pixel flat sits at its clip floor (Flat.flatLlamas.assess_pixel_flat)."""
+    if not (pixel_map_file and os.path.exists(pixel_map_file)):
+        return
+    try:
+        lines, warnings, report_text = assess_pixel_flat(pixel_map_file)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"Pixel-flat summary unavailable: {exc}")
+        return
+    if not lines:
+        return
+    for line in lines:
+        logger.info(line)
+    for w in warnings:
+        logger.warning(w, extra={'summarised': True})
+    reporter.summary(lines[0], lines[1:] + [f"⚠️  {w}" for w in warnings])
+    reporter.report('Pixel flat', report_text)
+
+
 def report_fibre_flat(reporter, corrections_file, ff_files, skipped=None):
     """Show the fibre-flat checks under the current phase and in the final report.
 
@@ -3197,6 +3217,9 @@ def main(config_path):
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
         
+
+        if flat_pixel_maps:
+            report_pixel_flat(reporter, flat_pixel_maps[0])
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")

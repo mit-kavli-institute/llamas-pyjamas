@@ -99,6 +99,23 @@ within each benchside after the flat**, measured on the science frames:
 - per benchside, the robust scatter (1.4826 × MAD) of those levels, in %.
 
 A frame counts only if the noise on one fibre's level is below 1%, so it can resolve the ceiling.
+The table also gives the range of two other scatters: *raw* (no throughput correction) and
+*tp only* (the RSS throughput alone), which is what a flat has to beat.
+
+Two checks look at the lamp shape `W_i` itself, because a narrow dip in `W_i` becomes an
+emission-like bump in every science spectrum divided by it:
+- **narrow structure:** each fibre's `W_i` is divided by its 25-pixel running median, on the
+  central 80% of its range. The robust rms of that ratio is reported, and dips deeper than 5%
+  are counted;
+- **twilight cross-check:** each twilight fibre, on a common wavelength grid, is divided by the
+  median of its ±4 neighbours, which removes the solar spectrum. A `W_i` dip deeper than 2%
+  that this ratio does not show at no less than half depth was put in by the lamp flat, not
+  the fibre.
+
+The pixel flat is checked too (`Flat.flatLlamas.assess_pixel_flat`): the share of corrected
+pixels that sit at the clip floor, per detector. A detector, or a whole colour, far above the
+rest means the lamp flat's fibre cores were lowered (cosmic-ray cleaning) or saturated. On
+20261015_16 this share was 1.8% for green, against 0.01% for red.
 
 The checks, from categorical to per-fibre:
 
@@ -106,7 +123,11 @@ The checks, from categorical to per-fibre:
 |---|---|
 | Fallback | a benchside used lamp-only throughput, fibres took the benchside-median T_i, or fibres were left uncorrected (`MASK_NOT_FLAT_FIELDED`) |
 | Relative outlier | a benchside's T_i scatter is more than `TI_RELATIVE_OUTLIER` (1.5) × the median of the other benchsides of its colour |
+| Relative: worse than the throughput | the sky scatter after the flat exceeds the scatter with the RSS throughput alone (`FFSA` > `FFST`) |
+| Relative: clip floor | a pixel-flat detector, or a colour's median, has more than 5× the floor-clipped share of the others (above 0.1%) |
 | Absolute ceiling | the sky scatter after the flat exceeds `FF_RESIDUAL_CEILING_PCT` (3%). This is **provisional**: it is set from what a working flat should leave (twilight-to-twilight repeatability is 0.3–1%), not tuned to current data. If it fails everywhere, the summary says so |
+| Absolute: narrow structure | a benchside's `WINRMS` exceeds `NARROW_CEILING_PCT` (1%, provisional, set from twilight repeatability) |
+| Twilight cross-check | more than `TWILIGHT_UNCONFIRMED_MAX` (20%, provisional) of a benchside's `W_i` dips deeper than 2% are missing from the twilight |
 | Fibre outliers | a fibre's T_i is more than `TI_OUTLIER_SIGMA` (5) robust sigma from its benchside median |
 
 ### Header cards
@@ -115,7 +136,10 @@ The checks, from categorical to per-fibre:
 |---|---|---|
 | each benchside extension of `fibre_flat_corrections.fits` | `TIMED`, `TIRMS`, `TIMAD` | median T_i; RMS and robust scatter about it, % (raw throughput, before flattening) |
 | | `TINOUT`, `TINFALL` | fibres > 5 robust sigma from the median; fibres given the benchside-median T_i |
-| primary header of each `_FF` RSS | `FFSB<bs>`, `FFSA<bs>` | sky scatter within benchside `<bs>` before and after the flat, % |
+| | `WINRMS`, `WINDIP` | median narrow rms of `W_i`, %; dips deeper than 5% |
+| | `WIDIPN`, `WIDIPTW` | `W_i` dips deeper than 2% tested against the twilight; the fraction it does not show |
+| each extension of `pixel_maps.fits` | `NCORPIX`, `FCLIPLO`, `FCLIPHI` | pixels the flat corrects; % of them at the clip floor and ceiling |
+| primary header of each `_FF` RSS | `FFSB<bs>`, `FFST<bs>`, `FFSA<bs>` | sky scatter within benchside `<bs>`: raw, with the RSS throughput only, and after the flat, % |
 | | `FFSN<bs>` | noise on one fibre's sky level, % |
 | | `FFNSKIP` | fibres without a correction |
 | | `FFVER` | fibre-flat version; 2 = divides by `C_i / THRUPUT` |
