@@ -130,10 +130,10 @@ SHAs are filled in after each phase.
 | A2 `3def65f` | Stop cosmic-ray cleaning the lamp flats and stamp the flat products with their recipe | See below. | On R0 + A0. Changes the pixel flat, so every science extraction changes: clobber re-run. |
 | A3 `84cca12` | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
 | A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
-| B1 | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
-| B2 | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
-| B3 | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
-| B4 | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
+| B1 `267bb2d` | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
+| B2 `7ed8748` | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
+| B3 `a1f1ccf` | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
+| B4 `b81ea8c` | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
