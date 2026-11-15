@@ -20,8 +20,10 @@ from astropy.io import fits
 
 from llamas_pyjamas.Utils.maskedSums import (band_integral, common_coverage, complete_sum,
                                              renormalised_mean, resample_bad)
-from llamas_pyjamas.File.llamasRSS import (MASK_FLAT_LAMP_ONLY, MASK_NO_COUNTS,
-                                           MASK_NOT_FLAT_FIELDED, bad_pixel_mask)
+from llamas_pyjamas.File.llamasRSS import (MASK_CR_MISSING, MASK_CR_PARTIAL,
+                                           MASK_FLAT_LAMP_ONLY, MASK_NO_COUNTS,
+                                           MASK_NOT_FLAT_FIELDED, bad_pixel_mask,
+                                           no_bridge_mask)
 from llamas_pyjamas.Tests.rss_fixtures import write_rss
 
 
@@ -97,6 +99,31 @@ def test_bad_pixel_mask_rule(tmp):
     assert bad[3, :10].all() and not bad[3, 10:].any()     # zero-count fill: bad (legacy too)
 
 
+def test_cosmic_ray_bits(tmp):
+    """A sample measured around cosmic rays is usable; one lost to a cosmic ray is bad, and is
+    the only kind of gap a resampler may not bridge."""
+    p = write_rss(os.path.join(tmp, 'x_RSS_green.fits'),
+                  mask_bits={int(MASK_CR_PARTIAL): (slice(0, 1), slice(None))},
+                  cr_missing=(slice(1, 2), slice(5, 7)),
+                  zero_counts=(slice(2, 3), slice(0, 4)))
+    with fits.open(p) as h:
+        bad = bad_pixel_mask(h)
+        nob = no_bridge_mask(h)
+    assert not bad[0].any()                                # partial: informational
+    assert bad[1, 5:7].all() and bad[1].sum() == 2         # missing: bad
+    assert nob[1, 5:7].all() and nob.sum() == 2            # only the cosmic-ray gap
+    assert not nob[2].any()                                # zero-fill stays bridgeable
+
+
+def test_no_bridge_mask_without_mask_extension(tmp):
+    p = write_rss(os.path.join(tmp, 'x_RSS_green.fits'))
+    with fits.open(p, mode='update') as h:
+        del h['MASK']
+    with fits.open(p) as h:
+        nob = no_bridge_mask(h)
+        assert nob.shape == h['SKYSUB'].data.shape and not nob.any()
+
+
 def test_readers_agree_on_legacy_zero_count_pixels(tmp):
     """A legacy file (MASK all zero) with zero-filled pixels: every reader masks the same."""
     from llamas_pyjamas.Combine.superRSS import _read_channel
@@ -135,6 +162,44 @@ def test_generate_rss_flags_zero_counts(tmp):
         assert np.all(m[2, :20] & MASK_NO_COUNTS) and not np.any(m[2, 20:] & MASK_NO_COUNTS)
         assert not np.any(m[[0, 1, 3, 4, 5]] & MASK_NO_COUNTS)
         assert h[0].header['RSSSTAGE'] == 'base'
+        assert h[0].header['CRMISS'] == 0 and h[0].header['CRPART'] == 0
+
+
+def test_generate_rss_labels_cosmic_ray_gaps(tmp):
+    """A sample the extraction lost to a cosmic ray is NaN and carries MASK_CR_MISSING, not
+    MASK_NO_COUNTS; a zero-fill still gets MASK_NO_COUNTS; the partial bit passes through."""
+    from llamas_pyjamas.File.llamasRSS import RSSgeneration
+    n, nw = 6, 50
+    counts = np.full((n, nw), 10.0)
+    errors = np.ones((n, nw))
+    dq = np.zeros((n, nw), dtype=np.int16)
+    counts[1, 10:12] = np.nan                              # lost to a cosmic ray
+    errors[1, 10:12] = np.nan
+    dq[1, 10:12] |= MASK_CR_MISSING
+    dq[3, 30] |= MASK_CR_PARTIAL                           # measured around one
+    counts[2, :20] = 0.0                                   # extraction zero-fill
+    obj = SimpleNamespace(counts=counts, wave=np.tile(np.linspace(5000, 6000, nw), (n, 1)),
+                          errors=errors, sky=np.full((n, nw), 1.0), dead_fibers=[],
+                          relative_throughput=np.ones(n), dq=dq)
+    hdr = fits.Header()
+    hdr['OBS TYPE'] = 'CAL24'
+    pkl = os.path.join(tmp, 'x.pkl')
+    with open(pkl, 'wb') as fh:
+        cloudpickle.dump({'primary_header': hdr, 'extractions': [obj],
+                          'metadata': [{'channel': 'green', 'bench': '1', 'side': 'A'}]}, fh)
+    out = os.path.join(tmp, 'x_RSS.fits')
+    RSSgeneration().generate_rss(pkl, out)
+    with fits.open(out) as h:
+        m = h['MASK'].data
+        assert np.all(m[1, 10:12] & MASK_CR_MISSING)
+        assert not np.any(m[1, 10:12] & MASK_NO_COUNTS)
+        assert np.all(m[2, :20] & MASK_NO_COUNTS)
+        assert m[3, 30] & MASK_CR_PARTIAL and not bad_pixel_mask(h)[3, 30]
+        assert np.all(np.isnan(h['SKYSUB'].data[1, 10:12]))
+        assert np.all(np.isnan(h['ERROR'].data[1, 10:12]))
+        p = h[0].header
+        assert p['CRMISS'] == 2 and p['CRPART'] == 1
+        assert p['CRMISSF'] == pytest.approx(100.0 * 2 / (n * nw - 20), abs=1e-4)
 
 
 # ---------------------------------------------------------------- sensfunc aperture

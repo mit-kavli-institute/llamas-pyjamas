@@ -12,7 +12,7 @@ import os
 import numpy as np
 from astropy.io import fits
 
-from llamas_pyjamas.File.llamasRSS import _fiberwcs_hdu
+from llamas_pyjamas.File.llamasRSS import MASK_CR_MISSING, _fiberwcs_hdu
 from llamas_pyjamas.Utils.wcsLlamas import FIBRE_AREA_ARCSEC2
 
 N_FIB = 60
@@ -52,14 +52,16 @@ def _sky(nwave):
 
 def write_rss(path, *, stage='base', channel='green', registered=False, wcs_method=None,
               wcs_refined=None, fiberwcs=True, flam=False, noflat=False, rsstage=None,
-              header=None, mask_bits=None, zero_counts=None, seed=0, nfib=N_FIB,
-              nwave=N_WAVE, thruput=None):
+              header=None, mask_bits=None, zero_counts=None, cr_missing=None, seed=0,
+              nfib=N_FIB, nwave=N_WAVE, thruput=None):
     """Write a synthetic RSS channel file and return its path.
 
     ``stage`` sets the structural markers; ``rsstage`` writes an RSSSTAGE card (default: the
     stage itself; pass ``False`` for a legacy file without one). ``registered`` writes a refined
     FIBERWCS 1" off the rough positions. ``mask_bits`` is ``{bit: (rows, cols)}`` OR-ed into
     MASK; ``zero_counts`` is ``(rows, cols)`` set to COUNTS == 0 with SKYSUB = -SKY there.
+    ``cr_missing`` is ``(rows, cols)`` lost to cosmic rays: COUNTS, SKYSUB and ERROR are NaN and
+    MASK carries MASK_CR_MISSING, as the extraction writes them.
     """
     rng = np.random.default_rng(seed)
     lo, hi = WAVE_RANGE[channel]
@@ -74,6 +76,11 @@ def write_rss(path, *, stage='base', channel='green', registered=False, wcs_meth
     if zero_counts is not None:
         counts[zero_counts] = 0.0
         skysub[zero_counts] = -sky[zero_counts]
+    if cr_missing is not None:
+        counts[cr_missing] = np.nan
+        skysub[cr_missing] = np.nan
+        err[cr_missing] = np.nan
+        mask[cr_missing] |= MASK_CR_MISSING
     for bit, sl in (mask_bits or {}).items():
         mask[sl] |= np.int16(bit)
 

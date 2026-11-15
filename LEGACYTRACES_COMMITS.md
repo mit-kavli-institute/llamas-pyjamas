@@ -255,6 +255,28 @@ and config are in `reduced_fffix/logs/`. Numbers below are from
 - **Green after the flat vs the RSS throughput alone.** After the flat, green is about 1%
   above the throughput alone on every benchside. Red is below it on all 8.
 
+## 4. Cosmic-ray pixels as missing data, and Horne as the default extraction (plan of 2026-11-15)
+
+Background: science, standard and sky frames are cosmic-ray cleaned with L.A.Cosmic, which
+replaces each flagged pixel with the median of its neighbours. The extraction used those
+replacements as if they were data, unflagged, and with an error computed from the lowered
+counts, so the inverse-variance co-adds gave them extra weight. Any sharp, bright feature that
+L.A.Cosmic flags (in any target or sky) was biased with no trace downstream. Now flagged pixels
+are missing data: the sample becomes NaN with a bad MASK bit, other fibres and exposures fill
+the gap, and Horne becomes the default extraction. User decisions:
+- boxcar: any flagged pixel in the aperture makes the sample missing (no profile repair);
+- Horne: measures around flagged pixels (informational bit, larger error) and makes the sample
+  missing when less than half of its profile is valid;
+- a cosmic-ray gap is never interpolated across in the cube and spectrum resamplers;
+- `horne` is the default `extraction_method`.
+
+Backups made before the edits: `*_backup_crmask.py` (untracked). Each step is one commit; find
+its SHA with `git log --oneline --grep "<subject>"`.
+
+| Step | Subject | What it does | Depends on / products |
+|---|---|---|---|
+| C1 | Register cosmic-ray MASK bits and label cosmic-ray gaps in the RSS | `MASK_CR_PARTIAL` (128, informational) and `MASK_CR_MISSING` (256, bad); `no_bridge_mask` (`MASK_NO_BRIDGE_BITS`); `generate_rss` labels a NaN sample that carries 256 as a cosmic-ray gap instead of `MASK_NO_COUNTS`; primary cards `CRMISS`, `CRPART`, `CRMISSF`; MASK-bit table in `File/README.md`; fixture `write_rss(cr_missing=...)`. | No product change until C4 (nothing sets the bits yet). |
+
 ## Not committed (left untracked on purpose)
 
 - **Backups:** `*_backup_*` files and `backup.txt`. These are the copies made before

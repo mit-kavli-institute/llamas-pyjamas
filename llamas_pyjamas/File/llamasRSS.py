@@ -141,9 +141,10 @@ def patch_rss_astrometry(path):
     return prov
 
 
-#: RSS MASK bit registry. INFORMATIONAL bits record how a pixel was processed and leave it usable;
-#: every other bit means the value must not be used. 32 and 64 are reserved for the per-fibre
-#: sky_quality codes (channel-global fallback / no sky), which are not written to MASK today.
+#: RSS MASK bit registry (File/README.md). INFORMATIONAL bits record how a pixel was processed
+#: and leave it usable; every other bit means the value must not be used. 32 and 64 are reserved
+#: for the per-fibre sky_quality codes (channel-global fallback / no sky), which are not written
+#: to MASK today. Bit 32768 (the int16 sign bit) is never used.
 MASK_FLAT_LAMP_ONLY = np.int16(1)         # informational: T_i not from this fibre's twilight
                                           # (lamp offset for the benchside, or benchside median)
 MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # informational: fibre absent from FiberMap_LUT; its
@@ -151,7 +152,13 @@ MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # informational: fibre absent from Fib
 MASK_NOT_FLAT_FIELDED = np.int16(4)       # bad: the fibre flat had no correction for this fibre
 MASK_DEAD_FIBRE = np.int16(8)             # bad: reserved (legacy Flat/fibre_flat.py)
 MASK_NO_COUNTS = np.int16(16)             # bad: extraction wrote no data here (COUNTS zero-fill)
-MASK_INFO_BITS = np.int16(MASK_FLAT_LAMP_ONLY | MASK_UNMAPPED_FIBRE_INTERP)
+MASK_CR_PARTIAL = np.int16(128)           # informational: Horne value measured from the pixels
+                                          # around cosmic-ray pixels (larger error)
+MASK_CR_MISSING = np.int16(256)           # bad: cosmic ray in the aperture; no data (NaN)
+MASK_INFO_BITS = np.int16(MASK_FLAT_LAMP_ONLY | MASK_UNMAPPED_FIBRE_INTERP | MASK_CR_PARTIAL)
+#: Gaps a resampler must leave as gaps (never interpolate across), so that other fibres and
+#: other exposures fill them.
+MASK_NO_BRIDGE_BITS = np.int16(MASK_CR_MISSING)
 
 
 def skysub_extname(hdul):
@@ -199,6 +206,25 @@ def bad_pixel_mask(hdul):
     if mask is None and counts is None:
         shape = np.shape(hdul[skysub_extname(hdul)].data)
     return bad_pixel_mask_arrays(mask, counts, shape)
+
+
+def no_bridge_mask_arrays(mask, shape=None):
+    """Boolean mask of gaps that must never be interpolated across (see :func:`no_bridge_mask`)."""
+    if mask is None:
+        return np.zeros(shape, dtype=bool)
+    return (np.asarray(mask).astype(np.int64) & int(MASK_NO_BRIDGE_BITS)) != 0
+
+
+def no_bridge_mask(hdul):
+    """True where a bad pixel must stay a gap when a fibre is resampled (cosmic-ray samples).
+
+    :func:`bad_pixel_mask` says what must not be used; this says which of those gaps a resampler
+    may not bridge by interpolating along the fibre. All False when the file has no MASK.
+    """
+    names = {h.name for h in hdul}
+    if 'MASK' in names:
+        return no_bridge_mask_arrays(hdul['MASK'].data)
+    return no_bridge_mask_arrays(None, np.shape(hdul[skysub_extname(hdul)].data))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1029,11 +1055,23 @@ class RSSgeneration:
                     wave_stack = wave_stack * _helio_factor
                 dq_stack = np.vstack(all_dq).astype(np.int16)
                 # Zero-fill from extraction (no profile pixels / off the detector) carries no
-                # data: SKYSUB there is -SKY. Flag it so no reader mistakes it for a value.
-                _no_counts = ~np.isfinite(counts_stack) | (counts_stack == 0)
+                # data: SKYSUB there is -SKY. Flag it so no reader mistakes it for a value. A
+                # cosmic-ray sample is NaN by design and keeps its own bit instead.
+                _cr_missing = (dq_stack & MASK_CR_MISSING) != 0
+                _no_counts = (~np.isfinite(counts_stack) | (counts_stack == 0)) & ~_cr_missing
                 dq_stack[_no_counts] |= MASK_NO_COUNTS
                 self.logger.info(f"Channel {channel}: {int(_no_counts.sum())} zero-count pixels "
                                  f"({100.0 * _no_counts.mean():.1f}%) flagged MASK_NO_COUNTS")
+                _n_cr_missing = int(_cr_missing.sum())
+                _n_cr_partial = int(((dq_stack & MASK_CR_PARTIAL) != 0).sum())
+                _n_measured = int((~_no_counts).sum())
+                _cr_frac = 100.0 * _n_cr_missing / _n_measured if _n_measured else 0.0
+                primary_hdu.header['CRMISS'] = (_n_cr_missing, 'samples lost to cosmic rays (MASK 256)')
+                primary_hdu.header['CRPART'] = (_n_cr_partial, 'samples measured around cosmic rays (MASK 128)')
+                primary_hdu.header['CRMISSF'] = (round(_cr_frac, 4), 'CRMISS, % of samples with counts')
+                if _n_cr_missing or _n_cr_partial:
+                    self.logger.info(f"Channel {channel}: {_n_cr_missing} samples lost to cosmic "
+                                     f"rays ({_cr_frac:.2f}%), {_n_cr_partial} measured around them")
                 fwhm_stack = np.vstack(all_fwhm)
                 sky_stack = np.vstack(all_sky)
 
@@ -1174,7 +1212,8 @@ class RSSgeneration:
                 # Extension 4 - MASK: the pixel mask array [NFIBER x NWAVE]
                 mask_hdu = fits.ImageHDU(dq_stack, header=common_header)
                 mask_hdu.header['EXTNAME'] = 'MASK'
-                mask_hdu.header['COMMENT'] = 'Pixel mask: 0=good, >0=various issues'
+                mask_hdu.header['COMMENT'] = ('Pixel mask bits (File/README.md): 1,2,128 informational; '
+                                              '4,8,16,256 bad')
                 hdul.append(mask_hdu)
                 self.logger.info(f"Added MASK extension with shape {dq_stack.shape}")
 
