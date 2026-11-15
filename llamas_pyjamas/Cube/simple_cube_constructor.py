@@ -47,6 +47,8 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 warnings.filterwarnings('ignore', category=VerifyWarning)
 
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.File.llamasRSS import bad_pixel_mask, no_bridge_mask
+from llamas_pyjamas.Utils.maskedSums import unbridged_gaps
 
 # LLAMAS IFU geometry constants
 LLAMAS_FOV = 35.0          # Field of view in arcseconds
@@ -92,6 +94,7 @@ class SimpleCubeConstructor:
         self.error = None
         self.wave = None
         self.mask = None
+        self.nobridge = None      # cosmic-ray gaps: never interpolated across
         self.fwhm = None
 
         # Fiber identity from RSS FIBERMAP extension
@@ -151,8 +154,8 @@ class SimpleCubeConstructor:
 
             # Shared bad-pixel rule (bad MASK bits + zero-count pixels; the fibre-flat
             # informational bits stay usable). Works for files without MASK too.
-            from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
             self.mask = bad_pixel_mask(hdul)
+            self.nobridge = no_bridge_mask(hdul)
             print(f"  MASK: {self.mask.shape} ({int(self.mask.sum())} bad pixels)")
 
             if 'FWHM' in hdul:
@@ -422,15 +425,12 @@ class SimpleCubeConstructor:
                                    left=np.nan, right=np.nan)
         except Exception:
             return None, None
-        # Bridge a single bad native pixel, but keep a run of two or more as no-data rather
-        # than inventing values across it (same rule as Combine.cube._resample_fibres).
-        from llamas_pyjamas.Utils.maskedSums import resample_bad
-        fin_w = np.isfinite(wave_fiber) & (wave_fiber > 0)
-        order_all = np.argsort(np.where(fin_w, wave_fiber, np.inf))
-        bo = (~valid)[order_all]
-        wide = bo & (np.r_[bo[1:], True] | np.r_[True, bo[:-1]])
-        keep = fin_w[order_all]
-        gap = resample_bad(self.wave_grid, wave_fiber[order_all][keep], wide[keep])
+        # Bridge a single bad native pixel, but keep a run of two or more, and any cosmic-ray
+        # gap, as no-data rather than inventing values across it (the same rule as
+        # Combine.cube._resample_fibres).
+        nobridge = None if self.nobridge is None else self.nobridge[fiber_idx, :]
+        gap = unbridged_gaps(self.wave_grid, np.where(wave_fiber > 0, wave_fiber, np.nan),
+                             ~valid, nobridge)
         interp_flux = np.where(gap, np.nan, interp_flux)
 
         # Variance (if available)

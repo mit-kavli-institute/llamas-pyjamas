@@ -41,7 +41,7 @@ from astropy.wcs import WCS
 from scipy.sparse import coo_matrix
 
 from llamas_pyjamas.Combine.coadd import _kernel, make_output_grid, _coverage_bool
-from llamas_pyjamas.Utils.maskedSums import band_integral, resample_bad
+from llamas_pyjamas.Utils.maskedSums import band_integral, unbridged_gaps
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,9 @@ def _resample_fibres(st, wl, units):
     x = flux (or SB), V = variance, bad = no-data (outside the fibre's coverage or masked). The one
     spectral resample -- linear interp, so mildly non-flux-conserving (documented).
 
-    Interpolation bridges a single masked native pixel (a cosmic ray, a lone zero-count sample),
-    but a run of two or more stays bad on the output grid: filling it would invent data."""
+    Interpolation bridges a single masked native pixel (a lone zero-count sample), but a run of
+    two or more stays bad on the output grid, and a cosmic-ray gap (``st.nobridge``) never is
+    bridged: filling it would invent data that other fibres and exposures can supply."""
     n, nw = st.n_fibres, wl.size
     x = np.zeros((n, nw), np.float32)
     V = np.full((n, nw), np.inf, np.float64)
@@ -122,12 +123,8 @@ def _resample_fibres(st, wl, units):
         wv = wv[order]
         fi = np.interp(wl, wv, st.flux[i][m][order], left=np.nan, right=np.nan)
         vi = np.interp(wl, wv, st.var[i][m][order], left=np.inf, right=np.inf)
-        # wide gaps: a bad native pixel next to another bad one (in wavelength order)
-        o_all = np.argsort(np.where(fin_w, st.wave[i], np.inf))
-        bo = b[o_all]
-        wide = bo & (np.r_[bo[1:], True] | np.r_[True, bo[:-1]])
-        keep = fin_w[o_all]
-        gap = resample_bad(wl, st.wave[i][o_all][keep], wide[keep])
+        gap = unbridged_gaps(wl, st.wave[i], b,
+                             None if st.nobridge is None else st.nobridge[i])
         cov = np.isfinite(fi) & ~gap
         x[i, cov] = fi[cov]
         V[i, cov] = vi[cov]

@@ -104,7 +104,8 @@ def _full_band(super_rss, channels):
 def _subselect(st: ChannelStack, sel) -> ChannelStack:
     return ChannelStack(channel=st.channel, ra=st.ra[sel], dec=st.dec[sel], wave=st.wave[sel],
                         flux=st.flux[sel], var=st.var[sel], mask=st.mask[sel],
-                        solid_angle=st.solid_angle[sel], exposure=st.exposure[sel])
+                        solid_angle=st.solid_angle[sel], exposure=st.exposure[sel],
+                        nobridge=None if st.nobridge is None else st.nobridge[sel])
 
 
 def estimate_psf_fwhm(super_rss, ra, dec, *, channels=None, radius_arcsec=3.0, default=1.2):

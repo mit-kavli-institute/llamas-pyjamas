@@ -104,6 +104,9 @@ class ChannelStack:
     mask: np.ndarray              # (N, nw)  bool, True = reject
     solid_angle: np.ndarray       # (N,)     arcsec^2 per fibre
     exposure: np.ndarray          # (N,)     int index into SuperRSS.exposures
+    #: (N, nw) bool, True = a gap a resampler must never interpolate across (cosmic-ray
+    #: samples, MASK_NO_BRIDGE_BITS); None = no such gaps recorded.
+    nobridge: Optional[np.ndarray] = None
 
     @property
     def n_fibres(self) -> int:
@@ -336,7 +339,7 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
     penalty (which would weight exposures inconsistently)."""
     from llamas_pyjamas.File.llamasRSS import (MixedStageError, RSSStageError, channel_siblings,
                                                check_stage_consistency, final_siblings,
-                                               skysub_extname, stage_of)
+                                               no_bridge_mask, skysub_extname, stage_of)
     if plane not in PLANES:
         raise ValueError(f"plane must be one of {PLANES}, not {plane!r}")
     if stage is None:
@@ -409,10 +412,11 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, sta
                                     f'{stages[c]!r}), so the sky penalty cannot be applied to it; '
                                     f'combine the ff_skysub stage or drop --sky-penalty')
             w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext, sky_penalty=sky_penalty)
+            nb = no_bridge_mask(hd)
         if to_per_second:
             f = f / exptime
             v = v / (exptime * exptime)                 # variance of counts/s
-        data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om)
+        data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om, nobridge=nb)
 
     distinct = sorted(set(stages.values()))
     if len(distinct) > 1 and not allow_mixed_stage:
@@ -522,13 +526,15 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
         exposures.append(meta)
         for c, d in data.items():
             a = acc.setdefault(c, dict(ra=[], dec=[], wave=[], flux=[], var=[], mask=[],
-                                       solid=[], exp=[]))
+                                       solid=[], exp=[], nobridge=[]))
             n = d['flux'].shape[0]
             a['ra'].append(d['ra']); a['dec'].append(d['dec']); a['wave'].append(d['wave'])
             a['flux'].append((d['flux'] * sc).astype(np.float32))
             a['var'].append((d['var'] * sc ** 2))
             a['mask'].append(d['mask']); a['solid'].append(d['solid_angle'])
             a['exp'].append(np.full(n, idx, dtype=np.int32))
+            nb = d.get('nobridge')
+            a['nobridge'].append(np.zeros(d['flux'].shape, bool) if nb is None else nb)
 
     channels_out: Dict[str, ChannelStack] = {}
     for c, a in acc.items():
@@ -537,7 +543,8 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
             ra=np.concatenate(a['ra']), dec=np.concatenate(a['dec']),
             wave=np.concatenate(a['wave'], axis=0), flux=np.concatenate(a['flux'], axis=0),
             var=np.concatenate(a['var'], axis=0), mask=np.concatenate(a['mask'], axis=0),
-            solid_angle=np.concatenate(a['solid']), exposure=np.concatenate(a['exp']))
+            solid_angle=np.concatenate(a['solid']), exposure=np.concatenate(a['exp']),
+            nobridge=np.concatenate(a['nobridge'], axis=0))
 
     overrides = {k: True for k, v in (('header', allow_header_mismatch),
                                        ('mixed', allow_mixed_stage), ('nocheck', not check_stages))

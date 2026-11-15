@@ -19,7 +19,7 @@ import astropy.units as u
 from astropy.io import fits
 
 from llamas_pyjamas.Utils.maskedSums import (band_integral, common_coverage, complete_sum,
-                                             renormalised_mean, resample_bad)
+                                             renormalised_mean, resample_bad, unbridged_gaps)
 from llamas_pyjamas.File.llamasRSS import (MASK_CR_MISSING, MASK_CR_PARTIAL,
                                            MASK_FLAT_LAMP_ONLY, MASK_NO_COUNTS,
                                            MASK_NOT_FLAT_FIELDED, bad_pixel_mask,
@@ -337,6 +337,53 @@ def test_resample_bridges_one_pixel_not_wide_gaps():
     _, _, bad = _resample_fibres(st, wl, 'flux')
     assert not bad[0].any()
     assert bad[1, 40:45].all() and not bad[1, :38].any() and not bad[1, 47:].any()
+
+
+def test_unbridged_gaps_rule():
+    w = np.arange(20, dtype=float)
+    one = np.zeros(20, bool); one[8] = True
+    two = np.zeros(20, bool); two[8:10] = True
+    assert not unbridged_gaps(w, w, one).any()             # a lone bad sample is bridged
+    assert unbridged_gaps(w, w, two)[8:10].all()           # a run of two is a gap
+    g = unbridged_gaps(w, w, one, no_bridge=one)           # a lone cosmic-ray gap is not bridged
+    assert g[8] and g.sum() == 1
+
+
+def test_resample_never_bridges_a_cosmic_ray_gap():
+    from llamas_pyjamas.Combine.cube import _resample_fibres
+    mask = np.zeros((2, 101), bool)
+    mask[0, 50] = True                                     # one-pixel cosmic-ray gap
+    mask[1, 60] = True                                     # one-pixel zero-count gap
+    st = _stack_for_cube(mask)
+    st.nobridge = np.zeros_like(mask)
+    st.nobridge[0, 50] = True
+    wl = np.linspace(5000, 5100, 101)
+    _, _, bad = _resample_fibres(st, wl, 'flux')
+    assert bad[0, 50] and bad[0].sum() == 1                # stays a gap for other fibres to fill
+    assert not bad[1].any()                                # still bridged
+
+
+def test_super_rss_records_cosmic_ray_gaps(tmp):
+    from llamas_pyjamas.Combine.superRSS import build_super_rss
+    p = write_rss(os.path.join(tmp, 'x_RSS_green.fits'), cr_missing=(slice(4, 5), slice(30, 32)))
+    sr = build_super_rss([p], plane='skysub', stage=None, reject_bad_fibres=False)
+    st = sr.channels['green']
+    assert st.nobridge[4, 30:32].all() and st.nobridge.sum() == 2
+    assert st.mask[4, 30:32].all()
+
+
+def test_simple_cube_leaves_cosmic_ray_gap_unbridged(tmp):
+    from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
+    p = write_rss(os.path.join(tmp, 'x_RSS_green.fits'), cr_missing=(slice(4, 5), slice(30, 31)),
+                  zero_counts=(slice(6, 7), slice(30, 31)))
+    scc = SimpleCubeConstructor()
+    scc.load_rss_file(p)
+    with fits.open(p) as h:
+        scc.wave_grid = np.asarray(h['WAVE'].data[0], float)
+    flux_cr, _ = scc.resample_fiber_to_grid(4)
+    flux_zero, _ = scc.resample_fiber_to_grid(6)
+    assert np.isnan(flux_cr[30]) and np.isfinite(flux_cr[29]) and np.isfinite(flux_cr[31])
+    assert np.isfinite(flux_zero[30])                      # a lone zero-count sample is bridged
 
 
 def test_cube_coverage_ignores_fibres_without_data():

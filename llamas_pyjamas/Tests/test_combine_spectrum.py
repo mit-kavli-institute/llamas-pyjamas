@@ -190,3 +190,21 @@ if __name__ == '__main__':
             print(f'FAIL {name}: {type(e).__name__}: {e}')
     print(f'\n{len(fns) - failed}/{len(fns)} passed')
     sys.exit(1 if failed else 0)
+
+
+def test_optimal_spectrum_unbiased_across_a_cosmic_ray_gap():
+    """The central fibre of one exposure loses the peak of an emission line to a cosmic ray: the
+    gap is not bridged from that fibre's neighbouring samples (which would flatten the line),
+    the other fibres and the other exposure fill it, and the line keeps its height."""
+    sr = _point_source_super(nw=8, C=10.0)
+    st = sr.channels['green']
+    st.flux[:, 4] *= 3.0                                   # a line: 3x the continuum at sample 4
+    centre = int(np.argmin(np.hypot(st.ra - RA0, st.dec - DEC0)))  # exposure 0's central fibre
+    st.flux[centre, 4] = np.nan
+    st.mask[centre, 4] = True
+    st.nobridge = np.zeros_like(st.mask)
+    st.nobridge[centre, 4] = True
+    spec, _ = optimal_spectrum(sr, RA0, DEC0, radius_arcsec=3.0)
+    wl, flux, var = spec['green']
+    assert np.all(np.isfinite(flux))
+    assert abs(flux[4] / (3.0 * np.median(flux)) - 1) < 0.02

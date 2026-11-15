@@ -132,6 +132,27 @@ def resample_bad(ref_wave, wave, bad):
     return b > 0
 
 
+def unbridged_gaps(ref_wave, wave, bad, no_bridge=None):
+    """Which samples at ``ref_wave`` are no-data after linearly resampling one fibre.
+
+    The one bridging rule every resampler uses: interpolation may bridge a single bad native
+    sample (a lone zero-count pixel), but a run of two or more bad samples stays a gap, and so
+    does any sample flagged ``no_bridge`` (a cosmic-ray gap, ``MASK_NO_BRIDGE_BITS``), so other
+    fibres and other exposures fill it instead of an invented value. Non-finite ``wave`` samples
+    are left out. Use alongside ``np.interp`` of the valid samples.
+    """
+    wave = np.asarray(wave, dtype=float)
+    bad = np.asarray(bad, dtype=bool)
+    fin = np.isfinite(wave)
+    order = np.argsort(np.where(fin, wave, np.inf))
+    bo = bad[order]
+    wide = bo & (np.r_[bo[1:], True] | np.r_[True, bo[:-1]])
+    if no_bridge is not None:
+        wide |= np.asarray(no_bridge, dtype=bool)[order]
+    keep = fin[order]
+    return resample_bad(ref_wave, wave[order][keep], wide[keep])
+
+
 def row_total(values):
     """Per-row total that treats non-finite samples as missing, not as zero.
 
