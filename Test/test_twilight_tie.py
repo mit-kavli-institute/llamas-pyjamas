@@ -24,6 +24,7 @@ from llamas_pyjamas.Flat.twilightTie import (
     save_archived_tie, load_latest_tie, compute_twilight_tie,
     combine_twilight_frames,
 )
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 from llamas_pyjamas.Flat.lampThroughput import compute_lamp_throughput
 
 BENCHSIDES = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B']
@@ -130,7 +131,7 @@ def _write_flat_smooth_models(path):
     """Uniform-throughput smooth models (so lamp C≈1, isolating the twilight tie)."""
     base = 1000.0 + 200.0 * np.sin(np.linspace(0, np.pi, N_WAVE))
     hdul = fits.HDUList([fits.PrimaryHDU()])
-    hdul[0].header['FIBIDS'] = 'physical'
+    stamp_recipe(hdul[0].header, 'lamp_flat')
     for bs in BENCHSIDES:
         smooth = np.tile(base, (N_FIB, 1))
         cols = [

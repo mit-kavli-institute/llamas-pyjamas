@@ -141,7 +141,7 @@ def test_gui_extract_raises_instead_of_returning_none(monkeypatch):
         raise OutOfDiskError('Local disk is full')
     monkeypatch.setattr('llamas_pyjamas.DataModel.validate.validate_for_gui', full)
     with pytest.raises(OutOfDiskError):
-        ge.GUI_extract('frame.fits')
+        ge.GUI_extract('frame.fits', recipe='science')
 
 
 def _flat_for_rss(monkeypatch, tmp_path, error):

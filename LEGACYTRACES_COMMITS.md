@@ -133,6 +133,7 @@ SHAs are filled in after each phase.
 | B1 | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
 | B2 | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
 | B3 | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
+| B4 | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
 - `Utils/recipes.py` adds the per-type processing recipes and their `RECIPE`/`RCPHASH` header
@@ -212,6 +213,18 @@ SHAs are filled in after each phase.
 - `Tests/test_horne_masking.py`: the old code fails 3 of its 4 cases.
 - Measured on 20261015_16 traces, the tracer zeroes no profile pixels (0.000%), so the
   tracer is unchanged.
+
+**B4: recipes enforced.**
+- `process_trace`, `GUI_extract` and `run_extraction` need `recipe=` (no science default).
+  `remove_cosmic_rays` is derived from it and can only turn cleaning off.
+- Every call site names its frame type. The GUI quick look picks the recipe from the
+  header, so arcs and flats are no longer cosmic-ray cleaned there.
+- Extractions are stamped with their recipe and get a `.recipe.json` sidecar.
+- Consumers check their inputs: pixel flat, smooth models, corrections, twilights, night
+  arcs.
+- Stale arcs are refused on resume.
+- `reduce.report_recipes` prints the recipe of every calibration product at the end of a
+  run, plus the science cosmic-ray summary.
 
 ## Not committed (left untracked on purpose)
 

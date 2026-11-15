@@ -184,13 +184,15 @@ def test_process_trace_stamps(tmp_path, captured, monkeypatch):
     path, shape = _trace_file(tmp_path)
     run = ge.process_trace._function
     on = settings(cosmic_ray_channels='red', cosmic_ray_threshold_red='8')
-    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', cosmic_rays=on)
+    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', cosmic_rays=on, recipe='science')
     h = out['extraction'].hdr
     assert h['CRCLEAN'] is True and h['CRTHRESH'] == 8.0 and h['CRCONTR'] == 9.0
-    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', cosmic_rays=settings())
+    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', cosmic_rays=settings(),
+              recipe='science')
     h = out['extraction'].hdr
     assert h['CRCLEAN'] is False and h['CRWHY'] == 'channel off' and out['cr_mask'] is None
-    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', remove_cosmic_rays=False)
+    out = run(np.zeros(shape), _header(), path, 1, method='boxcar', remove_cosmic_rays=False,
+              recipe='science')
     assert out['extraction'].hdr['CRWHY'] == 'remove_cosmic_rays false'
 
 

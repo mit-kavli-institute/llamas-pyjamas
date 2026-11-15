@@ -21,6 +21,7 @@ from llamas_pyjamas.File.llamasRSS import (
     RegistrationMismatchError, RSSStageError, StageHeaderMismatchError,
     check_stage_consistency, exposure_key, final_rss, final_siblings, rss_stage, stage_files,
     wcs_quality, write_rss_manifest)
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 from llamas_pyjamas.Tests.rss_fixtures import (
     BENCHSIDES, EXP_ID, FIBER_IDS, LONG, N_WAVE, stage_name, write_exposure, write_rss)
 
@@ -184,7 +185,7 @@ def test_stage_keywords_are_not_mismatches(tmp):
 def _corrections(path, channel='green', benchsides=('1A',), factor=2.0, flags=None):
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['METHOD'] = 'twilight'
-    hdus[0].header['FIBIDS'] = 'physical'
+    stamp_recipe(hdus[0].header, 'twilight')
     lo, hi = {'green': (4700.0, 7000.0)}[channel]
     for bs in benchsides:
         n = int(np.sum(BENCHSIDES == bs))
@@ -287,7 +288,7 @@ def _twilight_inputs(tmp, zero_frac_by_fid):
     from types import SimpleNamespace
     wave = np.linspace(4700.0, 7000.0, N_WAVE)
     hdus = [fits.PrimaryHDU()]
-    hdus[0].header['FIBIDS'] = 'physical'
+    stamp_recipe(hdus[0].header, 'lamp_flat')
     exts, meta = [], []
     for side in ('A', 'B'):
         cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),

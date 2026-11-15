@@ -74,8 +74,8 @@ from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
     MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
 from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
 from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
-from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, recipe_hash,  # noqa: E402
-                                          stamp_recipe)
+from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, check_recipe,  # noqa: E402
+                                          recipe_hash, stamp_recipe, write_recipe_sidecar)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,6 +98,7 @@ def _load_smooth_models(smooth_models_file):
                 f"{os.path.basename(smooth_models_file)} labels fibres by extraction row, "
                 f"not physical fibre id, so fibres above a dead fibre would get their "
                 f"neighbour's flat. Rebuild the flat products (re-run with clobber = true).")
+        check_recipe(hdul[0].header, 'lamp_flat', what=os.path.basename(smooth_models_file))
         for ext in hdul[1:]:
             ext_name = ext.header['EXTNAME']
             models[ext_name] = {
@@ -579,7 +580,7 @@ def _reduce_one_twilight(twilight_file, p2p_map_file, twi_dir, trace_dir, arc_so
     extraction_file = run_extraction(
         corrected_file, twi_dir, slow_bias=slow_bias, fast_bias=fast_bias,
         trace_dir=trace_dir, mastercalib_trace_dir=mastercalib_trace_dir,
-        remove_cosmic_rays=False, edge_bias=edge_bias)
+        remove_cosmic_rays=False, edge_bias=edge_bias, recipe='twilight')
     extraction_path = os.path.join(twi_dir, extraction_file)
     extraction_dict, primary_hdr = correct_wavelengths(extraction_path, soln=arc_soln)
     primary_hdr = primary_hdr if primary_hdr is not None else fits.Header()
@@ -589,6 +590,7 @@ def _reduce_one_twilight(twilight_file, p2p_map_file, twi_dir, trace_dir, arc_so
                      savefile=os.path.basename(pkl), save_dir=twi_dir)
     with open(sidecar, 'w') as fh:
         json.dump(key, fh)
+    write_recipe_sidecar(pkl, primary_hdr)
     # The uncalibrated pickle and the flat-divided frame are only intermediates.
     for path in (extraction_path, corrected_file):
         if path and os.path.abspath(path) != os.path.abspath(pkl) and os.path.exists(path):
@@ -638,6 +640,7 @@ def load_twilights(twilight_pkls):
     exts, metas, primary = [], [], None
     for pkl, colours in by_file.items():
         twi = ExtractLlamas.loadExtraction(pkl)
+        check_recipe(twi.get('primary_header'), 'twilight', what=os.path.basename(pkl))
         primary = twi.get('primary_header', primary)
         for ext, meta in zip(twi['extractions'], twi['metadata']):
             if meta['channel'] in colours:
@@ -1674,6 +1677,9 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=
                 f"{os.path.basename(corrections_file)} labels fibres by extraction row, not "
                 f"physical fibre id, so it would put the wrong flat on fibres above a dead "
                 f"fibre. Rebuild it (re-run with clobber = true).")
+        check_recipe(corr_hdul[0].header,
+                     'lamp_flat' if corr_method == 'lamp_only' else 'twilight',
+                     what=os.path.basename(corrections_file))
         for ext in corr_hdul[1:]:
             if ext.header.get('EXTNAME', '').endswith('_REF'):
                 continue  # Skip reference spectrum extensions

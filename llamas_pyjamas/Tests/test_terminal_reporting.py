@@ -18,6 +18,7 @@ from llamas_pyjamas.File.llamasRSS import RSSgeneration
 from llamas_pyjamas.Flat.fibreFlat import (BENCHSIDES, FF_RESIDUAL_CEILING_PCT,
                                            apply_fibre_flat_to_rss, assess_fibre_flat)
 from llamas_pyjamas.reduce import output_report_row, trace_report_row
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 from llamas_pyjamas.Tests.rss_fixtures import N_WAVE, stage_name, write_rss
 from llamas_pyjamas.Utils.reporter import (PipelineReporter, ReporterLogHandler, logger_area,
                                            warning_pattern)
@@ -165,7 +166,7 @@ def _science_rss(tmp, throughput, seed=1):
 def _corrections_per_fibre(path, factors, benchsides=('1A', '1B')):
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['METHOD'] = 'twilight'
-    hdus[0].header['FIBIDS'] = 'physical'
+    stamp_recipe(hdus[0].header, 'twilight')
     for k, bs in enumerate(benchsides):
         f = factors[30 * k:30 * (k + 1)]
         cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),

@@ -38,6 +38,7 @@ from llamas_pyjamas.Masking.cosmicLlamas import (clean_cosmic_rays, cosmic_ray_e
 from llamas_pyjamas.Masking.cosmicLlamas import default_settings as default_cr_settings
 from llamas_pyjamas.Bias.darkLlamas import (cosmic_ray_inputs, load_master_dark_camera,
                                             noise_factor)
+from llamas_pyjamas.Utils.recipes import cosmic_rays_for, stamp_recipe, write_recipe_sidecar
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -401,9 +402,12 @@ def select_bias_for_extension(hdu_data, header, tracer, use_bias, bench, side, c
 # governed by `num_cpus`; opt in with `ray_task_memory_mb` (applied at dispatch).
 @ray.remote
 def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use_bias=None,
-                  remove_cosmic_rays=True, edge_bias=None, cosmic_rays=None):
+                  remove_cosmic_rays=None, edge_bias=None, cosmic_rays=None, recipe=None):
     """
     Process a single HDU: subtract bias, load the trace from a trace file, and create an ExtractLlamas object.
+
+    ``recipe`` (Utils/recipes.py) names the frame type and is required: it decides whether
+    cosmic rays may be cleaned. ``remove_cosmic_rays`` can only turn cleaning off.
 
     The tracer is loaded first so its fiberimg can be used for the inter-fibre
     bias diagnostic and fallback bias. Bias selection is
@@ -415,6 +419,7 @@ def process_trace(hdu_data, header, trace_file, hdu_index, method='optimal', use
         'hdu_index': the HDU index for this extraction
     """
     _BIAS_INTERFIBRE_LOG_THRESHOLD = 10.0  # DN — divergence above which a diagnostic warning is logged
+    remove_cosmic_rays = cosmic_rays_for(recipe, remove_cosmic_rays)
 
     try:
         # Parse camera identifiers
@@ -604,8 +609,8 @@ def compute_detector_background(data, rows=(30, 50)):
 def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str = None,
                 slow_bias: str = None, fast_bias: str = None,
                 method=None, trace_dir=None, mastercalib_trace_dir=None,
-                remove_cosmic_rays=True, mask_output_dir=None, force_refresh=False, cosmic_rays=None,
-                edge_bias=None, whitelight_hex=True) -> tuple:
+                remove_cosmic_rays=None, mask_output_dir=None, force_refresh=False, cosmic_rays=None,
+                edge_bias=None, whitelight_hex=True, recipe=None) -> tuple:
 
     """
     Extracts data from a FITS file using calibration files and saves the extracted data.
@@ -634,6 +639,10 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     cosmic_rays (dict, optional): Per-channel cosmic-ray settings
                                   (``Masking.cosmicLlamas.cosmic_ray_settings``); None uses
                                   the package defaults. Stamped as CRID/CRCHAN.
+    recipe (str): The frame's processing recipe (Utils/recipes.py), required. It decides
+                  whether cosmic rays may be cleaned (remove_cosmic_rays can only turn
+                  cleaning off), is stamped on the extraction and recorded beside the
+                  pickle in ``<pickle>.recipe.json``.
 
     Returns:
     tuple: (extraction_file, white_light_file): the extraction pickle's file name (in
@@ -645,6 +654,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     it used to be swallowed into a ``None`` return, which callers then failed to unpack.
     """
     start_time = time.perf_counter()  # Start timer
+    remove_cosmic_rays = cosmic_rays_for(recipe, remove_cosmic_rays)
 
     if method is None:
         method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'optimal').strip().lower()
@@ -807,7 +817,7 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
             hdu_data = hdu[hdu_index].data.copy()
             hdr = hdu[hdu_index].header
 
-            future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method=method, use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias, cosmic_rays=cosmic_rays)
+            future = extract_fn.remote(hdu_data, hdr, trace_file, hdu_index, method=method, use_bias=masterbiasfile, remove_cosmic_rays=remove_cosmic_rays, edge_bias=edge_bias, cosmic_rays=cosmic_rays, recipe=recipe)
             futures.append(future)
 
         # Wait for all remote tasks to complete
@@ -846,6 +856,8 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
         # Record the cosmic-ray cleaning applied (CRID is what a resumed run compares)
         # before the masks, the extraction pickle and the white light are written.
         stamp_cosmic_rays(primary_hdr, cosmic_rays or default_cr_settings(), remove_cosmic_rays)
+        stamp_recipe(primary_hdr, recipe)
+        primary_hdr['CRCLEAN'] = (bool(remove_cosmic_rays), 'Cosmic-ray cleaning allowed')
 
         # Save cosmic ray masks if CR removal was enabled
         if remove_cosmic_rays:
@@ -867,6 +879,9 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
                 filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=output_dir)
         else:
             filename = save_extractions(extraction_list, primary_header=primary_hdr, savefile=extraction_file, save_dir=OUTPUT_DIR)
+        _saved = os.path.join(output_dir or OUTPUT_DIR, extraction_file)
+        if os.path.exists(_saved):
+            write_recipe_sidecar(_saved, primary_hdr)
         #print(f'extraction saved filename = {filename}')
         print(f'extraction saved filename = {extraction_file}')
         # if output_dir:

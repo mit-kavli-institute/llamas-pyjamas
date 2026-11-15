@@ -18,7 +18,9 @@ makes its products different, so that older products are rebuilt rather than reu
 """
 
 import hashlib
+import json
 import logging
+import os
 import sys
 from dataclasses import astuple, dataclass
 
@@ -57,6 +59,9 @@ RECIPES = {
     'twilight': Recipe('twilight', cosmic_rays=False, pixel_flat=True, dark=False,
                        sky_subtract=False, fmt=2),
     'arc': Recipe('arc', cosmic_rays=False, pixel_flat=False, dark=False, sky_subtract=False),
+    # A lamp flat extracted through the pixel flat for a fibre-flat RSS (no twilight).
+    'dome_flat': Recipe('dome_flat', cosmic_rays=False, pixel_flat=True, dark=False,
+                        sky_subtract=False),
     'science': Recipe('science', cosmic_rays=True, pixel_flat=True, dark=True,
                       sky_subtract=True),
     'standard': Recipe('standard', cosmic_rays=True, pixel_flat=True, dark=True,
@@ -65,7 +70,7 @@ RECIPES = {
                         sky_subtract=False),
 }
 
-CALIBRATION_RECIPES = ('lamp_flat', 'twilight', 'arc')
+CALIBRATION_RECIPES = ('lamp_flat', 'twilight', 'arc', 'dome_flat')
 
 
 def get_recipe(name):
@@ -137,3 +142,62 @@ def check_recipe(header, expected, what='product', strict=True):
         raise CalibrationRecipeError(message)
     logger.warning(message)
     return False
+
+
+def cosmic_rays_for(recipe, requested=None):
+    """Whether an extraction made with ``recipe`` cleans cosmic rays.
+
+    Every extraction names its recipe: there is no science default a calibration frame
+    could inherit. ``requested`` (the caller's or the config's switch) can turn cleaning
+    off where the recipe allows it, never on where it does not.
+    """
+    if recipe is None:
+        raise TypeError("an extraction needs a recipe (Utils/recipes.py: lamp_flat, twilight, "
+                        "arc, dome_flat, science, standard, sky_frame); there is no default")
+    allowed = get_recipe(recipe).cosmic_rays
+    if requested and not allowed:
+        raise ValueError(f"recipe {recipe!r} forbids cosmic-ray cleaning")
+    return allowed if requested is None else bool(requested)
+
+
+def recipe_for_frame(header):
+    """The recipe for a raw frame from its primary header (the GUI quick look).
+
+    LDLS flats are ``lamp_flat``, sky flats ``twilight``, frames with an arc lamp on ``arc``,
+    and anything else ``science``.
+    """
+    obj = str(header.get('OBJECT', '')).strip().lower()
+    if 'ldls' in obj or obj in ('flat', 'dome flat', 'lamp flat'):
+        return 'lamp_flat'
+    if 'skyflat' in obj.replace(' ', '') or 'twilight' in obj:
+        return 'twilight'
+    lamps = [k for k in header if 'LAMPS' in k and k.endswith('STATE')]
+    if any(str(header.get(k, '')).strip().upper() == 'ON' for k in lamps) or 'arc' in obj:
+        return 'arc'
+    return 'science'
+
+
+#: Keys copied from an extraction's primary header into its recipe sidecar.
+SIDECAR_KEYS = ('RECIPE', 'RCPHASH', 'PIPEVER', 'FIBIDS', 'CRCLEAN', 'CRID', 'CRCHAN')
+
+
+def sidecar_path(pkl_path):
+    """Path of the small JSON beside an extraction pickle that records its recipe."""
+    return pkl_path + '.recipe.json'
+
+
+def write_recipe_sidecar(pkl_path, header):
+    """Record an extraction pickle's recipe stamps beside it, readable without loading it."""
+    stamps = {k: _value(header, k) for k in SIDECAR_KEYS if _value(header, k) is not None}
+    with open(sidecar_path(pkl_path), 'w') as fh:
+        json.dump(stamps, fh)
+    return stamps
+
+
+def read_recipe_sidecar(pkl_path):
+    """The recipe stamps of an extraction pickle ({} when it has no sidecar)."""
+    path = sidecar_path(pkl_path)
+    if not os.path.exists(path):
+        return {}
+    with open(path) as fh:
+        return json.load(fh)

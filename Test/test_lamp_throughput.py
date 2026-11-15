@@ -19,6 +19,7 @@ from astropy.io import fits
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 from llamas_pyjamas.Flat.lampThroughput import compute_lamp_throughput
 
 CHANNEL = 'red'
@@ -42,7 +43,7 @@ def _write_smooth_models(path, tilt_amp=0.10, bright_fiber=('2A', 5),
     base = 1000.0 + 200.0 * np.sin(np.linspace(0, np.pi, N_WAVE))
 
     primary = fits.PrimaryHDU()
-    primary.header['FIBIDS'] = 'physical'
+    stamp_recipe(primary.header, 'lamp_flat')
     hdul = fits.HDUList([primary])
     for b, bs in enumerate(BENCHSIDES):
         bench, side = bs[0], bs[1]

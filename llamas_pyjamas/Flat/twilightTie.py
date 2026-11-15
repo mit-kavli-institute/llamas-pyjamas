@@ -204,7 +204,8 @@ def reduce_twilight_flats(twilight_files, p2p_map_file, trace_dir, arc_soln,
             continue
         extraction_file = run_extraction(
             corrected_file, twi_output_dir, slow_bias=slow_bias,
-            fast_bias=fast_bias, trace_dir=trace_dir, remove_cosmic_rays=False)
+            fast_bias=fast_bias, trace_dir=trace_dir, remove_cosmic_rays=False,
+            recipe='twilight')
         extraction_path = os.path.join(twi_output_dir, extraction_file)
         extraction_dict, primary_hdr = correct_wavelengths(
             extraction_path, soln=arc_soln)

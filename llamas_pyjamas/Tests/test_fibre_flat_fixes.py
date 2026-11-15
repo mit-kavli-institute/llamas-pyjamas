@@ -30,7 +30,8 @@ import llamas_pyjamas.reduce as reduce_mod
 from llamas_pyjamas.reduce import (apply_twilight_throughput, stale_products,
                                    twilight_throughputs)
 from llamas_pyjamas.Utils.deadfibers import live_fibre_ids, live_row_index
-from llamas_pyjamas.Utils.recipes import CalibrationRecipeError, check_recipe, recipe_hash
+from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, check_recipe, recipe_hash,
+                                          stamp_recipe)
 
 N_WAVE = 400
 N_LIVE = 297
@@ -68,6 +69,8 @@ def write_models(tmp_path):
     _write_smooth_models_fits({'green_2_B': {'fiber_ids': ids, 'smooth': sm, 'wave': wv,
                                             'channel': 'green', 'bench': '2', 'side': 'B'}},
                               path)
+    with fits.open(path, mode='update') as h:
+        stamp_recipe(h[0].header, 'lamp_flat')
     return path
 
 
@@ -135,7 +138,7 @@ def _rss_divided_by(tmp_path, true_tp, rss_tp):
 def _corrections(tmp_path, true_tp):
     hdus = [fits.PrimaryHDU()]
     hdus[0].header['METHOD'] = 'twilight'
-    hdus[0].header['FIBIDS'] = 'physical'
+    stamp_recipe(hdus[0].header, 'twilight')
     for k, bs in enumerate(('1A', '1B')):
         cols = [fits.Column(name='FIBER_ID', format='J', array=np.arange(30)),
                 fits.Column(name='CORRECTION', format=f'{RSS_NWAVE}D',

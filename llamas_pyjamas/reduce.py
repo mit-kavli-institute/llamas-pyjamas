@@ -79,7 +79,8 @@ from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_p
 from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
                                             process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
-from llamas_pyjamas.Utils.recipes import recipe_problem
+from llamas_pyjamas.Utils.recipes import (check_recipe, read_recipe_sidecar, recipe_problem,
+                                          sidecar_path)
 from llamas_pyjamas.Flat.flatCombine import (combine_lamp_flats, combined_flat_name,
                                              combined_is_current, describe_sets,
                                              resolve_lamp_flat_sets)
@@ -525,15 +526,15 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
         os.makedirs(output_dir)
 
     ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
-                   remove_cosmic_rays=False)
+                   remove_cosmic_rays=False, recipe='lamp_flat')
 
     return
 
 
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                    trace_dir=None, mastercalib_trace_dir=None,
-                   remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None,
-                   whitelight_hex=True, cosmic_rays=None):
+                   remove_cosmic_rays=None, mask_output_dir=None, edge_bias=None,
+                   whitelight_hex=True, cosmic_rays=None, recipe=None):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -544,13 +545,15 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         fast_bias: Path to FAST-mode master bias FITS file
         trace_dir: User trace directory (for real extensions)
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
-        remove_cosmic_rays: Enable L.A.Cosmic cosmic ray removal before extraction
+        remove_cosmic_rays: L.A.Cosmic switch; can only turn cleaning off where the recipe
+            allows it (None: as the recipe says)
         mask_output_dir: Output directory for cosmic ray mask FITS files
         edge_bias: Optional dict controlling the per-frame edge-bias (DC offset)
             correction (see build_edge_bias_config); forwarded to GUI_extract.
             None => process_trace uses its built-in defaults (Tier 1 on).
         cosmic_rays: Per-channel cosmic-ray settings (Masking.cosmicLlamas.
             cosmic_ray_settings); None => package defaults. Forwarded to GUI_extract.
+        recipe: The frame's processing recipe (Utils/recipes.py), required.
 
     Returns:
         str: Path to extraction file
@@ -577,7 +580,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias,
                 whitelight_hex=whitelight_hex,
-                cosmic_rays=cosmic_rays
+                cosmic_rays=cosmic_rays,
+                recipe=recipe
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -592,7 +596,8 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             mask_output_dir=mask_output_dir,
             edge_bias=edge_bias,
             whitelight_hex=whitelight_hex,
-            cosmic_rays=cosmic_rays
+            cosmic_rays=cosmic_rays,
+            recipe=recipe
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -617,6 +622,7 @@ def twilight_throughputs(twilight_pkls):
     out = {}
     for pkl, colours in by_file.items():
         twi = ExtractLlamas.loadExtraction(pkl)
+        check_recipe(twi.get('primary_header'), 'twilight', what=os.path.basename(pkl))
         source = str((twi.get('primary_header') or {}).get('TWIFILE', os.path.basename(pkl)))
         for e, m in zip(twi['extractions'], twi['metadata']):
             if m['channel'] not in colours:
@@ -705,7 +711,8 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
         sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
         trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
         remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir,
-        edge_bias=build_edge_bias_config(config, extraction_path), cosmic_rays=cosmic_rays)
+        edge_bias=build_edge_bias_config(config, extraction_path), cosmic_rays=cosmic_rays,
+        recipe='sky_frame')
     if not extracted:
         raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
 
@@ -724,7 +731,7 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
 def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
     ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
-                   remove_cosmic_rays=False)
+                   remove_cosmic_rays=False, recipe='arc')
 
     arc_picklename = os.path.join(output_dir, os.path.basename(arc_file).replace('_mef.fits', '_extract.pkl'))
 
@@ -913,7 +920,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
             pkl_basename = run_extraction(corr_file, output_dir,
                                           slow_bias=slow_bias, fast_bias=fast_bias,
                                           trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
-                                          remove_cosmic_rays=False, edge_bias=edge_bias)
+                                          remove_cosmic_rays=False, edge_bias=edge_bias,
+                                          recipe='dome_flat')
         except Exception as exc:
             if is_disk_full(exc):
                 raise
@@ -1298,7 +1306,11 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     """
     
     print(f"Applying flat field correction to: {os.path.basename(science_file)}")
-    
+    # The pixel flat must come from a lamp flat made with its recipe (no cosmic-ray
+    # cleaning, physical fibre ids): anything else plants false structure in the frame.
+    for _map in flat_pixel_maps:
+        check_recipe(fits.getheader(_map, 0), 'lamp_flat', what=os.path.basename(_map))
+
     # Step 1: Build flat field mapping with cross-checking
     flat_map = build_flat_field_map(flat_pixel_maps, science_file) # this doesn't seem righ
     
@@ -1955,6 +1967,8 @@ def cleanup_extraction_pkls(paths, save_pkl):
             if os.path.exists(path):
                 os.remove(path)
                 removed.append(path)
+            if os.path.exists(sidecar_path(path)):          # its recipe record goes with it
+                os.remove(sidecar_path(path))
         except OSError:
             pass
     return removed
@@ -1966,15 +1980,20 @@ FLAT_PRODUCT_RECIPES = (('pixel_maps.fits', 'lamp_flat'),
                         ('unillum_mask.fits', 'lamp_flat'))
 
 
-def stale_products(extraction_path, flat_field_dir):
+def stale_products(extraction_path, flat_field_dir, arc_dir=None):
     """``[(path, reason)]`` of products a resumed run would reuse that older code made.
 
     Flat products must carry their current recipe stamp (Utils/recipes.py). A base RSS
     must record the throughput its rows were divided by (FIBERMAP THRUPUT), and a fibre-
     flat-fielded RSS must be at the current FFVER: before FFVER 2 the fibre throughput was
-    divided out twice.
+    divided out twice. Night-arc extractions in ``arc_dir`` must carry the ``arc`` recipe
+    in their ``.recipe.json`` sidecar.
     """
     stale = []
+    for pkl in sorted(glob.glob(os.path.join(arc_dir, '*_extract.pkl'))) if arc_dir else []:
+        why = recipe_problem(read_recipe_sidecar(pkl), 'arc')
+        if why:
+            stale.append((pkl, why))
     for name, recipe in FLAT_PRODUCT_RECIPES:
         path = os.path.join(flat_field_dir, name)
         if os.path.exists(path):
@@ -2002,6 +2021,87 @@ def stale_products(extraction_path, flat_field_dir):
             stale.append((path, f"fibre flat FFVER {ffver}, now {FFVER}: the fibre throughput "
                                 f"was divided out twice"))
     return stale
+
+
+def recipe_matrix(output_dir, extraction_path, flat_field_dir):
+    """``[(product, expected recipe, problem or None)]`` for this run's calibration products.
+
+    Covers the flat products, the fibre-flat corrections, combined lamp flats, the reduced
+    twilights and the night arcs, read from their headers or ``.recipe.json`` sidecars.
+    """
+    rows = []
+
+    def add(path, recipe, header):
+        rows.append((os.path.basename(path), recipe, recipe_problem(header, recipe)))
+
+    for name, recipe in FLAT_PRODUCT_RECIPES:
+        path = os.path.join(flat_field_dir, name)
+        if os.path.exists(path):
+            add(path, recipe, fits.getheader(path, 0))
+    corr = os.path.join(flat_field_dir, 'fibre_flat_corrections.fits')
+    if os.path.exists(corr):
+        header = fits.getheader(corr, 0)
+        add(corr, 'lamp_flat' if header.get('METHOD') == 'lamp_only' else 'twilight', header)
+    for path in sorted(glob.glob(os.path.join(output_dir, 'bias_corrected',
+                                              '*_x[0-9]*_bias_corrected.fits'))):
+        add(path, 'lamp_flat', fits.getheader(path, 0))
+    for path in sorted(glob.glob(os.path.join(flat_field_dir, 'twilight', '*_twilight.pkl'))):
+        add(path, 'twilight', read_recipe_sidecar(path))
+    for path in sorted(glob.glob(os.path.join(output_dir, 'arcs', '*_extract.pkl'))):
+        add(path, 'arc', read_recipe_sidecar(path))
+    return rows
+
+
+def science_cosmic_ray_summary(extraction_path, mask_dir=None):
+    """One line on the science frames' cosmic-ray cleaning, or None.
+
+    From the RSS headers (CRCHAN: the channels cleaned) and the cosmic-ray masks (CRNPIX
+    per extension, summed per frame). The masks do not record their camera, so this is
+    per frame, not per channel.
+    """
+    chans = set()
+    for path in glob.glob(os.path.join(extraction_path, '*_RSS_*.fits')):
+        try:
+            chans.add(str(fits.getheader(path, 0).get('CRCHAN', '')).strip())
+        except OSError:
+            continue
+    totals = []
+    for path in glob.glob(os.path.join(mask_dir or os.path.join(extraction_path, 'masks'),
+                                       'cosmic_ray_mask_*.fits')):
+        try:
+            with fits.open(path) as hdul:
+                totals.append(sum(int(h.header.get('CRNPIX', 0) or 0) for h in hdul[1:]))
+        except OSError:
+            continue
+    if not chans and not totals:
+        return None
+    line = f"Science cosmic rays: channels {', '.join(sorted(c for c in chans if c)) or 'none'}"
+    if totals:
+        line += (f"; median {int(np.median(totals))} pixels flagged per frame "
+                 f"({len(totals)} frames)")
+    return line
+
+
+def report_recipes(reporter, output_dir, extraction_path, flat_field_dir, mask_dir=None):
+    """The recipe matrix of this run's calibration products, in the summary and the report.
+
+    Consumers already refuse a product made with the wrong recipe, so a completed run
+    should show none; any that do are logged as warnings.
+    """
+    rows = recipe_matrix(output_dir, extraction_path, flat_field_dir)
+    if not rows:
+        return
+    bad = [(name, why) for name, _, why in rows if why]
+    lines = [f"{name:<64} {recipe:<10} {'✓' if why is None else '✗ ' + why}"
+             for name, recipe, why in rows]
+    science = science_cosmic_ray_summary(extraction_path, mask_dir)
+    if science:
+        lines.append(science)
+    for name, why in bad:
+        logger.warning(f"Recipe check: {name}: {why}", extra={'summarised': True})
+    reporter.summary("Calibration recipes (Utils/recipes.py)", lines)
+    reporter.report('Recipes', f"{len(rows)} calibration products, "
+                    + (f"{len(bad)} not as expected ⚠️" if bad else "all as expected"))
 
 
 def report_pixel_flat(reporter, pixel_map_file):
@@ -2746,7 +2846,8 @@ def main(config_path):
     if resume:
         _stale = stale_products(extraction_path,
                                 config.get('flat_field_output_dir',
-                                           os.path.join(extraction_path, 'flat')))
+                                           os.path.join(extraction_path, 'flat')),
+                                arc_dir=os.path.join(output_dir, 'arcs'))
         if _stale:
             print(f"\n{len(_stale)} product(s) in this output folder were made by an older "
                   f"version of the pipeline and cannot be reused:")
@@ -3089,13 +3190,16 @@ def main(config_path):
                                                    trace_dir=final_trace_dir,
                                                    mastercalib_trace_dir=CALIB_DIR,
                                                    remove_cosmic_rays=False,
-                                                   edge_bias=edge_bias_cfg)
+                                                   edge_bias=edge_bias_cfg,
+                                                   recipe='arc')
                                 except Exception as _arc_exc:
                                     if is_disk_full(_arc_exc):
                                         raise
                                     logger.warning(f"Night-arc extraction for {_ch} failed: "
                                                    f"{_arc_exc}", exc_info=True)
                             if os.path.exists(_pkl):
+                                check_recipe(read_recipe_sidecar(_pkl), 'arc',
+                                             what=os.path.basename(_pkl))
                                 line_source[_ch] = _pkl
                             else:
                                 print(f"WARNING: night-arc extraction missing for {_ch} "
@@ -3537,7 +3641,8 @@ def main(config_path):
                     mask_output_dir=mask_output_dir,
                     edge_bias=edge_bias_cfg,
                     whitelight_hex=config.get('whitelight_hex', True),
-                    cosmic_rays=cr_settings
+                    cosmic_rays=cr_settings,
+                    recipe='science'
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -3559,7 +3664,8 @@ def main(config_path):
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias_cfg,
                 whitelight_hex=config.get('whitelight_hex', True),
-                cosmic_rays=cr_settings
+                cosmic_rays=cr_settings,
+                recipe='science'
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
@@ -3771,7 +3877,8 @@ def main(config_path):
                                 remove_cosmic_rays=remove_cosmic_rays,
                                 mask_output_dir=mask_output_dir,
                                 edge_bias=edge_bias_cfg,
-                                cosmic_rays=cr_settings
+                                cosmic_rays=cr_settings,
+                                recipe='science'
                             )
                             noflat_corr_dict, noflat_hdr = correct_wavelengths(
                                 noflat_extracted, soln=config.get('arcdict'))
@@ -4124,6 +4231,9 @@ def main(config_path):
             print(f"RSS manifest: {_manifest}")
         reporter.report('Output', output_report_row(
             _n_frames, _run_record['written'], len(cube_files), extraction_path))
+        report_recipes(reporter, output_dir, extraction_path,
+                       config.get('flat_field_output_dir', os.path.join(extraction_path, 'flat')),
+                       mask_dir=config.get('mask_output_dir'))
 
         # Rename the per-exposure pipeline white-light to {exposure_id}_whitelight_fullpipeline.fits
         # -- distinct from the telescope quicklook's {timestamp}_whitelight.fits (left untouched).
