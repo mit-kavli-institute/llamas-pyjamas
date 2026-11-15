@@ -81,9 +81,6 @@ from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_fiel
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
 from llamas_pyjamas.Utils.recipes import (check_recipe, read_recipe_sidecar, recipe_problem,
                                           sidecar_path)
-from llamas_pyjamas.Flat.flatCombine import (combine_lamp_flats, combined_flat_name,
-                                             combined_is_current, describe_sets,
-                                             resolve_lamp_flat_sets)
 from llamas_pyjamas.Flat.fibreFlat import (FFVER,
                                            compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
@@ -2026,8 +2023,8 @@ def stale_products(extraction_path, flat_field_dir, arc_dir=None):
 def recipe_matrix(output_dir, extraction_path, flat_field_dir):
     """``[(product, expected recipe, problem or None)]`` for this run's calibration products.
 
-    Covers the flat products, the fibre-flat corrections, combined lamp flats, the reduced
-    twilights and the night arcs, read from their headers or ``.recipe.json`` sidecars.
+    Covers the flat products, the fibre-flat corrections, the reduced twilights and the
+    night arcs, read from their headers or ``.recipe.json`` sidecars.
     """
     rows = []
 
@@ -2042,9 +2039,6 @@ def recipe_matrix(output_dir, extraction_path, flat_field_dir):
     if os.path.exists(corr):
         header = fits.getheader(corr, 0)
         add(corr, 'lamp_flat' if header.get('METHOD') == 'lamp_only' else 'twilight', header)
-    for path in sorted(glob.glob(os.path.join(output_dir, 'bias_corrected',
-                                              '*_x[0-9]*_bias_corrected.fits'))):
-        add(path, 'lamp_flat', fits.getheader(path, 0))
     for path in sorted(glob.glob(os.path.join(flat_field_dir, 'twilight', '*_twilight.pkl'))):
         add(path, 'twilight', read_recipe_sidecar(path))
     for path in sorted(glob.glob(os.path.join(output_dir, 'arcs', '*_extract.pkl'))):
@@ -2213,11 +2207,6 @@ def bias_first_frames(config):
         path = config.get(key)
         if isinstance(path, str) and path and os.path.exists(path):
             roles[path] = role
-    # Every exposure of a lamp-flat set is bias-corrected, then combined.
-    for files in (config.get('lamp_flat_sets') or {}).values():
-        for path in files:
-            if os.path.exists(path):
-                roles.setdefault(path, 'flat')
     for role, key in (('sky', 'sky_frame_files'), ('science', 'science_files')):
         for path in _as_list(config.get(key)):
             if os.path.exists(path):
@@ -2548,13 +2537,6 @@ def main(config_path):
     if _darks:
         config['dark_files'] = [d for d in ([_darks] if isinstance(_darks, str) else _darks)
                                 if str(d).strip()]
-
-    # Lamp flats: each colour's set of identical exposures, combined after bias-first
-    # (Flat/flatCombine.py). A listed set leaves its first frame in the key for now.
-    lamp_flat_sets = resolve_lamp_flat_sets(config)
-    config['lamp_flat_sets'] = lamp_flat_sets
-    for _line in describe_sets(lamp_flat_sets):
-        print(_line)
 
     # (full configuration is logged to the file once logging is set up, below)
 
@@ -2963,23 +2945,6 @@ def main(config_path):
     for _k in BIAS_FIRST_CALIBRATIONS:
         if config.get(_k):
             config[_k] = _bias_first(config[_k])
-
-    # Lamp flats: combine each set's bias-corrected exposures (cosmic rays are rejected
-    # here, never by L.A.Cosmic). Colours sharing a set share the combined frame.
-    _combined = {}
-    for _colour, _raws in (config.get('lamp_flat_sets') or {}).items():
-        if len(_raws) < 2:
-            continue
-        _key = tuple(_raws)
-        if _key not in _combined:
-            _out = os.path.join(_bias_corr_dir, combined_flat_name(_raws))
-            _names = [os.path.basename(r) for r in _raws]
-            if resume and combined_is_current(_out, _names):
-                print(f"RESUME: reusing combined lamp flat {os.path.basename(_out)}")
-            else:
-                combine_lamp_flats([_bias_first(r) for r in _raws], _out, raw_names=_names)
-            _combined[_key] = _out
-        config[f'{_colour}_flat_file'] = _combined[_key]
 
     # Sky frames (list or comma-separated string)
     _sky_frames = config.get('sky_frame_files')

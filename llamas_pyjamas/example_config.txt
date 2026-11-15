@@ -106,10 +106,6 @@ red_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/t
 green_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 blue_flat_file = /Users/slh/Library/CloudStorage/Box-Box/slhughes/testing_files/trace_flats/LLAMAS_2025-05-23T12_27_47.585_mef.fits
 
-# Each flat's set of identical exposures is found and combined (default true); a
-# comma-separated list gives the set explicitly. See Flat/flatCombine.py.
-lamp_flat_combine = true
-
 # A camera that fails to trace gets its master trace shifted onto these flats.
 # false: accept the shift when the fibre fingerprint is inconclusive (see Trace/README.md).
 shifted_master_require_fingerprint = true

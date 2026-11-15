@@ -41,44 +41,6 @@ throughputs = flat.calculate_throughputs()
 
 The flat module is typically run after bias correction and before spectral extraction to normalize the pixel-to-pixel variations and fibre-to-fibre throughput differences.
 
-## Lamp-flat sets (`flatCombine.py`)
-
-**Each LDLS setting is taken as a short set of identical exposures**, three on 20261015_16.
-`resolve_lamp_flat_sets` finds the set of each configured `{colour}_flat_file` from the raw
-headers. Exposures belong to one set when:
-- `OBJECT`, `REXPTIME`, `READ-MDE`, `DATE-OBS` and every lamp, selector and filter-wheel
-  `STATE` all match;
-- consecutive exposures start no more than 10 minutes apart.
-
-A comma-separated list in the key gives the set explicitly. `lamp_flat_combine = false` uses
-the single configured frame.
-
-**How a set is combined.** Every exposure of the set is bias-corrected. `combine_lamp_flats`
-then:
-- matches each camera across the frames by header, never by index;
-- scales each frame to the first over their lit pixels;
-- combines them with `Bias/darkLlamas.combine_frames` (median of 3 or more, 5σ
-  pair-minimum for 2).
-
-The result, `bias_corrected/<first stem>_x<N>_bias_corrected.fits`, replaces the flat key.
-Tracing and the flat stage both use it. It records `NCOMBINE`, `COMBMETH`, `FLSCALES` and
-`FLATIN<n>`, and carries the `lamp_flat` recipe stamp.
-
-**Not every exposure in a set is usable, so each is checked against the configured one.**
-On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical
-headers but blank, saturated or 6× brighter data. Per camera, an exposure is combined only
-if all of these hold (`flatCombine.consistency`):
-- its fibre profile correlates with the configured frame's at r ≥ 0.98;
-- its brightness is within ×2/3–1.5 of it;
-- it is not more saturated.
-
-The configured frame is always the reference. A camera left with that frame alone keeps it
-unchanged, recorded as `COMBMETH = single`. `FLREJECT` and `NREJECT` record what was left
-out, and why.
-
-**This is how cosmic rays are rejected in a lamp flat; L.A.Cosmic never runs on one.**
-Combining does not fix saturation: a saturated core is saturated in every exposure.
-
 ## Fibre-to-fibre flat (`fibreFlat.py`)
 
 `compute_fibre_flat_twilight` (or `compute_fibre_flat_lamp_only` without a twilight) writes

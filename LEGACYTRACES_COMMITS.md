@@ -131,10 +131,11 @@ SHAs are filled in after each phase.
 | A3 `84cca12` | Check the fibre flat against the throughput, the twilight and its own narrow structure | See below. | On A1, A2. QA only; no product data change. |
 | A4 `54f4410` | Refuse to resume from products an older pipeline version made | See below. | On A0–A2. A resumed run on an old output folder now stops; use clobber. |
 | B1 `267bb2d` | Reduce each twilight once and take both throughputs from it, per colour | See below. | On A0–A4. Changes the RSS throughput for colours whose twilight was not the newest file: clobber re-run. |
-| B2 `7ed8748` | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
+| B2 `7ed8748` (**removed**) | Combine each lamp flat's set of exposures before tracing and flat fielding | See below. | On A2. Changes traces and flats: clobber re-run. New key `lamp_flat_combine` (default true). |
 | B3 `a1f1ccf` | Normalise the Horne profile over the whole aperture so masked pixels do not bias the flux | See below. | Changes Horne fluxes and errors where pixels are masked: clobber re-run; rebuild sensfuncs. |
 | B4 `b81ea8c` | Make every extraction name its recipe and check each calibration product's recipe | See below. | API change: `process_trace`, `GUI_extract` and `run_extraction` need `recipe=`. Old arcs are refused on resume. |
-| B2 fix `7c3ed9e` | Combine only the lamp-flat exposures that match the configured one | On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical headers but blank, saturated or 6× brighter data; the B2 median made all 16 green/blue cameras untraceable. Per camera, an exposure is now used only if its fibre profile (r ≥ 0.98), brightness (×2/3–1.5) and saturation match the configured frame, which is always the reference. | On B2 (`7ed8748`). |
+| B2 fix `7c3ed9e` (**removed**) | Combine only the lamp-flat exposures that match the configured one | On 20261015_16 the two exposures after the configured 0.07 s green/blue flat have identical headers but blank, saturated or 6× brighter data; the B2 median made all 16 green/blue cameras untraceable. Per camera, an exposure is now used only if its fibre profile (r ≥ 0.98), brightness (×2/3–1.5) and saturation match the configured frame, which is always the reference. | On B2 (`7ed8748`). |
+| Removal | Remove lamp-flat combining: use only the configured lamp flat | Reverses B2 and its fix at the user's request. Lamp flats are never combined: traces, pixel flat and lamp model come from exactly the file in `{colour}_flat_file`, as before B2. `lamp_flat` recipe `fmt` 3, so products made while combining was in are refused on resume. | Clobber re-run of any night reduced with B2. |
 | `79aaec5` | Add fibre-flat acceptance and arc cosmic-ray check scripts | `Scripts/ffcheck/fibreflat_acceptance.py <output_dir>` prints the per-benchside acceptance numbers; `arc_cr_check.py` checks the arcs' recipe and cosmic-ray stamps. | Read-only scripts. |
 
 **R0 + A0: physical fibre ids and processing recipes.**
@@ -195,7 +196,7 @@ SHAs are filled in after each phase.
   (`reduce_twilight_flat`, now removed) reduced the twilights again for T_i on every run.
 - The dome-flat RSS is still made when no twilight is configured.
 
-**B2: lamp-flat sets combined.**
+**B2: lamp-flat sets combined (removed again; see "Removal" above).**
 - `Flat/flatCombine.py` finds each configured flat's set of identical exposures from the raw
   headers. On 20261015_16 it finds 16-34-26.8/44.5/35-08.4 and 16-38-38.0/39-02.9/39-31.4.
 - Every exposure is bias-corrected, then the set is combined: matched by header, scaled,

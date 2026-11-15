@@ -8,8 +8,8 @@ flat, and before extraction.
 never are. On a lamp flat, L.A.Cosmic takes the bright, sharp fibre cores for cosmic rays and
 lowers them. Up to 460,000 pixels per green or blue detector were changed on 20261015_16. This
 left about 9,400 false narrow dips in the green fibre flat, and each one becomes a fake emission
-bump in the science. Cosmic rays in calibration frames are rejected by combining exposures
-instead (`Flat/README.md`).
+bump in the science. Any cosmic ray in a calibration frame is left as it is. A lamp flat is
+the single exposure configured for its colour, and a 0.07–0.5 s exposure collects few of them.
 
 ## Settings
 

@@ -51,10 +51,11 @@ class Recipe:
 
 
 RECIPES = {
-    # Traces, pixel flat and per-fibre lamp model come from the lamp flat. fmt 2: no
-    # cosmic-ray cleaning, physical fibre ids, combined exposures.
+    # Traces, pixel flat and per-fibre lamp model come from the configured lamp flat
+    # alone. fmt 2: no cosmic-ray cleaning, physical fibre ids. fmt 3: lamp-flat exposures
+    # are no longer combined (products from the short-lived combine are refused).
     'lamp_flat': Recipe('lamp_flat', cosmic_rays=False, pixel_flat=False, dark=False,
-                        sky_subtract=False, fmt=2),
+                        sky_subtract=False, fmt=3),
     # Twilight: fibre throughput. fmt 2: physical fibre ids.
     'twilight': Recipe('twilight', cosmic_rays=False, pixel_flat=True, dark=False,
                        sky_subtract=False, fmt=2),
