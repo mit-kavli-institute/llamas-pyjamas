@@ -110,4 +110,10 @@ as for a changed dark.
 - **How flagged pixels are used is part of the ID.** Frames cleaned before cosmic-ray pixels
   became missing data (and RSS files without `CRID`) are redone on resume; frames with cleaning
   off (`CRID = off`) are not.
-- **Masks:** the cosmic-ray masks are written to `{mask_output_dir or extraction_output_dir}/masks/`.
+- **Masks:** the cosmic-ray masks are written to `{mask_output_dir or extraction_output_dir}/masks/`,
+  in pipeline orientation (`CRORIENT`). Each extension records its camera (`COLOR`, `BENCH`,
+  `SIDE`, `CAMSN`, from the camera's own header) with `CRNPIX`, `CRNMISS`, `CRNPART` and the
+  thresholds; masks written before 2026-11-15 have only `EXTVER` and `CRNPIX`.
+- **Run summary:** the end of a run reports, per channel, the median pixels flagged per frame
+  and the share of samples lost to cosmic rays (`CRMISSF`, median and maximum over frames). It
+  is a reported number, with no threshold.

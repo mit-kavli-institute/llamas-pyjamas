@@ -872,13 +872,14 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
 
         # Save cosmic ray masks if CR removal was enabled
         if remove_cosmic_rays:
-            cr_masks = {}
+            cr_masks, cr_headers = {}, {}
             for result in writable_results:
                 if result.get('cr_mask') is not None:
                     cr_masks[result['hdu_index']] = result['cr_mask']
+                    cr_headers[result['hdu_index']] = result['extraction'].hdr
             if cr_masks:
                 mask_dir = mask_output_dir if mask_output_dir else (output_dir or OUTPUT_DIR)
-                save_cosmic_ray_masks(cr_masks, primary_hdr, file, mask_dir)
+                save_cosmic_ray_masks(cr_masks, primary_hdr, file, mask_dir, headers=cr_headers)
 
         # Build extraction list from writable results
         extraction_list = [result['extraction'] for result in writable_results]

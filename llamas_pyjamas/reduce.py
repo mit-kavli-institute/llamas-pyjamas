@@ -2049,30 +2049,55 @@ def recipe_matrix(output_dir, extraction_path, flat_field_dir):
 def science_cosmic_ray_summary(extraction_path, mask_dir=None):
     """One line on the science frames' cosmic-ray cleaning, or None.
 
-    From the RSS headers (CRCHAN: the channels cleaned) and the cosmic-ray masks (CRNPIX
-    per extension, summed per frame). The masks do not record their camera, so this is
-    per frame, not per channel.
+    From the RSS headers (CRCHAN: the channels cleaned; CRMISSF: the share of samples lost to
+    cosmic rays, which are missing data) and the cosmic-ray masks in
+    ``{mask_dir or extraction_path}/masks`` (CRNPIX per extension). Masks written since
+    2026-11-15 record their camera, so flagged pixels are reported per channel; older masks
+    only per frame. A reported number, with no threshold.
     """
     chans = set()
+    lost = {}                                   # channel -> {exposure: CRMISSF}
     for path in glob.glob(os.path.join(extraction_path, '*_RSS_*.fits')):
         try:
-            chans.add(str(fits.getheader(path, 0).get('CRCHAN', '')).strip())
+            hdr = fits.getheader(path, 0)
         except OSError:
             continue
-    totals = []
-    for path in glob.glob(os.path.join(mask_dir or os.path.join(extraction_path, 'masks'),
+        chans.add(str(hdr.get('CRCHAN', '')).strip())
+        ch = str(hdr.get('CHANNEL', '')).strip().lower()
+        if ch and 'CRMISSF' in hdr:
+            lost.setdefault(ch, {})[exposure_key(path)] = float(hdr['CRMISSF'])
+    totals, per_channel = [], {}
+    for path in glob.glob(os.path.join(mask_dir or extraction_path, 'masks',
                                        'cosmic_ray_mask_*.fits')):
         try:
             with fits.open(path) as hdul:
-                totals.append(sum(int(h.header.get('CRNPIX', 0) or 0) for h in hdul[1:]))
+                frame = {}
+                for h in hdul[1:]:
+                    n = int(h.header.get('CRNPIX', 0) or 0)
+                    ch = str(h.header.get('COLOR', '')).strip().lower() or None
+                    frame[ch] = frame.get(ch, 0) + n
         except OSError:
             continue
+        totals.append(sum(frame.values()))
+        for ch, n in frame.items():
+            if ch:
+                per_channel.setdefault(ch, []).append(n)
     if not chans and not totals:
         return None
     line = f"Science cosmic rays: channels {', '.join(sorted(c for c in chans if c)) or 'none'}"
-    if totals:
+    order = [c for c in ('red', 'green', 'blue')]
+    if per_channel:
+        line += ("; median pixels flagged per frame "
+                 + ", ".join(f"{c} {int(np.median(per_channel[c]))}" for c in order
+                             if c in per_channel)
+                 + f" ({len(totals)} frames)")
+    elif totals:
         line += (f"; median {int(np.median(totals))} pixels flagged per frame "
                  f"({len(totals)} frames)")
+    if lost:
+        line += ("; samples lost (missing data) "
+                 + ", ".join(f"{c} {np.median(list(lost[c].values())):.2f}% "
+                             f"(max {max(lost[c].values()):.2f}%)" for c in order if c in lost))
     return line
 
 

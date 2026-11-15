@@ -161,3 +161,45 @@ def test_rss_carries_the_cosmic_ray_bits(tmp, monkeypatch):
         assert m[0, 80] & MASK_CR_MISSING and not m[0, 80] & MASK_NO_COUNTS
         assert bad_pixel_mask(h)[0, 80] and np.isnan(h['SKYSUB'].data[0, 80])
         assert h[0].header['CRMISS'] == 1 and h[0].header['CRPART'] == 1
+
+
+# ---------------------------------------------------------------- masks and the run summary
+def test_masks_record_their_camera(tmp):
+    from llamas_pyjamas.Masking.cosmicLlamas import save_cosmic_ray_masks
+    hdr = fits.Header()
+    hdr['COLOR'], hdr['BENCH'], hdr['SIDE'], hdr['CAMSN'] = 'GREEN', 2, 'b', 'SN123'
+    hdr['CRNMISS'] = (4, 'samples lost')
+    m = np.zeros((5, 5), bool)
+    m[1, 1] = True
+    out = save_cosmic_ray_masks({7: m}, fits.Header(), 'LLAMAS_x_SCI24_mef.fits', tmp,
+                                headers={7: hdr})
+    with fits.open(out) as h:
+        x = h[1].header
+        assert (x['COLOR'], x['BENCH'], x['SIDE'], x['CAMSN']) == ('green', '2', 'B', 'SN123')
+        assert x['CRNMISS'] == 4 and x['CRNPIX'] == 1 and x['EXTVER'] == 7
+        assert h[0].header['CRORIENT'] == 'pipeline'
+    out = save_cosmic_ray_masks({7: m}, fits.Header(), 'LLAMAS_y_SCI24_mef.fits', tmp)
+    with fits.open(out) as h:                              # older callers: no identity, still fine
+        assert 'COLOR' not in h[1].header and h[1].header['CRNPIX'] == 1
+
+
+def test_run_summary_reports_flagged_pixels_and_samples_lost_per_channel(tmp):
+    from llamas_pyjamas.Masking.cosmicLlamas import save_cosmic_ray_masks
+    from llamas_pyjamas.reduce import science_cosmic_ray_summary
+    from llamas_pyjamas.Tests.rss_fixtures import stage_name, write_rss
+    for i, frac in enumerate((0.2, 0.4)):
+        base = f'LLAMAS_2026-10-16_0{i}-00-00.0_SCI24_mef_bias_corrected_flat_corrected'
+        for stage in ('base', 'ff'):                       # the same exposure at two stages
+            write_rss(stage_name(tmp, 'green', stage, base=base),
+                      header={'CRCHAN': 'green,blue', 'CRMISSF': frac})
+        hdrs = {}
+        for idx, color in ((2, 'GREEN'), (3, 'BLUE')):
+            h = fits.Header()
+            h['COLOR'], h['BENCH'], h['SIDE'] = color, 1, 'A'
+            hdrs[idx] = h
+        save_cosmic_ray_masks({2: np.ones((4, 4), bool), 3: np.zeros((4, 4), bool)},
+                              fits.Header(), f'{base}.fits', tmp, headers=hdrs)
+    line = science_cosmic_ray_summary(tmp)               # masks under {extraction_path}/masks
+    assert 'channels green,blue' in line
+    assert 'green 16' in line and 'blue 0' in line and '(2 frames)' in line
+    assert 'samples lost (missing data) green 0.30% (max 0.40%)' in line

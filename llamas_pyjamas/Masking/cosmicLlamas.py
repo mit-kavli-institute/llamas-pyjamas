@@ -17,6 +17,7 @@ from astropy.io import fits
 from lacosmic import remove_cosmics
 
 from llamas_pyjamas.constants import LACOSMIC_DEFAULTS, LACOSMIC_COLOR_OVERRIDES, gain_noise_lookup
+from llamas_pyjamas.Bias import camera_of_header
 from llamas_pyjamas.Utils.detectorProps import props_for_header
 
 logger = logging.getLogger("llamas_pyjamas")
@@ -271,7 +272,12 @@ def clean_cosmic_rays(data, color=None, bench=None, side=None, header=None,
     return cleaned, mask
 
 
-def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_dir):
+#: Extension-header cards copied into each mask HDU from its camera's extension header.
+MASK_HDU_CARDS = ('CAMSN', 'CRNPIX', 'CRNMISS', 'CRNPART', 'CRTHRESH', 'CRCONTR', 'CRNEIGH')
+
+
+def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_dir,
+                          headers=None):
     """Save cosmic ray masks as a multi-extension FITS file.
 
     Parameters
@@ -284,6 +290,9 @@ def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_
         Path to the original science FITS file (used for naming).
     output_dir : str
         Base output directory. Masks are written to ``{output_dir}/masks/``.
+    headers : dict, optional
+        ``{hdu_index: extension header}``. Each mask HDU then records its camera (COLOR,
+        BENCH, SIDE from the header, never from the index) and ``MASK_HDU_CARDS``.
 
     Returns
     -------
@@ -300,6 +309,7 @@ def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_
 
     primary_hdu = fits.PrimaryHDU(header=primary_header.copy())
     primary_hdu.header['CRCLEAN'] = (True, 'Cosmic ray masks from L.A.Cosmic')
+    primary_hdu.header['CRORIENT'] = ('pipeline', 'Masks are in pipeline (extraction) orientation')
     hdul.append(primary_hdu)
 
     for hdu_index in sorted(masks_dict.keys()):
@@ -307,6 +317,17 @@ def save_cosmic_ray_masks(masks_dict, primary_header, original_filename, output_
         img_hdu = fits.ImageHDU(data=mask.astype(np.uint8))
         img_hdu.header['EXTVER'] = hdu_index
         img_hdu.header['CRNPIX'] = (int(mask.sum()), 'Number of CR pixels in this extension')
+        hdr = (headers or {}).get(hdu_index)
+        if hdr is not None:
+            bench, side, color = camera_of_header(hdr)
+            if color:
+                img_hdu.header['COLOR'] = (color, 'Camera colour (from its extension header)')
+                img_hdu.header['BENCH'] = (bench, 'Camera bench')
+                img_hdu.header['SIDE'] = (side, 'Camera side')
+            for key in MASK_HDU_CARDS:
+                if key in hdr:
+                    comment = hdr.comments[key] if hasattr(hdr, 'comments') else ''
+                    img_hdu.header[key] = (hdr[key], comment)
         hdul.append(img_hdu)
 
     hdul.writeto(outfile, overwrite=True)
