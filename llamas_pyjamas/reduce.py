@@ -79,8 +79,8 @@ from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_p
 from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
                                             process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
-from llamas_pyjamas.Utils.recipes import (check_recipe, copy_extraction_method,
-                                          read_recipe_sidecar, recipe_problem,
+from llamas_pyjamas.Utils.recipes import (EXTRACT_METHODS, check_recipe, copy_extraction_method,
+                                          normalise_method, read_recipe_sidecar, recipe_problem,
                                           run_extraction_method, sidecar_path)
 from llamas_pyjamas.Flat.fibreFlat import (FFVER,
                                            compute_fibre_flat_lamp_only,
@@ -2483,6 +2483,28 @@ def output_report_row(n_frames, written, n_cubes, extraction_path):
     return f"{frames} → {len(rss)} RSS, {n_cubes} cubes in {extraction_path}"
 
 
+#: The extraction method when the config does not set ``extraction_method`` (since 2026-11-15;
+#: boxcar before). 'optimal' is accepted as an alias of 'horne'; 'legacy' is comparison only.
+DEFAULT_EXTRACTION_METHOD = 'horne'
+
+
+def resolve_extraction_method(config):
+    """``(method, boxcar half-width)`` for a run from its config.
+
+    ``extraction_method`` defaults to :data:`DEFAULT_EXTRACTION_METHOD`; ``optimal`` becomes
+    ``horne``; an unknown value warns and uses the default. ``boxcar_halfwidth`` defaults to
+    2.5 px (it only matters for boxcar, and for the read-noise aperture of the error model).
+    """
+    method = normalise_method(config.get('extraction_method', DEFAULT_EXTRACTION_METHOD))
+    if method not in EXTRACT_METHODS:
+        print(f"WARNING: unknown extraction_method '{method}'; "
+              f"using '{DEFAULT_EXTRACTION_METHOD}'")
+        logger.warning(f"Unknown extraction_method '{method}'; using "
+                       f"'{DEFAULT_EXTRACTION_METHOD}'")
+        method = DEFAULT_EXTRACTION_METHOD
+    return method, float(config.get('boxcar_halfwidth', 2.5))
+
+
 def main(config_path):
     """
     Main entry point for the data reduction pipeline.
@@ -2738,22 +2760,17 @@ def main(config_path):
     print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
 
     # ── Extraction method (applies to EVERY extraction in the run) ──────────
-    # 'boxcar' (default): trace-following aperture with fractional edge weights;
-    # 'optimal' is unstable on cameras with blended profiles. Threaded via the
-    # environment so science, arc, flat, twilight and sky extractions all use the
-    # SAME method; mixing methods breaks the per-fibre throughput calibration.
-    extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
-    if extraction_method not in ('optimal', 'boxcar', 'horne', 'legacy'):
-        print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
-        extraction_method = 'boxcar'
-    boxcar_halfwidth = float(config.get('boxcar_halfwidth', 2.5))
+    # Threaded via the environment so science, arc, flat, twilight and sky extractions
+    # all use the SAME method; mixing methods breaks the per-fibre throughput calibration.
+    # Every product records it (EXTMETH), and a resumed run never mixes methods.
+    extraction_method, boxcar_halfwidth = resolve_extraction_method(config)
     os.environ['LLAMAS_EXTRACT_METHOD'] = extraction_method
     os.environ['LLAMAS_BOXCAR_HALFWIDTH'] = str(boxcar_halfwidth)
     # Detector read noise [DN] for Horne variance weighting (read_noise config key).
     os.environ['LLAMAS_READ_NOISE'] = str(float(config.get('read_noise', 3.5)))
     print(f"Extraction method: {extraction_method}"
           + (f" (fractional aperture half-width {boxcar_halfwidth} px)"
-             if extraction_method == 'boxcar' else ""))
+             if extraction_method == 'boxcar' else " (profile-weighted, Horne 1986)"))
 
     # Optional per-task memory reservation for extraction (default 0 = none).
     # A non-zero value throttles extraction concurrency on low-RAM machines; leave
@@ -3557,7 +3574,7 @@ def main(config_path):
                 _ech = config.get('sky_empirical_channels', ('red', 'green', 'blue'))
                 if isinstance(_ech, str):
                     _ech = tuple(c.strip().lower() for c in _ech.split(',') if c.strip())
-                _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+                _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', DEFAULT_EXTRACTION_METHOD)
                 _fields = _e2.group_fields(
                     science_files_to_process,
                     min_frames=int(config.get('sky_empirical_min_frames', _e2.MIN_FIELD_FRAMES)))

@@ -300,7 +300,7 @@ def group_fields(frame_files, min_frames=MIN_FIELD_FRAMES, sep_arcsec=FIELD_SEP_
     return fields
 
 
-def build_field_empirical_sky(member_files, donor_files, trace_dir, method='boxcar',
+def build_field_empirical_sky(member_files, donor_files, trace_dir, method='horne',
                               channels=('red', 'green', 'blue'),
                               min_blank=MIN_BLANK, blank_frac=BLANK_FRAC):
     """Per-member empirical sky, EXTRACTED with the pipeline aperture.

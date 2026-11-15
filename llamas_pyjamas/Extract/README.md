@@ -50,6 +50,19 @@ extractor.saveSpectra()
 
 Note: The parallel processing features using Ray are currently under development and not yet available for production use.
 
+## Extraction method
+
+`extraction_method` in the config sets the method of **every** extraction in a run (science,
+lamp flat, twilight, arc and sky), because mixing methods breaks the per-fibre throughput
+calibration. Each product records it as `EXTMETH` (and `EXTHW`, the boxcar half-width), and a
+resumed run never mixes methods (`Utils/README.md`).
+
+| Method | What it does |
+|---|---|
+| `horne` (default since 2026-11-15; alias `optimal`) | Horne (1986): the profile-weighted, variance-weighted estimate below. Masked and cosmic-ray pixels drop out without bias. |
+| `boxcar` (default before) | A trace-following aperture of ±`boxcar_halfwidth` px with fractional edge weights. A masked pixel in the aperture makes the sample missing. |
+| `legacy` | The old profile-weighted mean, not flux conserving; for comparison only. |
+
 ## Horne (optimal) extraction and masked pixels
 
 `method = 'horne'` (alias `optimal`) uses the bspline profile `P` of each fibre:

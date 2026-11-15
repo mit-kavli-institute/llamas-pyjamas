@@ -136,7 +136,7 @@ CONFIG_CATALOG = [
         ('dark_exptime_tolerance', 'float', '0.10', None, 'A dark matches a frame with the same read mode and a requested exposure within this fraction.'),
     ]),
     ('Extraction', [
-        ('extraction_method', 'enum', 'boxcar', ['boxcar', 'horne', 'optimal'], 'Extraction algorithm.'),
+        ('extraction_method', 'enum', 'horne', ['horne', 'boxcar', 'optimal'], 'Extraction algorithm.'),
         ('boxcar_halfwidth', 'float', '2.5', None, 'Boxcar aperture half-width (px); full aperture = 2x.'),
         ('twilight_throughput', 'bool', 'true', None, 'Per-fibre throughput from the twilight flat vs the arc.'),
     ]),

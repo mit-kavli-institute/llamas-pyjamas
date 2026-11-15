@@ -39,7 +39,8 @@ from llamas_pyjamas.Masking.cosmicLlamas import (clean_cosmic_rays, cosmic_ray_e
 from llamas_pyjamas.Masking.cosmicLlamas import default_settings as default_cr_settings
 from llamas_pyjamas.Bias.darkLlamas import (cosmic_ray_inputs, load_master_dark_camera,
                                             noise_factor)
-from llamas_pyjamas.Utils.recipes import cosmic_rays_for, stamp_recipe, write_recipe_sidecar
+from llamas_pyjamas.Utils.recipes import (EXTRACT_METHODS, cosmic_rays_for, normalise_method,
+                                          stamp_recipe, write_recipe_sidecar)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -666,10 +667,11 @@ def GUI_extract(file: fits.BinTableHDU, flatfiles: str = None, output_dir: str =
     remove_cosmic_rays = cosmic_rays_for(recipe, remove_cosmic_rays)
 
     if method is None:
-        method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'optimal').strip().lower()
-    if method not in ('optimal', 'boxcar', 'horne', 'legacy'):
-        logger.warning(f"Unknown extraction method '{method}'; using 'optimal'")
-        method = 'optimal'
+        method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'horne')
+    method = normalise_method(method)
+    if method not in EXTRACT_METHODS:
+        logger.warning(f"Unknown extraction method '{method}'; using 'horne'")
+        method = 'horne'
     print(f'Extraction method: {method}')
     
     try:

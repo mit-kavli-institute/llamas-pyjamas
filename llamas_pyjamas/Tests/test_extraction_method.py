@@ -148,3 +148,48 @@ def test_flux_calibration_refuses_a_sensfunc_from_another_method(tmp):
     flux_calibrate_file(path, _sensfunc(dict(base, extmeth='horne')), apply_extinction=False)
     with fits.open(path) as h:
         assert 'FLAM' in h
+
+
+# ---------------------------------------------------------------- the default
+def test_horne_is_the_default():
+    from llamas_pyjamas.reduce import DEFAULT_EXTRACTION_METHOD, resolve_extraction_method
+    assert DEFAULT_EXTRACTION_METHOD == 'horne'
+    assert resolve_extraction_method({}) == ('horne', 2.5)
+    assert resolve_extraction_method({'extraction_method': 'optimal'})[0] == 'horne'
+    assert resolve_extraction_method({'extraction_method': 'Boxcar',
+                                      'boxcar_halfwidth': '3'}) == ('boxcar', 3.0)
+    assert resolve_extraction_method({'extraction_method': 'nonsense'})[0] == 'horne'
+
+
+def test_setup_gui_and_example_config_default_to_horne():
+    from llamas_pyjamas.Utils import reduxSetupGUI as gui
+    entry = [e for _section, entries in gui.CONFIG_CATALOG for e in entries
+             if e[0] == 'extraction_method']
+    assert len(entry) == 1 and entry[0][2] == 'horne'
+    example = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           'example_config.txt')
+    with open(example) as fh:
+        assert any(line.strip() == 'extraction_method = horne' for line in fh)
+
+
+def test_error_model_follows_the_objects_method_not_the_environment(monkeypatch):
+    """The read-noise aperture comes from the method the object ran, even when the environment
+    says otherwise (it is unset in the GUI quick look)."""
+    from types import SimpleNamespace
+    from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas
+    nx, ny = 50, 21
+    rows = np.arange(ny)[:, None]
+    prof = np.where((rows >= 6) & (rows < 15), np.exp(-0.5 * ((rows - 10) / 1.2) ** 2), 0.0)
+    prof = prof * np.ones((1, nx))
+    prof /= prof.sum(axis=0, keepdims=True)
+    trace = SimpleNamespace(bench='1', side='A', channel='green', nfibers=1, naxis1=nx,
+                            naxis2=ny, fiberimg=np.where(prof > 0, 0, -1),
+                            profimg=prof, traces=np.full((1, nx), 10.0), fitsfile='s.fits',
+                            extraction_aperture=3.0)
+    hdr = {'GAIN': 1.0, 'RDNOISE': 3.0, 'COLOR': 'green', 'BENCH': '1', 'SIDE': 'A'}
+    frame = 100.0 * prof
+    errs = []
+    for env in ('horne', 'boxcar'):
+        monkeypatch.setenv('LLAMAS_EXTRACT_METHOD', env)
+        errs.append(ExtractLlamas(trace, frame, dict(hdr), method='horne').counts_err)
+    np.testing.assert_array_equal(errs[0], errs[1])

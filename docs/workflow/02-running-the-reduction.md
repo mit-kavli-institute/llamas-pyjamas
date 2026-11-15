@@ -94,7 +94,7 @@ Each stage writes a product to disk and stamps its headers so later runs can ski
 | 2 | **Fibre tracing** | locates each fibre on the detector from the flats (falls back to packaged master traces) | `traces/LLAMAS_{color}_{bench}_{side}_traces.pkl` |
 | 3 | **Arc refinement** *(optional)* | refines the wavelength solution from night arcs (`refine_arc=true`); else uses the packaged reference arc | `arcs/…` |
 | 4 | **Pixel flat** | builds the 2-D detector flat and divides it into the science frames | `extractions/flat/pixel_maps.fits` |
-| 5 | **Extraction** | pulls a spectrum from every fibre (`boxcar` default; `horne`/`optimal` available); removes cosmic rays; renders the white-light image | `extractions/*_extract.pkl`, `*_whitelight_fullpipeline.fits` |
+| 5 | **Extraction** | pulls a spectrum from every fibre (`horne` default, alias `optimal`; `boxcar` available); cosmic-ray pixels are missing data; renders the white-light image | `extractions/*_extract.pkl`, `*_whitelight_fullpipeline.fits` |
 | 6 | **Wavelength cal** | transfers the arc solution onto each extraction | `*_corrected_extractions.pkl` |
 | 7 | **Sky subtraction** | builds and subtracts a 1-D sky model per fibre (`sky_subtract=true`) | `*_sky1d_extractions.pkl` |
 | 8 | **Heliocentric shift** | corrects the wavelength scale to the heliocentric/barycentric frame (`wave_frame`) | header `VELFRAME/HELIOVEL/VELCORR` |

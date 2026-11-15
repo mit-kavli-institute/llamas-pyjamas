@@ -435,9 +435,10 @@ class ExtractLlamas:
             # CAMSN), then defaults; read noise matters most in the faint red.
             gain, readnoise, src = props_for_header(
                 self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
-            # Method-aware effective aperture for the RN term (see effective_aperture_pix).
-            # Boxcar -> ~2*halfwidth px (straight sum); optimal/Horne -> profile-weighted.
-            _method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+            # Method-aware effective aperture for the RN term (see effective_aperture_pix):
+            # the method this object was extracted with, not the environment (the two differ
+            # when the environment is unset, e.g. in the GUI quick look).
+            _method = method
             _half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
             aperture_pix = effective_aperture_pix(_method, _half, self.trace)
             # A missing sample (NaN counts) gets a NaN error.

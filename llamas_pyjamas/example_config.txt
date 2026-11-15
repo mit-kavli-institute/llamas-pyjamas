@@ -67,10 +67,10 @@ remove_cosmic_rays = True
 # EXTRACTION METHOD
 #==============================================================================
 # Used for every extraction in the run (science and calibrations).
-#   boxcar (default): trace-following aperture with fractional edge-pixel weights.
-#   horne: Horne (1986) optimal extraction; variance-weighted, gives per-pixel errors.
-#   optimal: legacy profile-weighted mean; not flux conserving, comparison only.
-extraction_method = boxcar
+#   horne (default; alias optimal): Horne (1986) profile-weighted extraction.
+#   boxcar: trace-following aperture with fractional edge-pixel weights.
+#   legacy: profile-weighted mean; not flux conserving, comparison only.
+extraction_method = horne
 # Boxcar aperture half-width in pixels (total aperture = 2x this; fibre pitch ~6.9 px).
 boxcar_halfwidth = 2.5
 

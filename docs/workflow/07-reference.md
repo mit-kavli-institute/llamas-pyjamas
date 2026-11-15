@@ -77,7 +77,7 @@ quote paths**). The authoritative, annotated list is
 | `remove_cosmic_rays`, `cosmic_ray_channels`, `cosmic_ray_threshold_{c}` / `_contrast_{c}` / `_neighbor_threshold_{c}`, `cosmic_ray_maxiter` | cosmic-ray cleaning: master switch, channels (default blue, green) and per-channel L.A.Cosmic thresholds ([details](../../llamas_pyjamas/Masking/README.md)) |
 | `output_dir`, `trace_output_dir`, `extraction_output_dir`, `cube_output_dir` | output locations (`output_dir` defaults to `reduced/` next to the first science file) |
 | `disk_margin`, `min_free_gb`, `skip_disk_check`, `scratch_dir` | pre-flight disk-space check ([details](02-running-the-reduction.md#disk-space)) |
-| `extraction_method` (`boxcar`/`horne`/`optimal`), `boxcar_halfwidth` | extraction |
+| `extraction_method` (`horne` default, `optimal` = `horne`, `boxcar`), `boxcar_halfwidth` | extraction |
 | `sky_subtract`, `sky_selection_method` | sky subtraction |
 | `wave_frame` (`heliocentric`/…) | wavelength reference frame |
 | `apply_fibre_flat`, `twilight_throughput` | throughput corrections |
