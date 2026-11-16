@@ -69,7 +69,9 @@ def main():
     for path in sorted(glob.glob(os.path.join(ext_dir, '*_RSS_*.fits'))):
         with fits.open(path) as h:
             p = h[0].header
-            if not p.get('FIBRFLAT'):
+            # skip anything that is not a fibre-flatted RSS (e.g. a *_RSS_*_sensfunc.fits,
+            # whose header records FIBRFLAT of its standard)
+            if not p.get('FIBRFLAT') or 'FIBERMAP' not in h:
                 continue
             ch = str(p.get('CHANNEL', '')).lower()
             ffver.add(p.get('FFVER', 1))

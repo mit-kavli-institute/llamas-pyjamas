@@ -63,6 +63,12 @@ resumed run never mixes methods (`Utils/README.md`).
 | `boxcar` (default before) | A trace-following aperture of ±`boxcar_halfwidth` px with fractional edge weights. A masked pixel in the aperture makes the sample missing. |
 | `legacy` | The old profile-weighted mean, not flux conserving; for comparison only. |
 
+On 20261015_16 (`Scripts/ffcheck/extract_method_compare.py`), Horne gave 0.91–0.99 of the
+5-px boxcar flux per camera, the same within about 1% across lamp flat, twilight and science,
+so a run that uses one method throughout calibrates it out. No camera showed the instability
+once attributed to optimal extraction on blended profiles: 0–2 outlier fibres per camera, far
+fewer negative samples than boxcar, and only a weak correlation with neighbour brightness.
+
 ## Horne (optimal) extraction and masked pixels
 
 `method = 'horne'` (alias `optimal`) uses the bspline profile `P` of each fibre:
