@@ -61,8 +61,15 @@ from llamas_pyjamas.CubeViewer.cubeViewPick import ElementPicker
 from llamas_pyjamas.CubeViewer.cubeViewRSS import RSSScene
 from llamas_pyjamas.CubeViewer.cubeViewScene import CHANNEL_ORDER, SpectralScene, Spectrum
 from llamas_pyjamas.CubeViewer.cubeViewSpecPlot import SpectrumPanel
+from llamas_pyjamas.Utils.recipes import LEGACY_EXTMETH, normalise_method
 
 logger = logging.getLogger(__name__)
+
+
+def _pointing_missing(header) -> bool:
+    """True when the standards matcher cannot read a pointing out of this header."""
+    from llamas_pyjamas.Flux.fluxStandards import ra_dec_from_header
+    return ra_dec_from_header(header) == (None, None)
 
 
 class CombineOptionsDialog(QDialog):
@@ -114,10 +121,8 @@ class CombineOptionsDialog(QDialog):
         form.addRow('Weighting', self.weighting)
 
         # White-light coverage floor: exclude collapsed spaxels shallower than this
-        # fraction of the peak dither depth (NEXP). 0 keeps the FULL field (outer,
-        # fewer-dither regions included, at lower SNR); 0.7 shows only the well-
-        # covered core (avoids biased partial-coverage boundaries). The CUBE always
-        # keeps every covered spaxel regardless -- this only masks the white light.
+        # fraction of the peak dither depth (NEXP). 0 keeps the FULL field; 0.7 shows
+        # only the well-covered core. This only masks the white light, not the cube.
         self.coverage_frac = QDoubleSpinBox()
         self.coverage_frac.setRange(0.0, 0.95)
         self.coverage_frac.setSingleStep(0.05)
@@ -379,7 +384,7 @@ class CubeViewerWindow(QMainWindow):
         for action in self.wcs_file_actions:
             action.setEnabled(False)
 
-        # Combine: stack a field's dithers into a cube and inspect it (Phase 4).
+        # Combine: stack a field's dithers into a cube and inspect it.
         combine_menu = self.menuBar().addMenu('&Combine')
         combine_menu.setToolTipsVisible(True)
         cube_action = QAction('Combine field into &cube…', self)
@@ -389,7 +394,7 @@ class CubeViewerWindow(QMainWindow):
         combine_menu.addAction(cube_action)
         self.narrowband_action = QAction('&Narrowband line image…', self)
         self.narrowband_action.setToolTip('Continuum-subtracted narrowband image at a chosen line '
-                                          'wavelength (e.g. Lya), sent to a new DS9 frame')
+                                          'wavelength, sent to a new DS9 frame')
         self.narrowband_action.triggered.connect(self.narrowband_image_dialog)
         combine_menu.addAction(self.narrowband_action)
 
@@ -459,11 +464,31 @@ class CubeViewerWindow(QMainWindow):
         try:
             from llamas_pyjamas.Combine.superRSS import build_super_rss
             from llamas_pyjamas.Combine.cube import combine_field_cubes
-            from llamas_pyjamas.Combine.transparency import transparency_scales
+            from llamas_pyjamas.Combine.transparency import TransparencyError, transparency_scales
             from llamas_pyjamas.CubeViewer.cubeViewCube import CoaddCubeScene
-            sr = build_super_rss(paths)             # all channels
+            from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError
+            try:
+                sr = build_super_rss(paths)         # all channels
+            except MissingFluxCalibrationError as exc:
+                # No silent fallback to counts: the user decides.
+                QApplication.restoreOverrideCursor()
+                answer = QMessageBox.question(
+                    self, 'Combine field',
+                    f'{exc}\n\nCombine the UNCALIBRATED sky-subtracted plane (counts/s) instead?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                sr = build_super_rss(paths, plane='skysub')
             try:                                   # transparency is best-effort (needs a bright src)
                 sr.apply_scales(transparency_scales(sr))
+            except TransparencyError as exc:
+                # Some exposure cannot be measured: scaling only the others would mix photometric
+                # systems, so combine all of them unscaled and say so.
+                QApplication.restoreOverrideCursor()
+                QMessageBox.warning(self, 'Combine', f'Combining WITHOUT transparency scaling:\n\n{exc}')
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             except Exception as exc:               # noqa: BLE001
                 logger.warning('transparency scaling skipped: %s', exc)
             cov_frac = opts.pop('coverage_frac', 0.0)
@@ -702,12 +727,20 @@ class CubeViewerWindow(QMainWindow):
         """Return (primary_header, StandardMatch|None) for the loaded file."""
         try:
             from astropy.io import fits
-            from llamas_pyjamas.Flux.fluxStandards import load_catalog
+            from llamas_pyjamas.Flux.fluxStandards import load_catalog, ra_dec_from_header
             header = fits.getheader(path, 0)
+            # Warn, don't whisper: the standard is identified by CROSSMATCH, so a header the
+            # matcher cannot read means the sensfunc action greys out with no visible reason.
+            if ra_dec_from_header(header) == (None, None):
+                logger.warning(
+                    'no usable pointing in %s (RA=%r DEC=%r): cannot tell whether this is a '
+                    'flux standard, so the sensitivity-function action stays disabled',
+                    os.path.basename(path), header.get('RA'), header.get('DEC'))
             match = load_catalog().match_header(header)
             return header, match
         except Exception as exc:                       # noqa: BLE001
-            logger.debug('standard identification skipped: %s', exc)
+            logger.warning('standard identification skipped for %s: %s',
+                           os.path.basename(path), exc)
             return None, None
 
     def _update_sensfunc_action(self) -> None:
@@ -717,6 +750,11 @@ class CubeViewerWindow(QMainWindow):
             tip = f'{self._standard.name} has no bundled reference spectrum'
         elif is_std:
             tip = f'Build a sensitivity function from the aperture on {self._standard.name}'
+        elif self._header is not None and _pointing_missing(self._header):
+            # Distinguish "not a standard" from "we could not even read the pointing" --
+            # the second is a header problem, not a statement about the target.
+            tip = ('No usable RA/DEC in this header, so the standard crossmatch could not run. '
+                   'Enabled only when the loaded file is a recognised flux standard.')
         else:
             tip = 'Enabled only when the loaded file is a recognised flux standard'
         self.sensfunc_action.setToolTip(tip)
@@ -780,7 +818,7 @@ class CubeViewerWindow(QMainWindow):
 
         header = fits.Header()
         # Provenance/meta keys, minus WCS cards -- the authoritative WCS is the returned `wcs`
-        # object (previously it was discarded and DS9 only saw meta's linear map).
+        # object, not meta's linear map.
         _wcs_prefixes = ('CRPIX', 'CRVAL', 'CDELT', 'CTYPE', 'CUNIT', 'CD', 'PC',
                          'CROTA', 'LONPOLE', 'LATPOLE', 'RADESYS', 'WCSAXES', 'EQUINOX')
         for key, value in meta.items():
@@ -894,8 +932,23 @@ class CubeViewerWindow(QMainWindow):
                                 f'Could not load the reference spectrum: {exc}')
             return
 
-        # The picker already summed the aperture per channel; hand those spectra straight in.
+        # The picker already summed the aperture per channel (complete-coverage: a wavelength is
+        # kept only where every aperture fibre has good data). A fibre with no good data at all
+        # would empty the sum, so name it rather than build from a partial aperture.
+        empty = {s.channel: s.empty_members for s in self._current_spectra if s.empty_members}
+        if empty:
+            detail = '; '.join(f"{c}: {', '.join(m)}" for c, m in empty.items())
+            QMessageBox.warning(
+                self, 'Sensitivity function',
+                f'The aperture includes fibre(s) with no good data ({detail}).\n\nTheir share of '
+                f'the star\'s flux would be missing from the total. Pick an aperture without them.')
+            return
         spectra = {s.channel: s.good() for s in self._current_spectra}
+        coverage = {c: (float(w.min()), float(w.max())) for c, (w, _) in spectra.items() if w.size}
+        logger.info('Sensfunc aperture: complete-coverage range per channel %s',
+                    {c: f'{lo:.0f}-{hi:.0f} A' for c, (lo, hi) in coverage.items()})
+        self.statusBar().showMessage('Aperture complete coverage: ' + ', '.join(
+            f'{c} {lo:.0f}-{hi:.0f} A' for c, (lo, hi) in coverage.items()))
 
         airmass = None
         if self._header is not None:
@@ -905,10 +958,34 @@ class CubeViewerWindow(QMainWindow):
             except (TypeError, ValueError):
                 airmass = None
 
+        # Record the standard's processing stage in the sensfunc, so applying it to science at a
+        # different fibre-flat state is caught (fluxCalibrate.apply_sensfunc).
+        from llamas_pyjamas.File.llamasRSS import final_rss, rss_stage
+        stage_meta = {}
+        if self._path:
+            try:
+                stage = rss_stage(self._path)
+                _hdr0 = fits.getheader(self._path, 0)
+                stage_meta = {'rssstage': stage, 'fibrflat': stage != 'base',
+                              'ffver': int(_hdr0.get('FFVER', 1)),
+                              'extmeth': normalise_method(_hdr0.get('EXTMETH', LEGACY_EXTMETH)),
+                              'stdfile': os.path.basename(self._path)}
+                final = final_rss(self._path)
+                if os.path.abspath(final) != os.path.abspath(self._path):
+                    QMessageBox.information(
+                        self, 'Sensitivity function',
+                        f'This standard is loaded at stage {stage!r}, but its exposure has a more '
+                        f'processed file:\n{os.path.basename(final)}\n\nThe sensfunc will be '
+                        f'recorded as {stage!r} and can only calibrate science at the same '
+                        f'fibre-flat state. Open the final file to build one for final-stage science.')
+            except Exception as exc:                   # noqa: BLE001 - provenance best-effort
+                logger.warning('Could not determine the standard RSS stage: %s', exc)
+
         from llamas_pyjamas.CubeViewer.cubeViewSensFunc import SensFuncDialog, SensFuncModel
         model = SensFuncModel(spectra=spectra, exptime=exptime,
                               ref_wave=ref_wave, ref_flux=ref_flux,
-                              standard_name=self._standard.name, airmass=airmass)
+                              standard_name=self._standard.name, airmass=airmass,
+                              meta=stage_meta)
         default_path = ''
         if self._path:
             base = os.path.splitext(os.path.basename(self._path))[0]
@@ -932,6 +1009,14 @@ class CubeViewerWindow(QMainWindow):
         rss_paths = dialog.chosen_files
         if not sens_path or not rss_paths:
             return
+        # FLAM goes on each exposure's final stage -- the file the combiner uses.
+        from llamas_pyjamas.Flux.fluxCalibrate import calibration_targets
+        try:
+            rss_paths = calibration_targets(rss_paths)
+        except Exception as exc:                       # noqa: BLE001
+            QMessageBox.critical(self, 'Apply sensitivity function',
+                                 f'Cannot resolve the files to calibrate:\n{exc}')
+            return
 
         reply = QMessageBox.question(
             self, 'Apply sensitivity function',
@@ -944,12 +1029,13 @@ class CubeViewerWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from llamas_pyjamas.Flux.fluxCalibrate import flux_calibrate_file
+        from llamas_pyjamas.Flux.fluxCalibrate import check_calibration_target, flux_calibrate_file
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         n_ok, failures = 0, []
         try:
             for path in rss_paths:
                 try:
+                    check_calibration_target(path)
                     flux_calibrate_file(path, sens_path, apply_extinction=True)
                     n_ok += 1
                 except Exception as exc:               # noqa: BLE001
@@ -958,7 +1044,7 @@ class CubeViewerWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
         # If the open file was among those calibrated, reload so its FLAM shows now.
-        if self._path in rss_paths:
+        if self._path and os.path.abspath(self._path) in rss_paths:
             self.load(self._path)
 
         message = f'Flux-calibrated {n_ok}/{len(rss_paths)} file(s).'
@@ -979,11 +1065,21 @@ class CubeViewerWindow(QMainWindow):
         """Reload the current file so the freshly-written (refined or rough) WCS is picked up, then
         re-display and report.
 
-        Block registration operates on the SELECTED dithers, not the open file, so the currently
-        displayed scene may be unrelated (e.g. a leftover combined CUBE from an earlier Combine).
-        Only an RSS scene can be reloaded through the RSS loader — reloading a cube here raised
-        'RSS has neither a SKYSUB nor a FLUX extension'. Skip the reload for non-RSS scenes."""
+        Block registration operates on the SELECTED dithers, not the open file, so the displayed
+        scene may be unrelated (e.g. a combined cube). Only an RSS scene can be reloaded through
+        the RSS loader, so the reload is skipped for non-RSS scenes."""
         if self._path and isinstance(self.scene, RSSScene):
+            # Registration writes to each exposure's FINAL stage; if another stage is open, show
+            # the file that now carries the solution rather than one that does not.
+            try:
+                from llamas_pyjamas.File.llamasRSS import final_rss
+                final = final_rss(self._path)
+                if os.path.abspath(final) != os.path.abspath(self._path):
+                    message += (f'\n\nThe solution was written to the final stage, '
+                                f'{os.path.basename(final)}; now showing it.')
+                    self._path = final
+            except Exception as exc:              # noqa: BLE001 - reload what is open
+                logger.warning('Could not resolve the final stage of %s: %s', self._path, exc)
             self.load(self._path)                 # reload -> scene.refined_wcs from FIBERWCS
             try:
                 self.display()
@@ -1086,9 +1182,10 @@ class CubeViewerWindow(QMainWindow):
         """Write the registration QA plot (fitted centroids + Gaia over the white light)."""
         if not self._require_file('Registration QA'):
             return
-        from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
+        from llamas_pyjamas.File.llamasRSS import final_siblings
         from llamas_pyjamas.QA.qa_registration import plot_registration_qa
-        siblings = channel_siblings(self._path) or {'': self._path}
+        # the registration lives on the final stage
+        siblings = final_siblings(self._path, allow_mixed=True) or {'': self._path}
         green = siblings.get('green') or next(iter(siblings.values()))
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:

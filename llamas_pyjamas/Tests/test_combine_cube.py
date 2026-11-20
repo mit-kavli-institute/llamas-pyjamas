@@ -3,7 +3,7 @@
 A synthetic super-RSS with one source fibre carrying an emission-line spectrum, seen in two
 exposures, run through combine_cube; checks the spectrum is recovered at the source spaxel (line
 position + inverse-variance combined amplitude), coverage/exposure depth, surface-brightness units,
-and the wavelength axis. The full pipeline is validated on real may26 data.
+and the wavelength axis. The full pipeline is validated on real data.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_cube`).
 """

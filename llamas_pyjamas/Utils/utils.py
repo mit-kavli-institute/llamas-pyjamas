@@ -1,36 +1,8 @@
 # llamas_pyjamas/utils.py
 """Utils module for llamas_pyjamas package.
-This module provides various utility functions for logging, file handling,
-data processing, and visualization related to the llamas_pyjamas project.
-Functions:
-    setup_logger(name, log_filename=None):
-        Setup logger with file and console handlers.
-    create_peak_lookup(peaks):
-        Create lookup table mapping peak index to y position.
-    save_combs_to_fits(comb_dict: dict, outfile: str = 'comb_profiles.fits') -> None:
-        Save dictionary of comb profiles to multi-extension FITS file.
-    grab_peak_pos_from_LUT(file, channel, benchside, fiber=None):
-        Retrieve peak positions from a lookup table (LUT) file.
-    create_peak_lookups(peaks, benchside=None):
-        Create lookup dict with special handling for 2A missing fiber.
-    dump_LUT(channel, hdu, trace_obj):
-        Dump lookup table (LUT) data from HDU to a JSON file.
-    flip_b_side_positions():
-        Flip B-side positions in the LUT.
-    flip_positions():
-        Flip positions in the LUT based on predefined criteria.
-    plot_trace(traceobj):
-        Plot trace data from a trace object.
-    plot_traces_on_image(traceobj, data, zscale=False):
-        Plot traces overlaid on raw data with optional zscale.
-    check_bspline_negative_values(fit_results, pixel_map_files=None, output_dir='diagnostics'):
-        Fast scanning function to identify negative values in B-spline fit results.
-    plot_bspline_fit(fit_results, extension_key, fiber_idx, output_file=None):
-        Plot individual fiber B-spline fits with original data for inspection.
-    check_reference_arc_wavelength_ranges(arc_file=None, verbose=True):
-        Check wavelength ranges in the LLAMAS reference arc calibration file.
-    check_extraction_wavelength_ranges(extraction_file, reference_arc_file=None, verbose=True):
-        Check wavelength ranges in extraction file and compare to reference arc.
+
+Utility functions for logging, trace and LUT file handling, header checks,
+and flat-field / wavelength diagnostics.
 """
 import os
 import logging
@@ -50,7 +22,6 @@ import pickle
 import cloudpickle
 
 # Module-level logger for utility functions
-# This logger can be used by all functions in this module
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -62,7 +33,7 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
+def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10, console=True):
     """Configure centralized pipeline logging — one file per run.
 
     Sets up handlers on the ``llamas_pyjamas`` parent logger.
@@ -80,6 +51,9 @@ def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     retention : int
         Keep only the newest ``retention`` ``llamas_pipeline_*.log`` files in
         ``log_dir`` (older ones are removed). Set to 0 to disable pruning.
+    console : bool
+        Also echo INFO and above to stderr. False for a curated run, whose
+        terminal handler is attached by ``reduce.py``.
 
     Returns
     -------
@@ -110,16 +84,26 @@ def configure_pipeline_logging(log_dir, level=logging.INFO, retention=10):
     parent_logger.handlers.clear()
     parent_logger.propagate = False
 
+    # Modules imported before this call may have given themselves a standalone
+    # console handler (this module, setup_logger). Drop those so every record goes
+    # through the parent's handlers once, instead of leaking past the log file.
+    for _name, _child in list(logging.root.manager.loggerDict.items()):
+        if _name.startswith('llamas_pyjamas.') and isinstance(_child, logging.Logger):
+            for _h in list(_child.handlers):
+                if type(_h) is logging.StreamHandler:
+                    _child.removeHandler(_h)
+
     fh = logging.FileHandler(log_file)
     fh.setLevel(level)
     fh.setFormatter(logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     parent_logger.addHandler(fh)
 
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-    parent_logger.addHandler(ch)
+    if console:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        parent_logger.addHandler(ch)
 
     parent_logger.info(f"Pipeline logging configured. Log file: {log_file}")
     return log_file
@@ -529,12 +513,7 @@ def flip_b_side_positions()-> None:
             }
         }
     }
-    The function performs the following steps:
-    1. Loads the LUT from 'LUT/traceLUT.json'.
-    2. Iterates over each color ('green', 'blue', 'red').
-    3. For each color, checks if the 'B' side exists in the LUT.
-    4. If the 'B' side exists, flips the fiber positions by reversing the fiber numbers.
-    5. Saves the updated LUT to 'LUT/traceLUT_copy.json'.
+    Reads 'LUT/traceLUT.json' and writes 'LUT/traceLUT_copy.json'.
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.
@@ -585,7 +564,6 @@ def flip_positions()-> None:
     """
 
     # flipped = {"greenA":True, "greenB":False, "blueA": False, "blueB":True, "redA":True, "redB":False}
-    #Attempt to check on 23rd Jan 2025
     flipped = {"greenA":False, "greenB":True, "blueA": True, "blueB":False, "redA":False, "redB":True}
     ##temp one
     #flipped = {"greenA":True, "greenB":False, "blueA": True, "blueB":False, "redA":True, "redB":False}
@@ -626,197 +604,42 @@ def flip_positions()-> None:
         json.dump(lut, f, indent=4)
 
 
-def copy_mastercalib_trace(channel: str, bench: str, side: str,
-                          mastercalib_dir: str, target_dir: str) -> str:
-    """
-    Copy mastercalib trace to target directory, replacing the invalid user trace.
+def find_trace_pickle(channel: str, bench: str, side: str, directory: str) -> str:
+    """Locate a camera's trace pickle, accepting both shipped filename forms.
+
+    The mastercalib bundle names its files ``LLAMAS_{channel}_{bench}_{side}_traces.pkl``,
+    while traces written by ``run_ray_tracing(is_master_calib=True)`` carry a
+    ``LLAMAS_master_`` prefix. Both are in circulation, so every lookup tries both.
 
     Args:
-        channel: Color channel (red/green/blue)
-        bench: Bench number
-        side: Side letter (A/B)
-        mastercalib_dir: Source mastercalib directory
-        target_dir: Destination user trace directory
+        channel: Colour channel (red/green/blue).
+        bench: Bench number.
+        side: Side letter (A/B).
+        directory: Directory to search.
 
     Returns:
-        str: Path to copied trace file
+        str: Path to the trace pickle.
 
     Raises:
-        FileNotFoundError: If mastercalib trace not found
-
-    Example:
-        >>> copy_mastercalib_trace('green', '4', 'B', '/calib', '/user/traces')
-        '/user/traces/LLAMAS_green_4_B_traces.pkl'
+        FileNotFoundError: If neither filename form is present.
     """
-    import shutil
-
-    # Find mastercalib trace
-    mastercalib_filename = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
-    mastercalib_path = os.path.join(mastercalib_dir, mastercalib_filename)
-
-    if not os.path.exists(mastercalib_path):
-        raise FileNotFoundError(f"Mastercalib trace not found: {mastercalib_path}")
-
-    # Copy to target directory using USER naming convention (without "master_" prefix)
-    # This replaces the invalid user trace file
-    user_filename = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
-    target_path = os.path.join(target_dir, user_filename)
-
-    # Use shutil.copy2 to preserve metadata
-    shutil.copy2(mastercalib_path, target_path)
-    logger.info(f"Replaced invalid trace with mastercalib: {user_filename}")
-
-    return target_path
+    names = (f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl',
+             f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl')
+    for name in names:
+        path = os.path.join(directory, name)
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        f"No trace file for {channel}{bench}{side} in {directory}; tried {names}")
 
 
-def validate_and_fix_trace_fibres(trace_dir: str, mastercalib_dir: str = CALIB_DIR) -> dict:
-    """
-    Validate each trace file individually and copy mastercalib fallback when needed.
-
-    This function checks each trace file for correct fiber count. If a trace has
-    the wrong number of fibers, it automatically copies the corresponding mastercalib
-    trace as a fallback, allowing the pipeline to continue with a hybrid trace set.
-
-    Args:
-        trace_dir: User trace directory to validate
-        mastercalib_dir: Mastercalib directory for fallback traces
-
-    Returns:
-        dict: {
-            'valid_traces': [(channel, bench, side, filepath), ...],
-            'invalid_traces': [(channel, bench, side, expected, actual), ...],
-            'fallback_used': [(channel, bench, side, mastercalib_path, copied_path), ...],
-            'all_valid': bool
-        }
-
-    Example:
-        >>> results = validate_and_fix_trace_fibres('/user/traces')
-        >>> if not results['all_valid']:
-        ...     print(f"Replaced {len(results['fallback_used'])} invalid traces")
-    """
-    # Expected fiber counts per benchside
-    N_fib = {'1A': 298, '1B': 300, '2A': 298, '2B': 297,
-             '3A': 298, '3B': 300, '4A': 300, '4B': 298}
-
-    # Get all trace files in directory
-    files = glob.glob(os.path.join(trace_dir, '*.pkl'))
-
-    if not files:
-        logger.warning(f"No trace files found in {trace_dir}")
-        return {
-            'valid_traces': [],
-            'invalid_traces': [],
-            'fallback_used': [],
-            'all_valid': False
-        }
-
-    valid_traces = []
-    invalid_traces = []
-    fallback_used = []
-
-    for pkl_file in files:
-        try:
-            # Load trace object
-            with open(pkl_file, "rb") as file:
-                traceobj = pickle.load(file)
-
-            # Extract trace information
-            shape = traceobj.traces.shape[0]
-            channel = traceobj.channel.lower()
-            bench = str(traceobj.bench)
-            side = traceobj.side
-            benchside = f"{bench}{side}"
-
-            # Get expected fiber count
-            expected_fibers = N_fib.get(benchside)
-
-            if expected_fibers is None:
-                logger.warning(f"Unknown benchside {benchside} in {os.path.basename(pkl_file)}")
-                continue
-
-            # Check if fiber count matches
-            if shape == expected_fibers:
-                valid_traces.append((channel, bench, side, pkl_file))
-                logger.debug(f"✓ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (valid)")
-            else:
-                invalid_traces.append((channel, bench, side, expected_fibers, shape))
-                logger.warning(f"✗ {channel}{bench}{side}: {shape}/{expected_fibers} fibers (invalid)")
-
-                # Copy mastercalib fallback
-                try:
-                    copied_path = copy_mastercalib_trace(
-                        channel, bench, side,
-                        mastercalib_dir, trace_dir
-                    )
-                    fallback_used.append((channel, bench, side, os.path.join(mastercalib_dir, f'LLAMAS_master_{channel}_{bench}_{side}_traces.pkl'), copied_path))
-                    logger.info(f"✓ Copied mastercalib fallback for {channel}{bench}{side}")
-                except FileNotFoundError as e:
-                    logger.error(f"✗ Could not find mastercalib fallback for {channel}{bench}{side}: {e}")
-
-        except Exception as e:
-            logger.error(f"Error validating trace file {pkl_file}: {e}")
-            continue
-
-    all_valid = len(invalid_traces) == 0
-
-    return {
-        'valid_traces': valid_traces,
-        'invalid_traces': invalid_traces,
-        'fallback_used': fallback_used,
-        'all_valid': all_valid
-    }
-
-
-def count_trace_fibres(mastercalib_dir: str = CALIB_DIR) -> bool:
-    """
-    Checks if all trace files have the correct number of fibers for their benchside.
-
-    DEPRECATED: Use validate_and_fix_trace_fibres() for more detailed validation
-    with automatic fallback support.
-
-    Args:
-        mastercalib_dir (str): Directory containing the trace calibration pickle files.
-            Defaults to CALIB_DIR from config.
-
-    Returns:
-        bool: True if all trace files have the correct fiber count, False otherwise.
-    """
-    N_fib = {'1A':298, '1B':300, '2A':298, '2B':297, '3A':298, '3B':300, '4A':300, '4B':298}
-    files = glob.glob(mastercalib_dir+'/*.pkl')
-    assert type(files) == list, 'File extraction did not return as list'
-
-    all_match = True
-
-    for idx, pkl in enumerate(files):
-        with open(pkl, "rb") as file:
-            traceobj = pickle.load(file)
-        shape = traceobj.traces.shape[0]
-        channel = traceobj.channel
-        benchside = f"{traceobj.bench}{traceobj.side}"
-        req = N_fib[benchside]
-
-        if shape != req:
-            all_match = False
-
-        print(f'Channel {channel} Benchside {benchside} trace has {shape} fibres and requires {req}')
-
-    return all_match
-        
-        
 def flip_blue_combs()-> None:
     """
     Flips all blue combs in the lookup table (LUT) file.
     
-    This function reads the LUT JSON file, processes all benchsides ('1A' through '4B')
-    in the blue combs section, and flips those comb arrays. The updated LUT is then 
-    saved back to the JSON file.
-    
-    The function performs the following steps:
-    1. Loads the LUT from 'LUT/traceLUT.json'.
-    2. Checks if 'combs' and 'blue' keys exist in the LUT structure.
-    3. For each benchside (1A-4B) in the blue combs, flips the comb array.
-    4. Saves the updated LUT back to the original file.
-    
+    Reverses each benchside's blue comb array in 'LUT/traceLUT.json' and saves
+    the LUT back in place.
+
     Raises:
         FileNotFoundError: If the LUT file does not exist.
         json.JSONDecodeError: If the LUT file is not a valid JSON.

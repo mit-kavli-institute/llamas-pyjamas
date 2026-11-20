@@ -1,8 +1,7 @@
 """Celestial (RA/DEC tangent-plane) WCS for LLAMAS images.
 
 A first-guess sky WCS from the header pointing, so white-light images and cubes carry RA/DEC.
-This is the groundwork for registering and stacking dithered exposures; a later phase will
-centroid stars on the image and refine the WCS before combining.
+Refinement against catalogue stars is done in :mod:`llamas_pyjamas.Utils.register`.
 
 Two ways to get a WCS:
 
@@ -12,19 +11,17 @@ Two ways to get a WCS:
   stars matched to a catalogue (Gaia/PanSTARRS). Accurate; needed for dither stacking because the
   header pointing is not reliable.
 
-Calibration (from the J1613 field, TEL_ROT=212, tied to 2 Gaia stars and confirmed vs PanSTARRS)
------------------------------------------------------------------------------------------------
+Calibration (tied to Gaia stars, confirmed vs PanSTARRS)
+--------------------------------------------------------
 * The LLAMAS field is **mirror-imaged** on sky -- the correct WCS has ``det(CD) > 0`` (:data:`IFU_MIRRORED`).
 * **The rotator keyword is the sky PA of the fibre +x axis:** image +x points at PA = TEL_ROT
   (E of N), +y at TEL_ROT-90. Implemented as a PC rotation of ``pa_deg + IFU_PA_OFFSET``.
 * **Plate scale** 0.75"/fibre-map-unit; the fibre-map y-coords already carry the sqrt(3)/2 hex
   row compression, so one isotropic scale gives 0.75" along rows and ~0.65" between rows.
 
-PROVISIONAL: the offset/parity come from a SINGLE rotator angle (212) -- the sign of the TEL_ROT
-dependence and the exact offset are unconfirmed (needs a starry field at a very different rotator
-angle). The rotator is stable frame-to-frame, so once the mapping is trusted, sparse-field
-registration should fix rotation from it and solve only the RA/DEC offset. ``IFU_PA_OFFSET`` is
-the master knob (config ``wcs_pa_offset``) so the eventual telescope-side fix drops straight in.
+The rotator is stable frame-to-frame, so sparse-field registration fixes rotation from this
+mapping and solves only the RA/DEC offset. ``IFU_PA_OFFSET`` is the master knob (config
+``wcs_pa_offset``) so an eventual telescope-side fix drops straight in.
 """
 
 import logging
@@ -45,14 +42,14 @@ ARCSEC_PER_FIBRE = 0.75
 #: brightness (SB = FLAM / FIBRE_AREA_ARCSEC2).
 FIBRE_AREA_ARCSEC2 = np.pi * (0.75 / 2.0) ** 2
 
-#: The LLAMAS field is mirror-imaged on sky: the correct WCS has det(CD) > 0. (Confirmed vs
-#: PanSTARRS on the J1613 field.) False would give a standard N-up/E-left (det<0) frame.
+#: The LLAMAS field is mirror-imaged on sky: the correct WCS has det(CD) > 0 (confirmed vs
+#: PanSTARRS). False would give a standard N-up/E-left (det<0) frame.
 IFU_MIRRORED = True
 
 #: Degrees added to the header rotator angle (TEL_ROT/TEL_PA) to get the sky PA of the fibre +x
-#: axis: PA(+x) = TEL_ROT + IFU_PA_OFFSET. Calibrated against Gaia on 3 fields (J1613/J0958/J2151,
-#: TEL_ROT 212-265): the rotator angle essentially IS the sky PA (slope +1), with a ~1 deg
-#: residual (centroid-noise level). Master knob for the eventual TCS fix (config ``wcs_pa_offset``).
+#: axis: PA(+x) = TEL_ROT + IFU_PA_OFFSET. Calibrated against Gaia on 3 fields (TEL_ROT 212-265):
+#: the rotator angle essentially IS the sky PA (slope +1), with a ~1 deg residual (centroid-noise
+#: level). Master knob for the eventual TCS fix (config ``wcs_pa_offset``).
 IFU_PA_OFFSET = 1.2
 
 
@@ -94,9 +91,9 @@ def celestial_wcs(ra_deg: float, dec_deg: float, crpix: Sequence[float],
     # mirrored field: cdelt=[+s,+s] (det>0); standard sky: cdelt=[-s,+s] (det<0, N-up/E-left).
     w.wcs.cdelt = [scale if mirrored else -scale, scale]
     # The fibre +x axis lands at sky PA = pa_deg + pa_offset (E of N). For the mirrored (det>0)
-    # frame PA(+x) = 90 - theta, so theta = 90 - (pa_deg + pa_offset). (Calibrated against Gaia
-    # on 3 fields spanning TEL_ROT 212-265: PA(+x) tracks +TEL_ROT with slope +1; an earlier
-    # +theta form had the sign wrong -- right at TEL_ROT~212, ~90 deg off by 265.)
+    # frame PA(+x) = 90 - theta, so theta = 90 - (pa_deg + pa_offset). Gaia fits over TEL_ROT
+    # 212-265 confirm PA(+x) tracks +TEL_ROT with slope +1; a +theta form looks right at a single
+    # rotator angle but goes badly wrong away from it.
     pa_x = float(pa_deg or 0.0) + float(pa_offset)
     theta = np.deg2rad((90.0 - pa_x) if mirrored else (pa_x - 90.0))
     cos_t, sin_t = np.cos(theta), np.sin(theta)
@@ -114,14 +111,10 @@ def pointing_from_header(header) -> Tuple[Optional[float], Optional[float], floa
     """
     if header is None:
         return None, None, 0.0
-    # Field POSITION angle (deg E of N) = TEL ROT (the rotator / commanded PA), which the WCS applies
-    # as its rotation. TEL PA is the PARALLACTIC angle -- a geometric readout of HA/Dec/latitude
-    # (confirmed by its header comment and by matching the computed parallactic angle), NOT the
-    # instrument orientation -- so it must NOT drive the rotation. Prefer TEL ROT; use TEL PA only if
-    # TEL ROT is absent. (may26 has no TEL PA and already used TEL ROT -> no-op there; this fixes data
-    # like mar25 that writes both, where the old TEL-PA-first order injected the parallactic angle as a
-    # spurious, time-varying rotation.) NOTE (per RS): TEL ROT itself has had TCS write bugs; the Gaia
-    # star fit verifies it when stars are present.
+    # Field POSITION angle (deg E of N) = TEL ROT (the rotator / commanded PA). TEL PA is the
+    # PARALLACTIC angle (a HA/Dec/latitude readout), NOT the instrument orientation, so it must not
+    # drive the rotation; it is used only if TEL ROT is absent. TEL ROT itself has had TCS write
+    # bugs; the Gaia star fit verifies it when stars are present.
     pa = header.get('TEL ROT', header.get('TEL PA', 0.0))
     try:
         pa = float(pa)

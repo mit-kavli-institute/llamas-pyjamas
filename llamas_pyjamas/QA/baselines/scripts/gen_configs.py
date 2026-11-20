@@ -3,11 +3,11 @@
 thresholds. Builds complete per-detector (extension.name x readout_mode) lookup
 tables (color-median fallback for the always-placeholder blue detectors).
 
-Design (post-review):
+Design:
 - Background/level checks consume the per-detector unilluminated-stripe band
   (edge_bg) and use the MEDIAN metric matching median-derived limits.
 - Level/background/RMS are WARN (drift & warm monitoring); structure is FAIL on
-  uniform frames (bias/dark) and WARN on illuminated frames; saturation uses the
+  every cal type (see build_cal_config); saturation uses the
   per-detector derived cap; shutter is FAIL; CCD temperature has a WARN band and a
   FAIL (shut-off) band.
 - Illuminated frames (flat/sky/arc) get NO full-frame level check (illumination
@@ -170,27 +170,12 @@ def temp_rules():
 
 
 # ---------------------------------------------------------------------------
-# Camera-warming (dark-current glow) check on SCIENCE frames. A warming detector
-# grows a diffuse dark-current glow -- a smooth large-scale background gradient --
-# BEFORE the header CCD temperature moves (the header lags the pixel-level onset).
-# Science otherwise runs NO image checks, so a warming detector there is invisible.
-#
-# We flag it with an exposure-normalized background-gradient RATE (ADU/s): the
-# quarter-block MEDIAN gradient (robust to the sparse bright fibre/target flux, so it
-# measures the background not the astrophysical signal) divided by exposure time.
-# Rationale (see QA_TESTS_SUMMARY.md): dark current is a RATE, so a warming detector
-# accrues its gradient fast (3.A.Green on 2026-05-06 06-08 = 2.1 ADU/s) while a normal
-# frame's slow sky/scattered-light gradient accrues at <=~0.06 ADU/s even over 300 s.
-# This is what makes it robust to bright/long science, which absolute structure/sigma
-# thresholds were NOT (real dispersed-spectrum structure false-flagged bright frames).
-# Detector-independent -> a single static threshold; WARN only (advisory alert).
-#
-# Calibration (20260505_06 + ut20260710_11 exposure ladder): a FIXED bias-level
-# background gradient (<=~8 ADU, does NOT scale with time) inflates the rate at short
-# exposures, so (a) exposures below MIN_EXPTIME are SKIPPED -- dark-current warming is
-# not measurable in a few seconds anyway (1 s frames gave a spurious 6-8 ADU/s), and
-# (b) the threshold sits above the 10 s fixed-structure ceiling (~0.8 ADU/s) and well
-# below the warming value (3.A.Green 06-08 = 2.1 ADU/s). 60 s/900 s frames are <=0.13.
+# Camera-warming (dark-current glow) check on SCIENCE frames. A warming detector grows a
+# smooth background gradient BEFORE the header CCD temperature moves. The quarter-block
+# MEDIAN gradient (robust to fibre flux) per second of exposure separates warming (~2 ADU/s)
+# from normal sky/scattered light (<=~0.06 ADU/s). See QA_TESTS_SUMMARY.md.
+# A FIXED bias-level gradient (<=~8 ADU) inflates the rate at short exposures, so frames
+# below WARM_MIN_EXPTIME are skipped and the threshold sits above the 10 s ceiling.
 WARM_RATE_WARN = 1.3    # ADU/s WARN threshold (healthy 10s <=0.8, warming ~2.1)
 WARM_MIN_EXPTIME = 8.0  # s; below this the rate is not computed (rule SKIPs)
 
@@ -246,9 +231,8 @@ def build_cal_config():
     lookup["temp"] = build_temp_table()   # per-camera CCD temperature caps (shared by all cal types)
     # (PRODCATG, set_name, uniform?)  uniform frames (bias/dark) additionally get a frame-level
     # band. Row/column structure is a hard FAIL for ALL cal types: on uniform frames banding is an
-    # unambiguous defect, and on illuminated frames (arc/flat/sky) the per-detector heavy-tail caps
-    # sit ~1.5x above the worst normal frame, so only a gross odd-structure anomaly (e.g. the
-    # 2026-07-10 commissioning arc, ~2x cap on every detector) trips it -- see QA_TESTS_SUMMARY.md.
+    # unambiguous defect, and on illuminated frames the heavy-tail caps sit ~1.5x above the worst
+    # normal frame, so only a gross structure anomaly trips it -- see QA_TESTS_SUMMARY.md.
     types = [("CAL.R-BIA", "BIAS", True), ("CAL.R-DRK", "DARK", True),
              ("CAL.R-FLT", "LDLS_FLAT", False), ("CAL.R-SKY", "SKY_FLAT", False),
              ("CAL.R-ARC", "ARC_THAR", False)]
@@ -274,17 +258,10 @@ def build_cal_config():
 
 
 def build_science_config():
-    """Science QA. Per-detector level/edge-background bands are still OMITTED (science
-    frames carry real astrophysical 2D structure and variable sky, with no science
-    baselines to calibrate absolute levels). But a WARMING detector must be caught here
-    too -- science frames are exactly where it corrupts the data -- so science runs a
-    camera-warming monitor: an exposure-normalized background-gradient RATE (ADU/s) that
-    isolates the dark-current glow (~2.1 ADU/s on 3.A.Green, 2026-05-06 06-08) from the
-    slow sky/scattered-light gradient of normal bright/long science (<=~0.06 ADU/s) --
-    WARN only. Absolute structure/sigma thresholds were rejected: real dispersed-spectrum
-    structure false-flagged bright standards / long exposures. Warm/shut-off cameras are
-    still also covered by the CCD temperature header check (when populated) and the
-    shutter fault; gross saturation is flagged too."""
+    """Science QA. Per-detector level/edge-background bands are OMITTED (science frames
+    carry real 2D structure and variable sky, with no science baselines). A warming
+    detector is caught by the camera-warming rate monitor (WARN; see WARM_RATE_WARN),
+    plus the CCD temperature header check, the shutter fault and gross saturation."""
     cfg = base_blocks()
     cfg["lookup_tables"] = {"temp": build_temp_table()}   # per-camera CCD temperature caps
     s = DER["shutter"]["SCI.R-*"]

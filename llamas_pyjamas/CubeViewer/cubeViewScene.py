@@ -6,17 +6,13 @@ a wavelength window into an image, and asks it what spectra live at a pixel. Fib
 hexagons and dithered mosaics are all details of a scene implementation.
 
 The rule that keeps this honest: **every scene returns an** :class:`astropy.wcs.WCS`, always.
-Today the RSS scene has no per-fibre astrometry (the RSS ``FIBERMAP`` RA/DEC columns are
-written as NaN), so it synthesises a *linear* WCS in fibre-map units. A cube carries a real
-``RA---TAN``/``DEC--TAN`` WCS. Both satisfy the same interface, so when per-fibre sky
-coordinates are eventually populated the RSS scene swaps its linear WCS for a TAN one and
-nothing above it changes. That is what makes registering and combining dithered exposures a
-new scene rather than a rewrite.
+A scene without sky astrometry synthesises a *linear* WCS in fibre-map units; a registered RSS
+or a cube carries a real ``RA---TAN``/``DEC--TAN`` WCS. Both satisfy the same interface, so
+nothing above the scene needs to know which.
 
-:meth:`SpectralScene.spectra_at` returns a *list*, never a single spectrum. One fibre today;
-several weighted fibres once aperture extraction lands; one spaxel for a cube; a resampled
-stack for a mosaic. The plotting panel already handles all of these because it only ever sees
-a list.
+:meth:`SpectralScene.spectra_at` returns a *list*, never a single spectrum: one fibre, several
+weighted fibres for an aperture, or one spaxel for a cube. The plotting panel handles all of
+these because it only ever sees a list.
 
 Classes
 -------
@@ -36,6 +32,8 @@ from typing import Dict, Hashable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from astropy.wcs import WCS
+
+from llamas_pyjamas.Utils.maskedSums import complete_sum, renormalised_mean, resample_bad
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +76,9 @@ class Spectrum:
     #: False when there is no instrumental (counts) plane -- e.g. a stacked cube built only from the
     #: calibrated (FLAM) plane, where ``flux`` mirrors ``flam``. Lets the panel grey out "Counts".
     has_counts: bool = True
+    #: Labels of combined members that had no good sample at all (set by :func:`combine`); a
+    #: complete-coverage sum over them is empty, so callers can name the culprits.
+    empty_members: Tuple[str, ...] = ()
 
     @property
     def has_flam(self) -> bool:
@@ -129,8 +130,12 @@ def combine(spectra: Sequence[Spectrum], label: str = 'aperture',
         Label for the combined spectra.
     mode : {'sum', 'mean'}
         ``'sum'`` totals the members (weighted by :attr:`Spectrum.weight`), which is what an
-        aperture extraction wants: the source's total flux. ``'mean'`` divides by the total
-        weight, giving a representative spectrum rather than a total.
+        aperture extraction wants: the source's total flux. It is valid only at wavelengths where
+        EVERY member has good data; elsewhere the result is NaN and masked, never a partial total
+        (a member that is masked, non-finite, or outside its own wavelength range would count as
+        zero flux and make the total -- and a sensitivity function built from it -- wrong).
+        ``'mean'`` divides by the weight of the members valid at each wavelength, giving a
+        representative spectrum rather than a total.
 
     Notes
     -----
@@ -161,20 +166,37 @@ def combine(spectra: Sequence[Spectrum], label: str = 'aperture',
             logger.warning("Zero total weight combining %d %s spectra", len(members), channel)
             continue
 
-        def _stack(getter):
-            acc = np.zeros_like(reference, dtype=float)
-            for member in members:
-                vals = getter(member)
-                if member.wave is not reference:
-                    vals = np.interp(reference, member.wave, vals, left=np.nan, right=np.nan)
-                acc += member.weight * np.nan_to_num(vals, nan=0.0)
-            return acc / total_weight if mode == 'mean' else acc
+        def _on_grid(member, values):
+            """(values, bad) of one member on the reference grid."""
+            vals = np.asarray(values, dtype=float)
+            bad = ~np.isfinite(vals)
+            if member.mask is not None:
+                bad = bad | np.asarray(member.mask, dtype=bool)
+            if member.wave is not reference:
+                wave = np.asarray(member.wave, dtype=float)
+                fin = np.isfinite(wave)
+                vals = np.interp(reference, wave[fin], np.where(bad, 0.0, vals)[fin],
+                                 left=np.nan, right=np.nan)
+                bad = resample_bad(reference, wave, bad)   # either neighbour bad, or off-range
+            return vals, bad
 
-        stack = _stack(lambda m: m.flux)
-        # Calibrated flux adds the same way; carry it only if every member has it.
-        flam = (_stack(lambda m: m.flam) if all(m.has_flam for m in members) else None)
+        def _stack(getter):
+            on_grid = [_on_grid(m, getter(m)) for m in members]
+            values = np.vstack([v for v, _ in on_grid])
+            bad = np.vstack([b for _, b in on_grid])
+            weights = [m.weight for m in members]
+            if mode == 'mean':
+                return renormalised_mean(values, bad, weights)
+            return complete_sum(values, bad, weights)
+
+        stack, mask = _stack(lambda m: m.flux)
+        empty = tuple(m.label for m in members
+                      if m.mask is not None and np.asarray(m.mask, dtype=bool).all())
+        # Calibrated flux adds the same way; carry it only if every member has it. Its own NaNs
+        # (outside the sensfunc's range) stay in the values; good(calibrated=True) drops them.
+        flam = (_stack(lambda m: m.flam)[0] if all(m.has_flam for m in members) else None)
         out.append(Spectrum(wave=reference, flux=stack, channel=channel, label=label,
-                            weight=total_weight, flam=flam))
+                            weight=total_weight, mask=mask, flam=flam, empty_members=empty))
     return out
 
 

@@ -16,6 +16,7 @@ repeated calls with the same tracer object.
 """
 
 import logging
+import weakref
 import numpy as np
 import scipy.ndimage
 from astropy.stats import sigma_clipped_stats
@@ -24,9 +25,27 @@ from typing import List, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Module-level in-memory cache: key = (id(tracer), image_type)
-# Value: boolean 2-D numpy array (True = inter-fibre gap pixel)
+# Module-level in-memory cache: key = (id(tracer), image_type[, min_distance]);
+# value = (weakref to the tracer, boolean 2-D mask). An id is only unique while its
+# object lives, and bias-first frees each frame's tracers, so a hit must also be the
+# same tracer object; entries whose tracer has gone are dropped.
 _MASK_CACHE: dict = {}
+
+
+def _cached_mask(key, tracer):
+    hit = _MASK_CACHE.get(key)
+    if hit is not None and hit[0]() is tracer:
+        return hit[1]
+    return None
+
+
+def _cache_mask(key, tracer, mask):
+    for k in [k for k, (ref, _m) in _MASK_CACHE.items() if ref() is None]:
+        del _MASK_CACHE[k]
+    try:
+        _MASK_CACHE[key] = (weakref.ref(tracer), mask)
+    except TypeError:          # an object that cannot be weakly referenced: don't cache
+        pass
 
 # Image types where scattered light in fibre wings warrants wider gaps
 _FLAT_IMAGE_TYPES = frozenset({'dome_flat', 'lamp_flat', 'trace_flat'})
@@ -85,7 +104,7 @@ def build_interfibre_mask(tracer,
     Uses the ``fiberimg`` attribute of a loaded ``TraceLlamas`` object.
     ``fiberimg`` is a 2-D integer array (shape naxis2 × naxis1) where pixels
     belonging to a fibre are set to that fibre's index and inter-fibre gap
-    pixels are set to -1 (see traceLlamasMaster.py:769).
+    pixels are set to -1 (see TraceLlamas.profileFit in traceLlamasMaster.py).
 
     For flat-field image types (dome_flat, lamp_flat, trace_flat), one pixel
     of binary erosion is applied to the fibre mask before inverting, widening
@@ -121,9 +140,10 @@ def build_interfibre_mask(tracer,
         return mask
 
     cache_key = (id(tracer), image_type)
-    if cache_key in _MASK_CACHE:
+    cached = _cached_mask(cache_key, tracer)
+    if cached is not None:
         logger.debug(f"build_interfibre_mask: cache hit for {cache_key}")
-        return _MASK_CACHE[cache_key]
+        return cached
 
     # Base gap mask: pixels not assigned to any fibre
     gap_mask = (tracer.fiberimg == -1)
@@ -138,7 +158,7 @@ def build_interfibre_mask(tracer,
             f"build_interfibre_mask: applied 1px erosion for image_type='{image_type}'"
         )
 
-    _MASK_CACHE[cache_key] = gap_mask
+    _cache_mask(cache_key, tracer, gap_mask)
     logger.debug(
         f"build_interfibre_mask: built mask for {cache_key}, "
         f"{gap_mask.sum()} gap pixels ({100*gap_mask.mean():.1f}%)"
@@ -193,9 +213,10 @@ def build_topbottom_stripe_mask(tracer,
         return np.zeros(image_shape, dtype=bool)
 
     cache_key = (id(tracer), 'stripe', float(min_distance))
-    if cache_key in _MASK_CACHE:
+    cached = _cached_mask(cache_key, tracer)
+    if cached is not None:
         logger.debug(f"build_topbottom_stripe_mask: cache hit for {cache_key}")
-        return _MASK_CACHE[cache_key]
+        return cached
 
     fibre_px = tracer.fiberimg >= 0
     # distance_transform_edt returns, for each True pixel, the distance to the
@@ -204,7 +225,7 @@ def build_topbottom_stripe_mask(tracer,
     dist = scipy.ndimage.distance_transform_edt(~fibre_px)
     mask = dist > float(min_distance)
 
-    _MASK_CACHE[cache_key] = mask
+    _cache_mask(cache_key, tracer, mask)
     logger.debug(
         f"build_topbottom_stripe_mask: {int(mask.sum())} px > {min_distance}px "
         f"from fibres ({100*mask.mean():.1f}%)"

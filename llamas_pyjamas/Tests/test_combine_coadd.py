@@ -3,7 +3,7 @@
 Synthetic FibreTables with known values/variances, checked against the closed-form kernel-weighted
 mean: single-fibre value preserved, inverse-variance combine of co-located fibres, coverage/nexp
 counting, min-coverage masking, flux vs surface-brightness units, and the output WCS round-trip.
-The full pipeline (build -> collapse -> co-add -> FITS) is validated on real may26 data.
+The full pipeline (build -> collapse -> co-add -> FITS) is validated on real data.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_coadd`).
 """

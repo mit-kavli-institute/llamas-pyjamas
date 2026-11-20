@@ -22,12 +22,14 @@ Example:
 
 import os
 import re
+import glob
 import argparse
 import pickle
 import traceback
 import multiprocessing
 import logging
 import gc
+import time
 from datetime import datetime
 
 from llamas_pyjamas.Trace.traceLlamasMaster import run_ray_tracing
@@ -36,32 +38,56 @@ from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 import llamas_pyjamas.GUI.guiExtract as ge
 from llamas_pyjamas.File.llamasIO import process_fits_by_color
 from llamas_pyjamas.File.llamasRSS import update_ra_dec_in_fits
+from llamas_pyjamas.File.llamasRSS import (RSS_STAGE_RANK, RSS_STAGE_RE, exposure_id,
+                                           exposure_key, rss_stage, write_rss_manifest)
 import llamas_pyjamas.Arc.arcLlamasMulti as arc
 from llamas_pyjamas.File.llamasRSS import RSSgeneration
-from llamas_pyjamas.Utils.utils import count_trace_fibres, check_header, configure_pipeline_logging, setup_logger
-from llamas_pyjamas.Utils.rayManager import resolve_run_temp_dir, prune_stale, check_inputs_reachable, preflight_disk_check, cleanup_scratch, init_ray
+from llamas_pyjamas.Utils.utils import check_header, configure_pipeline_logging, setup_logger
+from llamas_pyjamas.Trace.traceValidation import (copy_mastercalib_trace, count_trace_fibres,
+                                                  validate_and_fix_trace_fibres,
+                                                  confirm_unusable_master_traces,
+                                                  set_aside_legacy_traces, slim_bloated_traces)
+from llamas_pyjamas.Trace.masterShift import describe_shift
+from llamas_pyjamas.Utils.rayManager import (resolve_run_temp_dir, prune_stale, check_inputs_reachable,
+                                             cleanup_scratch, init_ray, object_store_bytes,
+                                             ray_spill_folder)
+from llamas_pyjamas.Utils.diskSpace import (DiskSpaceError, disk_full_message, disk_space_gate,
+                                            estimate_disk_use, is_disk_full)
 from llamas_pyjamas.Cube.cubeConstruct import CubeConstructor
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+from llamas_pyjamas.Bias.biasFirst import (bias_correct_frame, dark_summary, expected_provenance,
+                                           resolve_master_bias_file)
+from llamas_pyjamas.Bias.biasFirstResume import CALIBRATION_ROLES, is_product_of, redo_stale_frames
+from llamas_pyjamas.Bias.darkLlamas import (DEFAULT_TOLERANCE, build_master_dark,
+                                            check_dark_files, group_darks, match_dark)
+from llamas_pyjamas.Masking.cosmicLlamas import (copy_cosmic_ray_stamps, cosmic_ray_id,
+                                                 cosmic_ray_settings, describe_settings)
 from llamas_pyjamas.Cube.crr_cube_constructor import CRRCubeConstructor, CRRCubeConfig
 from llamas_pyjamas.Cube.rss_to_crr_adapter import load_rss_as_crr_data, combine_channels_for_crr
 from llamas_pyjamas.Cube.simple_cube_constructor import SimpleCubeConstructor
 from astropy.io import fits
 import numpy as np
 
-import shutil
-
 _cached_reference_arc = None
 _cached_reference_arc_path = None
 
-logger = logging.getLogger(__name__)
+# Named explicitly: run as a script this module is __main__, whose logger would
+# miss the llamas_pyjamas log file and the curated terminal.
+logger = logging.getLogger('llamas_pyjamas.reduce')
 
 from llamas_pyjamas.DataModel.validate import validate_and_fix_extensions, get_placeholder_extension_indices, validate_for_gui
-from llamas_pyjamas.Flat.flatLlamas import process_flat_field_complete, process_pixel_flat_simple
+from llamas_pyjamas.Flat.flatLlamas import (assess_pixel_flat, process_flat_field_complete,
+                                            process_pixel_flat_simple)
 from llamas_pyjamas.Sky.skyLlamas import skyModel_1d
-from llamas_pyjamas.Flat.fibreFlat import (compute_fibre_flat_lamp_only,
+from llamas_pyjamas.Utils.recipes import (EXTRACT_METHODS, check_recipe, copy_extraction_method,
+                                          normalise_method, read_recipe_sidecar, recipe_problem,
+                                          run_extraction_method, sidecar_path)
+from llamas_pyjamas.Flat.fibreFlat import (FFVER,
+                                           compute_fibre_flat_lamp_only,
                                            compute_fibre_flat_twilight,
-                                           reduce_twilight_flat,
-                                           apply_fibre_flat_to_rss)
+                                           reduce_twilights, load_twilights,
+                                           apply_fibre_flat_to_rss,
+                                           assess_fibre_flat)
 
 _linefile = os.path.join(LUT_DIR, '')
 
@@ -118,7 +144,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
 
     Checks package directories, required master bias files, required config keys,
     and file/directory path existence before any processing begins.  On failure,
-    prints a clear itemised summary and calls sys.exit(1).
+    logs each error and calls sys.exit(1).
 
     Parameters
     ----------
@@ -157,7 +183,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
 
     if errors:
         for e in errors:
-            print(f"  \u2717  ERROR: {e}")
+            logger.error(f"Pre-flight: {e}")
         print(f"\nPipeline pre-flight check FAILED — {len(errors)} error(s).")
         print("Fix the above issues and re-run.")
         sys.exit(1)
@@ -200,7 +226,7 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # ------------------------------------------------------------------
     file_keys = ['science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
                  'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
-                 'blue_twilight_flat']
+                 'blue_twilight_flat', 'dark_files']
     if config.get('generate_new_wavelength_soln') is True:
         file_keys.append('arc_file')
 
@@ -213,16 +239,45 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
             if not os.path.isfile(p):
                 errors.append(f"'{key}' path does not exist: '{p}'")
 
-    # Directory keys — warn only (pipeline creates them if missing)
+    # Dark frames: each must be a dark (a mistagged science frame would be
+    # subtracted from the science). Not run through validate_input_files, which
+    # edits files in place.
+    darks = [p for p in (config.get('dark_files') or []) if os.path.isfile(p)]
+    if darks:
+        dark_errors, dark_warnings = check_dark_files(darks)
+        errors += dark_errors
+        warnings += dark_warnings
+    # Cosmic-ray settings: checked here so a bad value stops the run before any
+    # extraction (a worker would otherwise drop the camera silently).
+    _cr, cr_errors, cr_warnings = cosmic_ray_settings(config)
+    errors += cr_errors
+    warnings += cr_warnings
+
+    try:
+        tol = float(config.get('dark_exptime_tolerance', DEFAULT_TOLERANCE))
+        if not 0 < tol < 1:
+            errors.append(f"'dark_exptime_tolerance' must be between 0 and 1, got {tol}")
+    except (TypeError, ValueError):
+        errors.append(f"'dark_exptime_tolerance' is not a number: "
+                      f"{config.get('dark_exptime_tolerance')!r}")
+
+    if 'disk_estimate_factor' in config:
+        warnings.append("'disk_estimate_factor' is no longer used: the disk-space check now "
+                        "estimates each product (its safety factor is disk_margin)")
+
+    out_errors, out_warnings = output_dir_checks(config)
+    errors += out_errors
+    warnings += out_warnings
+
+    # Directory keys: the pipeline creates any that are missing, so this is a note.
     dir_keys = ['output_dir', 'trace_output_dir', 'extraction_output_dir',
                 'flat_field_output_dir', 'log_output_dir', 'cube_output_dir', 'flat_file_dir']
     for key in dir_keys:
         if key in config and config[key]:
             p = config[key]
             if not os.path.isdir(p):
-                warnings.append(
-                    f"'{key}' directory does not exist yet: '{p}' — it will be created."
-                )
+                logger.info(f"Pre-flight: '{key}' directory does not exist yet: '{p}' "
+                            f"— it will be created.")
 
     # ------------------------------------------------------------------
     # 5. LUT reference arc check
@@ -239,10 +294,11 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
+    # Through the logger, so they reach the curated terminal and not just the log.
     for w in warnings:
-        print(f"  \u26a0  WARNING: {w}")
+        logger.warning(f"Pre-flight: {w}")
     for e in errors:
-        print(f"  \u2717  ERROR: {e}")
+        logger.error(f"Pre-flight: {e}")
 
     if errors:
         print(
@@ -258,6 +314,73 @@ def validate_pipeline_config(config: dict, config_path: str) -> bool:
         print("\nPipeline pre-flight check passed.")
 
     return True
+
+
+FLAT_KEYS = ('red_flat_file', 'green_flat_file', 'blue_flat_file')
+
+
+def missing_flat_files(config) -> list:
+    """The flat config keys that are unset or point at no file."""
+    return [key for key in FLAT_KEYS
+            if not config.get(key) or not os.path.exists(config.get(key))]
+
+
+def night_flats(config) -> dict:
+    """``{channel: path}`` of the configured flats that exist, for shifted masters."""
+    return {key.split('_')[0]: config[key] for key in FLAT_KEYS
+            if config.get(key) and os.path.exists(config[key])}
+
+
+def require_fingerprint(config) -> bool:
+    """``shifted_master_require_fingerprint`` (default true)."""
+    return str(config.get('shifted_master_require_fingerprint', True)).strip().lower() \
+        not in ('false', '0', 'no')
+
+
+def new_shifted_masters(validation_results) -> list:
+    """Shifted masters written by this validation (not already counted as valid)."""
+    valid_paths = {v[3] for v in validation_results.get('valid_traces', [])
+                   if isinstance(v, tuple) and len(v) > 3}
+    return [e for e in validation_results.get('shifted_masters', []) if e[4] not in valid_paths]
+
+
+def print_shifted_masters(validation_results):
+    """List the cameras whose mastercalib trace was shifted onto this night's flat."""
+    for channel, bench, side, *_, record in validation_results.get('shifted_masters', []):
+        print(f"  ✓ {channel}{bench}{side}: mastercalib trace shifted onto this night's flat "
+              f"({describe_shift(record)})")
+
+
+def report_trace_validation(validation_results, label, reporter):
+    """Print what ``validate_and_fix_trace_fibres`` found and fixed in a trace set.
+
+    Then ask about any camera left with no usable trace: proceed without it, or
+    terminate the run (``confirm_unusable_master_traces``).
+    """
+    invalid = validation_results['invalid_traces']
+    missing = validation_results['missing_traces']
+    fallback = validation_results['fallback_used']
+
+    print(f"⚠️  Found {len(invalid)} {label} trace(s) with incorrect fiber counts")
+    if missing:
+        print(f"⚠️  {len(missing)} camera(s) have no trace file")
+    print(f"✓  Copied {len(fallback)} mastercalib fallback trace(s)")
+    if validation_results.get('shifted_masters'):
+        print(f"✓  {len(validation_results['shifted_masters'])} mastercalib trace(s) shifted "
+              f"onto this night's flats")
+    for channel, bench, side, expected, actual in invalid:
+        print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
+    for channel, bench, side in missing:
+        print(f"  ✗ {channel}{bench}{side}: no trace file")
+    for channel, bench, side, *_ in fallback:
+        print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
+    print_shifted_masters(validation_results)
+
+    with reporter.paused():
+        confirm_unusable_master_traces(validation_results['unusable_masters'])
+    shifted = new_shifted_masters(validation_results)
+    print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} "
+          f"{label} + {len(shifted)} shifted mastercalib + {len(fallback)} mastercalib)")
 
 
 def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, placeholder_indices=None):
@@ -295,21 +418,16 @@ def copy_mastercalib_traces_for_placeholders(flat_file, trace_dir, channel, plac
             if cam_channel != channel.lower():
                 continue
 
-            # Determine mastercalib trace filename
-            master_trace_file = f'LLAMAS_master_{channel.lower()}_{bench}_{side}_traces.pkl'
-            master_trace_path = os.path.join(CALIB_DIR, master_trace_file)
-
-            # Target filename (user trace naming convention)
-            user_trace_file = f'LLAMAS_{channel.lower()}_{bench}_{side}_traces.pkl'
-            user_trace_path = os.path.join(trace_dir, user_trace_file)
-
-            # Copy mastercalib trace to user trace directory
-            if os.path.exists(master_trace_path):
-                shutil.copy2(master_trace_path, user_trace_path)
+            # Copied only if usable (right fibre count; an old-format master must pass
+            # the registration audit). If not, the camera is left without a trace and
+            # the validation after tracing reports it and asks whether to go on.
+            try:
+                copy_mastercalib_trace(channel.lower(), str(bench), str(side), CALIB_DIR, trace_dir)
+            except FileNotFoundError as exc:
+                print(f"  ✗ WARNING: {channel}{bench}{side}: {exc}")
+            else:
                 print(f"  ✓ Copied mastercalib trace for {channel}{bench}{side}")
                 traces_copied += 1
-            else:
-                print(f"  ✗ WARNING: Mastercalib trace not found: {master_trace_file}")
 
     return traces_copied
 
@@ -406,15 +524,15 @@ def extract_flat_field(flat_file_dir, output_dir, slow_bias=None, fast_bias=None
         os.makedirs(output_dir)
 
     ge.GUI_extract(flat_file_dir, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
-                   remove_cosmic_rays=False)
+                   remove_cosmic_rays=False, recipe='lamp_flat')
 
     return
 
 
 def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                    trace_dir=None, mastercalib_trace_dir=None,
-                   remove_cosmic_rays=True, mask_output_dir=None, edge_bias=None,
-                   whitelight_hex=True):
+                   remove_cosmic_rays=None, mask_output_dir=None, edge_bias=None,
+                   whitelight_hex=True, cosmic_rays=None, recipe=None):
     """
     Run spectrum extraction with hybrid trace support.
 
@@ -425,11 +543,15 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
         fast_bias: Path to FAST-mode master bias FITS file
         trace_dir: User trace directory (for real extensions)
         mastercalib_trace_dir: Mastercalib trace directory (for placeholder extensions)
-        remove_cosmic_rays: Enable L.A.Cosmic cosmic ray removal before extraction
+        remove_cosmic_rays: L.A.Cosmic switch; can only turn cleaning off where the recipe
+            allows it (None: as the recipe says)
         mask_output_dir: Output directory for cosmic ray mask FITS files
         edge_bias: Optional dict controlling the per-frame edge-bias (DC offset)
             correction (see build_edge_bias_config); forwarded to GUI_extract.
             None => process_trace uses its built-in defaults (Tier 1 on).
+        cosmic_rays: Per-channel cosmic-ray settings (Masking.cosmicLlamas.
+            cosmic_ray_settings); None => package defaults. Forwarded to GUI_extract.
+        recipe: The frame's processing recipe (Utils/recipes.py), required.
 
     Returns:
         str: Path to extraction file
@@ -455,7 +577,9 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias,
-                whitelight_hex=whitelight_hex
+                whitelight_hex=whitelight_hex,
+                cosmic_rays=cosmic_rays,
+                recipe=recipe
             )
     else:
         assert os.path.exists(science_file), "Science file does not exist."
@@ -469,7 +593,9 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
             remove_cosmic_rays=remove_cosmic_rays,
             mask_output_dir=mask_output_dir,
             edge_bias=edge_bias,
-            whitelight_hex=whitelight_hex
+            whitelight_hex=whitelight_hex,
+            cosmic_rays=cosmic_rays,
+            recipe=recipe
         )
 
     # GUI_extract returns just the basename; make it a full path
@@ -479,52 +605,54 @@ def run_extraction(science_file, output_dir, slow_bias=None, fast_bias=None,
     return extraction_file_path
 
 
-def apply_twilight_throughput(extraction_dict, twilight_dir):
-    """Set per-fibre relative_throughput from the twilight (sky) flat extraction.
+def twilight_throughputs(twilight_pkls):
+    """Per-fibre relative throughput of every camera, from its colour's reduced twilight.
 
-    The twilight illuminates the fibres with the same geometry as the night sky
-    (unlike the dome lamp), and — because it is extracted with the same method
-    as the science in the same run — its per-fibre response is directly
-    applicable (validated 2026-07: predicts the stable on-sky 5577 response at
-    corr 0.97 on cameras where the lamp throughput reads 0.40). Objects never
-    contaminate it (dedicated sky-illuminated frames).
-
-    Finds the newest twilight extraction pickle in ``twilight_dir`` and, for
-    every camera present in both, replaces ``relative_throughput`` with the
-    fibre's median twilight counts normalised to the camera median (clipped to
-    [0.1, 3.0]; out-of-range/dead fibres get 1.0). Cameras without a twilight
-    counterpart keep their existing (arc-carried) values.
-
-    Returns the number of cameras updated (0 => nothing done / no twilight).
+    ``twilight_pkls`` is ``{colour: pickle}`` (``Flat.fibreFlat.reduce_twilights``): the
+    same reduction the fibre flat's T_i comes from. A fibre's throughput is its median
+    twilight counts over columns 700:1500 divided by the camera median; values outside
+    0.1-3 (dead or bad fibres) are set to 1. Returns
+    ``{(channel, bench, side): (throughput, source file name)}``.
     """
-    import glob as _glob
-    cands = sorted(
-        _glob.glob(os.path.join(twilight_dir, '*_extract_corrected_extractions.pkl'))
-        + _glob.glob(os.path.join(twilight_dir, '*_extract.pkl')),
-        key=os.path.getmtime, reverse=True)
-    if not cands:
-        return 0
-    twi = ExtractLlamas.loadExtraction(cands[0])
-    twi_map = {}
-    for e, m in zip(twi['extractions'], twi['metadata']):
-        twi_map[(m['channel'], str(m['bench']), str(m['side']).upper())] = e
+    by_file = {}
+    for colour, pkl in twilight_pkls.items():
+        by_file.setdefault(pkl, []).append(colour)
+    out = {}
+    for pkl, colours in by_file.items():
+        twi = ExtractLlamas.loadExtraction(pkl)
+        check_recipe(twi.get('primary_header'), 'twilight', what=os.path.basename(pkl))
+        source = str((twi.get('primary_header') or {}).get('TWIFILE', os.path.basename(pkl)))
+        for e, m in zip(twi['extractions'], twi['metadata']):
+            if m['channel'] not in colours:
+                continue
+            counts = np.asarray(e.counts, dtype=float)
+            wl = np.nanmedian(counts[:, 700:1500], axis=1)
+            good = np.isfinite(wl) & (wl > 0)
+            if good.sum() < 30:
+                continue
+            tp = wl / np.nanmedian(wl[good])
+            tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
+            out[(m['channel'], str(m['bench']), str(m['side']).upper())] = (tp, source)
+        del twi
+    return out
+
+
+def apply_twilight_throughput(extraction_dict, twilight_tp):
+    """Set each camera's ``relative_throughput`` from its colour's twilight.
+
+    ``twilight_tp`` is :func:`twilight_throughputs`'s result. Cameras without a twilight
+    keep their existing (arc-carried) values. Returns the number of cameras updated.
+    """
     n_done = 0
     for e, m in zip(extraction_dict['extractions'], extraction_dict['metadata']):
-        et = twi_map.get((m['channel'], str(m['bench']), str(m['side']).upper()))
-        if et is None:
+        entry = twilight_tp.get((m['channel'], str(m['bench']), str(m['side']).upper()))
+        if entry is None:
             continue
-        counts = np.asarray(et.counts, dtype=float)
-        wl = np.nanmedian(counts[:, 700:1500], axis=1)
-        good = np.isfinite(wl) & (wl > 0)
-        if good.sum() < 30:
-            continue
-        tp = wl / np.nanmedian(wl[good])
-        tp = np.where(np.isfinite(tp) & (tp > 0.1) & (tp < 3.0), tp, 1.0)
+        tp, source = entry
         n = min(np.asarray(e.counts).shape[0], tp.size)
         e.relative_throughput = tp[:n].copy()
+        e.throughput_source = source                       # recorded as the RSS TPSRC
         n_done += 1
-    logger.info(f"apply_twilight_throughput: updated {n_done} cameras from "
-                f"{os.path.basename(cands[0])}")
     return n_done
 
 
@@ -547,7 +675,8 @@ def build_edge_bias_config(config, extraction_path, flat_field_dir=None):
 
 
 def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_dir,
-                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None):
+                       remove_cosmic_rays, mask_output_dir, config, flat_pixel_maps=None,
+                       cosmic_rays=None):
     """Extract a dedicated blank-sky MEF and return a ``*_corrected_extractions.pkl``.
 
     Mirrors the science extraction path (validate -> optional flat-correct ->
@@ -580,11 +709,14 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
         sky_file, extraction_path, slow_bias=slow_bias, fast_bias=fast_bias,
         trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
         remove_cosmic_rays=remove_cosmic_rays, mask_output_dir=mask_output_dir,
-        edge_bias=build_edge_bias_config(config, extraction_path))
+        edge_bias=build_edge_bias_config(config, extraction_path), cosmic_rays=cosmic_rays,
+        recipe='sky_frame')
     if not extracted:
         raise RuntimeError(f"Extraction of sky frame {sky_file} produced no output")
 
-    corr_extractions, _ = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    corr_extractions, ext_hdr = correct_wavelengths(extracted, soln=config.get('arcdict'))
+    copy_cosmic_ray_stamps(ext_hdr, sky_primary_hdr)
+    copy_extraction_method(ext_hdr, sky_primary_hdr)
     base_name = os.path.splitext(os.path.basename(extracted))[0]
     sky_savefile = os.path.join(extraction_path, f'{base_name}_corrected_extractions.pkl')
     save_extractions(corr_extractions['extractions'], primary_header=sky_primary_hdr,
@@ -598,7 +730,7 @@ def _extract_sky_frame(sky_file, extraction_path, slow_bias, fast_bias, trace_di
 def calc_wavelength_soln(arc_file, output_dir, slow_bias=None, fast_bias=None):
 
     ge.GUI_extract(arc_file, output_dir=output_dir, slow_bias=slow_bias, fast_bias=fast_bias,
-                   remove_cosmic_rays=False)
+                   remove_cosmic_rays=False, recipe='arc')
 
     arc_picklename = os.path.join(output_dir, os.path.basename(arc_file).replace('_mef.fits', '_extract.pkl'))
 
@@ -628,19 +760,11 @@ def correct_wavelengths(science_extraction_file, soln=None):
     product from refineArcX/refineArcX2D), an already-loaded arcdict, or None
     for the packaged reference arc. Loads are cached keyed on the source path
     so successive science files reuse one load.
-
-    NOTE: this function previously ignored ``soln`` entirely (a leftover TODO)
-    and always used the packaged reference arc — silently discarding any
-    refined solution, so refine_arc had no effect on science reductions.
     """
     global _cached_reference_arc, _cached_reference_arc_path
 
-    # stdout (not just logger): when run via `python -m llamas_pyjamas.reduce`
-    # this module is `__main__`, whose logger does not propagate into the
-    # llamas_pyjamas log file — prints are the reliable record of which arc
-    # solution was actually used.
-    print(f"correct_wavelengths: soln = "
-          f"{'<in-memory dict>' if isinstance(soln, dict) else repr(soln)}")
+    logger.info(f"correct_wavelengths: soln = "
+                f"{'<in-memory dict>' if isinstance(soln, dict) else repr(soln)}")
 
     if isinstance(soln, dict):
         arcdict = soln
@@ -683,14 +807,14 @@ def correct_wavelengths(science_extraction_file, soln=None):
 
 
 def _pointing_from_header(header):
-    """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header (F6).
+    """Extract (ra_deg, dec_deg, pa_deg) from an RSS/science primary header.
 
     Prefers the decimal ``RA``/``DEC`` keywords, falling back to the sexagesimal
     HIERARCH ``TEL RA``/``TEL DEC`` pair, and reads the field POSITION angle from
     ``TEL ROT`` (then ``TEL PA``). ``TEL PA`` is the PARALLACTIC angle, not the
     instrument orientation, so it must not preempt ``TEL ROT``. Returns
-    ``(0.0, 0.0, 0.0)`` if nothing usable is present so cube construction degrades
-    to the old placeholder behaviour.
+    ``(0.0, 0.0, 0.0)`` if nothing usable is present so cube construction still
+    runs, without a real pointing.
     """
     if header is None:
         return 0.0, 0.0, 0.0
@@ -725,7 +849,7 @@ def _pointing_from_header(header):
 
 
 def resolve_twilight_files(config):
-    """Resolve the twilight flat to use for each colour (F1).
+    """Resolve the twilight flat to use for each colour.
 
     Supports both the per-colour keys ``{red,green,blue}_twilight_flat`` and the
     singular ``twilight_flat`` key, with the per-colour key taking precedence and
@@ -791,10 +915,18 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
 
         # Step 2: extract (bias subtraction is handled inside run_extraction)
         # run_extraction returns only a basename (from GUI_extract); join with output_dir
-        pkl_basename = run_extraction(corr_file, output_dir,
-                                      slow_bias=slow_bias, fast_bias=fast_bias,
-                                      trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
-                                      remove_cosmic_rays=False, edge_bias=edge_bias)
+        try:
+            pkl_basename = run_extraction(corr_file, output_dir,
+                                          slow_bias=slow_bias, fast_bias=fast_bias,
+                                          trace_dir=trace_dir, mastercalib_trace_dir=CALIB_DIR,
+                                          remove_cosmic_rays=False, edge_bias=edge_bias,
+                                          recipe='dome_flat')
+        except Exception as exc:
+            if is_disk_full(exc):
+                raise
+            logger.warning(f"Extraction of {os.path.basename(corr_file)} failed: {exc}",
+                           exc_info=True)
+            pkl_basename = None
         if not pkl_basename:
             print(f"  WARNING: Extraction failed for {os.path.basename(corr_file)} — skipping")
             continue
@@ -819,7 +951,8 @@ def _process_flat_for_rss(flat_files, flat_pixel_maps, output_dir,
         # file/console handling (a __main__-based logger would escape to stderr).
         rss_logger = logging.getLogger('llamas_pyjamas.rss')
         rss_gen = RSSgeneration(logger=rss_logger)
-        out = rss_gen.generate_rss(corr_pkl, rss_base)
+        # Flats are never sky-modelled, and a twilight's signal *is* sky.
+        out = rss_gen.generate_rss(corr_pkl, rss_base, subtract_sky=False)
         if out:
             rss_outputs.extend(out)
 
@@ -1172,7 +1305,11 @@ def apply_flat_field_correction(science_file, flat_pixel_maps, output_dir,
     """
     
     print(f"Applying flat field correction to: {os.path.basename(science_file)}")
-    
+    # The pixel flat must come from a lamp flat made with its recipe (no cosmic-ray
+    # cleaning, physical fibre ids): anything else plants false structure in the frame.
+    for _map in flat_pixel_maps:
+        check_recipe(fits.getheader(_map, 0), 'lamp_flat', what=os.path.basename(_map))
+
     # Step 1: Build flat field mapping with cross-checking
     flat_map = build_flat_field_map(flat_pixel_maps, science_file) # this doesn't seem righ
     
@@ -1347,7 +1484,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
         use_crr (bool): Use CRR (Covariance-regularized Reconstruction) method (overrides cube_method)
         crr_config (CRRCubeConfig, optional): CRR configuration parameters
         parallel (bool): Use parallel processing for CRR method
-        cube_method (str): Cube construction method: 'simple' (default), 'crr', or 'traditional'
+        cube_method (str): Cube construction method: 'simple', 'crr', or 'traditional' (default)
         cube_pixel_size (float): Spatial pixel size in arcsec (for simple method)
         cube_fiber_pitch (float): Fiber pitch in arcsec (for simple method)
         cube_wave_sampling (float): Wavelength sampling factor (for simple method)
@@ -1376,7 +1513,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
     processed_traditional_bases = set()
 
     # Create a single logger for all cube construction
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('llamas_pyjamas.reduce')
     logger.info(f"Starting cube construction for {len(rss_files)} RSS files/base paths")
 
     for rss_file in rss_files:
@@ -1460,9 +1597,7 @@ def construct_cube(rss_files, output_dir, wavelength_range=None, dispersion=1.0,
                 # Construct cube
                 constructor.construct_cube(radius=cube_radius, min_weight=cube_min_weight)
 
-                # Create WCS from the real telescope pointing in the RSS header
-                # (F6) — previously hardcoded to (0,0), leaving cubes with no
-                # on-sky astrometry.
+                # Create WCS from the telescope pointing in the RSS header.
                 _ra_c, _dec_c, _pa = _pointing_from_header(
                     getattr(constructor, 'primary_header', None))
                 constructor.create_wcs(ra_center=_ra_c, dec_center=_dec_c,
@@ -1627,30 +1762,9 @@ def _frame_label(science_file):
     return os.path.splitext(base)[0][:24]
 
 
-def _exposure_id(name):
-    """The bare exposure identifier ``LLAMAS_<date>_<time>`` for a frame.
-
-    Everything from the exposure-type marker (``_SCI##`` / ``_CAL##``) onward — including the
-    whole processing chain (``_mef_bias_corrected_flat_corrected_extract`` …) — is dropped, so
-    the same id is recovered from a raw file, any intermediate product, or the consolidated
-    RSS. This is what the consolidated RSS is named after and what resume detection keys on;
-    the exposure timestamp is unique, so it identifies the frame on its own. Falls back to the
-    old stem (extension + trailing ``_mef`` stripped) when no type marker is present.
-    """
-    stem = os.path.basename(str(name))
-    m = re.match(r'^(.*?)_(?:SCI|CAL)\d', stem)
-    if m:
-        return m.group(1)
-    # Strip only a real FITS extension -- NOT os.path.splitext, which would eat the fractional
-    # second of a timestamp (e.g. '..._23-21-07.7' -> '..._23-21-07'). That decimal must be kept
-    # so it matches the raw frames and the consolidated name is stable across re-runs.
-    for _ext in ('.fits.gz', '.fits', '.fit'):
-        if stem.lower().endswith(_ext):
-            stem = stem[:-len(_ext)]
-            break
-    if stem.endswith('_mef'):
-        stem = stem[:-len('_mef')]
-    return stem
+#: The bare exposure identifier ``LLAMAS_<date>_<time>`` of a frame (see
+#: :func:`llamas_pyjamas.File.llamasRSS.exposure_id`, where the stage contract lives).
+_exposure_id = exposure_id
 
 
 def _science_stem(science_file):
@@ -1677,19 +1791,22 @@ def _has_rss_product(extraction_dir, stem):
     return False
 
 
-#: RSS correction-stage suffixes, least to most corrected. The consolidator keeps the most
-#: corrected file per (frame, channel) and drops the earlier stages.
-_RSS_STAGE_RANK = {'': 0, '_FF': 1, '_FF_SKYSUB': 2}
-_RSS_STAGE_RE = re.compile(r'^(.*)_RSS_(blue|green|red)(_FF(?:_SKYSUB)?)?\.fits$')
+#: RSS correction-stage suffixes, least to most corrected (shared with the post-processing tools
+#: through :mod:`llamas_pyjamas.File.llamasRSS`). The consolidator keeps the most corrected file
+#: per (frame, channel) and drops the earlier stages.
+_RSS_STAGE_RANK = RSS_STAGE_RANK
+_RSS_STAGE_RE = RSS_STAGE_RE
 
 
 def consolidate_rss_files(extraction_dir, keep_intermediate=False):
     """Collapse the per-stage RSS files to one per (frame, channel).
 
     The extract / fibre-flat (_FF) / sky-subtracted (_FF_SKYSUB) stages each write a
-    progressively-corrected RSS with the same HDU layout, so on disk there are up to three
-    files per channel. This keeps the most-corrected one, deletes the earlier stages, and
-    renames the survivor to the clean ``{base}_RSS_{color}.fits`` (dropping the stage suffix).
+    progressively-corrected RSS, so on disk there are up to three files per channel. Their HDU
+    layouts differ: the fibre flat drops NOFLAT, and the sky framework adds SKYRESID/SKYMASK.
+    This keeps the most-corrected one, deletes the earlier stages, and renames the survivor to
+    the clean ``{base}_RSS_{color}.fits`` (dropping the stage suffix, so the stage then lives
+    only in the headers -- see ``llamasRSS.rss_stage``).
 
     Must run AFTER cube construction, which reads the _FF / _FF_SKYSUB files. With
     `keep_intermediate` (config ``keep_intermediate_rss``) nothing is touched.
@@ -1734,6 +1851,40 @@ def consolidate_rss_files(extraction_dir, keep_intermediate=False):
 
 
 _WHITELIGHT_RE = re.compile(r'^(.*)_whitelight\.fits$')
+
+
+def _base_stage_rss(extraction_dir, note=None):
+    """Base-stage RSS files in ``extraction_dir``: the inputs of the pedestal and the fibre flat.
+
+    Candidates are suffix-less per-channel RSS names (plus the single-channel ``_RSS.fits``);
+    their headers decide (``rss_stage``). A suffix-less file at a later stage -- the consolidated
+    ``{exposure}_RSS_{channel}.fits`` of an earlier run -- is kept as it is, because flat-fielding
+    it again would divide by C_i twice; that is printed and passed to ``note(path, msg)`` so the
+    manifest records it. Derived files (``_EMPSKY`` and the like) are never candidates.
+    """
+    out = []
+    if not os.path.isdir(extraction_dir):
+        return out
+    for fname in sorted(os.listdir(extraction_dir)):
+        m = RSS_STAGE_RE.match(fname)
+        if not ((m is not None and not m.group(3)) or fname.endswith('_RSS.fits')):
+            continue
+        full = os.path.join(extraction_dir, fname)
+        try:
+            stage = rss_stage(full)
+        except Exception as exc:                                  # noqa: BLE001
+            logger.warning(f"Cannot determine the stage of {fname}: {exc}; not processed")
+            if note:
+                note(full, f'not processed: stage unreadable ({exc})')
+            continue
+        if stage == 'base':
+            out.append(full)
+        else:
+            print(f"Keeping existing {stage} file {fname}; not regenerated "
+                  f"(already processed by an earlier run).")
+            if note:
+                note(full, f'kept existing {stage} file; not regenerated')
+    return out
 
 
 def consolidate_whitelight_files(extraction_dir, keep_intermediate=False):
@@ -1815,9 +1966,543 @@ def cleanup_extraction_pkls(paths, save_pkl):
             if os.path.exists(path):
                 os.remove(path)
                 removed.append(path)
+            if os.path.exists(sidecar_path(path)):          # its recipe record goes with it
+                os.remove(sidecar_path(path))
         except OSError:
             pass
     return removed
+
+
+#: Flat products a resumed run reuses, and the recipe each must carry.
+FLAT_PRODUCT_RECIPES = (('pixel_maps.fits', 'lamp_flat'),
+                        ('flat_smooth_models.fits', 'lamp_flat'),
+                        ('unillum_mask.fits', 'lamp_flat'))
+
+
+def stale_products(extraction_path, flat_field_dir, arc_dir=None):
+    """``[(path, reason)]`` of products a resumed run would reuse that older code made.
+
+    Flat products must carry their current recipe stamp (Utils/recipes.py). A base RSS
+    must record the throughput its rows were divided by (FIBERMAP THRUPUT), and a fibre-
+    flat-fielded RSS must be at the current FFVER: before FFVER 2 the fibre throughput was
+    divided out twice. Night-arc extractions in ``arc_dir`` must carry the ``arc`` recipe
+    in their ``.recipe.json`` sidecar.
+    """
+    stale = []
+    for pkl in sorted(glob.glob(os.path.join(arc_dir, '*_extract.pkl'))) if arc_dir else []:
+        why = recipe_problem(read_recipe_sidecar(pkl), 'arc')
+        if why:
+            stale.append((pkl, why))
+    for name, recipe in FLAT_PRODUCT_RECIPES:
+        path = os.path.join(flat_field_dir, name)
+        if os.path.exists(path):
+            why = recipe_problem(fits.getheader(path, 0), recipe)
+            if why:
+                stale.append((path, why))
+    corr = os.path.join(flat_field_dir, 'fibre_flat_corrections.fits')
+    if os.path.exists(corr):
+        header = fits.getheader(corr, 0)
+        why = recipe_problem(header, 'lamp_flat' if header.get('METHOD') == 'lamp_only'
+                             else 'twilight')
+        if why:
+            stale.append((corr, why))
+    for path in sorted(glob.glob(os.path.join(extraction_path, '*_RSS_*.fits'))):
+        try:
+            stage = rss_stage(path)
+            with fits.open(path) as hdul:
+                ffver = int(hdul[0].header.get('FFVER', 1))
+                has_tp = 'FIBERMAP' in hdul and 'THRUPUT' in hdul['FIBERMAP'].columns.names
+        except Exception:                                     # noqa: BLE001 - not an RSS
+            continue
+        if stage == 'base' and not has_tp:
+            stale.append((path, "no FIBERMAP THRUPUT (the throughput its rows were divided by)"))
+        elif stage != 'base' and ffver < FFVER:
+            stale.append((path, f"fibre flat FFVER {ffver}, now {FFVER}: the fibre throughput "
+                                f"was divided out twice"))
+    return stale
+
+
+def recipe_matrix(output_dir, extraction_path, flat_field_dir):
+    """``[(product, expected recipe, problem or None)]`` for this run's calibration products.
+
+    Covers the flat products, the fibre-flat corrections, the reduced twilights and the
+    night arcs, read from their headers or ``.recipe.json`` sidecars.
+    """
+    rows = []
+
+    def add(path, recipe, header):
+        rows.append((os.path.basename(path), recipe, recipe_problem(header, recipe)))
+
+    for name, recipe in FLAT_PRODUCT_RECIPES:
+        path = os.path.join(flat_field_dir, name)
+        if os.path.exists(path):
+            add(path, recipe, fits.getheader(path, 0))
+    corr = os.path.join(flat_field_dir, 'fibre_flat_corrections.fits')
+    if os.path.exists(corr):
+        header = fits.getheader(corr, 0)
+        add(corr, 'lamp_flat' if header.get('METHOD') == 'lamp_only' else 'twilight', header)
+    for path in sorted(glob.glob(os.path.join(flat_field_dir, 'twilight', '*_twilight.pkl'))):
+        add(path, 'twilight', read_recipe_sidecar(path))
+    for path in sorted(glob.glob(os.path.join(output_dir, 'arcs', '*_extract.pkl'))):
+        add(path, 'arc', read_recipe_sidecar(path))
+    return rows
+
+
+def science_cosmic_ray_summary(extraction_path, mask_dir=None):
+    """One line on the science frames' cosmic-ray cleaning, or None.
+
+    From the RSS headers (CRCHAN: the channels cleaned; CRMISSF: the share of samples lost to
+    cosmic rays, which are missing data) and the cosmic-ray masks in
+    ``{mask_dir or extraction_path}/masks`` (CRNPIX per extension). Masks written since
+    2026-11-15 record their camera, so flagged pixels are reported per channel; older masks
+    only per frame. A reported number, with no threshold.
+    """
+    chans = set()
+    lost = {}                                   # channel -> {exposure: CRMISSF}
+    for path in glob.glob(os.path.join(extraction_path, '*_RSS_*.fits')):
+        try:
+            hdr = fits.getheader(path, 0)
+        except OSError:
+            continue
+        chans.add(str(hdr.get('CRCHAN', '')).strip())
+        ch = str(hdr.get('CHANNEL', '')).strip().lower()
+        if ch and 'CRMISSF' in hdr:
+            lost.setdefault(ch, {})[exposure_key(path)] = float(hdr['CRMISSF'])
+    totals, per_channel = [], {}
+    for path in glob.glob(os.path.join(mask_dir or extraction_path, 'masks',
+                                       'cosmic_ray_mask_*.fits')):
+        try:
+            with fits.open(path) as hdul:
+                frame = {}
+                for h in hdul[1:]:
+                    n = int(h.header.get('CRNPIX', 0) or 0)
+                    ch = str(h.header.get('COLOR', '')).strip().lower() or None
+                    frame[ch] = frame.get(ch, 0) + n
+        except OSError:
+            continue
+        totals.append(sum(frame.values()))
+        for ch, n in frame.items():
+            if ch:
+                per_channel.setdefault(ch, []).append(n)
+    if not chans and not totals:
+        return None
+    line = f"Science cosmic rays: channels {', '.join(sorted(c for c in chans if c)) or 'none'}"
+    order = [c for c in ('red', 'green', 'blue')]
+    if per_channel:
+        line += ("; median pixels flagged per frame "
+                 + ", ".join(f"{c} {int(np.median(per_channel[c]))}" for c in order
+                             if c in per_channel)
+                 + f" ({len(totals)} frames)")
+    elif totals:
+        line += (f"; median {int(np.median(totals))} pixels flagged per frame "
+                 f"({len(totals)} frames)")
+    if lost:
+        line += ("; samples lost (missing data) "
+                 + ", ".join(f"{c} {np.median(list(lost[c].values())):.2f}% "
+                             f"(max {max(lost[c].values()):.2f}%)" for c in order if c in lost))
+    return line
+
+
+def report_recipes(reporter, output_dir, extraction_path, flat_field_dir, mask_dir=None):
+    """The recipe matrix of this run's calibration products, in the summary and the report.
+
+    Consumers already refuse a product made with the wrong recipe, so a completed run
+    should show none; any that do are logged as warnings.
+    """
+    rows = recipe_matrix(output_dir, extraction_path, flat_field_dir)
+    if not rows:
+        return
+    bad = [(name, why) for name, _, why in rows if why]
+    lines = [f"{name:<64} {recipe:<10} {'✓' if why is None else '✗ ' + why}"
+             for name, recipe, why in rows]
+    science = science_cosmic_ray_summary(extraction_path, mask_dir)
+    if science:
+        lines.append(science)
+    for name, why in bad:
+        logger.warning(f"Recipe check: {name}: {why}", extra={'summarised': True})
+    reporter.summary("Calibration recipes (Utils/recipes.py)", lines)
+    reporter.report('Recipes', f"{len(rows)} calibration products, "
+                    + (f"{len(bad)} not as expected ⚠️" if bad else "all as expected"))
+
+
+def report_pixel_flat(reporter, pixel_map_file):
+    """Show how much of the pixel flat sits at its clip floor (Flat.flatLlamas.assess_pixel_flat)."""
+    if not (pixel_map_file and os.path.exists(pixel_map_file)):
+        return
+    try:
+        lines, warnings, report_text = assess_pixel_flat(pixel_map_file)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"Pixel-flat summary unavailable: {exc}")
+        return
+    if not lines:
+        return
+    for line in lines:
+        logger.info(line)
+    for w in warnings:
+        logger.warning(w, extra={'summarised': True})
+    reporter.summary(lines[0], lines[1:] + [f"⚠️  {w}" for w in warnings])
+    reporter.report('Pixel flat', report_text)
+
+
+def report_fibre_flat(reporter, corrections_file, ff_files, skipped=None):
+    """Show the fibre-flat checks under the current phase and in the final report.
+
+    The checks' warnings go to the log (and the warning tally) once; the terminal
+    shows them in the summary block rather than inline.
+    """
+    ff_files = [f for f in ff_files if os.path.exists(f)]
+    if not (corrections_file and os.path.exists(corrections_file) and ff_files):
+        return
+    try:
+        lines, warnings, report_text = assess_fibre_flat(corrections_file, ff_files, skipped)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"Fibre-flat summary unavailable: {exc}")
+        return
+    for line in lines:
+        logger.info(line)
+    for w in warnings:
+        logger.warning(w, extra={'summarised': True})
+    reporter.summary(lines[0], lines[1:] + [f"⚠️  {w}" for w in warnings])
+    reporter.report('Fibre flat', report_text)
+
+
+_TRACE_SOURCE_LABELS = {
+    'existing_validated': 'existing traces',
+    'existing_partial_fallback': 'existing traces',
+    'generated_validated': 'traced this run',
+    'generated_partial_fallback': 'traced this run',
+    'mastercalib': 'mastercalib traces',
+    'mastercalib_per_camera': 'mastercalib traces',
+}
+
+
+def trace_report_row(trace_source, validation_results=None):
+    """One line on where the traces came from, for the end-of-run report."""
+    source = _TRACE_SOURCE_LABELS.get(trace_source, str(trace_source))
+    if not validation_results:
+        return source
+
+    def _cams(items):
+        by_colour = {}
+        for ch, b, s, *_ in items:
+            by_colour.setdefault(ch, []).append(f"{b}{s}")
+        return ', '.join(f"all {ch}" if len(bss) == 8 else f"{ch} {' '.join(sorted(bss))}"
+                         for ch, bss in by_colour.items())
+
+    fallback = validation_results.get('fallback_used', [])
+    shifted = validation_results.get('shifted_masters', [])
+    skipped = validation_results.get('unusable_masters', [])
+    n_cams = (len(validation_results.get('valid_traces', [])) + len(fallback)
+              + len(new_shifted_masters(validation_results)))
+    text = f"{n_cams} cameras, {source}"
+    if shifted:
+        text += f"; shifted master for {_cams(shifted)}"
+    if fallback and trace_source != 'mastercalib_per_camera':
+        text += f"; mastercalib for {_cams(fallback)}"
+    if skipped:
+        text += f"; no trace for {_cams(skipped)}"
+    return text
+
+
+#: Calibration keys that go through bias-first, and their role.
+BIAS_FIRST_CALIBRATIONS = {
+    'red_flat_file': 'flat', 'green_flat_file': 'flat', 'blue_flat_file': 'flat',
+    'red_arc_file': 'arc', 'green_arc_file': 'arc', 'blue_arc_file': 'arc',
+    'twilight_flat': 'twilight', 'red_twilight_flat': 'twilight',
+    'green_twilight_flat': 'twilight', 'blue_twilight_flat': 'twilight',
+}
+
+
+def _as_list(value):
+    """A config value as a list of strings: split on commas, or the list's items."""
+    if isinstance(value, str):
+        return [s.strip() for s in value.split(',') if s.strip()]
+    if isinstance(value, (list, tuple)):
+        return [s for s in value if isinstance(s, str) and s.strip()]
+    return []
+
+
+def bias_first_frames(config):
+    """{raw path: role} for every frame bias-first will correct.
+
+    Roles: 'science' (science and folded flux standards), 'sky', or a calibration
+    role. A file listed both as a calibration and as science/sky takes the
+    science/sky role, so it gets the dark.
+    """
+    roles = {}
+    for key, role in BIAS_FIRST_CALIBRATIONS.items():
+        path = config.get(key)
+        if isinstance(path, str) and path and os.path.exists(path):
+            roles[path] = role
+    for role, key in (('sky', 'sky_frame_files'), ('science', 'science_files')):
+        for path in _as_list(config.get(key)):
+            if os.path.exists(path):
+                if roles.get(path) in CALIBRATION_ROLES:
+                    print(f"NOTE: {os.path.basename(path)} is listed as a calibration and as "
+                          f"{role}; it is corrected once, as {role} (with the dark).")
+                roles[path] = role
+    return roles
+
+
+#: Where outputs went when output_dir was unset, before 2026-11-14: inside the package.
+OLD_DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, 'reduced')
+
+
+def default_output_dir(config):
+    """``<folder of the first science frame>/reduced``, the output_dir when none is set."""
+    science = _as_list(config.get('science_files'))
+    if not science:
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(science[0])), 'reduced')
+
+
+def frames_in_old_default(config):
+    """This run's frames that already have bias-corrected products in the old default folder."""
+    folder = os.path.join(OLD_DEFAULT_OUTPUT_DIR, 'bias_corrected')
+    if not os.path.isdir(folder):
+        return []
+    names = os.listdir(folder)
+    keys = list(BIAS_FIRST_CALIBRATIONS) + ['science_files', 'sky_frame_files']
+    frames = {p for key in keys for p in _as_list(config.get(key))}
+    return sorted(raw for raw in frames
+                  if any(is_product_of(n, exposure_id(raw)) for n in names))
+
+
+def output_dir_checks(config):
+    """Pre-flight ``(errors, warnings)`` for an unset output_dir, which defaults to the night.
+
+    The default folder must be writable. Frames that already have products in the old default
+    (inside the package) are named, since a resume would otherwise silently start afresh.
+    """
+    errors, warnings = [], []
+    night_out = None if config.get('output_dir') else default_output_dir(config)
+    if not night_out:
+        return errors, warnings
+    night = os.path.dirname(night_out)
+    if not (os.path.isdir(night) and os.access(night, os.W_OK)):
+        errors.append(f"output_dir is not set, and its default '{night_out}' (next to the "
+                      f"science frames) is not writable. Set output_dir.")
+        return errors, warnings
+    print(f"output_dir is not set: writing to {night_out}")
+    old = frames_in_old_default(config)
+    if old:
+        warnings.append(
+            f"{len(old)} of this run's frames have products in {OLD_DEFAULT_OUTPUT_DIR} (the "
+            f"default output_dir before 2026-11-14). This run writes to {night_out}; to resume "
+            f"from them instead, set output_dir = {OLD_DEFAULT_OUTPUT_DIR}")
+    return errors, warnings
+
+
+def disk_folders(config, output_dir, ray_temp_dir):
+    """The folders a run writes to, for the disk-space check (defaults as in ``main``)."""
+    extraction = config.get('extraction_output_dir') or os.path.join(output_dir, 'extractions')
+    return {'output': output_dir,
+            'bias_corrected': os.path.join(output_dir, 'bias_corrected'),
+            'traces': config.get('trace_output_dir') or os.path.join(output_dir, 'traces'),
+            'extractions': extraction,
+            'flat': config.get('flat_field_output_dir') or os.path.join(extraction, 'flat'),
+            'arcs': os.path.join(output_dir, 'arcs'),
+            'lut': LUT_DIR,
+            'ray': ray_spill_folder(config, ray_temp_dir)}
+
+
+def products_done(folders):
+    """``done(kind, raw)`` for the disk estimate: does that product already exist on disk?
+
+    Mirrors the resume checks of each stage. An existing product costs no new space, whether
+    it is reused or overwritten.
+    """
+    listings = {}
+
+    def names(folder):
+        if folder not in listings:
+            listings[folder] = os.listdir(folder) if os.path.isdir(folder) else []
+        return listings[folder]
+
+    def has(folder, raw, marker):
+        exp = exposure_id(raw)
+        return any(exp in n and marker in n for n in names(folder))
+
+    def done(kind, raw):
+        if kind == 'bias_corrected':
+            stem = os.path.splitext(os.path.basename(raw))[0]
+            return f"{stem}_bias_corrected.fits" in names(folders['bias_corrected'])
+        if kind == 'science':
+            return _has_rss_product(folders['extractions'], exposure_id(raw))
+        if kind == 'sky':
+            return has(folders['extractions'], raw, '_corrected_extractions.pkl')
+        if kind == 'twilight_flat':
+            return has(os.path.join(folders['flat'], 'twilight'), raw, '_RSS_')
+        if kind == 'twilight_fibre':
+            return has(os.path.join(folders['extractions'], 'twilight'), raw, '_extract.pkl')
+        if kind == 'arc':
+            return has(folders['arcs'], raw, '_extract.pkl')
+        if kind == 'traces':
+            return sum(n.endswith('_traces.pkl') for n in names(folders['traces'])) >= 24
+        if kind == 'flat':
+            return {'pixel_maps.fits', 'flat_smooth_models.fits'} <= set(names(folders['flat']))
+        if kind == 'darks':
+            return any(n.startswith('master_dark_')
+                       for n in names(os.path.join(folders['output'], 'darks')))
+        if kind == 'refined_arc':
+            return os.path.exists(os.path.join(folders['lut'], 'LLAMAS_reference_arc_refined2d.pkl'))
+        return False
+
+    return done
+
+
+def check_run_disk_space(config, folders, interactive=None):
+    """The pre-flight disk-space check (``Utils/diskSpace.py``) for this run.
+
+    Raises:
+        DiskSpaceError: too little space, or the user chose to terminate.
+    """
+    darks = [p for p in config.get('dark_files') or [] if os.path.isfile(p)]
+    items = estimate_disk_use(
+        bias_first_frames(config), folders, products_done(folders), config,
+        dark_groups=len(group_darks(darks)) if darks else 0,
+        object_store_bytes=object_store_bytes(config))
+    return disk_space_gate(items, config, interactive=interactive,
+                           folder_names={path: name for name, path in folders.items()})
+
+
+def prepare_master_darks(config, frame_roles, slow_bias, fast_bias, output_dir, qa_dir):
+    """Match each science/sky frame to a dark group and build the master darks it needs.
+
+    Returns ``{raw path: (MasterDark or None, scale or None, note)}``; ``note`` says
+    why there is no dark, or warns about the scale. Calibration frames get no dark.
+    """
+    out = {f: (None, None, 'calibration frame') for f, r in frame_roles.items()
+           if r in CALIBRATION_ROLES}
+    targets = [f for f, r in frame_roles.items() if r not in CALIBRATION_ROLES]
+    darks = config.get('dark_files') or []
+    if not darks:
+        for f in targets:
+            out[f] = (None, None, 'no darks listed')
+        return out
+    tol = float(config.get('dark_exptime_tolerance', DEFAULT_TOLERANCE))
+    groups = group_darks(darks)
+    print("DARK FRAMES")
+    for g in groups:
+        print(f"  {g.label} x {len(g.files)}"
+              + ("   WARNING: fewer than 3, see Bias/README.md" if len(g.files) < 3 else ""))
+    masters = {}
+    print(f"Dark matching (same read mode, exposure within {tol:.0%}):")
+    for f in targets:
+        hdr = fits.getheader(f, 0)
+        group, scale, note = match_dark(hdr, groups, tol)
+        if group is not None:
+            key = (group.mode, group.rexptime)
+            if key not in masters:
+                bias_path = resolve_master_bias_file(fits.getheader(group.files[0], 0),
+                                                     slow_bias, fast_bias)
+                masters[key] = build_master_dark(group, bias_path,
+                                                 os.path.join(output_dir, 'darks'), qa_dir)
+            out[f] = (masters[key], scale, note)
+        else:
+            out[f] = (None, None, note)
+        print(f"  {os.path.basename(f)}  {str(hdr.get('OBJECT') or ''):20s} "
+              + (f"-> {group.label} darks, scale {scale:.4f}" if group else f"NOT corrected: {note}")
+              + (f"  WARNING: {note}" if group is not None and note else ""))
+        if group is None:
+            logger.warning(f"No dark for {os.path.basename(f)}: {note}")
+        elif note:
+            logger.warning(f"Dark for {os.path.basename(f)}: {note}")
+    return out
+
+
+def describe_redo(summary):
+    """Terminal line for a resumed run that redid out-of-date frames ('' if none)."""
+    stale = summary.get('stale') or {}
+    if not stale:
+        return ''
+    reasons = sorted({reason for _role, reason in stale.values()})
+    where = os.path.relpath(summary['stale_dir'], os.path.dirname(os.path.dirname(summary['stale_dir'])))
+    if summary['scope'] == 'all':
+        return (f"Calibration frames out of date ({'; '.join(reasons)}): redoing the whole "
+                f"reduction; {summary['moved']} old files and folders moved to {where}")
+    return (f"Redoing {len(summary['redo'])} frame(s) out of date ({'; '.join(reasons)}); "
+            f"{summary['moved']} old files and folders moved to {where}")
+
+
+def dark_report_row(frame_dark, frame_roles, corrected):
+    """One line on the dark subtraction, for the end-of-run report.
+
+    ``corrected`` maps raw paths to their bias-corrected files.
+    """
+    targets = [f for f, r in frame_roles.items() if r not in CALIBRATION_ROLES]
+    if not targets:
+        return ''
+    if all(frame_dark.get(f, (None, None, ''))[2] == 'no darks listed' for f in targets):
+        return 'none listed (dark current left to the edge-DC constant)'
+    full, partly, missed, flagged, labels = [], [], [], [], set()
+    for f in targets:
+        name = os.path.basename(f)
+        master, _scale, note = frame_dark.get(f, (None, None, ''))
+        rows = []
+        try:
+            rows = dark_summary(corrected.get(f, f))
+        except Exception:                                          # noqa: BLE001
+            pass
+        applied = [r for r in rows if r[1]]
+        dead = [r for r in rows if not r[1] and r[2] == 'dead camera in this frame']
+        others = [r for r in rows if not r[1] and r not in dead]
+        if master is None or not applied:
+            missed.append(f"{name} ({note or (others[0][2] if others else 'no dark')})")
+            continue
+        labels.add(f"{master.label} x {master.ncombine}")
+        if others:
+            partly.append(f"{name}: {', '.join(f'{c} ({why})' for c, _a, why in others)}")
+        else:
+            full.append(name)
+        flagged += [f"{name} {c} {flags}" for c, _a, flags in applied if flags != 'none']
+
+    def _few(items):
+        return ', '.join(items[:3]) + (f" +{len(items) - 3} more" if len(items) > 3 else '')
+
+    text = f"subtracted on {len(full) + len(partly)}/{len(targets)} frames"
+    if labels:
+        text += f" ({', '.join(sorted(labels))})"
+    if partly:
+        text += f"; cameras without a dark: {_few(partly)}"
+    if missed:
+        text += f"; not corrected: {_few(missed)}"
+    if flagged:
+        text += f"; flagged: {_few(flagged)}"
+    return text
+
+
+def output_report_row(n_frames, written, n_cubes, extraction_path):
+    """One line on what the run produced, for the end-of-run report.
+
+    RSS products are counted per (exposure, channel), however many stage files each has.
+    """
+    rss = {(exposure_key(f), m.group(2)) for f in written
+           for m in [RSS_STAGE_RE.match(os.path.basename(f))] if m}
+    frames = f"{n_frames} science frame" + ("s" if n_frames != 1 else "")
+    return f"{frames} → {len(rss)} RSS, {n_cubes} cubes in {extraction_path}"
+
+
+#: The extraction method when the config does not set ``extraction_method`` (since 2026-11-15;
+#: boxcar before). 'optimal' is accepted as an alias of 'horne'; 'legacy' is comparison only.
+DEFAULT_EXTRACTION_METHOD = 'horne'
+
+
+def resolve_extraction_method(config):
+    """``(method, boxcar half-width)`` for a run from its config.
+
+    ``extraction_method`` defaults to :data:`DEFAULT_EXTRACTION_METHOD`; ``optimal`` becomes
+    ``horne``; an unknown value warns and uses the default. ``boxcar_halfwidth`` defaults to
+    2.5 px (it only matters for boxcar, and for the read-noise aperture of the error model).
+    """
+    method = normalise_method(config.get('extraction_method', DEFAULT_EXTRACTION_METHOD))
+    if method not in EXTRACT_METHODS:
+        print(f"WARNING: unknown extraction_method '{method}'; "
+              f"using '{DEFAULT_EXTRACTION_METHOD}'")
+        logger.warning(f"Unknown extraction_method '{method}'; using "
+                       f"'{DEFAULT_EXTRACTION_METHOD}'")
+        method = DEFAULT_EXTRACTION_METHOD
+    return method, float(config.get('boxcar_halfwidth', 2.5))
 
 
 def main(config_path):
@@ -1840,7 +2525,8 @@ def main(config_path):
         Configuration: {...}
     """
     print(f"Loading configuration from {config_path}")
-    # You can add functionality here as needed.
+    # Files modified from here on were made by this run (a resumed run never moves them).
+    run_start = time.time()
     with open(config_path, 'r') as f:
         config = {}
         for line in f:
@@ -1878,13 +2564,10 @@ def main(config_path):
                 config[key] = value
 
 
-    # Spectrophotometric standards are extracted exactly like science frames, so fold
-    # flux_standard_files into the science list here, before any stage runs. Every
-    # downstream stage (bias-first, flat correction, extraction) then processes them
-    # uniformly with no standard-specific code path. flux_standard_files is kept as its
-    # own key purely as a record of which exposures are standards; the flux-calibration
-    # step re-identifies each one from its header coordinates, so nothing downstream needs
-    # to track the star name or thread a separate path through the pipeline.
+    # Spectrophotometric standards are reduced exactly like science frames, so fold
+    # flux_standard_files into the science list before any stage runs. The key is kept
+    # only as a record; flux calibration re-identifies each standard from its header
+    # coordinates.
     _std = config.get('flux_standard_files')
     if _std:
         _std_list = [s for s in ([_std] if isinstance(_std, str) else _std) if str(s).strip()]
@@ -1898,14 +2581,17 @@ def main(config_path):
         print(f"Folded {len(_std_list)} flux-standard exposure(s) into the science "
               f"extraction list")
 
+    # dark_files: a single entry parses as a string.
+    _darks = config.get('dark_files')
+    if _darks:
+        config['dark_files'] = [d for d in ([_darks] if isinstance(_darks, str) else _darks)
+                                if str(d).strip()]
+
     # (full configuration is logged to the file once logging is set up, below)
 
-    # Resume control: by default the pipeline reuses any intermediate products
-    # already on disk (flat pixel maps, per-science RSS/_FF products, cubes) and
-    # skips the stages that produced them, so a re-run only does the work that is
-    # actually missing. Set ``clobber = true`` in the config to force every stage
-    # to run from scratch (including trace regeneration; normally traces are also
-    # reused when ``use_existing_traces`` is true, which is the default).
+    # Resume control: by default intermediate products already on disk (flat pixel
+    # maps, RSS/_FF products, cubes) are reused and their stages skipped. Set
+    # ``clobber = true`` to run every stage from scratch, including tracing.
     clobber = bool(config.get('clobber', False))
     resume = not clobber
     # (clobber/resume status is logged to the file below, after logging setup)
@@ -1924,30 +2610,28 @@ def main(config_path):
         log_dir = config['log_output_dir']
     else:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'logs')
-    log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)))
-    logger = logging.getLogger(__name__)
+    terminal_verbose = bool(config.get('terminal_verbose', False))
+    log_file = configure_pipeline_logging(log_dir, retention=int(config.get('log_retention', 10)),
+                                          console=terminal_verbose)
+    logger = logging.getLogger('llamas_pyjamas.reduce')
     logger.info(f"Pipeline started. Config: {config_path}")
 
     # ── Curated terminal reporting (terminal_verbose = false, default) ──────
-    # Route the driver's ~hundreds of print()/logger.info lines to the log file
-    # and show a compact live phase summary on the terminal instead. Ray worker
-    # output is already off the terminal (log_to_driver=False). Set
-    # terminal_verbose = true to restore the full firehose for debugging.
+    # Route the driver's print()/logger.info output to the log file and show a
+    # compact live phase summary on the terminal instead. Set
+    # terminal_verbose = true to restore the full output for debugging.
     import sys as _sys, atexit as _atexit, warnings as _warnings
     from llamas_pyjamas.Utils.reporter import (PipelineReporter, StdoutToLog,
                                                ReporterLogHandler)
-    # Suppress a benign, high-frequency third-party warning: pypeit's per-line
-    # Gaussian centroid fit (fitting.py fit_gauss -> curve_fit) reports
-    # "Covariance of the parameters could not be estimated" for marginal/blended
-    # lines. The pipeline uses the fitted centroid, not its covariance, so this
-    # is noise; it fires hundreds of times during arc refinement/line detection.
+    # Suppress a benign, high-frequency pypeit warning from its per-line Gaussian
+    # centroid fit on marginal/blended lines. The pipeline uses the fitted
+    # centroid, not its covariance.
     _warnings.filterwarnings('ignore',
                              message='Covariance of the parameters could not be estimated')
     # pypeit's bspline solver (util.py) warns "NaN found in cholesky_band" when a
     # fit is locally singular (sparse spectrum edges); it handles it internally
     # and the pipeline guards the resulting model, so it is noise too.
     _warnings.filterwarnings('ignore', message='.*NaN found in cholesky_band.*')
-    terminal_verbose = bool(config.get('terminal_verbose', False))
     _sf = config.get('science_files')
     _n_frames = len(_sf) if isinstance(_sf, list) else (1 if _sf else 0)
     # Planned phases: bias, trace, [arc], [flat], extract, wave+sky, finalise.
@@ -1957,11 +2641,18 @@ def main(config_path):
     if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
         _total_phases += 1
     reporter = PipelineReporter(n_frames=_n_frames, enabled=not terminal_verbose)
+    reporter.log_path = log_file
     _orig_stdout = _sys.stdout
-    _restored = {'done': False}
-    if not terminal_verbose:
+    # 'ok' turns True only when the main try block completes, so an early exit
+    # (pre-flight sys.exit, a crash) ends the report with ❌, not ✅.
+    _run_state = {'done': False, 'ok': False, 'message': None}
+    _parent = logging.getLogger('llamas_pyjamas')
+    if terminal_verbose:
+        # Verbose: the console handler prints everything; this one only counts
+        # warnings for the end-of-run report.
+        _parent.addHandler(ReporterLogHandler(reporter))
+    else:
         _sys.stdout = StdoutToLog(logging.getLogger('llamas_pyjamas.stdout'))
-        _parent = logging.getLogger('llamas_pyjamas')
         for _h in list(_parent.handlers):
             if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
                 _parent.removeHandler(_h)
@@ -1977,12 +2668,12 @@ def main(config_path):
             if isinstance(_h, logging.FileHandler):
                 _pw.addHandler(_h)
 
-    def _restore_terminal(ok=True):
-        if _restored['done']:
+    def _restore_terminal():
+        if _run_state['done']:
             return
-        _restored['done'] = True
+        _run_state['done'] = True
         try:
-            reporter.finish(ok=ok)
+            reporter.finish(ok=_run_state['ok'], message=_run_state['message'])
         except Exception:
             pass
         _sys.stdout = _orig_stdout
@@ -1993,6 +2684,9 @@ def main(config_path):
                 pass
     _atexit.register(_restore_terminal)
     reporter.start(total_phases=_total_phases)
+    # Placeholder so Output leads the report; filled in once products exist.
+    reporter.report('Output', f"{_n_frames} science frame" + ("s" if _n_frames != 1 else "")
+                    + " (no products: run did not finish)")
     # Full configuration + run mode -> log file only (console handler is now at
     # WARNING in curated mode; these are too verbose for the terminal).
     logger.info("Configuration: %s", config)
@@ -2000,24 +2694,24 @@ def main(config_path):
                 if clobber else "resume (reuse existing intermediate products)")
 
     # --- Ray / temp scratch management ---------------------------------------
-    # Redirect all of Ray's temp output (session logs, object-store spill, and the
-    # runtime_env package uploads) into one short, owned, per-run directory so it can
-    # be bounded and reliably cleaned up. Registers atexit + SIGTERM backstops so the
-    # scratch is removed even if the pipeline fails early, and reclaims any leftovers
-    # from crashed prior runs. See llamas_pyjamas/Utils/rayManager.py.
+    # Redirect all of Ray's temp output into one owned, per-run directory that is
+    # cleaned up at exit (even on failure), and reclaim leftovers from crashed runs.
+    # See llamas_pyjamas/Utils/rayManager.py.
     ray_temp_dir = resolve_run_temp_dir(config)
     prune_stale(config)
 
-    # Fail fast if any input lives on an unresponsive filesystem (an offline
-    # cloud mount — Box/iCloud/Dropbox — or a dead network share). Otherwise the
-    # first os.stat in validate_pipeline_config below blocks indefinitely with no
-    # message. This only flags paths whose stat never returns; genuinely missing
-    # files are reported by the existence checks that follow.
-    check_inputs_reachable(get_input_files_from_config(config),
+    # Fail fast if any input lives on an unresponsive filesystem (an offline cloud
+    # mount or dead network share); otherwise the first os.stat below blocks
+    # indefinitely with no message. Missing files are reported by later checks.
+    check_inputs_reachable(get_input_files_from_config(config) + list(config.get('dark_files') or []),
                            timeout_s=float(config.get('input_timeout_s', 15)))
 
     # Pre-flight validation — exits cleanly if anything is wrong
-    validate_pipeline_config(config, config_path)
+    try:
+        validate_pipeline_config(config, config_path)
+    except SystemExit:
+        _run_state['message'] = 'pre-flight check failed (errors above)'
+        raise
 
     input_files = get_input_files_from_config(config)
     validate_input_files(input_files)
@@ -2039,10 +2733,8 @@ def main(config_path):
     # Parse cosmic ray removal configuration
     remove_cosmic_rays = config.get('remove_cosmic_rays', True)
     mask_output_dir = config.get('mask_output_dir', None)
-    if remove_cosmic_rays:
-        logger.info("Cosmic ray removal enabled (L.A.Cosmic)")
-    else:
-        logger.info("Cosmic ray removal disabled")
+    cr_settings, _cr_errors, _cr_warnings = cosmic_ray_settings(config)
+    logger.info(f"Cosmic rays (L.A.Cosmic): {describe_settings(cr_settings, remove_cosmic_rays)}")
 
     # Parse CRR cube configuration (defaults to True if not specified)
     use_crr_cube = config.get('CRR_cube', False)  # Default to True
@@ -2068,25 +2760,17 @@ def main(config_path):
     print(f"Configuring Ray object store memory to {ray_object_store_mb} MB")
 
     # ── Extraction method (applies to EVERY extraction in the run) ──────────
-    # 'boxcar' (default): trace-following aperture with fractional pixel weights
-    # at the edges (continuous across half-pixel trace crossings). Interim
-    # default until the Horne optimal extraction is rebuilt — the current
-    # profile-weighted 'optimal' is unstable on cameras with blended profiles.
-    # Threaded via environment so science, arc, flat, twilight and sky
-    # extractions all use the SAME method — mixing methods breaks the
-    # per-fibre throughput calibration.
-    extraction_method = str(config.get('extraction_method', 'boxcar')).strip().lower()
-    if extraction_method not in ('optimal', 'boxcar', 'horne', 'legacy'):
-        print(f"WARNING: unknown extraction_method '{extraction_method}'; using 'boxcar'")
-        extraction_method = 'boxcar'
-    boxcar_halfwidth = float(config.get('boxcar_halfwidth', 2.5))
+    # Threaded via the environment so science, arc, flat, twilight and sky extractions
+    # all use the SAME method; mixing methods breaks the per-fibre throughput calibration.
+    # Every product records it (EXTMETH), and a resumed run never mixes methods.
+    extraction_method, boxcar_halfwidth = resolve_extraction_method(config)
     os.environ['LLAMAS_EXTRACT_METHOD'] = extraction_method
     os.environ['LLAMAS_BOXCAR_HALFWIDTH'] = str(boxcar_halfwidth)
     # Detector read noise [DN] for Horne variance weighting (read_noise config key).
     os.environ['LLAMAS_READ_NOISE'] = str(float(config.get('read_noise', 3.5)))
     print(f"Extraction method: {extraction_method}"
           + (f" (fractional aperture half-width {boxcar_halfwidth} px)"
-             if extraction_method == 'boxcar' else ""))
+             if extraction_method == 'boxcar' else " (profile-weighted, Horne 1986)"))
 
     # Optional per-task memory reservation for extraction (default 0 = none).
     # A non-zero value throttles extraction concurrency on low-RAM machines; leave
@@ -2098,10 +2782,9 @@ def main(config_path):
     print(f"Configuring Ray per-task memory reservation to {ray_task_memory_mb} MB")
 
 
-    if not config.get('output_dir'):
-        output_dir = os.path.join(BASE_DIR, 'reduced')
-    else:
-        output_dir = config.get('output_dir')
+    output_dir = (config.get('output_dir') or default_output_dir(config)
+                  or OLD_DEFAULT_OUTPUT_DIR)
+    config['output_dir'] = output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     # Wavelength/xshift QA (QA/waveQA.py): per-run HTML report + CSV scorecard.
@@ -2112,17 +2795,29 @@ def main(config_path):
                                or os.path.join(output_dir, 'QA'))
     print(f"Wavelength QA: enabled={wavelength_qa}, dir={config['qa_output_dir']}")
 
-    # Pre-flight disk-space gate: warn when space is tight, abort *before any work*
-    # when it is guaranteed insufficient (so no partial output is left behind).
-    _preflight_inputs = []
-    for _k in ('science_files', 'red_flat_file', 'green_flat_file', 'blue_flat_file',
-               'arc_file', 'flat_file'):
-        _v = config.get(_k)
-        if isinstance(_v, list):
-            _preflight_inputs.extend(_v)
-        elif _v:
-            _preflight_inputs.append(_v)
-    preflight_disk_check(config, output_dir, ray_temp_dir, _preflight_inputs)
+    # Disk space. Trace pickles carrying a frozen copy of the master bias (saved before
+    # Bias/biasCache.py) are slimmed first: bias-first loads them and the estimate uses
+    # their size. Then every volume the run writes to is checked; with too little room
+    # the user is asked whether to go on (Utils/diskSpace.py).
+    run_folders = disk_folders(config, output_dir, ray_temp_dir)
+    if os.path.isdir(run_folders['traces']):
+        for _path, _old, _new in slim_bloated_traces(run_folders['traces']):
+            print(f"Slimmed {os.path.basename(_path)}: {_old / 1e9:.2f} GB -> "
+                  f"{_new / 1e9:.2f} GB (it carried a copy of the master bias)")
+
+    def _disk_gate():
+        if config.get('skip_disk_check'):
+            print("Disk-space check skipped (skip_disk_check = true).")
+            return
+        with reporter.paused():
+            try:
+                check_run_disk_space(config, run_folders)
+            except DiskSpaceError as exc:
+                logger.error(f"Disk space: {exc}")
+                _run_state['message'] = str(exc)[:120]
+                raise SystemExit(1)
+
+    _disk_gate()
 
     # Start THE one Ray session for this run with the canonical config (object store
     # clamped to 30% RAM, py_modules bundle uploaded once, temp/spill in the owned
@@ -2150,7 +2845,7 @@ def main(config_path):
         if not os.path.exists(arcdict):
             raise FileNotFoundError(f"Reference arc file not found at {arcdict}")
         config['arcdict'] = arcdict
-        # NOTE: refine_arc dispatch now happens AFTER trace selection (below),
+        # NOTE: refine_arc dispatch happens AFTER trace selection (below),
         # because the 2d method can extract the night's own arc exposures
         # ({red,green,blue}_arc_file) as its line source, which needs traces.
 
@@ -2172,6 +2867,27 @@ def main(config_path):
     else:
         extraction_path = config['extraction_output_dir']
 
+    # A resumed run must not reuse products that older code made: they would mix fibre-
+    # flat versions, recipes or fibre-id conventions into this run's output.
+    if resume:
+        _stale = stale_products(extraction_path,
+                                config.get('flat_field_output_dir',
+                                           os.path.join(extraction_path, 'flat')),
+                                arc_dir=os.path.join(output_dir, 'arcs'))
+        if _stale:
+            print(f"\n{len(_stale)} product(s) in this output folder were made by an older "
+                  f"version of the pipeline and cannot be reused:")
+            for _path, _why in _stale[:20]:
+                print(f"  ✗ {os.path.basename(_path)}: {_why}")
+            if len(_stale) > 20:
+                print(f"  … and {len(_stale) - 20} more")
+            print("Re-run with clobber = true to rebuild them (or point output_dir elsewhere).")
+            logger.error(f"Resume refused: {len(_stale)} stale product(s), e.g. "
+                         f"{os.path.basename(_stale[0][0])} ({_stale[0][1]})")
+            _run_state['message'] = (f"{len(_stale)} product(s) from an older pipeline version; "
+                                     f"re-run with clobber = true")
+            raise SystemExit(1)
+
     # Per-frame edge-bias (DC offset) settings, threaded into every extraction so
     # science and flats are corrected identically. See build_edge_bias_config.
     edge_bias_cfg = build_edge_bias_config(config, extraction_path)
@@ -2180,27 +2896,78 @@ def main(config_path):
           f"use_flat_mask={edge_bias_cfg['use_flat_mask']}")
 
     # ── BIAS-FIRST PREPROCESSING (unconditional) ────────────────────────────
-    # Bias subtraction is ALWAYS the first data operation for EVERY frame —
-    # science, arc, flat, twilight and sky — before flat division, tracing or
-    # extraction. Each raw MEF gets (1) the mode-appropriate (READ-MDE) 2D
-    # master bias and (2) the per-frame edge DC measured from the
-    # unilluminated stripes outside the fibre bundle, then is written to
-    # {output_dir}/bias_corrected/ with BIASSUB/EDGE* header stamps that make
-    # every downstream stage skip its internal bias handling (exactly-once).
-    # Not configurable: any other order is unphysical.
-    #
-    # WHY: the flat-field division previously ran on frames still carrying
-    # their ~500 DN bias pedestal, so percent-level spectral structure in the
-    # pixel flat was multiplied by the pedestal instead of the signal,
-    # imprinting tens-of-DN fake emission lines (the spurious blue "sky
-    # lines" of 2026-07). With the pedestal removed first, the same flat
-    # structure perturbs the signal by <1 DN.
-    from llamas_pyjamas.Bias.biasFirst import bias_correct_frame
+    # Bias subtraction is ALWAYS the first data operation for EVERY frame, before
+    # flat division, tracing or extraction: the READ-MDE 2D master bias, then (for
+    # science, flux-standard and sky frames with a matched dark) scale x master
+    # dark, then the per-frame edge DC, written to {output_dir}/bias_corrected/
+    # with BIASSUB/DARK*/EDGE* stamps so downstream stages skip their own bias
+    # handling. Not configurable: dividing the flat into a frame still carrying its
+    # ~500 DN pedestal turns percent-level flat structure into tens-of-DN fake
+    # emission lines. See Bias/README.md.
     reporter.phase("🧾", "Bias subtraction")
     print("\n" + "=" * 60)
-    print("BIAS-FIRST PREPROCESSING (master bias + edge DC, before all else)")
+    print("BIAS-FIRST PREPROCESSING (master bias + dark + edge DC, before all else)")
     print("=" * 60)
     _bias_corr_dir = os.path.join(output_dir, 'bias_corrected')
+
+    frame_roles = bias_first_frames(config)
+    frame_dark = prepare_master_darks(config, frame_roles, slow_bias_file, fast_bias_file,
+                                      output_dir, config['qa_output_dir'])
+    if remove_cosmic_rays and cr_settings['red']['enabled']:
+        _no_dark = [os.path.basename(f) for f, r in frame_roles.items()
+                    if r not in CALIBRATION_ROLES and frame_dark[f][0] is None]
+        if _no_dark:
+            logger.warning(
+                f"Red cosmic-ray cleaning is on but {len(_no_dark)} frame(s) have no dark "
+                f"({', '.join(_no_dark[:3])}{' …' if len(_no_dark) > 3 else ''}); on these, "
+                f"red flags hot pixels and sky-line cores (see Masking/README.md)")
+
+    # Resume: a frame corrected by an older bias step, against another master bias
+    # or without the dark this run subtracts would otherwise be reused by name at
+    # every later stage. Move its products aside so the normal resume rebuilds them.
+    redo_summary = {}
+    if resume:
+        _expected_prov = {
+            raw: (role, expected_provenance(fits.getheader(raw, 0), slow_bias_file,
+                                            fast_bias_file, *frame_dark[raw][:2]))
+            for raw, role in frame_roles.items()}
+        # Science, standard and sky RSS also record the cosmic-ray cleaning (CRID) and the
+        # extraction method (EXTMETH/EXTHW).
+        _crid = cosmic_ray_id(cr_settings, remove_cosmic_rays)
+        _extract = run_extraction_method()
+        for _raw, (_role, _exp) in _expected_prov.items():
+            if _role not in CALIBRATION_ROLES:
+                _exp['CRID'] = _crid
+                if _extract is not None:
+                    _exp['EXTMETH'], _exp['EXTHW'] = _extract
+        _mask_dir = config.get('mask_output_dir') or extraction_path
+        _cube_dir = config.get('cube_output_dir') or os.path.join(output_dir, 'cubes')
+        _protected = [p for v in config.values() for p in _as_list(v)
+                      if isinstance(p, str) and os.path.isfile(p)]
+        redo_summary = redo_stale_frames(
+            _expected_prov,
+            dirs=[output_dir, _bias_corr_dir, extraction_path, os.path.join(extraction_path, 'masks'),
+                  _mask_dir, os.path.join(_mask_dir, 'masks'), _cube_dir, config['qa_output_dir']],
+            calib_dirs={'trace_dir': config.get('trace_output_dir'),
+                        'extraction_dir': extraction_path,
+                        'flat_dir': config.get('flat_field_output_dir',
+                                               os.path.join(extraction_path, 'flat')),
+                        'qa_dir': config['qa_output_dir']},
+            output_dir=output_dir, protected=_protected, since=run_start,
+            sky_used=(config.get('sky_selection_method') == 'frame'
+                      and not config.get('sky_extraction_file')),
+            empirical_sky=bool(config.get('sky_empirical_2d', False)))
+        _redo_line = describe_redo(redo_summary)
+        if _redo_line:
+            print(_redo_line)
+            for _raw, (_role, _why) in sorted(redo_summary['stale'].items()):
+                print(f"  out of date: {os.path.basename(_raw)} ({_role}): {_why}")
+            reporter.note(_redo_line)
+        if redo_summary.get('stale'):
+            # The moved products are still on disk, and these frames now need space again.
+            _disk_gate()
+
+    bias_corrected_of = {}
 
     def _bias_first(path):
         """Bias-correct one raw frame (resume-aware); returns the new path."""
@@ -2211,19 +2978,19 @@ def main(config_path):
             os.path.splitext(os.path.basename(path))[0] + '_bias_corrected.fits')
         if resume and os.path.exists(_expected):
             print(f"RESUME: reusing bias-corrected {os.path.basename(_expected)}")
+            bias_corrected_of[path] = _expected
             return _expected
-        return bias_correct_frame(
+        _dark, _scale, _note = frame_dark.get(path, (None, None, 'calibration frame'))
+        bias_corrected_of[path] = bias_correct_frame(
             path, _bias_corr_dir,
             slow_bias=slow_bias_file, fast_bias=fast_bias_file,
             trace_dir=config.get('trace_output_dir'),
             mastercalib_trace_dir=CALIB_DIR,
-            edge_bias=edge_bias_cfg)
+            edge_bias=edge_bias_cfg, dark=_dark, dark_note=_note)
+        return bias_corrected_of[path]
 
     # Calibration frames (single-path keys)
-    for _k in ('red_flat_file', 'green_flat_file', 'blue_flat_file',
-               'red_arc_file', 'green_arc_file', 'blue_arc_file',
-               'twilight_flat', 'red_twilight_flat', 'green_twilight_flat',
-               'blue_twilight_flat'):
+    for _k in BIAS_FIRST_CALIBRATIONS:
         if config.get(_k):
             config[_k] = _bias_first(config[_k])
 
@@ -2240,10 +3007,17 @@ def main(config_path):
         config['science_files'] = [_bias_first(_f) for _f in _sci]
     elif _sci:
         config['science_files'] = _bias_first(_sci)
+    reporter.report('Dark', dark_report_row(frame_dark, frame_roles, bias_corrected_of))
     print("=" * 60 + "\n")
 
     # Note: Pixel maps will be created in extractions/flat/ directory during flat field processing
     # No need to pre-create a separate pixel_maps directory
+    # What this run wrote and kept, per RSS file, for rss_manifest.json (see write_rss_manifest).
+    _run_record = {'written': set(), 'notes': {}}
+
+    def _note(path, msg):
+        _run_record['notes'].setdefault(os.path.basename(path), []).append(msg)
+
     try:
         reporter.phase("🔦", "Tracing fibres")
 
@@ -2258,59 +3032,57 @@ def main(config_path):
 
         final_trace_dir = None
         trace_source = None
+        validation_results = None
+        trace_dir = config.get('trace_output_dir')
 
-        # Check if we should use existing traces or generate new ones
-        if resume and config.get('use_existing_traces', True) and os.path.exists(config.get('trace_output_dir')):
-            # Check if trace files exist in the specified directory
-            import glob
-            existing_traces = glob.glob(os.path.join(config.get('trace_output_dir'), '*.pkl'))
+        # Reuse this night's traces if allowed and they are current-format. Otherwise
+        # trace the night from its flats with the current tracer (traceLlamasMaster).
+        retrace = True
+        if resume and config.get('use_existing_traces', True) and os.path.exists(trace_dir):
+            existing_traces = glob.glob(os.path.join(trace_dir, '*.pkl'))
             if existing_traces:
-                print(f"Found {len(existing_traces)} existing trace files in {config.get('trace_output_dir')}")
-
-                # Validate existing traces with per-trace fallback
-                from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
-
+                print(f"Found {len(existing_traces)} existing trace files in {trace_dir}")
                 print("Validating existing traces...")
                 validation_results = validate_and_fix_trace_fibres(
-                    config.get('trace_output_dir'),
-                    mastercalib_dir=CALIB_DIR
-                )
-
-                if validation_results['all_valid']:
-                    print("✓ All existing traces validated successfully")
-                    final_trace_dir = config.get('trace_output_dir')
-                    trace_source = "existing_validated"
+                    trace_dir, mastercalib_dir=CALIB_DIR, flats=night_flats(config),
+                    require_fingerprint=require_fingerprint(config))
+                legacy = validation_results['legacy_traces']
+                if legacy:
+                    # Old-format traces are never reused. Nothing has been changed yet,
+                    # so stopping here for want of flats leaves the folder untouched.
+                    print(f"⚠️  {len(legacy)} trace(s) in {trace_dir} were written by an older "
+                          f"pipeline version and are not reused")
+                    for channel, bench, side, path in legacy:
+                        print(f"  ✗ {channel}{bench}{side}: {os.path.basename(path)}")
+                    missing_flats = missing_flat_files(config)
+                    if missing_flats:
+                        raise RuntimeError(
+                            f"{trace_dir} holds traces from an older pipeline version, which are "
+                            f"not reused, and there are no flats to re-trace from: set "
+                            f"{', '.join(missing_flats)} in the config. No files were changed.")
+                    print("Re-tracing this night from its flats with the current tracer")
+                    for original, backup in set_aside_legacy_traces([path for *_, path in legacy]):
+                        print(f"  set aside {os.path.basename(original)} as {os.path.basename(backup)}")
+                    validation_results = None
                 else:
-                    # Some traces invalid - fallbacks were copied
-                    invalid_count = len(validation_results['invalid_traces'])
-                    fallback_count = len(validation_results['fallback_used'])
-
-                    print(f"⚠️  Found {invalid_count} trace(s) with incorrect fiber counts")
-                    print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
-
-                    # Print details about invalid traces
-                    for channel, bench, side, expected, actual in validation_results['invalid_traces']:
-                        print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
-
-                    # Print details about fallbacks used
-                    for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
-                        print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
-
-                    # Still use trace_output_dir (now contains mix of user + mastercalib)
-                    final_trace_dir = config.get('trace_output_dir')
-                    trace_source = "existing_partial_fallback"
-
-                    print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} user + {fallback_count} mastercalib)")
+                    retrace = False
+                    final_trace_dir = trace_dir
+                    if validation_results['all_valid']:
+                        print("✓ All existing traces validated successfully")
+                        print_shifted_masters(validation_results)
+                        trace_source = "existing_validated"
+                    else:
+                        report_trace_validation(validation_results, 'existing', reporter)
+                        trace_source = "existing_partial_fallback"
+            elif missing_flat_files(config):
+                print("No existing trace files and no flats to trace from; using mastercalib")
+                retrace = False
             else:
-                print("No existing trace files found in specified directory")
-                final_trace_dir = None  # Will generate new or fallback
-                trace_source = "existing_missing"
-        else:
+                print("No existing trace files found; tracing this night from its flats")
+
+        if retrace:
             print("Generating new traces...")
             logger.info("Stage: Generating new traces")
-
-            # Validate flat field files before trace generation
-            
 
             print("Validating flat field files...")
             red_flat_validated = validate_and_fix_extensions(
@@ -2330,55 +3102,52 @@ def main(config_path):
             )
 
             generate_traces(red_flat_validated, green_flat_validated, blue_flat_validated,
-                           config.get('trace_output_dir'),
-                           slow_bias=slow_bias_file, fast_bias=fast_bias_file)
-
-            # Validate newly generated traces with per-trace fallback
-            from llamas_pyjamas.Utils.utils import validate_and_fix_trace_fibres
+                           trace_dir, slow_bias=slow_bias_file, fast_bias=fast_bias_file)
 
             print("Validating newly generated traces...")
+            # A camera that failed to trace gets its mastercalib trace shifted onto its flat.
+            shift_onto = {'red': red_flat_validated, 'green': green_flat_validated,
+                          'blue': blue_flat_validated}
             validation_results = validate_and_fix_trace_fibres(
-                config.get('trace_output_dir'),
-                mastercalib_dir=CALIB_DIR
-            )
+                trace_dir, mastercalib_dir=CALIB_DIR, flats=shift_onto,
+                require_fingerprint=require_fingerprint(config))
+            if validation_results['legacy_traces']:
+                # Old-format files the re-trace did not overwrite, e.g. LLAMAS_master_*
+                # names, which clear_stale_traces leaves alone. Every fresh trace has comb_ok.
+                set_aside_legacy_traces([path for *_, path in validation_results['legacy_traces']])
+                validation_results = validate_and_fix_trace_fibres(
+                    trace_dir, mastercalib_dir=CALIB_DIR, flats=shift_onto,
+                    require_fingerprint=require_fingerprint(config))
 
+            final_trace_dir = trace_dir
             if validation_results['all_valid']:
                 print("✓ Generated traces validated successfully")
-                final_trace_dir = config.get('trace_output_dir')
                 trace_source = "generated_validated"
             else:
-                # Some traces invalid - fallbacks were copied
-                invalid_count = len(validation_results['invalid_traces'])
-                fallback_count = len(validation_results['fallback_used'])
-
-                print(f"⚠️  Found {invalid_count} generated trace(s) with incorrect fiber counts")
-                print(f"✓  Copied {fallback_count} mastercalib fallback trace(s)")
-
-                # Print details about invalid traces
-                for channel, bench, side, expected, actual in validation_results['invalid_traces']:
-                    print(f"  ✗ {channel}{bench}{side}: Expected {expected} fibers, found {actual}")
-
-                # Print details about fallbacks used
-                for channel, bench, side, _master_path, _copied_path in validation_results['fallback_used']:
-                    print(f"  ✓ {channel}{bench}{side}: Using mastercalib fallback (copied to trace_dir)")
-
-                # Still use trace_output_dir (now contains mix of user + mastercalib)
-                final_trace_dir = config.get('trace_output_dir')
+                report_trace_validation(validation_results, 'generated', reporter)
                 trace_source = "generated_partial_fallback"
-
-                print(f"\n✓ Continuing with hybrid trace set ({len(validation_results['valid_traces'])} generated + {fallback_count} mastercalib)")
 
         # Final fallback to mastercalib if needed
         if final_trace_dir is None:
             print(f"\n⚠️  FALLBACK: Using mastercalib traces from {CALIB_DIR}")
 
-            # Validate mastercalib traces exist and are valid
+            # Every master usable: use the mastercalib set in place, nothing copied.
             if count_trace_fibres(CALIB_DIR):
                 final_trace_dir = CALIB_DIR
                 trace_source = "mastercalib"
                 print("✓ Mastercalib traces validated successfully")
             else:
-                raise RuntimeError(f"FATAL: Even mastercalib traces in {CALIB_DIR} are invalid or missing!")
+                # Otherwise fall back camera by camera: only the usable masters are
+                # copied into the (empty) trace directory.
+                print("⚠️  Some mastercalib traces are unusable; falling back camera by camera")
+                validation_results = validate_and_fix_trace_fibres(
+                    config.get('trace_output_dir'), mastercalib_dir=CALIB_DIR)
+                if not validation_results['fallback_used']:
+                    raise RuntimeError(f"FATAL: no usable mastercalib trace in {CALIB_DIR} for any camera!")
+                with reporter.paused():
+                    confirm_unusable_master_traces(validation_results['unusable_masters'])
+                final_trace_dir = config.get('trace_output_dir')
+                trace_source = "mastercalib_per_camera"
 
         # Update config to reflect final decision
         config['trace_output_dir'] = final_trace_dir
@@ -2391,8 +3160,9 @@ def main(config_path):
         print(f"Trace source: {trace_source}")
         print(f"All pipeline steps will use traces from: {final_trace_dir}")
         print("="*60)
+        reporter.report('Traces', trace_report_row(trace_source, validation_results))
 
-        # ── Arc xshift refinement (moved after trace selection so the 2d
+        # ── Arc xshift refinement (after trace selection so the 2d
         # method can extract the night's own arc exposures) ──
         if config.get('refine_arc', False) and not config.get('generate_new_wavelength_soln'):
             reporter.phase("🌈", "Arc wavelength refinement")
@@ -2405,11 +3175,9 @@ def main(config_path):
             if refine_method == '2d':
                 from llamas_pyjamas.Arc.arcSurface import refineArcX2D
 
-                # Night-of arc line source: extract the same-afternoon arc
-                # exposures ({red,green,blue}_arc_file) through the night's
-                # traces so the refined solution aligns to the observation
-                # epoch rather than the packaged reference arc's. Extraction
-                # is resume-aware (existing *_extract.pkl in arcs/ reused).
+                # Night-of arc line source: extract the same-afternoon arcs
+                # through the night's traces so the refined solution matches the
+                # observation epoch, not the packaged reference arc's.
                 line_source = None
                 if bool(config.get('refine_arc_use_night_arcs', True)):
                     night_arcs = {}
@@ -2428,14 +3196,23 @@ def main(config_path):
                                 print(f"RESUME: reusing extracted night arc for {_ch}: {_base}")
                             else:
                                 print(f"Extracting night arc for {_ch}: {os.path.basename(_f)}")
-                                run_extraction(_f, arc_extract_dir,
-                                               slow_bias=slow_bias_file,
-                                               fast_bias=fast_bias_file,
-                                               trace_dir=final_trace_dir,
-                                               mastercalib_trace_dir=CALIB_DIR,
-                                               remove_cosmic_rays=False,
-                                               edge_bias=edge_bias_cfg)
+                                try:
+                                    run_extraction(_f, arc_extract_dir,
+                                                   slow_bias=slow_bias_file,
+                                                   fast_bias=fast_bias_file,
+                                                   trace_dir=final_trace_dir,
+                                                   mastercalib_trace_dir=CALIB_DIR,
+                                                   remove_cosmic_rays=False,
+                                                   edge_bias=edge_bias_cfg,
+                                                   recipe='arc')
+                                except Exception as _arc_exc:
+                                    if is_disk_full(_arc_exc):
+                                        raise
+                                    logger.warning(f"Night-arc extraction for {_ch} failed: "
+                                                   f"{_arc_exc}", exc_info=True)
                             if os.path.exists(_pkl):
+                                check_recipe(read_recipe_sidecar(_pkl), 'arc',
+                                             what=os.path.basename(_pkl))
                                 line_source[_ch] = _pkl
                             else:
                                 print(f"WARNING: night-arc extraction missing for {_ch} "
@@ -2489,12 +3266,11 @@ def main(config_path):
         if config.get('apply_flat_field_correction', True) and config.get('apply_pixel_flat', True):
             reporter.phase("💡", "Flat field")
         flat_pixel_maps = []
+        twilight_pkls = {}     # {colour: reduced twilight pickle}, set after the flat stage
         flat_field_method = config.get('flat_field_method', 'simple')
-        # Resume: flat_pixel_maps is always a single-element list holding the path
-        # to pixel_maps.fits (see process_flat_field_calibration). If both that MEF
-        # and the flat_smooth_models.fits (needed by the fibre-flat stage) already
-        # exist, we can skip the expensive flat extraction entirely and just point
-        # flat_pixel_maps at the existing file.
+        # Resume: if pixel_maps.fits and flat_smooth_models.fits (needed by the
+        # fibre-flat stage) both exist, skip the expensive flat extraction and
+        # point flat_pixel_maps (a single-element list) at the existing MEF.
         _flat_field_dir = config.get('flat_field_output_dir',
                                      os.path.join(extraction_path, 'flat'))
         _flat_products_present = (
@@ -2595,32 +3371,11 @@ def main(config_path):
             config['flat_rss_outputs'] = []
             timestamp_ff = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Prefer twilight flat when specified (per-colour aware, F1).
-            twilight_by_color = resolve_twilight_files(config)
-            twilight_files = list(dict.fromkeys(
-                f for f in twilight_by_color.values() if f))  # distinct, ordered
-            twilight_file = twilight_files[0] if twilight_files else None
+            # Twilights are reduced once after this stage (reduce_twilights). With none
+            # configured, a dome-flat RSS is made instead.
+            twilight_file = next((f for f in resolve_twilight_files(config).values() if f), None)
 
-            if twilight_files and flat_pixel_maps:
-                print("\nTwilight flat specified — building fibre-flat RSS from twilight flat...")
-                twi_dir = os.path.join(flat_field_dir, 'twilight')
-                os.makedirs(twi_dir, exist_ok=True)
-                twi_rss = _process_flat_for_rss(
-                    twilight_files,
-                    flat_pixel_maps, twi_dir,
-                    trace_dir=final_trace_dir,
-                    arc_dict_config=config.get('arcdict'),
-                    timestamp=timestamp_ff, label='twilight',
-                    slow_bias=slow_bias_file, fast_bias=fast_bias_file,
-                    edge_bias=edge_bias_cfg,
-                )
-                if twi_rss:
-                    config['flat_rss_outputs'] = twi_rss
-                    print(f"  Twilight flat RSS: {twi_rss}")
-                else:
-                    print("  WARNING: Twilight flat RSS generation failed.")
-
-            if not config['flat_rss_outputs']:
+            if twilight_file is None:
                 # Fallback: dome flats — also need pixel correction before extraction
                 dome_files = [config.get('red_flat_file'),
                               config.get('green_flat_file'),
@@ -2659,6 +3414,29 @@ def main(config_path):
        # Apply flat field corrections to science files before extraction
         # First, validate all science files for missing extensions
         
+
+        if flat_pixel_maps:
+            report_pixel_flat(reporter, flat_pixel_maps[0])
+
+        # Each twilight is reduced once; the RSS throughput and the fibre flat's T_i both
+        # come from that reduction (Flat.fibreFlat.reduce_twilights).
+        twilight_by_colour = resolve_twilight_files(config)
+        if flat_pixel_maps and any(twilight_by_colour.values()):
+            try:
+                twilight_pkls = reduce_twilights(
+                    twilight_by_colour, flat_pixel_maps[0], final_trace_dir,
+                    config.get('arcdict'), slow_bias_file, _flat_field_dir,
+                    fast_bias=fast_bias_file, edge_bias=edge_bias_cfg,
+                    mastercalib_trace_dir=CALIB_DIR)
+                print("Twilight flats: " + ", ".join(
+                    f"{c}={os.path.basename(p)}" for c, p in sorted(twilight_pkls.items())))
+            except Exception as exc:
+                if is_disk_full(exc):
+                    raise
+                logger.warning(f"Twilight reduction failed: {exc}", exc_info=True)
+                print(f"WARNING: Twilight reduction failed ({exc}); the RSS keeps the "
+                      f"arc-carried throughput and the fibre flat falls back to the lamp")
+                twilight_pkls = {}
 
         print("\n" + "="*60)
         print("VALIDATING SCIENCE FILES")
@@ -2781,11 +3559,10 @@ def main(config_path):
             print(f"Total extensions with errors: {overall_stats['total_errors']}")
 
         # ── Field-level empirical multi-dither 2D sky (opt-in; default off) ──
-        # Build, per exposure, the empirical sky from the field's dithers on the bias+flat-corrected
-        # 2D frames and extract it with the pipeline aperture, saved as a per-exposure sidecar pkl
-        # ({stem}_empsky2d.pkl). The sky loop below seeds each fibre's .sky with it as the BASE, then
-        # skyModel_1d(residual=True) + sky_line_refine + the framework stage run as the second-pass
-        # residual cleanup (each independently config-toggleable). See Combine/empiricalSky2D.
+        # Build each exposure's empirical sky from the field's dithers on the 2D frames, extracted
+        # with the pipeline aperture into a {stem}_empsky2d.pkl sidecar. The sky loop below seeds
+        # .sky with it as the BASE; the later sky stages then clean up the residual.
+        # See Combine/empiricalSky2D.
         if (config.get('sky_empirical_2d', False)
                 and isinstance(science_files_to_process, list)
                 and len(science_files_to_process) >= 2):
@@ -2797,7 +3574,7 @@ def main(config_path):
                 _ech = config.get('sky_empirical_channels', ('red', 'green', 'blue'))
                 if isinstance(_ech, str):
                     _ech = tuple(c.strip().lower() for c in _ech.split(',') if c.strip())
-                _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+                _emethod = os.environ.get('LLAMAS_EXTRACT_METHOD', DEFAULT_EXTRACTION_METHOD)
                 _fields = _e2.group_fields(
                     science_files_to_process,
                     min_frames=int(config.get('sky_empirical_min_frames', _e2.MIN_FIELD_FRAMES)))
@@ -2876,7 +3653,9 @@ def main(config_path):
                     remove_cosmic_rays=remove_cosmic_rays,
                     mask_output_dir=mask_output_dir,
                     edge_bias=edge_bias_cfg,
-                    whitelight_hex=config.get('whitelight_hex', True)
+                    whitelight_hex=config.get('whitelight_hex', True),
+                    cosmic_rays=cr_settings,
+                    recipe='science'
                 )
                 print(f"Extraction completed for {os.path.basename(science_file)}. Output file: {extracted_basename}")
                 if extracted_basename:
@@ -2897,7 +3676,9 @@ def main(config_path):
                 remove_cosmic_rays=remove_cosmic_rays,
                 mask_output_dir=mask_output_dir,
                 edge_bias=edge_bias_cfg,
-                whitelight_hex=config.get('whitelight_hex', True)
+                whitelight_hex=config.get('whitelight_hex', True),
+                cosmic_rays=cr_settings,
+                recipe='science'
             )
             print(f"Extraction completed. Used traces from {final_trace_dir} with mastercalib fallback. Output file: {extracted_basename}")
             if extracted_basename:
@@ -2941,13 +3722,18 @@ def main(config_path):
                     sky_frame_files[0], extraction_path,
                     slow_bias_file, fast_bias_file, final_trace_dir,
                     remove_cosmic_rays, mask_output_dir, config,
-                    flat_pixel_maps=flat_pixel_maps if use_flat else None)
+                    flat_pixel_maps=flat_pixel_maps if use_flat else None,
+                    cosmic_rays=cr_settings)
             else:
                 print("WARNING: sky_selection_method='frame' but no sky_frame_files set; "
                       "falling back to 'quantile'")
                 sky_selection_method = 'stratified'
 
         reporter.phase("🌌", "Wavelength & sky subtraction")
+        # Per-fibre throughput from the twilights (default on; twilight_throughput = false
+        # keeps the arc-carried lamp values). Computed once for all frames.
+        twilight_tp = (twilight_throughputs(twilight_pkls)
+                       if config.get('twilight_throughput', True) and twilight_pkls else {})
         for index, (correction_path, orig_science_file) in enumerate(science_pkl_pairs):
             reporter.frame(index + 1, len(science_pkl_pairs), _frame_label(orig_science_file))
             print(f"Processing extraction file {index+1}/{len(science_pkl_pairs)}: {correction_path}")
@@ -2955,32 +3741,28 @@ def main(config_path):
                 raise FileNotFoundError(f"Extraction file {correction_path} does not exist.")
 
             # Correct wavelengths for each extraction file
-            corr_extractions, _ = correct_wavelengths(correction_path, soln=config.get('arcdict'))
+            corr_extractions, ext_hdr = correct_wavelengths(correction_path, soln=config.get('arcdict'))
 
             # Per-fibre throughput from the twilight (sky) flat, extracted with
             # the same method as the science (default on; twilight_throughput =
             # false reverts to the arc-carried lamp values).
             if config.get('twilight_throughput', True):
-                _twi_dir = os.path.join(
-                    config.get('flat_field_output_dir',
-                               os.path.join(extraction_path, 'flat')), 'twilight')
-                _n_twi = apply_twilight_throughput(corr_extractions, _twi_dir) \
-                    if os.path.isdir(_twi_dir) else 0
+                _n_twi = apply_twilight_throughput(corr_extractions, twilight_tp)
                 if _n_twi:
                     print(f"Twilight throughput applied to {_n_twi} cameras")
                 else:
-                    print("Twilight throughput: no twilight extraction found — "
-                          "keeping arc-carried values")
+                    print("Twilight throughput: no reduced twilight — keeping arc-carried values")
 
             corr_extraction_list = corr_extractions['extractions']
 
-            # Read primary header directly from the original science FITS file.
-            # This guarantees correct RA/DEC and telescope pointing regardless of what
-            # may have been stored in intermediate pickle files (flat-corrected copies,
-            # concat'd flat pkls, etc. all share the same primary HDU data but the
-            # pkl chain is fragile — the original file is authoritative).
+            # Read the primary header from the original science FITS file: it is the
+            # authoritative source of RA/DEC and pointing, not the intermediate pkl chain.
             with fits.open(orig_science_file) as _sci_hdul:
                 primary_hdr = _sci_hdul[0].header.copy()
+            # ...but the cosmic-ray cleaning and the extraction method were recorded at
+            # extraction (CRID/CRCHAN, EXTMETH/EXTHW), and a resumed run compares them on the RSS.
+            copy_cosmic_ray_stamps(ext_hdr, primary_hdr)
+            copy_extraction_method(ext_hdr, primary_hdr)
 
             # Save the corrected extractions using the current file's base name
             base_name = os.path.splitext(os.path.basename(correction_path))[0]
@@ -3021,6 +3803,7 @@ def main(config_path):
             # Optionally run sky subtraction, populating the .sky attribute on each fiber
             sky_subtract = config.get('sky_subtract', True)
             rss_input_file = savefile
+            sky1d_file = None
             if sky_subtract:
                 print(f"Running sky subtraction on {os.path.basename(savefile)} "
                       f"(selection='{sky_selection_method}', "
@@ -3046,16 +3829,12 @@ def main(config_path):
                     rss_input_file = lr_file
                     print(f"OH line refinement applied -> {os.path.basename(lr_file)}")
 
-                # The continuum pedestal (sky_pedestal) is NO LONGER applied per-frame here: its
-                # floor template is built by combining ALL of the run's frames, so it runs as a
-                # run-level stage after this loop (see run_pedestal_stage, before the fibre-flat).
+                # The continuum pedestal (sky_pedestal) is not applied per-frame: its floor
+                # template combines ALL of the run's frames, so it runs as a run-level stage
+                # after this loop (see run_pedestal_stage, before the fibre-flat).
 
-                # Per-science wavelength QA: final xshift (incl. refineSkyX if
-                # enabled) + populated .sky. Writes one HTML report + CSV per
-                # science frame into qa_output_dir. Never fatal. Note: lives
-                # inside the loop that resume skips, so QA regenerates only when
-                # extraction reruns; the standalone CLI
-                # (python -m llamas_pyjamas.QA.waveQA) covers existing products.
+                # Per-science wavelength QA (HTML + CSV per frame). Never fatal. Resume skips
+                # this loop, so for existing products use python -m llamas_pyjamas.QA.waveQA.
                 if wavelength_qa:
                     try:
                         from llamas_pyjamas.QA import waveQA
@@ -3109,7 +3888,11 @@ def main(config_path):
                                 orig_science, extraction_path,
                                 trace_dir=final_trace_dir,
                                 mastercalib_trace_dir=CALIB_DIR,
-                                edge_bias=edge_bias_cfg
+                                remove_cosmic_rays=remove_cosmic_rays,
+                                mask_output_dir=mask_output_dir,
+                                edge_bias=edge_bias_cfg,
+                                cosmic_rays=cr_settings,
+                                recipe='science'
                             )
                             noflat_corr_dict, noflat_hdr = correct_wavelengths(
                                 noflat_extracted, soln=config.get('arcdict'))
@@ -3131,6 +3914,8 @@ def main(config_path):
                             except OSError:
                                 pass
                         except Exception as _nf_err:
+                            if is_disk_full(_nf_err):
+                                raise
                             import traceback as _tb
                             print(f"WARNING: NOFLAT extraction failed: {_nf_err}")
                             _tb.print_exc()
@@ -3160,34 +3945,39 @@ def main(config_path):
             # Updating RA and Dec in RSS files
             for rss_output_file in new_rss_outputs:
                 update_ra_dec_in_fits(rss_output_file, logger=rss_logger)
+                _run_record['written'].add(os.path.basename(rss_output_file))
 
             # Free wavelength-corrected extractions to reduce memory pressure
             del corr_extractions, corr_extraction_list
             gc.collect()
 
-            # Extraction pkls are intermediate products: the RSS carries everything the
-            # downstream steps need, and each pkl is large (~GB). By default they are removed
-            # once the RSS is written; set save_extraction_pkl = true to keep them at full
-            # size for deep inspection (most users never look at them). The RSS, not the pkl,
-            # is the resume anchor, so removal does not affect resume.
-            for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file],
+            # Extraction pkls (~GB each) are removed once the RSS is written, which carries
+            # everything downstream needs and is the resume anchor. That includes the sky1d
+            # pkl when the line-refined one superseded it. Set save_extraction_pkl = true to
+            # keep them for inspection.
+            for _pkl in cleanup_extraction_pkls([correction_path, rss_input_file, sky1d_file],
                                                 config.get('save_extraction_pkl', False)):
                 print(f"Removed extraction pkl (save_extraction_pkl=false): "
                       f"{os.path.basename(_pkl)}")
 
-        # ── Run-level continuum pedestal (option A) ──
-        # Applied here, after every base-sky per-channel RSS exists and BEFORE the fibre-throughput
-        # flat: scattered light does not traverse the fibre so it is not throughput-modulated and must
-        # be subtracted pre-flat (the RSS COUNTS/SKY planes are pre-flat). The floor template needs all
-        # the run's frames, so it cannot run in the per-frame loop above; run_pedestal_stage builds the
-        # per-run counts/sec template (or config/shipped fallback) and applies it idempotently.
+        # ── Run-level continuum pedestal ──
+        # Applied after every base RSS exists and BEFORE the fibre-throughput flat: scattered
+        # light does not traverse the fibre, so it is not throughput-modulated and must be
+        # subtracted pre-flat. The floor template needs all the run's frames; run_pedestal_stage
+        # builds it (or uses the config/shipped fallback) and applies it idempotently.
         if config.get('sky_subtract', True) and config.get('sky_pedestal', False):
             from llamas_pyjamas.Sky.skyPedestal import run_pedestal_stage
-            _ped_rss = [
-                os.path.join(extraction_path, f)
-                for f in os.listdir(extraction_path)
-                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
-            ]
+            _ped_rss = []
+            for _f in _base_stage_rss(extraction_path, _note):
+                _ff = _f.replace('.fits', '_FF.fits')
+                if resume and os.path.exists(_ff):
+                    # Its FF (and FF_SKYSUB) were made without this pedestal; changing only
+                    # the base file now would leave the stages holding different data.
+                    print(f"RESUME: pedestal not applied to {os.path.basename(_f)} -- its _FF "
+                          f"already exists (set clobber=true to redo the chain).")
+                    _note(_f, 'pedestal skipped: downstream stage exists')
+                    continue
+                _ped_rss.append(_f)
             if _ped_rss:
                 print(f"Applying run-level continuum pedestal to {len(_ped_rss)} RSS files "
                       f"(scope={config.get('sky_pedestal_scope', 'slit')})...")
@@ -3206,11 +3996,7 @@ def main(config_path):
             # RSS files that still need a fibre-flat product. On resume, drop any
             # that already have their _FF.fits so the (expensive) twilight
             # reduction below is skipped entirely when nothing is pending.
-            _rss_all = [
-                os.path.join(extraction_path, f)
-                for f in os.listdir(extraction_path)
-                if f.endswith('.fits') and '_RSS' in f and '_FF' not in f
-            ]
+            _rss_all = _base_stage_rss(extraction_path, _note)
             if resume:
                 _rss_pending = [r for r in _rss_all
                                 if not os.path.exists(r.replace('.fits', '_FF.fits'))]
@@ -3221,15 +4007,16 @@ def main(config_path):
                 print("RESUME: all _FF products present — skipping fibre-to-fibre "
                       "flat correction (set clobber=true to force).")
                 logger.info("Resume: skipping fibre-flat (all _FF present)")
+                report_fibre_flat(reporter,
+                                  os.path.join(flat_field_dir, 'fibre_flat_corrections.fits'),
+                                  [r.replace('.fits', '_FF.fits') for r in _rss_all])
             elif os.path.exists(smooth_models_file):
                 print("\n" + "=" * 60)
                 print("FIBRE-TO-FIBRE FLAT CORRECTION")
                 print("=" * 60)
 
-                # F1: resolve twilight flats PER COLOUR. The previous code read
-                # only the singular ``twilight_flat`` key and silently ignored
-                # the per-colour keys ``{red,green,blue}_twilight_flat`` that the
-                # LLAMAS config templates use, forcing a lamp-only fallback.
+                # Resolve twilight flats PER COLOUR ({red,green,blue}_twilight_flat,
+                # falling back to the shared twilight_flat key).
                 twilight_by_color = resolve_twilight_files(config)
                 # Group colours by the distinct file that serves them (a single
                 # LLAMAS twilight MEF holds all cameras, so several colours often
@@ -3249,47 +4036,21 @@ def main(config_path):
                     print(f"Using twilight flat(s): {summary}")
                     logger.info(f"Twilight flats (per colour): {summary}")
                     try:
-                        merged_ext, merged_meta = [], []
-                        merged_primary = None
-                        used_colors = set()
-                        for tfile, colors in files_to_colors.items():
-                            twi = reduce_twilight_flat(
-                                tfile,
-                                flat_pixel_maps[0] if flat_pixel_maps else None,
-                                final_trace_dir,
-                                config.get('arcdict'),
-                                slow_bias_file,
-                                extraction_path,
-                                fast_bias=fast_bias_file,
-                                edge_bias=edge_bias_cfg,
-                            )
-                            merged_primary = twi.get('primary_header',
-                                                     merged_primary)
-                            # Keep only the channels this file is assigned to, so
-                            # a per-colour twilight flat contributes only its
-                            # colour(s) to the merged set.
-                            for ext, meta in zip(twi['extractions'],
-                                                 twi['metadata']):
-                                if meta['channel'] in colors:
-                                    merged_ext.append(ext)
-                                    merged_meta.append(meta)
-                                    used_colors.add(meta['channel'])
-                            del twi
-                            gc.collect()
+                        # The twilights reduced after the flat stage, each camera from
+                        # its colour's file (the same reduction the RSS throughput used).
+                        twi_extractions = load_twilights(twilight_pkls)
+                        if twi_extractions is None:
+                            raise RuntimeError("no reduced twilight (see the flat stage)")
+                        used_colors = {m['channel'] for m in twi_extractions['metadata']}
                         missing = {'red', 'green', 'blue'} - used_colors
                         if missing:
                             logger.warning(
                                 f"No twilight flat for colour(s) "
                                 f"{sorted(missing)}; those benchsides will use "
                                 f"the lamp-derived T_i fallback within the "
-                                f"twilight method.")
+                                f"twilight method.", extra={'summarised': True})
                             print(f"  NOTE: colour(s) {sorted(missing)} have no "
                                   f"twilight flat — lamp-only T_i for those.")
-                        twi_extractions = {
-                            'extractions': merged_ext,
-                            'metadata': merged_meta,
-                            'primary_header': merged_primary,
-                        }
                         corrections_file = compute_fibre_flat_twilight(
                             twi_extractions, smooth_models_file,
                             flat_field_dir,
@@ -3297,12 +4058,18 @@ def main(config_path):
                                 'fibre_flat_integration_range'),
                             poly_order=config.get(
                                 'fibre_flat_poly_order', None),
+                            header_extra={
+                                f'TWIFIL{c[0].upper()}': (os.path.basename(f),
+                                                          f'{c} twilight flat')
+                                for f, cs in files_to_colors.items() for c in cs},
                         )
-                        del twi_extractions, merged_ext, merged_meta
+                        del twi_extractions
                         gc.collect()
                         print(f"Fibre flat computed (twilight + lamp method; "
                               f"colours: {sorted(used_colors)})")
                     except Exception as e:
+                        if is_disk_full(e):
+                            raise
                         print(f"WARNING: Twilight reduction failed: {e}")
                         logger.warning(f"Twilight reduction failed: {e}", exc_info=True)
                         print("Falling back to lamp-only fibre flat")
@@ -3310,10 +4077,6 @@ def main(config_path):
                         # Best-effort cleanup of any partial intermediates.
                         try:
                             del twi_extractions
-                        except NameError:
-                            pass
-                        try:
-                            del merged_ext, merged_meta
                         except NameError:
                             pass
                         gc.collect()
@@ -3325,22 +4088,28 @@ def main(config_path):
                         print("Twilight flat not available or failed — "
                               "using lamp-only fallback")
                     else:
+                        # The fibre-flat summary shows this, so it is only counted.
                         logger.warning(
                             "No twilight flat provided (checked twilight_flat and "
                             "{red,green,blue}_twilight_flat). Falling back to "
                             "lamp-only fibre-to-fibre flat. Science cubes will "
                             "contain artificial spatial illumination gradients "
-                            "from the lamp.")
+                            "from the lamp.", extra={'summarised': True})
                     corrections_file = compute_fibre_flat_lamp_only(
                         smooth_models_file, flat_field_dir)
                     print("Fibre flat computed (lamp-only method)")
 
                 # Apply to the pending RSS files (resume-filtered above).
+                _ff_stats = {}
                 for rss_file in _rss_pending:
                     ff_output = rss_file.replace('.fits', '_FF.fits')
                     apply_fibre_flat_to_rss(rss_file, corrections_file,
-                                           ff_output)
+                                           ff_output, stats=_ff_stats)
+                    _run_record['written'].add(os.path.basename(ff_output))
                     print(f"  FF RSS: {os.path.basename(ff_output)}")
+                report_fibre_flat(reporter, corrections_file,
+                                  [r.replace('.fits', '_FF.fits') for r in _rss_all],
+                                  skipped=_ff_stats.get('skipped'))
             else:
                 print("WARNING: Smooth models file not found — "
                       "skipping fibre-to-fibre flat correction")
@@ -3372,6 +4141,11 @@ def main(config_path):
                 print("=" * 60)
                 sky_cfg = SkySubtractConfig.from_pipeline_config(config)
                 skysub_files = subtract_sky_all_colors(ff_for_sky, config=sky_cfg)
+                _run_record['written'].update(os.path.basename(sf) for sf in skysub_files)
+                _made = {os.path.basename(sf) for sf in skysub_files}
+                for _ff in ff_for_sky:
+                    if os.path.basename(_ff.replace('_FF.fits', '_FF_SKYSUB.fits')) not in _made:
+                        _note(_ff, 'sky framework failed (see log); no _FF_SKYSUB')
                 for sf in skysub_files:
                     print(f"  SKYSUB RSS: {os.path.basename(sf)}")
                 logger.info(f"Sky framework produced: {skysub_files}")
@@ -3454,13 +4228,26 @@ def main(config_path):
             print("Cube generation disabled (generate_cubes=False)")
 
         # ── Consolidate per-stage RSS files to one per (frame, channel) ──
-        # The extract / _FF / _FF_SKYSUB stages leave up to three RSS per channel; keep only
-        # the most-corrected, renamed to a clean {base}_RSS_{color}.fits. Runs here, after cube
-        # construction (which consumes the _FF / _FF_SKYSUB files). Set keep_intermediate_rss =
-        # true to keep every stage.
+        # Keep only the most-corrected stage, renamed to {base}_RSS_{color}.fits. Must run after
+        # cube construction, which consumes the _FF / _FF_SKYSUB files. Set
+        # keep_intermediate_rss = true to keep every stage.
         for _action, _detail in consolidate_rss_files(
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"RSS consolidation: {_action} {_detail}")
+            if _action == 'renamed':
+                _old, _new = [x.strip() for x in _detail.split('->')]
+                if _old in _run_record['written']:
+                    _run_record['written'].add(_new)
+                _run_record['notes'].setdefault(_new, []).extend(
+                    _run_record['notes'].get(_old, []))
+        _manifest = write_rss_manifest(extraction_path, _run_record)
+        if _manifest:
+            print(f"RSS manifest: {_manifest}")
+        reporter.report('Output', output_report_row(
+            _n_frames, _run_record['written'], len(cube_files), extraction_path))
+        report_recipes(reporter, output_dir, extraction_path,
+                       config.get('flat_field_output_dir', os.path.join(extraction_path, 'flat')),
+                       mask_dir=config.get('mask_output_dir'))
 
         # Rename the per-exposure pipeline white-light to {exposure_id}_whitelight_fullpipeline.fits
         # -- distinct from the telescope quicklook's {timestamp}_whitelight.fits (left untouched).
@@ -3468,18 +4255,24 @@ def main(config_path):
                 extraction_path, keep_intermediate=config.get('keep_intermediate_rss', False)):
             print(f"White-light consolidation: {_action} {_detail}")
 
+        _run_state['ok'] = True
+
     except Exception as e:
-        traceback.print_exc()
+        # The full traceback goes to the log; the curated terminal shows one line.
+        if terminal_verbose:
+            traceback.print_exc()
         print(f"An error occurred: {e}")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
+        _run_state['message'] = f"{type(e).__name__}: {e}"[:120]
+        if is_disk_full(e):
+            _run_state['message'] = disk_full_message(
+                [run_folders['output'], run_folders['traces'], run_folders['extractions'],
+                 run_folders['ray']], ray_folders=(run_folders['ray'],))[:120]
     finally:
-        # Restore the terminal (finalise the reporter, un-redirect stdout) before
-        # teardown so the completion line and any traceback render normally.
-        # exc_info is set iff an exception is propagating through this finally.
-        _restore_terminal(ok=(_sys.exc_info()[0] is None))
-        # Prompt teardown: shut Ray down and remove the run scratch dir (honours
-        # cleanup_scratch=false). The atexit/SIGTERM backstops guarantee this also
-        # runs for failures before this try (validate/flat/arc) and on signals.
+        # Restore the terminal before teardown so the completion line renders normally.
+        _restore_terminal()
+        # Shut Ray down and remove the run scratch dir (honours cleanup_scratch=false).
+        # atexit/SIGTERM backstops cover failures before this try and signals.
         cleanup_scratch()
 
 

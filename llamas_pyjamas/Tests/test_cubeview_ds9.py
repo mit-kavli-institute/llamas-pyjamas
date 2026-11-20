@@ -169,11 +169,8 @@ def test_set_fits_pipes_real_fits_bytes_and_never_touches_disk():
 
 
 def test_is_alive_matches_real_xpaaccess_exit_semantics():
-    # Regression. xpaaccess reports the MATCH COUNT via its exit status, so a running DS9
-    # exits 1 (one match) and an absent one exits 0 -- inverted from the shell convention.
-    # Verified against xpa 2.1.20: `xpaaccess ds9` -> "yes", exit=1;
-    # `xpaaccess -n nosuchthing` -> "0", exit=0. Treating exit!=0 as failure made is_alive()
-    # raise exactly when DS9 *was* running.
+    # xpaaccess reports the MATCH COUNT via its exit status (xpa 2.1.20), so a running DS9
+    # exits 1 and an absent one exits 0; is_alive() must not treat exit!=0 as failure.
     with tempfile.TemporaryDirectory() as tmp:
         _make_fake_xpa(tmp, replies={'xpaaccess': '1\n'}, statuses={'xpaaccess': 1})
         os.environ['CUBEVIEWER_XPA_DIR'] = tmp

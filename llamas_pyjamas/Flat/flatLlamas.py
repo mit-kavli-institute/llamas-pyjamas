@@ -16,6 +16,8 @@ from pypeit.core.fitting import iterfit
 import pickle
 from datetime import datetime
 from scipy.ndimage import median_filter, gaussian_filter
+from llamas_pyjamas.Utils.deadfibers import live_fibre_ids
+from llamas_pyjamas.Utils.recipes import stamp_recipe
 
 
 # Default per-channel signal thresholds for the simple pixel flat method
@@ -121,7 +123,7 @@ def sanitize_extraction_dict_for_pickling(extraction_dict):
 
 
 
-def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
+def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None, ext_cards=None):
     """
     Sort pixel maps in canonical order and write to a single FITS file.
     
@@ -131,6 +133,7 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
         pixel_maps: Dictionary of pixel maps keyed by extension name
         output_path: Path to output FITS file
         header_info: Optional dictionary with header keywords
+        ext_cards: Optional ``{ext_name: {key: (value, comment)}}`` for the extensions
     """
     
     # Parse extension names and assign sort indices
@@ -187,6 +190,8 @@ def sort_and_write_pixel_maps(pixel_maps, output_path, header_info=None):
         img_hdu.header['BENCH'] = str(bench)
         img_hdu.header['SIDE'] = side.upper()
         img_hdu.header['COMMENT'] = f'Flat field pixel map for {ext_name}'
+        for key, card in (ext_cards or {}).get(ext_name, {}).items():
+            img_hdu.header[key] = card
 
         hdu_list.append(img_hdu)
     
@@ -284,10 +289,9 @@ def generate_pixel_flat_extension(extraction_obj, channel=None, filter_size=51,
         if return_smooth_models:
             smooth_models[fib_idx] = smooth_1d.copy()
 
-        # 1D sensitivity ratio where signal is reliable.
-        # F2: also reject non-finite, negative/zero, and saturated raw counts so
-        # corrupted pixels keep sensitivity 1.0 (no correction) instead of
-        # producing spurious ratios that the clip floors to clip_range[0].
+        # 1D sensitivity ratio where signal is reliable. Non-finite, non-positive
+        # and saturated raw counts keep sensitivity 1.0 rather than a spurious
+        # ratio that the clip would floor to clip_range[0].
         valid = (smooth_1d > signal_threshold) & np.isfinite(raw_1d) & (raw_1d > 0)
         if saturation_threshold is not None:
             valid &= (raw_1d < saturation_threshold)
@@ -461,7 +465,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             )
             
             # Create evaluation grid
-            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))  # was 2* for Higher resolution
+            xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))
             y_fit = sset.value(xmodel)[0]
             
             # Evaluate fit quality
@@ -509,7 +513,7 @@ def fit_spectrum_to_xshift(extraction, fiber_index, maxiter=6, bkspace=None, nor
             bkpt=manual_bkpt
         )
         
-        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift)) # why was this twice the length?
+        xmodel = np.linspace(xshift_clean.min(), xshift_clean.max(), len(xshift))
         y_fit = sset.value(xmodel)[0]
         y_fit_original = sset.value(xshift_clean)[0]
         residuals = counts_clean - y_fit_original
@@ -657,7 +661,7 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
 
     # Save the calibrated flat extractions (sanitized to avoid pickling issues)
     calibrated_flat_file = os.path.join(output_dir, 'combined_flat_extractions_calibrated.pkl')
-    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated) #why is this here?
+    sanitized_flat_dict = sanitize_extraction_dict_for_pickling(flat_dict_calibrated)
     with open(calibrated_flat_file, 'wb') as f:
         pickle.dump(sanitized_flat_dict, f)
     logger.info(f"Calibrated flat extractions saved to {calibrated_flat_file}")
@@ -678,8 +682,10 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     # Step 5: Generate the 2D maps
     logger.info("Step 5: Generating 2D Pixel-to-Pixel Sensitivity Maps")
     
-    # This calls generate_thresholds, which now uses our updated _generate_single_pixel_map
     pixel_map_results = threshold_processor.generate_thresholds()
+    stamp_lamp_flat_products(
+        [threshold_processor.map_filename],
+        {'red': red_flat_file, 'green': green_flat_file, 'blue': blue_flat_file})
     
     # Ensure the results dictionary points to the newly created FITS file
     results = {
@@ -691,6 +697,103 @@ def process_flat_field_complete(red_flat_file, green_flat_file, blue_flat_file,
     }
 
     return results
+
+
+def clip_fraction_cards(pixel_map, clip_range):
+    """Header cards: the share of corrected pixels sitting at the clip floor and ceiling.
+
+    Corrected pixels are those the map changes (finite and not exactly 1). A pixel at a
+    limit had its correction cut short: many at the floor mean the lamp flat's fibre cores
+    were lowered (e.g. by cosmic-ray cleaning) or saturated.
+    """
+    corrected = np.isfinite(pixel_map) & (pixel_map != 1.0)
+    n = int(corrected.sum())
+    if n == 0:
+        return {'NCORPIX': (0, 'pixels the pixel flat corrects')}
+    lo = int(np.sum(corrected & (pixel_map <= clip_range[0])))
+    hi = int(np.sum(corrected & (pixel_map >= clip_range[1])))
+    return {'NCORPIX': (n, 'pixels the pixel flat corrects'),
+            'FCLIPLO': (round(100.0 * lo / n, 4), '% of corrected pixels at the clip floor'),
+            'FCLIPHI': (round(100.0 * hi / n, 4), '% of corrected pixels at the clip ceiling')}
+
+
+def assess_pixel_flat(pixel_map_file, relative=5.0, floor_pct=0.1):
+    """Table and warnings on how much of the pixel flat sits at its clip floor.
+
+    Warns when a detector's floor-clipped share is more than ``relative`` x the median of
+    the other detectors of its colour, or a colour's median is more than ``relative`` x
+    the lowest colour's; in either case only above ``floor_pct`` %, below which the share
+    is too small to matter. Returns ``(lines, warnings, report_text)``.
+    """
+    lo = {}
+    with fits.open(pixel_map_file) as hdul:
+        for ext in hdul[1:]:
+            if 'FCLIPLO' in ext.header:
+                key = (str(ext.header.get('CHANNEL', '')).lower(),
+                       f"{ext.header.get('BENCH', '')}{str(ext.header.get('SIDE', '')).upper()}")
+                lo[key] = float(ext.header['FCLIPLO'])
+    if not lo:
+        return [], [], ''
+    colours = [c for c in ('red', 'green', 'blue') if any(k[0] == c for k in lo)]
+    benchsides = [f"{b}{s}" for b in '1234' for s in 'AB']
+    lines = ["Pixel flat: corrected pixels at the clip floor, %",
+             f"{'':7}" + ''.join(f"{bs:>7}" for bs in benchsides)]
+    for ch in colours:
+        lines.append(f"{ch:<7}" + ''.join(f"{lo[(ch, bs)]:7.2f}" if (ch, bs) in lo
+                                         else f"{'—':>7}" for bs in benchsides))
+    warnings = []
+    for (ch, bs), v in sorted(lo.items()):
+        others = [o for (c, b), o in lo.items() if c == ch and b != bs]
+        if len(others) >= 3 and v > floor_pct and v > relative * max(np.median(others), 1e-9):
+            warnings.append(f"Pixel flat {ch} {bs}: {v:.2f}% of corrected pixels at the clip "
+                            f"floor ({relative:g}x the other {ch} detectors' median "
+                            f"{np.median(others):.2f}%)")
+    medians = {ch: float(np.median([v for (c, _), v in lo.items() if c == ch])) for ch in colours}
+    lowest = min(medians.values())
+    for ch, m in medians.items():
+        if m > floor_pct and m > relative * max(lowest, 1e-9):
+            warnings.append(f"Pixel flat {ch}: median {m:.2f}% of corrected pixels at the clip "
+                            f"floor, {m / max(lowest, 1e-9):.0f}x the lowest colour "
+                            f"({lowest:.2f}%): the lamp flat's {ch} fibre cores were lowered "
+                            f"(cosmic-ray cleaning?) or saturated")
+    report = "clip floor " + ", ".join(f"{ch} {medians[ch]:.2f}%" for ch in colours)
+    return lines, warnings, report
+
+
+def stamp_lamp_flat_products(paths, flat_files):
+    """Record the lamp-flat recipe and input flats in the primary header of each product.
+
+    ``flat_files`` is ``{channel: path}``. Products are made with no cosmic-ray cleaning
+    (recipe ``lamp_flat``), recorded as CRCLEAN = False.
+    """
+    for path in paths:
+        if not path or not os.path.exists(path):
+            continue
+        with fits.open(path, mode='update') as hdul:
+            header = hdul[0].header
+            stamp_recipe(header, 'lamp_flat')
+            header['CRCLEAN'] = (False, 'Lamp flat not cosmic-ray cleaned')
+            for channel, flat in sorted(flat_files.items()):
+                header[f'FLATFIL{channel[0].upper()}'] = (
+                    os.path.basename(str(flat)) if flat else 'none', f'{channel} lamp flat')
+
+
+def smooth_model_table(ext_obj, smooth_models):
+    """``(fiber_ids, smooth, wave)`` for the rows of one camera that have a smooth model.
+
+    The extraction is live-indexed (dead fibres absent) and ``smooth_models`` is keyed by
+    that row. ``fiber_ids`` are the physical fibre ids (fibremap positions) of those rows,
+    the ids the RSS FIBERMAP uses, so the fibre flat lands on the right fibre above a dead
+    one. The three arrays are aligned row for row.
+    """
+    n_rows = ext_obj.counts.shape[0]
+    physical = live_fibre_ids(n_rows, getattr(ext_obj, 'dead_fibers', []) or [])
+    rows = [r for r in range(n_rows) if r in smooth_models]
+    wave = [ext_obj.wave[r, :] if ext_obj.wave is not None
+            else np.full(ext_obj.counts.shape[1], np.nan) for r in rows]
+    return (np.array([physical[r] for r in rows], dtype=np.int32),
+            np.array([smooth_models[r] for r in rows], dtype=np.float64),
+            np.array(wave, dtype=np.float64))
 
 
 def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
@@ -715,6 +818,7 @@ def _write_smooth_models_fits(all_smooth_data, output_path, filter_size=51,
     primary = fits.PrimaryHDU()
     primary.header['FILTSZ'] = (filter_size, 'Median filter kernel size')
     primary.header['GSIGMA'] = (gaussian_sigma, 'Gaussian smoothing sigma')
+    primary.header['FIBIDS'] = ('physical', 'FIBER_ID is the fibremap position')
     primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
     primary.header['HISTORY'] = 'Smooth lamp-envelope models from P2P flat step'
     hdul = fits.HDUList([primary])
@@ -948,6 +1052,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     trace_files = glob.glob(os.path.join(trace_dir, 'LLAMAS*traces.pkl'))
 
     pixel_maps = {}  # keyed by underscore-separated ext_name
+    clip_cards = {}  # keyed by ext_name: share of pixels at the clip limits
     all_smooth_data = {}  # keyed by ext_name, for fibre flat
     unillum_masks = {}  # keyed by ext_name, for edge-bias Tier 2 (flat-derived L/R darks)
 
@@ -979,6 +1084,7 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
             return_smooth_models=True,
         )
         pixel_maps[ext_name] = pixel_map
+        clip_cards[ext_name] = clip_fraction_cards(pixel_map, clip_range)
 
         # Edge-bias Tier 2: build the flat-derived unilluminated mask for this
         # detector. On-fibre pixels whose smooth flat model drops below
@@ -992,24 +1098,12 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
         except Exception as _um_exc:
             logger.warning(f"  {ext_name}: unillum mask build failed ({_um_exc})")
 
-        # Build FIBER_ID list keyed by physical ID, excluding dead fibres
-        dead_set = set(getattr(ext_obj, 'dead_fibers', []) or [])
-        total_fibers = ext_obj.counts.shape[0]
-        alive_ids = [i for i in range(total_fibers) if i not in dead_set]
-
-        # Collect smooth models and wavelength arrays for alive fibres only
-        alive_smooth = []
-        alive_wave = []
-        for fid in alive_ids:
-            if fid in smooth_models:
-                alive_smooth.append(smooth_models[fid])
-                alive_wave.append(ext_obj.wave[fid, :] if ext_obj.wave is not None
-                                  else np.full(ext_obj.counts.shape[1], np.nan))
+        alive_ids, alive_smooth, alive_wave = smooth_model_table(ext_obj, smooth_models)
 
         all_smooth_data[ext_name] = {
-            'fiber_ids': np.array(alive_ids, dtype=np.int32),
-            'smooth': np.array(alive_smooth, dtype=np.float64),
-            'wave': np.array(alive_wave, dtype=np.float64),
+            'fiber_ids': alive_ids,
+            'smooth': alive_smooth,
+            'wave': alive_wave,
             'channel': channel,
             'bench': bench,
             'side': side,
@@ -1025,7 +1119,10 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     pixel_map_path = os.path.join(output_dir, 'pixel_maps.fits')
     sort_and_write_pixel_maps(
         pixel_maps, pixel_map_path,
-        header_info={'FLATMTHD': 'simple_median_gaussian'})
+        header_info={'FLATMTHD': 'simple_median_gaussian',
+                     'CLIPLO': (clip_range[0], 'pixel-flat clip floor'),
+                     'CLIPHI': (clip_range[1], 'pixel-flat clip ceiling')},
+        ext_cards=clip_cards)
 
     # ── Step 6: Write smooth models FITS for fibre-to-fibre flat ──
     logger.info("Step 6: Writing smooth models FITS for fibre flat")
@@ -1042,6 +1139,10 @@ def process_pixel_flat_simple(red_flat_file, green_flat_file, blue_flat_file,
     except Exception as _um_exc:
         logger.warning(f"Failed to write unillum_mask.fits ({_um_exc}); "
                        f"edge-bias Tier 2 will fall back to stripes only")
+
+    stamp_lamp_flat_products(
+        [pixel_map_path, smooth_models_path, unillum_mask_path],
+        {'red': red_flat_file, 'green': green_flat_file, 'blue': blue_flat_file})
 
     logger.info(f"Pixel flat processing complete: {pixel_map_path}")
     logger.info(f"Smooth models saved to: {smooth_models_path}")
@@ -1184,8 +1285,7 @@ def apply_flat_field_correction(science_file, pixel_map_file, output_dir=None):
             # Handle potential division by zero or invalid values
             with np.errstate(divide='ignore', invalid='ignore'):
                 corrected_data = science_data / pixmap_data
-                # Replace inf and nan with original values (or zeros)
-                # You may want to adjust this behavior
+                # Non-finite ratios keep the uncorrected value
                 corrected_data = np.where(np.isfinite(corrected_data),
                                          corrected_data,
                                          science_data)

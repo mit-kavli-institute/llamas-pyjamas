@@ -175,10 +175,6 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
                 error_data = hdu.data.astype(np.float32)
                 logger.info(f"Loaded ERROR: {error_data.shape}")
                 
-            elif extname == 'MASK' and hdu.data is not None:
-                mask_data = hdu.data.astype(bool)
-                logger.info(f"Loaded MASK: {mask_data.shape}")
-                
             elif extname == 'WAVE' and hdu.data is not None:
                 wave_data = hdu.data.astype(np.float32)
                 logger.info(f"Loaded WAVE: {wave_data.shape}")
@@ -190,6 +186,13 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
             elif extname == 'FIBERMAP':
                 fibermap = Table(hdu.data)
                 logger.info(f"Loaded FIBERMAP: {len(fibermap)} fibers")
+
+        # CRR wants True = VALID; the shared rule gives True = bad (bad MASK bits, zero-count
+        # pixels), so invert it.
+        if flux_data is not None:
+            from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+            mask_data = ~bad_pixel_mask(hdul) & np.isfinite(flux_data)
+            logger.info(f"Valid-pixel mask: {int(mask_data.sum())} of {mask_data.size} valid")
     
     # Validate required data
     if flux_data is None:
@@ -220,9 +223,11 @@ def load_rss_as_crr_data(rss_file: str) -> RSSData:
             wavelength = wave_data
     
     # Convert to CRR format (transpose from LLAMAS [n_wave, n_fiber] to CRR [n_fiber, n_wave])
-    flux_crr = flux_data.T  # Shape: (n_fiber, n_wave)
-    error_crr = error_data.T
     mask_crr = mask_data.T
+    # A masked sample has zero weight in CRR, but 0 x NaN is still NaN in its matrix products,
+    # so one missing sample (e.g. a cosmic-ray gap) would blank its whole wavelength slice.
+    flux_crr = np.where(mask_crr, flux_data.T, 0.0)  # Shape: (n_fiber, n_wave)
+    error_crr = error_data.T
     
     # Convert error to inverse variance
     ivar_crr = np.zeros_like(error_crr)

@@ -5,7 +5,6 @@ import argparse
 import ray
 from llamas_pyjamas.Utils.rayManager import init_ray
 import psutil
-import pkg_resources
 from pathlib import Path
 import logging
 import llamas_pyjamas
@@ -28,7 +27,7 @@ import llamas_pyjamas.Trace.traceLlamasMaster as traceLlamasMaster
 from llamas_pyjamas.constants import RED_IDXS, GREEN_IDXS, BLUE_IDXS, N_det
 
 # Set up logger
-logger = logging.getLogger('flatProcessing')
+logger = logging.getLogger(__name__)
 
 
 def load_bias_subtracted_flat_2d(flat_fits_file, channel, bench, side, bias_file=None):
@@ -117,9 +116,8 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     
     assert type(idxs) == list, 'idxs must be a list of integers'
 
-    # Attach to (or start) the one consolidated Ray session (see Utils/rayManager.py):
-    # canonical py_modules runtime_env, object store clamped to 30% RAM, temp/spill in
-    # the owned scratch dir. In the pipeline this attaches to reduce.py's session.
+    # Attach to (or start) the shared Ray session (see Utils/rayManager.py); in the
+    # pipeline this is reduce.py's session.
     init_ray()
 
     
@@ -172,7 +170,7 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
     # Validate bias file structure (add placeholders for missing cameras)
     masterbiasfile = validate_for_gui(masterbiasfile)
 
-    masterfile = 'LLAMAS'  # Changed from 'LLAMAS_master' to match both LLAMAS and LLAMAS_master files
+    masterfile = 'LLAMAS'  # matches both LLAMAS_* and LLAMAS_master_* trace files
     extraction_file = os.path.splitext(filename)[0] + '_extractions_flat.pkl'
 
     if type(channel) == str:
@@ -248,12 +246,16 @@ def reduce_flat(filename, idxs, tracedir=None, channel=None, save_dir=OUTPUT_DIR
 
     futures = []
     for hdu_index, trace_file in _hdu_trace_pairs:
-        logging.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
+        logger.info(f'Processing HDU {hdu_index} with trace file {trace_file}')
         print(f"  Pairing HDU {hdu_index} with {os.path.basename(trace_file)}")
         hdu_data = channel_hdus[hdu_index].data
         hdr = channel_hdus[hdu_index].header
        
-        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal', use_bias=masterbiasfile)
+        # No cosmic-ray cleaning: L.A.Cosmic takes bright, sharp fibre cores for cosmic rays
+        # and lowers them, leaving false dips in the pixel flat and the fibre flat.
+        future = process_trace.remote(hdu_data, hdr, trace_file, hdu_index, method='optimal',
+                                      use_bias=masterbiasfile, remove_cosmic_rays=False,
+                                      recipe='lamp_flat')
         futures.append(future)
     
     _extractions = ray.get(futures)
@@ -405,7 +407,7 @@ def produce_normalised_whitelight(red_flat, green_flat, blue_flat, tracedir=None
             image = hdu[index].data
             max_val = np.nanmax(image)
             if np.isnan(image).all() or np.isnan(max_val):
-                logging.warning(f'All values are NaN for HDU {index}. Skipping normalization.')
+                logger.warning(f'All values are NaN for HDU {index}. Skipping normalization.')
                 normalized_image = image
             elif max_val != 0:
                 normalized_image = image / max_val

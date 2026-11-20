@@ -23,7 +23,6 @@ Two dialogs share the scan and the table:
 
 import logging
 import os
-import re
 from typing import Dict, List, Optional
 
 from astropy.io import fits
@@ -44,29 +43,34 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from llamas_pyjamas.File.llamasRSS import RSS_STAGE_RE_NOCASE
 from llamas_pyjamas.Flux.sensFunc import is_sensfunc_file
 
 logger = logging.getLogger(__name__)
 
-# An RSS plane, at any processing stage: <base>_RSS_<colour>[_FF[_SKYSUB]].fits. The base
-# before _RSS_ is the exposure key that groups the three colours into one row.
-_RSS_RE = re.compile(r'^(.*)_RSS_(blue|green|red)(?:_FF(?:_SKYSUB)?)?\.fits$', re.IGNORECASE)
+# An RSS plane, at any processing stage: <base>_RSS_<colour>[_FF[_SKYSUB]].fits (the shared
+# stage pattern). Planes are grouped by exposure (llamasRSS.exposure_key), so the long per-stage
+# names and a consolidated name of one exposure make one row.
+_RSS_RE = RSS_STAGE_RE_NOCASE
 _CHANNEL_ORDER = ('blue', 'green', 'red')
 
 
 def scan_rss_exposures(directory: str) -> List[Dict]:
     """Group the RSS planes in `directory` into one entry per exposure.
 
-    Returns a list of dicts (sorted by base name), each with: ``base`` (the filename stem
-    before ``_RSS_``), ``representative`` (the file to open -- green preferred), ``paths`` (all
-    plane files, blue/green/red order), ``channels``, and the header summary ``object``,
-    ``exptime``, ``notes``. ``error`` is set instead of the header fields if the header could
-    not be read. White-light and difference images are skipped.
+    Returns a list of dicts (sorted by exposure), each with: ``base`` (the exposure id),
+    ``representative`` (the file to open -- green preferred), ``paths`` (one plane file per
+    channel, blue/green/red order), ``channels``, and the header summary ``object``, ``exptime``,
+    ``notes``. Each channel's file is the exposure's FINAL stage (``_FF_SKYSUB`` > ``_FF`` >
+    base, or the consolidated file), so every picker -- open, register, apply sensfunc, combine
+    -- works on the file the combiner uses. ``error`` is set (duplicate stage files, channels on
+    mixed stages, or an unreadable header). White-light and difference images are skipped.
     """
     if not directory or not os.path.isdir(directory):
         return []
 
-    grouped: Dict[str, Dict[str, str]] = {}
+    from llamas_pyjamas.File.llamasRSS import RSSStageError, exposure_key, final_siblings
+    grouped: Dict[str, Dict[str, str]] = {}            # exposure -> {colour: a plane file}
     for name in sorted(os.listdir(directory)):
         low = name.lower()
         if not low.endswith('.fits') or 'white' in low or 'diff' in low:
@@ -74,16 +78,17 @@ def scan_rss_exposures(directory: str) -> List[Dict]:
         match = _RSS_RE.match(name)
         if not match:
             continue
-        base, colour = match.group(1), match.group(2).lower()
-        # Keep the least-suffixed plane per (base, colour): a consolidated run has exactly one,
-        # but if intermediates linger, prefer the cleanest name for display/opening.
-        existing = grouped.setdefault(base, {}).get(colour)
-        if existing is None or len(name) < len(os.path.basename(existing)):
-            grouped[base][colour] = os.path.join(directory, name)
+        grouped.setdefault(exposure_key(name), {}).setdefault(match.group(2).lower(),
+                                                              os.path.join(directory, name))
 
     entries: List[Dict] = []
     for base in sorted(grouped):
         planes = grouped[base]
+        stage_error = ''
+        try:
+            planes = final_siblings(next(iter(planes.values()))) or planes
+        except (RSSStageError, OSError) as exc:          # duplicates / mixed stages: say so
+            stage_error = str(exc)
         representative = next((planes[c] for c in ('green', 'red', 'blue') if c in planes),
                               next(iter(planes.values())))
         entry = {
@@ -91,7 +96,7 @@ def scan_rss_exposures(directory: str) -> List[Dict]:
             'representative': representative,
             'paths': [planes[c] for c in _CHANNEL_ORDER if c in planes],
             'channels': [c for c in _CHANNEL_ORDER if c in planes],
-            'object': '', 'exptime': None, 'notes': '', 'error': '',
+            'object': '', 'exptime': None, 'notes': '', 'error': stage_error,
         }
         try:
             from llamas_pyjamas.Utils.utils import exposure_time
@@ -220,7 +225,7 @@ class ObslogDialog(QDialog):
             file_item.setData(Qt.ItemDataRole.UserRole, row)
             if entry['channels']:
                 file_item.setToolTip('channels: ' + ', '.join(entry['channels']))
-            obj = entry['object'] if not entry['error'] else f"(header error: {entry['error']})"
+            obj = entry['object'] if not entry['error'] else f"(not usable: {entry['error']})"
             exp = '' if entry['exptime'] is None else f"{entry['exptime']:.1f}"
             exp_item = QTableWidgetItem()
             # Numeric sort: store the value in EditRole, the formatted string for display.

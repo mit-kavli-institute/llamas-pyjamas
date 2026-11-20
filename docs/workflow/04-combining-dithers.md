@@ -75,17 +75,41 @@ It then builds a cube for **every** channel on one shared grid, opens it, and sa
 ```bash
 # a deep cube for one field, transparency-scaled, all channels
 python -m llamas_pyjamas.Combine.combineField \
-    --dir /path/to/reduced --object J2151 --cube --scale-transparency
+    --dir /path/to/reduced/extractions --object J2151 --cube --scale-transparency
 
 # a broadband (or narrowband) co-added IMAGE instead of a cube
 python -m llamas_pyjamas.Combine.combineField \
-    --dir /path/to/reduced --object J2151 --band 5000 6000 --units sb --png
+    --dir /path/to/reduced/extractions --object J2151 --band 5000 6000 --units sb --png
 ```
 
 Useful options: `--channels`, `--band LO HI`, `--units sb|flux`, `--weight ivar|uniform|exptime`,
-`--kernel`, `--fwhm`, `--pixscale`, `--scale-transparency`, `--keep-bad-fibres`, `-o out.fits`,
-`--png`. Outputs default to `reduced/combined/`. See [Reference](07-reference.md#combinefield) for the
-full list.
+`--kernel`, `--fwhm`, `--pixscale`, `--scale-transparency`, `--keep-bad-fibres`, `--stage`,
+`--plane`, `-o out.fits`, `--png`. Outputs default to `reduced/combined/`. See
+[Reference](07-reference.md#combinefield) for the full list.
+
+### Which file of each exposure is combined
+
+A reduction run with `keep_intermediate_rss = true` keeps three RSS files per exposure and
+channel: the base `..._RSS_<ch>.fits`, the fibre-flat-fielded `..._RSS_<ch>_FF.fits` and the
+residual-sky-cleaned `..._RSS_<ch>_FF_SKYSUB.fits`. (A default run keeps only the most-corrected
+one, renamed `<exposure>_RSS_<ch>.fits`; its stage is recorded in the header.) Whichever of an
+exposure's files you name or the viewer lists, the combine uses its **final** stage, each channel
+separately; `--stage base|ff|ff_skysub` picks one explicitly. The cube header records `PLANE`
+(`flam` or `skysub`), `RSSSTAGE` and the contributing files.
+
+Registration and flux calibration write to that same final file, and the combine refuses inputs
+it would otherwise combine wrongly:
+
+- no `FLAM` in an exposure (pass `--plane skysub` to combine the instrumental plane on purpose);
+- a registered solution sitting in another stage of the exposure;
+- channels or exposures at different stages (`--allow-mixed-stage` overrides, recorded as `OVR_MIX`);
+- a primary header that differs between an exposure's stages (`--allow-header-mismatch`, `OVR_HDR`).
+
+A reduction registered and flux-calibrated before this (FLAM and FIBERWCS in the base files only)
+is brought across with
+`python -m llamas_pyjamas.Postprocessing.promote_final_rss /path/to/reduced/extractions --sensfunc STD_sensfunc.fits`
+(`--dry-run` first). The sensfunc must be built from the standard at the same fibre-flat stage
+as the science (CubeViewer records it; `--sensfunc-stage` declares it for an older sensfunc).
 
 ## What you get
 

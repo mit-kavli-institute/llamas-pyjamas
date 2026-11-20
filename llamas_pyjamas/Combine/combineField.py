@@ -1,16 +1,21 @@
 """
-CLI: co-add a field's dithers into an image (Phase 4).
+CLI: co-add a field's dithers into an image.
 
 Discovers a field's registered RSS files (or takes them explicitly), builds the super-RSS, and
-writes a DS9-ready co-add image with its depth maps. A quick way to eyeball a stack before the
-photometric-scaling / cube machinery lands.
+writes a DS9-ready co-add image (or, with --cube, a cube) with its depth maps.
+
+Each exposure is combined from its FINAL processing stage (``_FF_SKYSUB`` > ``_FF`` > base, or
+the consolidated file) whichever of its files is named, unless ``--stage`` picks one. The inputs
+must be flux-calibrated (FLAM; ``--plane skysub`` for the instrumental plane) and registered on
+that stage: an exposure whose registration or FLAM sits on another stage is refused -- bring it
+across with ``python -m llamas_pyjamas.Postprocessing.promote_final_rss``.
 
 Examples
 --------
-Broadband green co-add of J2151, auto-discovered in a reduction directory::
+Broadband green co-add of a field, auto-discovered in a reduction directory::
 
     python -m llamas_pyjamas.Combine.combineField --dir /path/reduced/extractions \\
-        --object J2151 --channels green -o j2151_green.fits --png
+        --object MYFIELD --channels green -o myfield_green.fits --png
 
 A narrowband window across all channels, surface brightness, from explicit files::
 
@@ -21,7 +26,6 @@ Open the result in DS9 (SCI is the primary; VAR/SNR/COVERAGE/NEXP are extensions
 """
 
 import argparse
-import glob
 import logging
 import os
 import sys
@@ -38,9 +42,23 @@ logger = logging.getLogger(__name__)
 
 
 def discover_field(directory: str, obj: str) -> List[str]:
-    """Green RSS files in `directory` whose OBJECT header starts with `obj` (one per exposure)."""
+    """One RSS path per exposure in ``directory`` whose OBJECT header starts with ``obj``.
+
+    Every stage and channel of an exposure (long per-stage names, a consolidated name) counts as
+    the same exposure; which stage is combined is decided by ``build_super_rss(stage=...)``, not
+    here. A green file is returned when there is one."""
+    from llamas_pyjamas.File.llamasRSS import RSS_STAGE_RE, exposure_key
+    by_exposure = {}
+    for name in sorted(os.listdir(directory)):
+        m = RSS_STAGE_RE.match(name)
+        if m is None or not os.path.isfile(os.path.join(directory, name)):
+            continue
+        cur = by_exposure.get(exposure_key(name))
+        if cur is None or (m.group(2) == 'green' and RSS_STAGE_RE.match(cur).group(2) != 'green'):
+            by_exposure[exposure_key(name)] = name
     hits = []
-    for f in sorted(glob.glob(os.path.join(directory, '*_RSS_green.fits'))):
+    for key in sorted(by_exposure):
+        f = os.path.join(directory, by_exposure[key])
         try:
             name = str(fits.getheader(f, 0).get('OBJECT', ''))
         except Exception:                              # noqa: BLE001
@@ -102,8 +120,9 @@ def _write_png(img, path):
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description='Co-add a field\'s dithers into a DS9 image.')
-    p.add_argument('rss', nargs='*', help='RSS files (any channel; siblings auto-found). '
-                                          'Or use --dir/--object to discover.')
+    p.add_argument('rss', nargs='*', help='RSS files (any channel, any stage; each exposure is '
+                                          'combined from its --stage file). Or use --dir/--object '
+                                          'to discover.')
     p.add_argument('--dir', help='reduction directory to search for --object')
     p.add_argument('--object', help='OBJECT prefix to select a field (e.g. J2151)')
     p.add_argument('--band', nargs=2, type=float, metavar=('LO', 'HI'),
@@ -125,7 +144,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument('--cube', action='store_true',
                    help='build an (RA,DEC,wave) cube (single channel) instead of a 2-D image')
     p.add_argument('--dwave', type=float, help='cube wavelength step (A); default native median')
-    p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto')
+    p.add_argument('--plane', choices=('auto', 'flam', 'skysub'), default='auto',
+                   help='data plane: auto/flam = flux-calibrated FLAM, required in every exposure '
+                        '(no silent fallback); skysub = the instrumental sky-subtracted plane')
+    p.add_argument('--stage', choices=('auto', 'base', 'ff', 'ff_skysub'), default='auto',
+                   help='which processing stage of each exposure to combine (default: the most '
+                        'corrected one on disk); recorded as RSSSTAGE in the output header')
+    p.add_argument('--sky-penalty', type=float, default=0.0, metavar='ALPHA',
+                   help='inflate the variance where the residual-sky estimate (SKYRESID, ff_skysub '
+                        'stage only) exceeds the formal error: var *= 1 + (ALPHA*SKYRESID/ERROR)^2, '
+                        'so sky-line residuals are down-weighted in the co-add. 0 (default) = off; '
+                        'needs tuning. Recorded as SKYPEN.')
+    p.add_argument('--allow-mixed-stage', action='store_true',
+                   help='combine exposures/channels at different RSS stages (flat-fielded and '
+                        'not); recorded as OVR_MIX in the output header')
+    p.add_argument('--allow-header-mismatch', action='store_true',
+                   help="use files whose primary header differs from their exposure's other "
+                        'stages; recorded as OVR_HDR in the output header')
     p.add_argument('--keep-bad-fibres', action='store_true',
                    help='do NOT mask strongly-negative (broken) fibres as no-data')
     p.add_argument('--scale-transparency', action='store_true',
@@ -148,21 +183,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.error('give RSS files, or --dir and --object')
     logger.info('combining %d exposure file(s)', len(paths))
 
-    sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
-                         reject_bad_fibres=not args.keep_bad_fibres)
-    logger.info(sr.summary())
+    from llamas_pyjamas.File.llamasRSS import RSSStageError
+    from llamas_pyjamas.Combine.superRSS import MissingFluxCalibrationError
+    from llamas_pyjamas.Combine.transparency import TransparencyError
+    try:
+        sr = build_super_rss(paths, plane=args.plane, channels=args.channels,
+                             reject_bad_fibres=not args.keep_bad_fibres, stage=args.stage,
+                             sky_penalty=args.sky_penalty,
+                             allow_mixed_stage=args.allow_mixed_stage,
+                             allow_header_mismatch=args.allow_header_mismatch)
+        logger.info(sr.summary())
 
-    if args.scale_transparency:
-        from llamas_pyjamas.Combine.transparency import transparency_scales
-        sources = None
-        if args.scale_source:
-            from astropy.coordinates import SkyCoord
-            import astropy.units as u
-            sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
-        scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
-                                     radius_arcsec=args.scale_radius, channels=args.channels)
-        sr.apply_scales(scales)
-        logger.info('after transparency scaling: %s', sr.summary())
+        if args.scale_transparency:
+            from llamas_pyjamas.Combine.transparency import transparency_scales
+            sources = None
+            if args.scale_source:
+                from astropy.coordinates import SkyCoord
+                import astropy.units as u
+                sources = [SkyCoord(r * u.deg, d * u.deg) for r, d in args.scale_source]
+            scales = transparency_scales(sr, sources=sources, n_sources=args.scale_sources,
+                                         radius_arcsec=args.scale_radius, channels=args.channels)
+            sr.apply_scales(scales)
+            logger.info('after transparency scaling: %s', sr.summary())
+    except (RSSStageError, MissingFluxCalibrationError, TransparencyError, FileNotFoundError) as exc:
+        logger.error('%s: %s', type(exc).__name__, exc)
+        print(f'combineField: not combined -- {type(exc).__name__}: {exc}', file=sys.stderr)
+        return 2
 
     if args.cube:
         from llamas_pyjamas.Combine.cube import combine_cube

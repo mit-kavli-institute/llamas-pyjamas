@@ -8,15 +8,13 @@ true flux F_ref(lambda) is known, the instrument response is
 
 where C_obs is the extracted counts summed over the star's aperture. Applying S to a science
 count rate then yields calibrated flux. This module builds S from a standard's extracted
-spectrum and fits a smooth model to it; it does not apply it (that is Phase III) and it does
-not correct for atmospheric extinction (also Phase III — the standard and science are generally
-at different airmass).
+spectrum and fits a smooth model to it. Applying S, with the differential extinction between
+standard and science airmass, is done in :mod:`llamas_pyjamas.Flux.fluxCalibrate`.
 
 The fit must follow the *instrument*, not the *star*, so two families of wavelength are masked
 before fitting: telluric absorption bands (atmosphere, not instrument) and the standard's own
 strong intrinsic lines. LLAMAS optical standards are hot subdwarfs and white dwarfs (GD108 sdB,
-Feige110 DOp) with broad Balmer and He absorption that would otherwise drag the fit down. The
-raw ratio confirms the need: on GD108 the blue ratio swings ~12x, almost all of it Balmer.
+Feige110 DOp) with broad Balmer and He absorption that would otherwise drag the fit down.
 
 The fit is done in log space (S spans orders of magnitude and is far smoother logarithmically)
 with pypeit's robust iterative b-spline (the same `iterfit` the flat-field and sky steps use),

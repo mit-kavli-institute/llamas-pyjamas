@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from llamas_pyjamas.Utils.maskedSums import interp_missing
+
 logger = logging.getLogger(__name__)
 
 # Fraction of the dispersion axis treated as each "edge" third.
@@ -391,11 +393,9 @@ def sky_line_residual_qa(sky1d_input, qa_dir=None, label='', emit='png'):
             results[cam] = {'note': 'placeholder_camera'}
             continue
         if sky.shape != counts.shape:
-            # Seen in real data: counts and sky rows disagree (e.g. 300 vs 298)
-            # from inconsistent dead-fibre insertion. Handled by trimming to the
-            # common fibre count; info, not warning (it fires per camera and does
-            # not affect the QA result). The underlying dead-fibre inconsistency
-            # is tracked separately.
+            # counts and sky rows can disagree (e.g. 300 vs 298) from inconsistent
+            # dead-fibre insertion; trim to the common rows. Info, not warning: it
+            # does not affect the QA result.
             logger.info(
                 f"waveQA sky {cam}: counts {counts.shape} vs sky {sky.shape} "
                 f"shape mismatch — trimming to common rows")
@@ -421,10 +421,12 @@ def sky_line_residual_qa(sky1d_input, qa_dir=None, label='', emit='png'):
         rms_after = np.full(nfib, np.nan)
         resid_cs = np.full_like(resid, np.nan, dtype=float)
         for i in range(nfib):
-            ci = np.nan_to_num(counts[i])
-            ri = np.nan_to_num(resid[i])
-            before_cs = ci - _continuum(ci, CONTINUUM_WINDOW_PIX)
-            after_cs = ri - _continuum(ri, CONTINUUM_WINDOW_PIX)
+            # The continuum is fitted through missing samples (interpolated), but they stay
+            # NaN in the residual so _rms leaves them out.
+            ci = np.asarray(counts[i], dtype=float)
+            ri = np.asarray(resid[i], dtype=float)
+            before_cs = ci - _continuum(interp_missing(ci), CONTINUUM_WINDOW_PIX)
+            after_cs = ri - _continuum(interp_missing(ri), CONTINUUM_WINDOW_PIX)
             resid_cs[i] = after_cs
             rms_before[i] = _rms(before_cs[line_px])
             rms_after[i] = _rms(after_cs[line_px])
@@ -539,8 +541,9 @@ def _sky_template_peaks(obj, nfibers, ref_fiber=150, fiber_half_width=10,
     rf = min(max(ref_fiber, 0), nfibers - 1)
     t_lo, t_hi = max(0, rf - fiber_half_width), min(nfibers, rf + fiber_half_width + 1)
     txs = np.concatenate([obj.xshift[tf, :] for tf in range(t_lo, t_hi)])
-    tct = np.concatenate([np.nan_to_num(obj.counts[tf, :], nan=0.0, posinf=0.0,
-                                        neginf=0.0) for tf in range(t_lo, t_hi)])
+    tct = np.concatenate([obj.counts[tf, :] for tf in range(t_lo, t_hi)]).astype(float)
+    ok = np.isfinite(txs) & np.isfinite(tct)               # missing samples are left out
+    txs, tct = txs[ok], tct[ok]
     order = np.argsort(txs)
     txs, tct = txs[order], tct[order]
     n_grid = 2048
@@ -611,7 +614,7 @@ def sky_xshift_error_qa(sky1d_input, qa_dir=None, label='', emit='png',
         fib_offset = np.full(nfib, np.nan)
         n_nolines = 0
         for i in range(nfib):
-            spec = np.nan_to_num(counts[i, :], nan=0.0, posinf=0.0, neginf=0.0)
+            spec = interp_missing(counts[i, :])            # line finding only
             try:
                 with _w.catch_warnings():
                     _w.simplefilter("ignore")

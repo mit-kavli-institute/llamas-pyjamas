@@ -1,9 +1,9 @@
-"""Unit + integration tests for applying a sensitivity function (Phase III).
+"""Unit + integration tests for applying a sensitivity function.
 
 The unit tests use a synthetic single-channel RSS with a constant sensitivity so FLAM has a
 known value, and check the extension writing, idempotency, the SKYSUB/FLUX fallback, and the
 differential-extinction factor. The integration test does a real self-application on GD108 and
-checks the published flux is recovered; it is skipped when the may26 data is absent.
+checks the published flux is recovered; it is skipped when that data is absent.
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_flux_calibrate`).
 """

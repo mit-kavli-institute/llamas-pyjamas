@@ -51,6 +51,7 @@ pane, and the summary bar at the bottom tallies what has been assigned.*
    | **Science** | many | the science exposures (including dithers) |
    | **Flux Standard** | many | standard-star exposures for the sensitivity function |
    | **Bias** | many | raw bias frames → combined into a master bias |
+   | **Dark** | many | raw dark frames (`dark_files`) → a master dark per read mode and exposure, subtracted from science, standard and sky frames with the same read mode and an exposure within 10% ([details](../../llamas_pyjamas/Bias/README.md#darks)) |
    | **Flag Bad** | many | frames to exclude (recorded for the record, unused) |
 
    Right-click a row to preview the raw MEF in SAOImage DS9 (needs `ds9` running + `pyds9`).
@@ -59,6 +60,10 @@ pane, and the summary bar at the bottom tallies what has been assigned.*
    median-combined per readout mode into `slow_master_bias.fits` / `fast_master_bias.fits`
    (via [`BiasLlamas`](../../llamas_pyjamas/Bias/llamasBias.py)). If you already have master biases,
    leave *Bias* empty and the pipeline uses the packaged ones.
+
+   The summary line under the table shows the dark groups (e.g. `SLOW 1350 s ×4`) and how many
+   science and standard frames have no matching dark; those are reduced without one. Use at least
+   three darks per exposure time.
 
 6. **Writes the config.** The chosen paths are substituted into the annotated template; unassigned
    flat/twilight/arc keys are commented out so the pipeline falls back to its defaults. Re-loading an

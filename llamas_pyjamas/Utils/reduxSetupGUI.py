@@ -26,7 +26,11 @@ from astropy.io import fits
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import llamas_pyjamas
+from llamas_pyjamas.Bias.darkLlamas import (DEFAULT_TOLERANCE, group_darks_from_headers,
+                                            match_dark)
 from llamas_pyjamas.Bias.llamasBias import BiasLlamas
+from llamas_pyjamas.Masking.cosmicLlamas import CHANNELS as CR_CHANNELS
+from llamas_pyjamas.Masking.cosmicLlamas import default_settings as default_cr_settings
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,7 @@ ROLES = {
     'flux_standard': ('Flux Standard', True, QtGui.QColor(255, 224, 130), BLACK),
     'science': ('Science', True, QtGui.QColor(230, 205, 250), BLACK),
     'bias': ('Bias', True, QtGui.QColor(212, 212, 212), BLACK),
+    'dark': ('Dark', True, QtGui.QColor(165, 165, 180), BLACK),
     'bad': ('BAD', True, QtGui.QColor(90, 90, 90), QtGui.QColor('white')),
 }
 
@@ -87,10 +92,37 @@ BAD_HEADER = '# Exposures flagged as BAD data in the setup GUI (for the record; 
 # science, bias, output dirs) are deliberately NOT here -- they are owned by the
 # main window's role buttons. Help text mirrors example_config.txt.
 # ---------------------------------------------------------------------------
+def _cosmic_ray_catalog():
+    """Option entries for the per-channel cosmic-ray settings, with the pipeline's
+    own defaults (Masking.cosmicLlamas.default_settings) so the two can't drift."""
+    d = default_cr_settings()
+    entries = [('cosmic_ray_channels', 'flags',
+                ','.join(c for c in CR_CHANNELS if d[c]['enabled']), list(CR_CHANNELS),
+                'Channels cleaned of cosmic rays. Red is best with darks: without them it '
+                'flags hot pixels and OH sky-line cores (see Masking/README.md).')]
+    for c in CR_CHANNELS:
+        name = c.capitalize()
+        entries += [
+            (f'cosmic_ray_threshold_{c}', 'float', '%g' % d[c]['cr_threshold'], None,
+             f'{name}: detection threshold in sigma (L.A.Cosmic cr_threshold); higher '
+             f'flags fewer, brighter cosmic rays.'),
+            (f'cosmic_ray_contrast_{c}', 'float', '%g' % d[c]['contrast'], None,
+             f'{name}: minimum contrast against the fine-structure image (L.A.Cosmic '
+             f'contrast); higher protects sharp real features such as sky lines.'),
+            (f'cosmic_ray_neighbor_threshold_{c}', 'float', '%g' % d[c]['neighbor_threshold'],
+             None, f'{name}: threshold in sigma for pixels next to a cosmic ray (L.A.Cosmic '
+                   f'neighbor_threshold).'),
+        ]
+    entries.append(('cosmic_ray_maxiter', 'int', str(d['maxiter']), None,
+                    'L.A.Cosmic iterations (all channels).'))
+    return entries
+
+
 CONFIG_CATALOG = [
     ('Run / Resume', [
         ('clobber', 'bool', 'false', None, 'Force every stage from scratch (ignore existing intermediate products).'),
         ('use_existing_traces', 'bool', 'true', None, 'Reuse existing traces on re-run instead of regenerating.'),
+        ('shifted_master_require_fingerprint', 'bool', 'true', None, 'A camera that fails to trace gets its master trace shifted onto the flats; false accepts the shift when the fibre fingerprint is inconclusive.'),
         ('keep_intermediate_rss', 'bool', 'false', None, 'Keep every stage’s RSS, not just the consolidated ones.'),
         ('save_extraction_pkl', 'bool', 'false', None, 'Keep the large per-exposure extraction pickles.'),
         ('full_extraction_pickle', 'bool', 'false', None, 'Write full-size extraction pickle (very large).'),
@@ -98,11 +130,13 @@ CONFIG_CATALOG = [
         ('log_retention', 'int', '10', None, 'Keep the newest N run logs.'),
     ]),
     ('Bias / Cosmic rays', [
-        ('remove_cosmic_rays', 'bool', 'true', None, 'Run L.A.Cosmic before extraction.'),
+        ('remove_cosmic_rays', 'bool', 'true', None, 'Run L.A.Cosmic before extraction (master switch for the channels below).'),
+        *_cosmic_ray_catalog(),
         ('read_noise', 'float', '3.5', None, 'CCD read noise (e-) fallback if not in the lab table.'),
+        ('dark_exptime_tolerance', 'float', '0.10', None, 'A dark matches a frame with the same read mode and a requested exposure within this fraction.'),
     ]),
     ('Extraction', [
-        ('extraction_method', 'enum', 'boxcar', ['boxcar', 'horne', 'optimal'], 'Extraction algorithm.'),
+        ('extraction_method', 'enum', 'horne', ['horne', 'boxcar', 'optimal'], 'Extraction algorithm.'),
         ('boxcar_halfwidth', 'float', '2.5', None, 'Boxcar aperture half-width (px); full aperture = 2x.'),
         ('twilight_throughput', 'bool', 'true', None, 'Per-fibre throughput from the twilight flat vs the arc.'),
     ]),
@@ -194,9 +228,9 @@ CONFIG_CATALOG = [
         ('ray_temp_dir', 'str', '', None, 'Ray temp base dir (SHORT path; blank = /tmp/llamas_ray).'),
         ('cleanup_scratch', 'bool', 'true', None, 'Remove the run’s Ray scratch dir on exit.'),
         ('prune_ray_sessions', 'bool', 'false', None, 'Sweep stale /tmp/ray sessions at startup.'),
-        ('min_free_gb', 'int', '5', None, 'Hard floor of free disk (GB) required to start.'),
-        ('disk_estimate_factor', 'int', '5', None, 'Output-size estimate multiplier (warning tier).'),
-        ('skip_disk_check', 'bool', 'false', None, 'Bypass the pre-flight disk-space gate.'),
+        ('min_free_gb', 'int', '5', None, 'GB kept free on each output disk (Ray keeps 5% of its scratch disk free).'),
+        ('disk_margin', 'float', '1.2', None, 'Safety factor on the estimated disk use of the run.'),
+        ('skip_disk_check', 'bool', 'false', None, 'Skip the pre-flight disk-space check (no prompt).'),
         ('input_timeout_s', 'int', '15', None, 'Per-run input-reachability probe budget (s).'),
     ]),
     ('WCS', [
@@ -206,6 +240,12 @@ CONFIG_CATALOG = [
 ]
 # keys the dialog manages -> for '0 means unset' handling on write
 _ZERO_IS_UNSET = {'ray_num_cpus', 'pixel_flat_saturation_threshold'}
+# 'flags' keys where no tick is a real choice, written as 'none' (not commented out,
+# which would fall back to the pipeline default)
+_EMPTY_IS_NONE = {'cosmic_ray_channels'}
+# smallest value a spin box accepts
+_MINIMUM = {**{k: 0.1 for k, kind, *_r in _cosmic_ray_catalog() if kind == 'float'},
+            'cosmic_ray_maxiter': 1, 'disk_margin': 1.0}
 
 
 def parse_config(path):
@@ -246,7 +286,7 @@ def scan_directory(data_dir, progress_callback=None):
             break
         entry = {'path': path, 'filename': os.path.basename(path), 'object': '',
                  'exptime': None, 'type': '', 'comment': '', 'readmode': '',
-                 'standard': None}
+                 'standard': None, 'timing': {}}
         try:
             hdr = fits.getheader(path, 0)
             entry['object'] = str(hdr.get('OBJECT', '') or '')
@@ -257,6 +297,9 @@ def scan_directory(data_dir, progress_callback=None):
             comment = hdr.get('OBS-CMNT')
             entry['comment'] = '' if comment is None else str(comment)
             entry['readmode'] = str(hdr.get('READ-MDE', '') or '')
+            # what dark matching reads (Bias.darkLlamas.match_dark)
+            entry['timing'] = {k: hdr.get(k) for k in
+                               ('READ-MDE', 'REXPTIME', 'SEXPTIME', 'EXPTIME', 'DEXPTIME')}
             # A science pointing sitting on a catalogue standard is very probably an
             # exposure of that standard -- headers cannot tell them apart, so this is
             # the only signal. Only SCIENCE frames are checked; calibrations never are.
@@ -289,7 +332,7 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
     """Build config-file text from a template.
 
     assignments maps role key -> path (single roles) or list of paths
-    ('science', 'bias', 'bad'). Assigned keys are substituted in place;
+    ('science', 'flux_standard', 'bias', 'dark', 'bad'). Assigned keys are substituted in place;
     unassigned flat / twilight / arc keys are commented out so the pipeline
     falls back to its defaults. template_path may be a previously generated
     config, in which case hand-edited parameters are preserved; existing
@@ -307,6 +350,8 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         'twilight_flat': None,
         'science_files': ', '.join(assignments.get('science', [])) or None,
         'flux_standard_files': ', '.join(assignments.get('flux_standard', [])) or None,
+        'dark_files': ', '.join(assignments.get('dark', [])) or None,
+        'output_dir': output_dir,
         'trace_output_dir': os.path.join(output_dir, 'traces'),
         'extraction_output_dir': os.path.join(output_dir, 'extractions'),
         'cube_output_dir': os.path.join(output_dir, 'cubes'),
@@ -371,15 +416,21 @@ def generate_config(assignments, output_dir, slow_bias=None, fast_bias=None,
         for key, path in new_arcs.items():
             out.append(f'{key} = {path}\n')
 
-    # flux_standard_files assigned but absent from the template goes in an appended line.
-    # An existing config written before this feature has no such key for the substitution
-    # loop above to fill, so without this the standards would be silently dropped on rewrite.
+    # flux_standard_files assigned but absent from the template (e.g. an older config) goes in
+    # an appended line, or the standards would be silently dropped on rewrite.
     if assignments.get('flux_standard') and 'flux_standard_files' not in substituted:
         out.append('\n# Spectrophotometric standard-star exposures (identified in the setup '
                    'GUI by\n# crossmatching the pointing against the bundled catalogue). '
                    'Extracted like\n# science; used in postprocessing to build a sensitivity '
                    'function.\n')
         out.append('flux_standard_files = ' + ', '.join(assignments['flux_standard']) + '\n')
+
+    # dark_files absent from the template (an older config) is appended the same way.
+    if assignments.get('dark') and 'dark_files' not in substituted:
+        out.append('\n# Dark frames (tagged in the setup GUI); subtracted from science, '
+                   'standard and\n# sky frames with the same read mode and exposure time. '
+                   'See Bias/README.md.\n')
+        out.append('dark_files = ' + ', '.join(assignments['dark']) + '\n')
 
     if assignments.get('bad'):
         out.append(f'\n{BAD_HEADER}\n')
@@ -470,6 +521,8 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
             for key, kind, default, choices, help_text in specs:
                 seed = current.get(key, default)
                 w = self._make_widget(kind, seed, default, choices)
+                if key in _MINIMUM:
+                    w.setMinimum(_MINIMUM[key])
                 self._helptext[key] = self._format_help(key, kind, default, choices, help_text)
                 w.setToolTip(f'{key}\n{help_text}')            # native tooltip (flaky on macOS)
                 w.setProperty('helpKey', key)                  # for the help panel below
@@ -592,7 +645,7 @@ class ConfigOptionsDialog(QtWidgets.QDialog):
                 out[key] = ('%g' % float(w.value()))
             elif kind == 'flags':
                 on = [cb.text() for cb in w.findChildren(QtWidgets.QCheckBox) if cb.isChecked()]
-                out[key] = ','.join(on) if on else None
+                out[key] = ','.join(on) if on else ('none' if key in _EMPTY_IS_NONE else None)
             else:  # str / path
                 t = w.text().strip()
                 out[key] = t or None
@@ -697,6 +750,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
         miscGrid.addWidget(role_button('science', 'Science'), 0, 0)
         miscGrid.addWidget(role_button('flux_standard', 'Flux Standard'), 1, 0)
         miscGrid.addWidget(role_button('bias', 'Bias'), 2, 0)
+        miscGrid.addWidget(role_button('dark', 'Dark'), 3, 0)
         miscGrid.addWidget(role_button('bad', 'Flag Bad'), 0, 1)
         clearBtn = QtWidgets.QPushButton('Clear Role')
         clearBtn.clicked.connect(self.clear_role)
@@ -1013,7 +1067,7 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
 
     def current_assignments(self):
         """Return dict role -> path (single roles) or list of paths (multi)."""
-        assignments = {'flux_standard': [], 'science': [], 'bias': [], 'bad': []}
+        assignments = {role: [] for role, spec in ROLES.items() if spec[1]}
         for path in sorted(self.roles):
             for role in self.roles[path]:
                 if ROLES[role][1]:
@@ -1082,6 +1136,13 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
                 self.roles.setdefault(rp, set()).add('flux_standard')
             else:
                 unmatched.append(f'Flux Standard: {p.strip()}')
+        darks = config.get('dark_files', '')
+        for p in (x for x in darks.split(',') if x.strip()):
+            rp = resolve(p)
+            if rp:
+                self.roles.setdefault(rp, set()).add('dark')
+            else:
+                unmatched.append(f'Dark: {p.strip()}')
         for p in bad_paths:
             rp = resolve(p)
             if rp:
@@ -1122,7 +1183,26 @@ class ReduxSetupWindow(QtWidgets.QMainWindow):
             f"Assigned — Flats: {rgb('flat')}   Twilights: {rgb('twilight')}   "
             f"Arcs: {rgb('arc')}   Science: {len(a['science'])}   "
             f"Flux std: {len(a['flux_standard'])}   "
-            f"Bias: {len(a['bias'])} ({n_slow} slow / {n_fast} fast)   Bad: {len(a['bad'])}")
+            f"Bias: {len(a['bias'])} ({n_slow} slow / {n_fast} fast)   "
+            f"{self.dark_summary(a)}   Bad: {len(a['bad'])}")
+
+    def dark_summary(self, a):
+        """'Darks: …' for the summary line: the dark groups, and the science and
+        standard frames no dark matches (same rule as the pipeline)."""
+        if not a['dark']:
+            return 'Darks: 0'
+        timing = {e['path']: e.get('timing') or {} for e in self.entries}
+        groups = group_darks_from_headers((p, timing.get(p, {})) for p in a['dark'])
+        try:
+            tol = float(self._config_overrides.get('dark_exptime_tolerance') or DEFAULT_TOLERANCE)
+        except ValueError:
+            tol = DEFAULT_TOLERANCE
+        frames = set(a['science']) | set(a['flux_standard'])
+        unmatched = sum(1 for p in frames if match_dark(timing.get(p, {}), groups, tol)[0] is None)
+        text = f"Darks: {len(a['dark'])} (" + ', '.join(f'{g.label} ×{len(g.files)}' for g in groups) + ')'
+        if unmatched:
+            text += f", no dark for {unmatched}/{len(frames)} science+std"
+        return text
 
     # --------------------------------------------------------- config write
     def write_config(self):

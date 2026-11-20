@@ -1271,14 +1271,13 @@ def prev_arcTransfer(scidict, arcdict, enable_validation=True):
     Uses dynamic extension matching by metadata (channel/bench/side) instead of
     hardcoded lookup tables.
 
-    NEW: Includes optional wavelength quality validation to catch common issues
-    like missing calibration, NaN values, or out-of-range wavelengths.
+    Optionally validates wavelength quality to catch common issues like missing
+    calibration, NaN values, or out-of-range wavelengths.
 
     Args:
         scidict (dict): Dictionary containing science extraction data.
         arcdict (dict): Dictionary containing arc extraction data with wavelength solution.
         enable_validation (bool): Enable wavelength quality validation (default: True).
-            Set to False to use original behavior without validation.
         verbose (bool): Enable verbose debugging output (default: False).
 
     Returns:
@@ -1484,9 +1483,9 @@ def run_wavelength_solution_ray(arc_filename: str, flat_filename: str,
     """
     Execute the complete wavelength solution pipeline using Ray multiprocessing.
     
-    This is the main orchestration function that runs the entire wavelength solution
-    process with Ray parallelization, following the exact workflow provided by the user.
-    
+    Runs the full wavelength-solution workflow (see
+    run_wavelength_solution_workflow) with Ray parallelization.
+
     Args:
         arc_filename (str): Path to the arc FITS file
         flat_filename (str): Path to the flat field FITS file  
@@ -1572,7 +1571,7 @@ def run_wavelength_solution_workflow(arc_filename: str, flat_filename: str,
     """
     Convenience function that runs either Ray-enabled or standard wavelength solution workflow.
     
-    This function matches the exact user workflow provided:
+    Equivalent to:
     ```
     arc.shiftArcX(arc_picklename)
     shift_picklename = arc_picklename.replace('_extract.pkl', '_extract_shifted.pkl')

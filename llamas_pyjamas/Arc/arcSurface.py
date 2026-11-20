@@ -4,10 +4,9 @@ llamas_pyjamas.Arc.arcSurface
 Hybrid 2D xshift refinement (``refine_arc_method = 2d``).
 
 The per-fibre global-quadratic xshift (shiftArcX) mis-tracks trace curvature
-near the detector edges (fibre-to-fibre deviation rms ~0.7 px center vs
-~2.4-3.1 px at the edge thirds on every camera), and the per-fibre cubic
-refinement (refineArcX) is data-starved (~15 identified catalog lines per
-fibre) and extrapolates noisily beyond the outermost matched line.
+near the detector edges, and the per-fibre cubic refinement (refineArcX) is
+data-starved (~15 identified catalog lines per fibre) and extrapolates noisily
+beyond the outermost matched line.
 
 Physics: the camera optics impose a smooth, low-order curvature field shared
 by all fibres of a detector, while slit assembly tolerances perturb each fibre
@@ -17,7 +16,7 @@ curvature. This module therefore fits, per camera:
 1. a robust 2D Legendre surface ``xshift_target(x, fibre_coord)`` to arc-line
    centroids pooled across ALL fibres — including catalog peaks without
    wavelength IDs, which constrain the alignment even though they play no role
-   in the wavelength solution (~7-14x more data than refineArcX uses); then
+   in the wavelength solution; then
 2. a small per-fibre perturbation (offset by default), shrunk toward zero, fit
    to each fibre's residuals about the surface. Fibres with too few matched
    lines get the surface only; fibres whose quadratic failed entirely
@@ -79,9 +78,8 @@ def _load_peak_catalog(channel, use_unidentified=True, blend_min_sep=8.0):
 
     Blend filter: unidentified peaks whose nearest catalog neighbour is closer
     than ``blend_min_sep`` px (~2x the centroiding FWHM) are dropped — blended
-    lines yield biased centroids regardless of how they are matched. Measured
-    on the reference arc, blends inflated red's fit residuals from ~0.4 px to
-    ~1.1 px. Identified (curated) lines are always kept.
+    lines yield biased centroids regardless of how they are matched.
+    Identified (curated) lines are always kept.
     """
     tbl = Table.read(os.path.join(LUT_DIR, f'{channel}_peaks.csv'))
     if 'PeakHeight' in tbl.colnames and 'Height' not in tbl.colnames:
@@ -327,7 +325,7 @@ def _apply_edge_extrap(vals, x, x_lo, x_hi, mode='linear', slope_win=50):
     """Replace the surface beyond the constrained range with a controlled tail.
 
     Past the outermost matched arc line the Legendre surface is unconstrained and
-    can swing several pixels (measured 2-6 px on blue), which misaligns the sky
+    can swing several pixels (worst on blue), which misaligns the sky
     model at the wavelength extremes and produces broad P-Cygni residuals. This
     continues each fibre's xshift with a C1 linear (or quadratic) extension using
     the local slope/curvature at the boundary, so every fibre extrapolates the
@@ -388,7 +386,7 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         cross-correlating the night arc's reference-fibre spectrum against the
         packaged arc's, so multi-pixel epoch offsets cannot defeat pass-1
         matching. Without line_source, centroids come from the reference
-        pickle's own (old-epoch) spectra as before.
+        pickle's own (reference-epoch) spectra.
     """
     # Accept either a pickle path or an already-loaded arcdict. The dict form
     # (operated on in place, returned instead of saved) lets callers run many
@@ -430,13 +428,11 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
         n_catalog = ref_line_xshift.size
 
         # --- Harvest extra line targets (self-calibrating) ---
-        # The hand-built catalog under-samples the wavelength extremes (blue: 6 of
-        # ~24 available lines below the mid-blue), leaving the xshift fit under-
-        # constrained there -> misaligned sky -> edge residuals. Detect lines on
-        # every real camera's reference fibre at ``harvest_sigdetect``, map each to
-        # the common xshift frame via that camera's own xshift, and keep those
-        # confirmed across >= ``harvest_min_cameras`` cameras. These add xshift
-        # constraints only; the wavelength solution (wv_fit below) is unchanged.
+        # The hand-built catalog under-samples the wavelength extremes (worst in
+        # the blue), leaving the xshift fit under-constrained there. Detect lines
+        # on every camera's reference fibre, map them to the common xshift frame,
+        # and keep those confirmed in >= ``harvest_min_cameras`` cameras. These add
+        # xshift constraints only; the wavelength solution (wv_fit) is unchanged.
         det_sig = harvest_sigdetect if harvest_lines else sigdetect
         if harvest_lines:
             hv, hc = [], []
@@ -559,13 +555,10 @@ def refineArcX2D(arc_extraction_shifted_pickle, channels=None, qa_collector=None
                         print(f"  {cam}: bootstrap xcorr failed — assuming "
                               f"zero epoch offset for pass 1")
 
-            # Detection once per fibre (cached in-run; reused by both passes).
-            # ``detection_cache`` (optional): a {(bench, side): [(tcent, ecent), ...]}
-            # dict of pre-computed centroids. Detection depends only on the line
-            # source and (sigdetect, fwhm), so when those are fixed across calls
-            # (e.g. a parameter sweep over fit-only knobs) the caller can supply
-            # the cache to skip the expensive re-detection. On a miss the
-            # detections are computed and stored back into the dict for reuse.
+            # Detection once per fibre (reused by both passes). ``detection_cache``
+            # ({(bench, side): [(tcent, ecent), ...]}) lets a caller sweeping
+            # fit-only parameters skip re-detection, which depends only on the line
+            # source, sigdetect and fwhm. Misses are stored back for reuse.
             cache_key = (str(bench), side)
             cached = detection_cache.get(cache_key) if detection_cache is not None else None
             n_det_total = 0

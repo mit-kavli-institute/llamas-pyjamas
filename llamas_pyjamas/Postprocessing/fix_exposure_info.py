@@ -72,10 +72,30 @@ CARD_COMMENTS = {
     'AEXPTIME': '[s] Actual exposure time', 'READ-MDE': 'CCD readout mode',
     'OBJECT': 'Object name', 'UTC': 'UT at start of exposure',
     'DATE-OBS': 'UT date at start of exposure', 'DATE': 'UT date at start of exposure',
-    'MJD-OBS': 'MJD at start of exposure', 'RA': 'Right ascension',
-    'DEC': 'Declination', 'AIRMASS': 'Airmass at start of exposure',
+    'MJD-OBS': 'MJD at start of exposure', 'RA': '[deg] Right ascension (J2000)',
+    'DEC': '[deg] Declination (J2000)', 'AIRMASS': 'Airmass at start of exposure',
 }
 CONFIDENCE_TIER = {'UNDECIDED': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3}
+
+
+def _sexagesimal_to_deg(value, is_ra: bool):
+    """TEL-block coordinate -> decimal degrees, or None if it cannot be read.
+
+    RA is hourangle, Dec is degrees. A value that is already numeric is passed through, so
+    re-running over a repaired header is a no-op.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        from astropy.coordinates import Angle
+        from astropy import units as u
+        return float(Angle(str(value).strip(), unit=(u.hourangle if is_ra else u.deg)).deg)
+    except Exception:                                   # noqa: BLE001 - bad string => no value
+        return None
 
 
 class UserQuit(Exception):
@@ -265,12 +285,23 @@ def propose_case_a(audit: FileAudit) -> None:
     if audit.ext_exptime_state == 'inconsistent':
         audit.notes.append("extension EXPTIME values disagree; not used as a donor")
 
-    # Verbatim TEL-block propagation
+    # TEL-block propagation. Verbatim, EXCEPT RA/DEC: the TEL block holds them sexagesimal
+    # ('10:00:47.03'), while RA/DEC are decimal degrees and the pipeline reads them with
+    # float(). An unparseable pointing also stops a standard being identified by crossmatch.
     for target, donor in TEL_PROPAGATION:
         if audit.finding(target).fillable:
             d = audit.finding(donor)
-            if d.status == 'ok':
-                audit.propose(target, d.current, 'TEL header', 'A')
+            if d.status != 'ok':
+                continue
+            value = d.current
+            if target in ('RA', 'DEC'):
+                value = _sexagesimal_to_deg(value, is_ra=(target == 'RA'))
+                if value is None:
+                    audit.notes.append(
+                        f"{target}: could not convert {d.current!r} from the TEL block to "
+                        f"decimal degrees; left unfilled rather than written unparseable")
+                    continue
+            audit.propose(target, value, 'TEL header', 'A')
 
     # MJD-OBS derived from TEL DATE-OBS (+ TEL UTC when the date has no time part)
     mjd = audit.finding('MJD-OBS')
@@ -908,11 +939,9 @@ def write_repaired(audit: FileAudit, output_dir: Path, overwrite: bool,
                     set_card(hdu.header, fix.key, fix.value,
                              '[s] Image nominal exposure time')
         # A present-but-blank SEXPTIME/AEXPTIME card poisons downstream
-        # hdr.get(key, fallback) chains: astropy returns Undefined for the
-        # blank card instead of the fallback (reduxSetupGUI reads SEXPTIME
-        # first and then fails on float(Undefined)). Convert blank -> absent
-        # in the copy; filled cards are never touched and SEXPTIME is still
-        # never fabricated.
+        # hdr.get(key, fallback) chains: astropy returns Undefined instead of
+        # the fallback. Convert blank -> absent in the copy; filled cards are
+        # never touched and SEXPTIME is never fabricated.
         for key in ('SEXPTIME', 'AEXPTIME'):
             if card_status(phdr, key).status == 'blank':
                 del phdr[key]

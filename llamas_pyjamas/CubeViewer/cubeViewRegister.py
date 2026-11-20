@@ -436,10 +436,11 @@ if _HAVE_QT:
             if not self.session.pairs or self.session.wcs is None:
                 QMessageBox.information(self, 'Refine WCS', 'Grab at least one star first.')
                 return
-            from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
-            siblings = channel_siblings(self.path) or {'': self.path}
-            det = siblings.get('green') or next(iter(siblings.values()))
+            from llamas_pyjamas.Utils.register import _registration_siblings
             try:
+                # write to the exposure's final stage, whichever stage is being viewed
+                siblings = _registration_siblings(self.path)
+                det = siblings.get('green') or next(iter(siblings.values()))
                 self.written = _write_frame_solution(det, siblings, self.session.wcs,
                                                      self.session.provenance())
             except Exception as exc:            # noqa: BLE001
@@ -500,9 +501,10 @@ if _HAVE_QT:
         def __init__(self, window, paths, parent=None) -> None:
             super().__init__(parent or window)
             self.window = window
+            from llamas_pyjamas.File.llamasRSS import exposure_key
             seen, uniq = set(), []                          # one path per exposure, order kept
             for p in paths:
-                k = os.path.basename(p).split('_RSS_')[0]
+                k = exposure_key(p)
                 if k not in seen:
                     seen.add(k)
                     uniq.append(p)

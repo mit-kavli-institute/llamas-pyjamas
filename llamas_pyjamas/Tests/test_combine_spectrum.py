@@ -1,9 +1,9 @@
-"""Tests for optimal point-source extraction and the narrowband line image (Phase 4, step 2).
+"""Tests for optimal point-source extraction and the narrowband line image.
 
 Synthetic: a Gaussian point source sampled by fibres over two exposures (optimal extraction should
 recover the template and beat a single fibre / uniform sum), the seeing estimate, and a cube with a
 line on one spaxel (narrowband should recover the line integral and continuum-subtract to zero
-off-line). Validated further on real may26 data.
+off-line).
 
 Runnable with pytest or as a plain script (`python -m llamas_pyjamas.Tests.test_combine_spectrum`).
 """
@@ -61,10 +61,8 @@ def test_optimal_spectrum_fits_profile_and_recovers_template():
 
 
 def test_profile_fit_converges_at_flux_calibrated_scale():
-    # FLAM-scale data (~1e-14) must still be FIT, not silently return the initial guess. The LSQ
-    # fitter meets its convergence tolerance immediately on tiny values and leaves sigma at its 0.6"
-    # start -> a spurious constant 1.41" FWHM (and a wrong extraction profile). Regression for the
-    # rescale-to-O(1) fix.
+    # FLAM-scale data (~1e-14) must still be FIT: on tiny values the LSQ fitter meets its tolerance
+    # immediately and leaves sigma at its 0.6" start (a spurious 1.41" FWHM).
     sr = _point_source_super(C=3e-14, fwhm=1.8)
     r = fit_source_profile(sr, RA0, DEC0)
     assert r is not None
@@ -106,7 +104,7 @@ def _abs_super(F0=100.0, sigma=1.0, area=0.44, nexp=1, nw=5):
 
 
 def test_optimal_spectrum_recovers_absolute_total_flux():
-    # F_hat must equal the source total flux AND be invariant to exposure count (the N-count bug fix)
+    # F_hat must equal the source total flux AND be invariant to exposure count
     for nexp in (1, 4):
         sr = _abs_super(F0=100.0, sigma=1.0, nexp=nexp)
         spec, fit = optimal_spectrum(sr, RA0, DEC0, dar=False)
@@ -192,3 +190,21 @@ if __name__ == '__main__':
             print(f'FAIL {name}: {type(e).__name__}: {e}')
     print(f'\n{len(fns) - failed}/{len(fns)} passed')
     sys.exit(1 if failed else 0)
+
+
+def test_optimal_spectrum_unbiased_across_a_cosmic_ray_gap():
+    """The central fibre of one exposure loses the peak of an emission line to a cosmic ray: the
+    gap is not bridged from that fibre's neighbouring samples (which would flatten the line),
+    the other fibres and the other exposure fill it, and the line keeps its height."""
+    sr = _point_source_super(nw=8, C=10.0)
+    st = sr.channels['green']
+    st.flux[:, 4] *= 3.0                                   # a line: 3x the continuum at sample 4
+    centre = int(np.argmin(np.hypot(st.ra - RA0, st.dec - DEC0)))  # exposure 0's central fibre
+    st.flux[centre, 4] = np.nan
+    st.mask[centre, 4] = True
+    st.nobridge = np.zeros_like(st.mask)
+    st.nobridge[centre, 4] = True
+    spec, _ = optimal_spectrum(sr, RA0, DEC0, radius_arcsec=3.0)
+    wl, flux, var = spec['green']
+    assert np.all(np.isfinite(flux))
+    assert abs(flux[4] / (3.0 * np.median(flux)) - 1) < 0.02

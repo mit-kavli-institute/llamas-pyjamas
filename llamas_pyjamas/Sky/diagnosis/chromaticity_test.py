@@ -1,4 +1,4 @@
-"""RS's chromaticity hypothesis: is per-fibre throughput wavelength-dependent?
+"""Chromaticity hypothesis: is per-fibre throughput wavelength-dependent?
 Per blank fibre (green): OH-derived throughput in the BLUE half vs RED half of the channel
 (chrom_OH = t_b/t_r), cross-checked against the same ratio from the chromatic fibre-flat
 CORRECTION(lambda) table (chrom_flat). Agreement => real chromatic throughput, already encoded in

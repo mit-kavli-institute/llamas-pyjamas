@@ -29,6 +29,7 @@ use("Qt5Agg")
 from glob import glob
 from astropy.io import fits
 from astropy.samp import SAMPIntegratedClient
+from llamas_pyjamas.Utils.recipes import recipe_for_frame
 import logging
 
 import subprocess
@@ -140,8 +141,7 @@ class MainWindow(QMainWindow):
 
     def plotSpectra(self):
 
-        # NOTE: This janky file is the same one that is distributed in the public
-        # llamas-etc gitgub repo.  WE will change this to pass in extracted spectra.
+        # TODO: placeholder spectrum from the public llamas-etc repo; pass in extracted spectra.
         junkfile = 'SN1a_R20mag.fits'
         spectrum = Table.read(junkfile)
         wave = spectrum['wave(nm)'] * 10.0
@@ -241,11 +241,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # Import and run extraction. force_refresh=True gives the GUI a fresh Ray
-            # session per click (re-bundles edited source), preserving prior behavior;
-            # the pipeline path leaves it False so stages share one session.
+            # force_refresh=True gives the GUI a fresh Ray session per click (re-bundles
+            # edited source); the pipeline leaves it False so stages share one session.
             from llamas_pyjamas.GUI.guiExtract import GUI_extract, box_extract
-            result = GUI_extract(filepath, force_refresh=True)
+            # The frame's recipe decides whether cosmic rays are cleaned (never on a flat
+            # or an arc).
+            result = GUI_extract(filepath, force_refresh=True,
+                                 recipe=recipe_for_frame(fits.getheader(filepath, 0)))
 
             # Show success message
             QMessageBox.information(

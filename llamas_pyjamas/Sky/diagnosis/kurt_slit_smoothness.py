@@ -2,7 +2,7 @@
 per-fibre measurement noise. Per green camera (21-frame-avg 5577 kurtosis): (a) order-4 polynomial R^2
 (fraction of the frame-averaged fibre variation that is a smooth function of slit position); (b) lag-1
 autocorrelation after binning fibres in groups of 8 (beats down per-fibre noise -> reveals the true
-fibre-to-fibre coherence RS expects to be 'extremely high'). Saves mk arrays for fix-prototyping."""
+fibre-to-fibre coherence). Saves mk arrays for fix-prototyping."""
 import sys, glob, warnings; warnings.filterwarnings('ignore')
 import os as _os  # repo root = three levels up from this diagnosis script
 sys.path.insert(0, _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', '..')))

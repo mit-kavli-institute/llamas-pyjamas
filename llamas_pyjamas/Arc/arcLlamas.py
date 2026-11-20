@@ -144,7 +144,7 @@ def refineArcX(arc_extraction_shifted_pickle, channels=None, qa_collector=None):
 
     Takes the quadratic xshift from shiftArcX as a first guess, detects arc line
     centroids via arc_lines_from_spec, matches them to the ThAr catalog, and fits
-    an order-5 Legendre polynomial per fiber. Falls back to the quadratic solution
+    a cubic (POLY_ORDER) Legendre polynomial per fiber. Falls back to the quadratic solution
     if fewer than MIN_LINES lines are matched for a given fiber.
 
     Args:

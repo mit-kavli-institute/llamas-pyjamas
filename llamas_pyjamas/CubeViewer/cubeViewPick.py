@@ -6,12 +6,10 @@ to the :class:`~llamas_pyjamas.CubeViewer.cubeViewScene.SpectralScene`, which de
 spatial element sits there. Dragging the crosshair therefore scrubs the spectrum panel across
 fibres, and a click is just a move that stopped.
 
-**Polling runs on a worker thread.** An XPA round-trip to a local DS9 measures ~9.5 ms median
-and up to ~17 ms on this hardware. At 10 Hz that is ~10% duty on the calling thread with
-outliers past a 60 fps frame budget, and a selection change adds a second round-trip to draw
-the marker — enough to make dragging visibly stutter if it ran on the Qt main thread. The
-worker only does XPA I/O; the scene query and all plotting stay on the main thread, reached by
-queued signals.
+**Polling runs on a worker thread.** An XPA round-trip to a local DS9 takes ~10-17 ms, and a
+selection change adds a second round-trip to draw the marker — enough to make dragging stutter
+on the Qt main thread. The worker only does XPA I/O; the scene query and all plotting stay on
+the main thread, reached by queued signals.
 
 Work is deduplicated on the scene's opaque element identity, not on position: the crosshair
 moves continuously but the selection only changes when it crosses into a new fibre, so the

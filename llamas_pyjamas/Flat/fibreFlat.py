@@ -11,13 +11,17 @@ applied to science RSS files by dividing the FLUX and ERROR arrays.
 """
 
 import os
+import json
 import logging
+from collections import defaultdict
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from datetime import datetime
 from numpy.polynomial.polynomial import polyvander2d
+from scipy.ndimage import label, median_filter
 from llamas_pyjamas.Image.WhiteLightModule import FiberMap_LUT
+from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, save_extractions
 logger = logging.getLogger(__name__)
 
 # Bounds for the correction factor — prevents catastrophic edge divisions
@@ -26,9 +30,53 @@ CORRECTION_CLAMP = (0.2, 5.0)
 # Minimum reference flux to apply correction (below this → C_i = 1.0)
 MIN_REF_FLUX = 100.0
 
-# RSS MASK bitmask flags written by apply_fibre_flat_to_rss
-MASK_FLAT_LAMP_ONLY        = np.int16(1)  # benchside T_i derived from lamp, not twilight
-MASK_UNMAPPED_FIBRE_INTERP = np.int16(2)  # fibre absent from FiberMap_LUT; gradient interpolated from benchside peers
+# Quality checks reported by assess_fibre_flat.
+# A fibre whose T_i lies this many robust sigma (1.4826 x MAD) from its benchside
+# median is counted as an outlier.
+TI_OUTLIER_SIGMA = 5.0
+# A benchside's T_i scatter is an outlier above this multiple of the median scatter
+# of the other benchsides of the same colour.
+TI_RELATIVE_OUTLIER = 1.5
+# PROVISIONAL ceiling on the sky scatter left within a benchside after the flat (%).
+# Set from what a working flat should leave -- twilight-to-twilight repeatability is
+# 0.3-1%, plus allowance for sky gradient and faint sources -- not from current runs.
+# Revisit once the flat has been validated on more nights.
+FF_RESIDUAL_CEILING_PCT = 3.0
+# A frame measures the residual only if the noise on its band sky level is below
+# this, so it can resolve the ceiling.
+FF_RESIDUAL_MAX_NOISE_PCT = FF_RESIDUAL_CEILING_PCT / 3
+
+BENCHSIDES = tuple(f"{b}{s}" for b in '1234' for s in 'AB')
+
+# Narrow structure in the lamp shape W_i: each fibre's W_i divided by its running median
+# over NARROW_WINDOW pixels, minus 1, on the central 80% of its range. A working flat's
+# narrow structure is at the level of twilight-to-twilight repeatability (0.3-1%), so the
+# ceiling is PROVISIONAL, set from that, not from current runs. NARROW_DIP_PCT counts
+# line-like dips (each becomes an emission bump when the science is divided by C_i).
+NARROW_WINDOW = 25
+NARROW_CEILING_PCT = 1.0
+NARROW_DIP_PCT = 5.0
+# A W_i dip deeper than TWILIGHT_DIP_PCT should also be in an independent twilight (the
+# fibre divided by the median of its +-TWILIGHT_NEIGHBOURS neighbours, which removes the
+# solar spectrum) at no less than half its depth. More than TWILIGHT_UNCONFIRMED_MAX of
+# them missing there (PROVISIONAL) means the lamp put them in, not the fibre.
+TWILIGHT_DIP_PCT = 2.0
+TWILIGHT_NEIGHBOURS = 4
+TWILIGHT_UNCONFIRMED_MAX = 0.2
+
+# Version of the _FF products, stamped as FFVER. 2 (2026-11-14): the flat divides by
+# C_i / THRUPUT; before, it divided by C_i on top of the RSS throughput, which applied the
+# fibre throughput twice. A sensfunc must come from a standard at the same FFVER.
+FFVER = 2
+
+# RSS MASK bitmask flags written by apply_fibre_flat_to_rss (registry in File/llamasRSS.py)
+from llamas_pyjamas.File.llamasRSS import (  # noqa: E402
+    MASK_FLAT_LAMP_ONLY, MASK_UNMAPPED_FIBRE_INTERP, MASK_NOT_FLAT_FIELDED, RSSStageError)
+from llamas_pyjamas.Utils.maskedSums import band_integral  # noqa: E402
+from llamas_pyjamas.Utils.deadfibers import live_row_index  # noqa: E402
+from llamas_pyjamas.Utils.recipes import (CalibrationRecipeError, check_recipe,  # noqa: E402
+                                          recipe_hash, run_extraction_method, stamp_recipe,
+                                          write_recipe_sidecar)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -46,6 +94,12 @@ def _load_smooth_models(smooth_models_file):
     """
     models = {}
     with fits.open(smooth_models_file) as hdul:
+        if hdul[0].header.get('FIBIDS') != 'physical':
+            raise CalibrationRecipeError(
+                f"{os.path.basename(smooth_models_file)} labels fibres by extraction row, "
+                f"not physical fibre id, so fibres above a dead fibre would get their "
+                f"neighbour's flat. Rebuild the flat products (re-run with clobber = true).")
+        check_recipe(hdul[0].header, 'lamp_flat', what=os.path.basename(smooth_models_file))
         for ext in hdul[1:]:
             ext_name = ext.header['EXTNAME']
             models[ext_name] = {
@@ -144,6 +198,7 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None,
     primary = fits.PrimaryHDU()
     primary.header['DATE'] = (datetime.now().isoformat(), 'File creation date')
     primary.header['METHOD'] = (method, 'Fibre flat method')
+    primary.header['FIBIDS'] = ('physical', 'FIBER_ID is the fibremap position')
     primary.header['HISTORY'] = f'Fibre-to-fibre flat corrections ({method})'
     if header_extra:
         for k, v in header_extra.items():
@@ -178,8 +233,10 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None,
         tbl.header['BENCH'] = data['bench']
         tbl.header['SIDE'] = data['side']
         tbl.header['NREF'] = (data['n_ref'], 'Fibres used for median reference')
+        for key, card in data.get('header', {}).items():
+            tbl.header[key] = card
         # Per-benchside provenance: a benchside processed under the twilight
-        # method but lacking twilight data actually used a lamp-only T_i (F1).
+        # method but lacking twilight data actually used a lamp-only T_i.
         if lamp_only_benchsides and ext_name in lamp_only_benchsides:
             tbl.header['METHOD'] = 'lamp_only'
         else:
@@ -206,6 +263,173 @@ def _write_corrections_fits(corrections, output_path, method, header_extra=None,
     return output_path
 
 
+def _robust_scatter_pct(values):
+    """1.4826 x MAD about the median, as a percentage of the median (NaN if < 20 values)."""
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v) & (v > 0)]
+    if v.size < 20:
+        return np.nan
+    med = np.median(v)
+    return float(1.4826 * np.median(np.abs(v - med)) / med * 100)
+
+
+def _band_sky_level(counts, error, wave, good, correction, tp=1.0):
+    """One fibre's sky level raw, with the RSS throughput only, after the flat, and its noise.
+
+    The level is the median over the central 80% of the fibre's wavelength range of:
+    COUNTS x ``tp`` (raw: no throughput correction), COUNTS (the RSS throughput ``tp``
+    only) and COUNTS / ``correction`` (after the flat). Returns
+    ``(raw, throughput_only, after, fractional_noise)``, or None for a fibre with too
+    little usable data.
+    """
+    ok = good & np.isfinite(wave) & (wave > 0) & np.isfinite(counts) & (counts != 0)
+    if np.sum(ok) < 50:
+        return None
+    lo, hi = np.min(wave[ok]), np.max(wave[ok])
+    band = ok & (wave >= lo + 0.1 * (hi - lo)) & (wave <= hi - 0.1 * (hi - lo))
+    if np.sum(band) < 50:
+        return None
+    before = float(np.median(counts[band]))
+    if before <= 0:
+        return None
+    after = float(np.median(counts[band] / correction[band]))
+    err = error[band]
+    err = err[np.isfinite(err)]
+    # Noise on a median of n samples ~ 1.2533 x the noise on their mean.
+    noise = 1.2533 * float(np.sqrt(np.sum(err ** 2))) / err.size / before if err.size else np.nan
+    return before * tp, before, after, noise
+
+
+def _narrow(values, wave):
+    """One fibre's narrow structure: values / running median - 1, NaN outside the central 80%."""
+    values = np.asarray(values, dtype=float)
+    wave = np.asarray(wave, dtype=float)
+    out = np.full(values.shape, np.nan)
+    ok = np.isfinite(values) & (values > 0) & np.isfinite(wave) & (wave > 0)
+    if ok.sum() < 3 * NARROW_WINDOW:
+        return out
+    lo, hi = wave[ok].min(), wave[ok].max()
+    band = ok & (wave >= lo + 0.1 * (hi - lo)) & (wave <= hi - 0.1 * (hi - lo))
+    ratio = np.full(values.shape, np.nan)
+    ratio[ok] = values[ok] / median_filter(values[ok], NARROW_WINDOW, mode='nearest') - 1
+    out[band] = ratio[band]
+    return out
+
+
+def _dips(narrow, depth_pct):
+    """Index arrays of the contiguous runs where ``narrow`` is below -depth_pct %."""
+    lab, n = label(np.nan_to_num(narrow, nan=0.0) < -depth_pct / 100)
+    return [np.flatnonzero(lab == k) for k in range(1, n + 1)]
+
+
+def _narrow_cards(w_rows, wave_rows):
+    """Header cards on the narrow structure of a benchside's W_i (``WINRMS``, ``WINDIP``)."""
+    rms, n_dips = [], 0
+    for w, wv in zip(w_rows, wave_rows):
+        r = _narrow(w, wv)
+        r = r[np.isfinite(r)]
+        if r.size < NARROW_WINDOW:
+            continue
+        rms.append(1.4826 * np.median(np.abs(r - np.median(r))) * 100)
+        n_dips += len(_dips(_narrow(w, wv), NARROW_DIP_PCT))
+    if not rms:
+        return {}
+    return {'WINRMS': (round(float(np.median(rms)), 3),
+                       'median narrow rms of W_i, % (robust)'),
+            'WINDIP': (n_dips, f'narrow W_i dips deeper than {NARROW_DIP_PCT:g}%')}
+
+
+def _twilight_dip_cards(w_rows, wave_rows, fiber_ids, twi_ext):
+    """Header cards checking the W_i dips of a benchside against its twilight.
+
+    Each twilight fibre, resampled to a common grid, is divided by the median of its
+    +-TWILIGHT_NEIGHBOURS neighbours, which removes the solar spectrum. A W_i dip deeper
+    than TWILIGHT_DIP_PCT counts as unconfirmed when that ratio's mean over the dip is
+    less than half the dip's mean depth. ``WIDIPN`` dips tested, ``WIDIPTW`` the fraction
+    unconfirmed.
+    """
+    counts, wave = twi_ext.counts, twi_ext.wave
+    if wave is None or wave.shape[0] != counts.shape[0]:
+        return {}
+    row_of = live_row_index(counts.shape[0], getattr(twi_ext, 'dead_fibers', []) or [])
+    rows = [row_of.get(int(f)) for f in fiber_ids]
+    finite = wave[np.isfinite(wave) & (wave > 0)]
+    if finite.size == 0:
+        return {}
+    grid = np.linspace(finite.min(), finite.max(), counts.shape[1])
+    resampled = np.full((len(rows), grid.size), np.nan)
+    for i, row in enumerate(rows):
+        if row is None:
+            continue
+        ok = np.isfinite(wave[row]) & (wave[row] > 0) & np.isfinite(counts[row]) & (counts[row] > 0)
+        if ok.sum() > 10:
+            order = np.argsort(wave[row][ok])
+            resampled[i] = np.interp(grid, wave[row][ok][order], counts[row][ok][order],
+                                     left=np.nan, right=np.nan)
+    n_tested = n_missing = 0
+    k = TWILIGHT_NEIGHBOURS
+    for i, (w, wv) in enumerate(zip(w_rows, wave_rows)):
+        if not np.any(np.isfinite(resampled[i])):
+            continue
+        dips = _dips(_narrow(w, wv), TWILIGHT_DIP_PCT)
+        if not dips:
+            continue
+        neighbours = np.vstack([resampled[max(0, i - k):i], resampled[i + 1:i + k + 1]])
+        with np.errstate(all='ignore'):
+            ratio = resampled[i] / np.nanmedian(neighbours, axis=0)
+        twi = _narrow(ratio, grid)
+        good = np.isfinite(twi)
+        if good.sum() < NARROW_WINDOW:
+            continue
+        twi_native = np.interp(wv, grid[good], twi[good], left=np.nan, right=np.nan)
+        w_narrow = _narrow(w, wv)
+        for dip in dips:
+            depth, seen = np.nanmean(w_narrow[dip]), np.nanmean(twi_native[dip])
+            if not (np.isfinite(depth) and np.isfinite(seen)):
+                continue
+            n_tested += 1
+            n_missing += seen > 0.5 * depth
+    if not n_tested:
+        return {'WIDIPN': (0, f'W_i dips > {TWILIGHT_DIP_PCT:g}% tested against the twilight')}
+    return {'WIDIPN': (n_tested, f'W_i dips > {TWILIGHT_DIP_PCT:g}% tested against the twilight'),
+            'WIDIPTW': (round(n_missing / n_tested, 3),
+                        'fraction of those the twilight does not show')}
+
+
+def _ti_header(ti_values, n_fallback=0):
+    """Header cards describing one benchside's fibre throughputs T_i (raw, before flattening)."""
+    v = np.asarray(list(ti_values), dtype=float)
+    v = v[np.isfinite(v) & (v > 0)]
+    cards = {'TINFALL': (int(n_fallback), 'fibres given the benchside-median T_i')}
+    if v.size < 3:
+        return cards
+    med = float(np.median(v))
+    sigma = 1.4826 * float(np.median(np.abs(v - med)))
+    n_out = int(np.sum(np.abs(v - med) > TI_OUTLIER_SIGMA * sigma)) if sigma > 0 else 0
+    cards.update({
+        'TIMED': (round(med, 5), 'median fibre throughput T_i'),
+        'TIRMS': (round(float(np.sqrt(np.mean((v - med) ** 2))) / med * 100, 3),
+                  'T_i RMS about the median, %'),
+        'TIMAD': (round(sigma / med * 100, 3), 'T_i robust scatter 1.4826*MAD, %'),
+        'TINOUT': (n_out, f'fibres > {TI_OUTLIER_SIGMA:g} robust sigma from median'),
+    })
+    return cards
+
+
+def _provenance(smooth_models_file, recipe):
+    """Primary-header cards for a corrections file: its recipe and the smooth models used.
+
+    ``recipe`` is ``twilight`` (T_i from a twilight) or ``lamp_flat`` (lamp only).
+    ``SMRCPHS`` is the smooth models' own recipe hash, so a corrections file made from
+    out-of-date smooth models can be recognised.
+    """
+    cards = stamp_recipe({}, recipe)
+    cards['SMTHFILE'] = os.path.basename(smooth_models_file)
+    cards['SMRCPHS'] = (str(fits.getheader(smooth_models_file, 0).get('RCPHASH', 'none')),
+                        'RCPHASH of the smooth models used')
+    return cards
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Branch B: Lamp-only fallback
 # ──────────────────────────────────────────────────────────────────────────────
@@ -228,7 +452,8 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
     corrections_file : str
         Path to ``fibre_flat_corrections.fits``.
     """
-    logger.warning(
+    # Reported to the user by assess_fibre_flat (and by reduce.py at the call).
+    logger.info(
         "No twilight flat provided. Falling back to lamp-only fibre-to-fibre "
         "flat. Science cubes will contain artificial spatial illumination "
         "gradients from the lamp."
@@ -262,6 +487,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
         corr_arr = np.ones_like(smooth_arr)
 
         n_alive = 0
+        ti_values = []   # per-fibre throughput: median of C_i where it is defined
         for i in range(n_fibres):
             w = wave_arr[i]
             s = smooth_arr[i]
@@ -279,6 +505,8 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
                      & np.isfinite(s) & (s > 0))
             corr_arr[i, valid] = s[valid] / ref_native[valid]
             corr_arr[i, ~valid] = 1.0
+            if np.sum(valid) > 10:
+                ti_values.append(np.median(corr_arr[i, valid]))
 
         # Clamp to safe range
         corr_arr = np.clip(corr_arr, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
@@ -295,6 +523,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
             'reference': reference,
             # TODO: populate from lamp photon noise when available
             'correction_var': np.zeros_like(corr_arr),
+            'header': {**_ti_header(ti_values), **_narrow_cards(corr_arr, wave_arr)},
         }
 
         # Collect for cross-bench diagnostics
@@ -312,8 +541,7 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
     # Write corrections FITS
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(corrections, output_path, method='lamp_only',
-                            header_extra={'SMTHFILE': os.path.basename(
-                                smooth_models_file)})
+                            header_extra=_provenance(smooth_models_file, 'lamp_flat'))
     return output_path
 
 
@@ -321,66 +549,109 @@ def compute_fibre_flat_lamp_only(smooth_models_file, output_dir):
 # Branch A: Twilight + Lamp
 # ──────────────────────────────────────────────────────────────────────────────
 
-def reduce_twilight_flat(twilight_file, p2p_map_file, trace_dir, arc_soln,
-                         slow_bias, output_dir, fast_bias=None, edge_bias=None):
-    """Reduce a twilight flat: bias/P2P correct, extract, wavelength calibrate.
+def _twilight_cache_key(twilight_file, p2p_map_file):
+    """What a cached twilight reduction must match to be reused: recipe, input, pixel flat."""
+    st = os.stat(p2p_map_file)
+    run = run_extraction_method()
+    return {'rcphash': recipe_hash('twilight'), 'source': os.path.basename(twilight_file),
+            'pixmap': os.path.basename(p2p_map_file), 'pixmap_size': st.st_size,
+            'pixmap_mtime': round(st.st_mtime, 3),
+            'extraction': list(run) if run is not None else None}
 
-    Reuses existing pipeline infrastructure for each step.
 
-    Parameters
-    ----------
-    twilight_file : str
-        Path to raw twilight flat FITS (MEF).
-    p2p_map_file : str
-        Path to pixel-to-pixel flat map (``pixel_maps.fits``).
-    trace_dir : str
-        Directory containing trace pickle files.
-    arc_soln : object or None
-        Arc solution dict, or None to use reference arc.
-    slow_bias : str or None
-        Path to SLOW-mode master bias FITS file.
-    output_dir : str
-        Output directory for intermediates.
-    fast_bias : str or None
-        Path to FAST-mode master bias FITS file.
-
-    Returns
-    -------
-    extraction_dict : dict
-        Calibrated extraction dict with keys ``'extractions'``,
-        ``'metadata'``, ``'primary_header'``.
-    """
+def _reduce_one_twilight(twilight_file, p2p_map_file, twi_dir, trace_dir, arc_soln,
+                         slow_bias, fast_bias, edge_bias, mastercalib_trace_dir):
+    """Reduce one twilight to a wavelength-calibrated extraction pickle (reused if current)."""
+    # Imported here: reduce imports this module at its top (circular import).
     from llamas_pyjamas.reduce import (apply_flat_field_correction,
                                        run_extraction, correct_wavelengths)
 
+    stem = os.path.splitext(os.path.basename(twilight_file))[0]
+    pkl = os.path.join(twi_dir, f'{stem}_twilight.pkl')
+    sidecar = pkl.replace('.pkl', '.json')
+    key = _twilight_cache_key(twilight_file, p2p_map_file)
+    if os.path.exists(pkl) and os.path.exists(sidecar):
+        with open(sidecar) as fh:
+            if json.load(fh) == key:
+                logger.info(f"Twilight: reusing {os.path.basename(pkl)}")
+                return pkl
+
     logger.info(f"Reducing twilight flat: {twilight_file}")
-    twi_output_dir = os.path.join(output_dir, 'twilight')
-    os.makedirs(twi_output_dir, exist_ok=True)
-
-    # Step 1: Apply P2P pixel map to twilight frame
-    logger.info("Twilight: applying P2P pixel map correction")
-    corrected_file, _ = apply_flat_field_correction(
-        twilight_file, [p2p_map_file], twi_output_dir)
+    corrected_file, _ = apply_flat_field_correction(twilight_file, [p2p_map_file], twi_dir)
     if corrected_file is None:
-        raise RuntimeError("Failed to apply P2P correction to twilight flat")
-    logger.info(f"Twilight P2P-corrected: {corrected_file}")
-
-    # Step 2: Extract using lamp traces
-    logger.info("Twilight: extracting 1D spectra using lamp traces")
+        raise RuntimeError(f"Failed to apply the pixel flat to {os.path.basename(twilight_file)}")
     extraction_file = run_extraction(
-        corrected_file, twi_output_dir,
-        slow_bias=slow_bias, fast_bias=fast_bias, trace_dir=trace_dir,
-        remove_cosmic_rays=False, edge_bias=edge_bias)
-    logger.info(f"Twilight extraction: {extraction_file}")
+        corrected_file, twi_dir, slow_bias=slow_bias, fast_bias=fast_bias,
+        trace_dir=trace_dir, mastercalib_trace_dir=mastercalib_trace_dir,
+        remove_cosmic_rays=False, edge_bias=edge_bias, recipe='twilight')
+    extraction_path = os.path.join(twi_dir, extraction_file)
+    extraction_dict, primary_hdr = correct_wavelengths(extraction_path, soln=arc_soln)
+    primary_hdr = primary_hdr if primary_hdr is not None else fits.Header()
+    stamp_recipe(primary_hdr, 'twilight')
+    primary_hdr['TWIFILE'] = (os.path.basename(twilight_file), 'Twilight flat')
+    save_extractions(extraction_dict['extractions'], primary_header=primary_hdr,
+                     savefile=os.path.basename(pkl), save_dir=twi_dir)
+    with open(sidecar, 'w') as fh:
+        json.dump(key, fh)
+    write_recipe_sidecar(pkl, primary_hdr)
+    # The uncalibrated pickle and the flat-divided frame are only intermediates.
+    for path in (extraction_path, corrected_file):
+        if path and os.path.abspath(path) != os.path.abspath(pkl) and os.path.exists(path):
+            os.remove(path)
+    logger.info(f"Twilight reduced: {os.path.basename(pkl)}")
+    return pkl
 
-    # Step 3: Wavelength calibration
-    logger.info("Twilight: applying wavelength calibration")
-    extraction_path = os.path.join(twi_output_dir, extraction_file)
-    extraction_dict, primary_hdr = correct_wavelengths(
-        extraction_path, soln=arc_soln)
-    logger.info("Twilight wavelength calibration complete")
 
-    return extraction_dict
+def reduce_twilights(twilight_by_colour, p2p_map_file, trace_dir, arc_soln, slow_bias,
+                     output_dir, fast_bias=None, edge_bias=None, mastercalib_trace_dir=None):
+    """Reduce each distinct twilight flat once; return ``{colour: calibrated pickle}``.
+
+    One reduction feeds both uses of the twilight: the per-fibre ``relative_throughput``
+    the RSS is divided by (``reduce.twilight_throughputs``) and the fibre flat's T_i
+    (:func:`compute_fibre_flat_twilight`), so the two always come from the same frame,
+    reduced the same way. Each frame gets the pixel flat, is extracted with the
+    ``twilight`` recipe (no cosmic-ray cleaning) and wavelength-calibrated. The pickle,
+    ``<output_dir>/twilight/<stem>_twilight.pkl``, is reused while its sidecar
+    ``.json`` matches the recipe, the frame and the pixel flat.
+
+    ``twilight_by_colour`` is ``{colour: path or None}`` (``reduce.resolve_twilight_files``);
+    colours without a twilight are left out of the result.
+    """
+    twi_dir = os.path.join(output_dir, 'twilight')
+    os.makedirs(twi_dir, exist_ok=True)
+    reduced, out = {}, {}
+    for colour, path in twilight_by_colour.items():
+        if not path or not os.path.exists(path):
+            continue
+        if path not in reduced:
+            reduced[path] = _reduce_one_twilight(path, p2p_map_file, twi_dir, trace_dir,
+                                                 arc_soln, slow_bias, fast_bias, edge_bias,
+                                                 mastercalib_trace_dir)
+        out[colour] = reduced[path]
+    return out
+
+
+def load_twilights(twilight_pkls):
+    """Merge the reduced twilights into one extraction dict, each camera from its colour's file.
+
+    ``twilight_pkls`` is ``{colour: pickle}`` from :func:`reduce_twilights`. Returns the dict
+    :func:`compute_fibre_flat_twilight` takes, or None when there are no twilights.
+    """
+    by_file = defaultdict(list)
+    for colour, pkl in twilight_pkls.items():
+        by_file[pkl].append(colour)
+    exts, metas, primary = [], [], None
+    for pkl, colours in by_file.items():
+        twi = ExtractLlamas.loadExtraction(pkl)
+        check_recipe(twi.get('primary_header'), 'twilight', what=os.path.basename(pkl))
+        primary = twi.get('primary_header', primary)
+        for ext, meta in zip(twi['extractions'], twi['metadata']):
+            if meta['channel'] in colours:
+                exts.append(ext)
+                metas.append(meta)
+    if not exts:
+        return None
+    return {'extractions': exts, 'metadata': metas, 'primary_header': primary}
 
 
 _DEFAULT_POLY_ORDER = {'blue': 4, 'green': 3, 'red': 2}
@@ -481,12 +752,9 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     flux_arr = np.array(flux_list)
 
     # ── 2. Per-bench pre-normalisation ──
-    # Scale each benchside so all benchside medians match the channel-wide
-    # reference level.  This removes detector-level bias-pedestal offsets
-    # BEFORE the polynomial fit so the gradient surface captures the true
-    # sky variation rather than being distorted by artificial detector
-    # discontinuities (the "brick wall" pattern caused by uncorrected bias
-    # pedestal drift between the 24 cameras).
+    # Scale every benchside median to the channel-wide reference level BEFORE
+    # the polynomial fit, so camera-to-camera bias-pedestal offsets (a "brick
+    # wall" pattern) do not distort the sky-gradient surface.
     bs_arr = np.array([bs for bs, fid in keys])
     unique_benchsides = np.unique(bs_arr)
     bs_medians = {}
@@ -564,7 +832,7 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
                            f"{key}, keeping normalised integral")
             corrected[key] = flux_arr_norm[i]
 
-    # ── Task 4: Re-add fibres absent from FiberMap_LUT using benchside-median ──
+    # ── Re-add fibres absent from FiberMap_LUT using benchside-median ──
     # Rather than keeping raw integrals (which preserve the spatial gradient),
     # apply the median gradient correction factor of the fibre's own benchside.
     benchside_corr_factors = {}
@@ -633,10 +901,8 @@ def _remove_twilight_gradient(integrals_dict, channel, poly_order=None):
     if unmapped_keys:
         logger.info(f"  Unmapped fibres (benchside-median applied): {len(unmapped_keys)}")
 
-    # NOTE: corrected values are intentionally kept at the per-bench-normalised
-    # scale (all benchsides at channel_ref level).  The final rescaling back to
-    # the raw median is deliberately omitted so that downstream Pass 2 can
-    # apply lamp-derived inter-benchside offsets cleanly.
+    # Corrected values deliberately stay at the per-bench-normalised scale (no
+    # rescaling to the raw median): Pass 2 applies the lamp inter-benchside offsets.
 
     diagnostics = {
         'x': x_arr,
@@ -1001,7 +1267,7 @@ def _compute_lamp_benchside_offsets(models):
 
 def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                                 output_dir, integration_range=None,
-                                poly_order=None):
+                                poly_order=None, header_extra=None):
     """Compute fibre-to-fibre flat using twilight spatial + lamp wavelength shape.
 
     For each benchside:
@@ -1013,7 +1279,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
     Parameters
     ----------
     twilight_extractions : dict
-        Calibrated twilight extractions (from ``reduce_twilight_flat``).
+        Calibrated twilight extractions (from :func:`load_twilights`).
     smooth_models_file : str
         Path to ``flat_smooth_models.fits``.
     output_dir : str
@@ -1071,33 +1337,22 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
             twi_ext = twi_lookup.get(ext_name)
             if twi_ext is None:
-                logger.warning(f"No twilight extraction for {ext_name}; "
-                               f"will use lamp-derived inter-bench offset as T_i")
+                logger.info(f"No twilight extraction for {ext_name}; "
+                            f"will use lamp-derived inter-bench offset as T_i")
                 lamp_only_benchsides.add(ext_name)
                 continue
 
             twi_counts = twi_ext.counts
             twi_wave = twi_ext.wave
-            dead_set = set(getattr(twi_ext, 'dead_fibers', []) or [])
-            total_twi = twi_counts.shape[0]
-
-            # Handle wave/counts shape mismatch (dead fibre expansion)
-            n_wave_rows = twi_wave.shape[0] if twi_wave is not None else 0
-            wave_expanded = (n_wave_rows == total_twi)
-            if not wave_expanded and n_wave_rows > 0:
-                fid_to_wave_row = {}
-                wave_row = 0
-                for phys_id in range(total_twi):
-                    if phys_id in dead_set:
-                        continue
-                    if wave_row < n_wave_rows:
-                        fid_to_wave_row[phys_id] = wave_row
-                        wave_row += 1
-                logger.debug(f"  {ext_name}: wave/counts shape mismatch "
-                             f"(wave={n_wave_rows}, counts={total_twi}), "
-                             f"mapped {len(fid_to_wave_row)} alive fibres")
-            else:
-                fid_to_wave_row = None
+            if twi_wave is None or twi_wave.shape[0] != twi_counts.shape[0]:
+                logger.warning(f"  {ext_name}: twilight wave and counts rows differ; "
+                               f"using the lamp-derived inter-bench offset as T_i")
+                lamp_only_benchsides.add(ext_name)
+                continue
+            # Twilight rows are live-indexed (dead fibres absent); fiber_ids are
+            # physical fibre ids, so look each one's row up.
+            row_of = live_row_index(twi_counts.shape[0],
+                                    getattr(twi_ext, 'dead_fibers', []) or [])
 
             # Determine integration window
             if integration_range and channel in integration_range:
@@ -1113,25 +1368,21 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
 
             # Integrate twilight per fibre
             for fid in fiber_ids:
-                if fid >= total_twi or fid in dead_set:
+                row = row_of.get(int(fid))
+                if row is None:
                     continue
-
-                if fid_to_wave_row is not None:
-                    wave_idx = fid_to_wave_row.get(fid)
-                    if wave_idx is None:
-                        continue
-                else:
-                    wave_idx = fid
-
-                tw = twi_wave[wave_idx] if twi_wave is not None else None
-                tc = twi_counts[fid]
+                tw = twi_wave[row]
+                tc = twi_counts[row]
 
                 if tw is not None and np.any(np.isfinite(tw)):
-                    mask = (np.isfinite(tw) & (tw >= w_lo)
-                            & (tw <= w_hi) & (tc > 0))
-                    if np.sum(mask) > 10:
-                        all_integrals[(benchside_str, fid)] = np.nansum(
-                            tc[mask])
+                    # mean(valid) x N over the window: a zero-filled or non-finite sample
+                    # must not count as zero flux, or a fibre with partial coverage gets a
+                    # low T_i and is over-corrected. Needs >10 valid samples and >= half
+                    # the window; otherwise the fibre gets the benchside median (pass 2).
+                    no_data = ~np.isfinite(tc) | (tc == 0)
+                    bi = band_integral(tc, tw, no_data, w_lo, w_hi)
+                    if bi.n[0] > 10 and np.isfinite(bi.value[0]):
+                        all_integrals[(benchside_str, fid)] = float(bi.value[0])
 
         channel_integrals[channel] = all_integrals
         logger.info(f"  {channel}: gathered {len(all_integrals)} twilight "
@@ -1181,7 +1432,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         n_fibres, n_pix = smooth_arr.shape
         corr_arr = np.ones_like(smooth_arr)
 
-        # ── Compute W_i(λ) from lamp (unchanged) ──
+        # ── Compute W_i(λ) from lamp ──
         w_arr = np.ones_like(smooth_arr)
         n_alive = 0
         for i in range(n_fibres):
@@ -1244,7 +1495,7 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
             lamp_offset = lamp_offsets.get(ext_name, 1.0)
             t_i = {fid: lamp_offset for fid in fiber_ids}
             lamp_only_benchsides.add(ext_name)
-            logger.warning(
+            logger.info(
                 f"  {ext_name}: no valid twilight integrals; "
                 f"falling back to lamp-derived inter-bench offset "
                 f"T_i = {lamp_offset:.4f} (MASK_FLAT_LAMP_ONLY will be set)"
@@ -1255,14 +1506,28 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         # ── Combine C_i = T_i × W_i ──
         fid_to_row = {fid: idx for idx, fid in enumerate(fiber_ids)}
         fibre_flags = np.zeros(len(fiber_ids), dtype=np.int16)
+        # Fibres without their own twilight integral (too little valid data) take the
+        # benchside median T_i and are flagged, rather than a silent T_i = 1.0, which is
+        # off by the benchside's lamp offset.
+        ti_fallback = float(np.median(list(t_i.values()))) if t_i else 1.0
+        n_fallback = 0
         for fid in fiber_ids:
             idx = fid_to_row[fid]
-            ti = t_i.get(fid, 1.0)
+            ti = t_i.get(fid)
+            if ti is None:
+                ti = ti_fallback
+                n_fallback += 1
+                fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
             corr_arr[idx] = ti * w_arr[idx]
             if ext_name in lamp_only_benchsides:
                 fibre_flags[idx] |= MASK_FLAT_LAMP_ONLY
             if (benchside_str, fid) in all_unmapped_keys:
                 fibre_flags[idx] |= MASK_UNMAPPED_FIBRE_INTERP
+
+        if n_fallback and ext_name not in lamp_only_benchsides:
+            logger.info(f"  {ext_name}: {n_fallback} fibre(s) without a usable twilight "
+                        f"integral take the benchside median T_i = {ti_fallback:.4f} "
+                        f"(flagged MASK_FLAT_LAMP_ONLY)")
 
         # Clamp
         corr_arr = np.clip(corr_arr, CORRECTION_CLAMP[0], CORRECTION_CLAMP[1])
@@ -1280,6 +1545,11 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
             'fibre_flags': fibre_flags,
             # TODO: populate from twilight/lamp photon noise when available
             'correction_var': np.zeros_like(corr_arr),
+            'header': {**_ti_header(t_i.values(),
+                                    0 if ext_name in lamp_only_benchsides else n_fallback),
+                       **_narrow_cards(w_arr, wave_arr),
+                       **(_twilight_dip_cards(w_arr, wave_arr, fiber_ids, twi_lookup[ext_name])
+                          if ext_name in twi_lookup else {})},
         }
 
         if channel not in channel_refs:
@@ -1322,27 +1592,6 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
                 f"{np.min(all_ti_values):>8.4f} "
                 f"{np.max(all_ti_values):>8.4f}")
 
-            # Flag benchsides deviating > 5% from 1.0
-            for ext_name in ext_names:
-                if ext_name not in t_i_all:
-                    continue
-                bs_str = (f"{models[ext_name]['bench']}"
-                          f"{models[ext_name]['side']}")
-                ti_dict = t_i_all[ext_name]
-                ti_vals = [ti_dict.get(fid, 1.0)
-                           for fid in models[ext_name]['fiber_ids']
-                           if fid in ti_dict]
-                if ti_vals:
-                    _arr = np.array(ti_vals)
-                    _med = float(np.median(_arr))
-                    _rms_pct = (float(np.sqrt(np.mean((_arr - _med) ** 2)))
-                                / _med * 100 if _med > 0 else 0.0)
-                    if _rms_pct > 5.0:
-                        logger.warning(
-                            f"  *** {bs_str} within-bench T_i scatter = "
-                            f"{_rms_pct:.1f}% (median={_med:.4f}) — "
-                            f"high intra-bench throughput variation ***")
-
     _cross_bench_diagnostic(channel_refs)
 
     # ── Save gradient model and diagnostic plot ──
@@ -1351,41 +1600,52 @@ def compute_fibre_flat_twilight(twilight_extractions, smooth_models_file,
         _plot_fibre_flat_diagnostic(gradient_diagnostics, t_i_all, models,
                                     channel_groups, output_dir)
 
-    # Record which benchsides fell back to the lamp-derived T_i inside the
-    # twilight method (e.g. a colour whose twilight flat was absent), so the
-    # products document per-benchside provenance rather than a single global
-    # method (F1).
+    # Record which benchsides fell back to the lamp-derived T_i (e.g. a colour
+    # with no twilight flat), so the products document per-benchside provenance.
     lamp_fallback_str = ','.join(sorted(lamp_only_benchsides))
     twilight_benchsides = sorted(
         ext_name for ext_name in models if ext_name not in lamp_only_benchsides)
     if lamp_only_benchsides:
+        # Shown to the user in assess_fibre_flat's summary, so only counted here.
         logger.warning(
             f"Twilight method: {len(lamp_only_benchsides)} benchside(s) used "
-            f"lamp-only fallback T_i (no twilight data): {lamp_fallback_str}")
+            f"lamp-only fallback T_i (no twilight data): {lamp_fallback_str}",
+            extra={'summarised': True})
     else:
         logger.info("Twilight method: all benchsides used twilight T_i")
 
     output_path = os.path.join(output_dir, 'fibre_flat_corrections.fits')
     _write_corrections_fits(
         corrections, output_path, method='twilight',
-        header_extra={'SMTHFILE': os.path.basename(smooth_models_file),
+        header_extra={**_provenance(smooth_models_file, 'twilight'),
                       'LAMPONLY': (lamp_fallback_str,
                                    'benchsides using lamp-only T_i fallback'),
                       'NTWIBS': (len(twilight_benchsides),
-                                 'n benchsides using twilight T_i')},
+                                 'n benchsides using twilight T_i'),
+                      **(header_extra or {})},
         lamp_only_benchsides=lamp_only_benchsides)
     return output_path
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Phase 3: Application to science RSS
+# Application to science RSS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
+def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None, stats=None):
     """Apply fibre-to-fibre flat correction to a science RSS file.
 
-    Divides FLUX and ERROR by the correction factor ``C_i(λ)`` for each
-    fibre, producing a new RSS file with ``_FF.fits`` suffix.
+    Divides the sky-subtracted plane and ERROR by ``C_i(λ) / THRUPUT`` for each fibre,
+    producing a new RSS file with ``_FF.fits`` suffix. THRUPUT is the throughput the RSS
+    rows were already divided by, so the fibre throughput is applied once.
+
+    It also measures how flat the sky is within each benchside, as an independent check
+    of the flat. Per fibre, the sky level is the median over the central 80% of its
+    wavelength range; the benchside value is the robust scatter (1.4826 x MAD) of those
+    levels, in %. Objects in a few fibres do not move a MAD. These go to the primary
+    header as ``FFSB<bs>`` (raw, no throughput correction), ``FFST<bs>`` (the RSS
+    throughput only), ``FFSA<bs>`` (after the flat) and ``FFSN<bs>`` (the median noise on
+    one fibre's level, %, which says whether the frame can resolve the residual), with
+    ``FFNSKIP`` for fibres left uncorrected.
 
     Parameters
     ----------
@@ -1395,6 +1655,9 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         Path to ``fibre_flat_corrections.fits``.
     output_file : str, optional
         Output path.  Defaults to replacing ``.fits`` with ``_FF.fits``.
+    stats : dict, optional
+        When given, receives ``'skipped'``: the ``(channel, benchside, fibre_id)``
+        of each fibre left uncorrected (flagged MASK_NOT_FLAT_FIELDED).
 
     Returns
     -------
@@ -1412,6 +1675,14 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
     corr_lookup = {}  # ext_name → {'fiber_ids', 'correction', 'wave', 'flags', 'correction_var'}
     with fits.open(corrections_file) as corr_hdul:
         corr_method = corr_hdul[0].header.get('METHOD', 'unknown')
+        if corr_hdul[0].header.get('FIBIDS') != 'physical':
+            raise CalibrationRecipeError(
+                f"{os.path.basename(corrections_file)} labels fibres by extraction row, not "
+                f"physical fibre id, so it would put the wrong flat on fibres above a dead "
+                f"fibre. Rebuild it (re-run with clobber = true).")
+        check_recipe(corr_hdul[0].header,
+                     'lamp_flat' if corr_method == 'lamp_only' else 'twilight',
+                     what=os.path.basename(corrections_file))
         for ext in corr_hdul[1:]:
             if ext.header.get('EXTNAME', '').endswith('_REF'):
                 continue  # Skip reference spectrum extensions
@@ -1430,6 +1701,11 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
     with fits.open(rss_file) as hdul:
         from llamas_pyjamas.File.llamasRSS import skysub_extname
+        if bool(hdul[0].header.get('FIBRFLAT', False)):
+            # e.g. a consolidated {exposure}_RSS_{channel}.fits picked up on a resumed run:
+            # flat-fielding it again would divide by C_i twice.
+            raise RSSStageError(f'{os.path.basename(rss_file)} is already fibre-flat-fielded '
+                                f'(FIBRFLAT=True); refusing to apply the fibre flat again')
         sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         channel = hdul[0].header.get('CHANNEL', 'unknown').lower()
 
@@ -1445,6 +1721,12 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
         # Read WAVE for grid-mismatch fallback
         wave_data = hdul['WAVE'].data
+        # Sky levels for the flatness check come from COUNTS (not sky-subtracted),
+        # on pixels the extraction marked good.
+        counts = hdul['COUNTS'].data if 'COUNTS' in hdul else None
+        good_pix = mask_data == 0
+        sky_levels = defaultdict(list)    # benchside -> [(before, after, noise)]
+        skipped = []
 
         benchsides = np.array([
             bs.decode().strip() if isinstance(bs, bytes)
@@ -1452,6 +1734,15 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             for bs in fibermap['BENCHSIDE']
         ])
         fiber_ids = fibermap['FIBER_ID']
+        # The RSS planes were already divided by each fibre's throughput (THRUPUT), and
+        # C_i holds the same throughput (T_i) times its wavelength shape, so the flat
+        # divides by C_i / THRUPUT: the throughput is applied once.
+        if 'THRUPUT' not in fibermap.names:
+            raise RSSStageError(
+                f'{os.path.basename(rss_file)} does not record the throughput its rows were '
+                f'divided by (FIBERMAP THRUPUT), so the fibre flat would divide it out a second '
+                f'time. It predates 2026-11-14: re-run with clobber = true.')
+        row_tp = np.asarray(fibermap['THRUPUT'], dtype=float)
 
         n_applied = 0
         n_skipped = 0
@@ -1467,7 +1758,9 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
             if ext_name not in corr_lookup:
                 logger.debug(f"Row {row_idx}: no corrections for {ext_name}")
+                mask_data[row_idx, :] |= MASK_NOT_FLAT_FIELDED
                 n_skipped += 1
+                skipped.append((channel, bs, fid))
                 continue
 
             corr_data = corr_lookup[ext_name]
@@ -1478,7 +1771,9 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             if not np.any(match_mask):
                 logger.debug(f"Row {row_idx}: FIBER_ID {fid} not in "
                              f"corrections for {ext_name}")
+                mask_data[row_idx, :] |= MASK_NOT_FLAT_FIELDED
                 n_skipped += 1
+                skipped.append((channel, bs, fid))
                 continue
 
             match_idx = np.where(match_mask)[0][0]
@@ -1500,13 +1795,20 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
                     f"extrapolated with boundary values ({left_val:.4f}, {right_val:.4f})"
                 )
 
-            # Apply correction: divide flux; propagate flat variance into error
+            # Apply correction: divide flux by C_i / tp; propagate flat variance into error
+            tp = row_tp[row_idx] if np.isfinite(row_tp[row_idx]) and row_tp[row_idx] > 0 else 1.0
+            c_i = np.asarray(c_i, dtype=float) / tp
             safe_c = np.where(np.isfinite(c_i) & (c_i > 0), c_i, 1.0)
+            if counts is not None:
+                level = _band_sky_level(counts[row_idx], error[row_idx],
+                                        wave_data[row_idx], good_pix[row_idx], safe_c, tp)
+                if level is not None:
+                    sky_levels[bs].append(level)
             flux[row_idx] /= safe_c
 
             var_c_arr = corr_data.get('correction_var')
             if var_c_arr is not None:
-                var_c_row = var_c_arr[match_idx]
+                var_c_row = var_c_arr[match_idx] / tp ** 2
                 if len(var_c_row) != len(safe_c):
                     # Resample variance onto the (possibly interpolated) science grid
                     var_c_row = np.interp(wave_data[row_idx],
@@ -1533,6 +1835,14 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
 
         logger.info(f"Applied fibre flat to {n_applied}/{flux.shape[0]} fibres "
                     f"({n_skipped} skipped)")
+        if n_skipped:
+            # Their flux stays on the un-flattened scale, so they are flagged bad, not
+            # silently mixed in with the corrected fibres. assess_fibre_flat reports
+            # them once for the whole run.
+            logger.info(f"{os.path.basename(rss_file)}: {n_skipped} fibre(s) had no fibre-flat "
+                        f"correction; flagged MASK_NOT_FLAT_FIELDED")
+        if stats is not None:
+            stats.setdefault('skipped', []).extend(skipped)
 
         # Write output RSS with corrected flux/error
         out_hdul = fits.HDUList()
@@ -1543,8 +1853,23 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
         primary.header['FFLATFIL'] = (os.path.basename(corrections_file),
                                       'Fibre flat corrections file')
         primary.header['FFMETHD'] = (corr_method, 'Fibre flat method')
+        primary.header['RSSSTAGE'] = ('ff', 'RSS processing stage (see rss_stage)')
+        primary.header['FFVER'] = (FFVER, 'Fibre-flat version (2: divides by C_i/THRUPUT)')
         primary.header['HISTORY'] = (f'Fibre flat applied: {n_applied} fibres '
                                      f'corrected ({corr_method})')
+        primary.header['FFNSKIP'] = (n_skipped, 'fibres without a fibre-flat correction')
+        for bs in BENCHSIDES:
+            for key in (f'FFSB{bs}', f'FFST{bs}', f'FFSA{bs}', f'FFSN{bs}'):
+                primary.header.remove(key, ignore_missing=True)
+            rows = np.array(sky_levels.get(bs, []), dtype=float).reshape(-1, 4)
+            raw, tp_only, after = (_robust_scatter_pct(rows[:, j]) for j in range(3))
+            noise = float(np.nanmedian(rows[:, 3])) * 100 if len(rows) else np.nan
+            if not np.all(np.isfinite([raw, tp_only, after, noise])):
+                continue
+            primary.header[f'FFSB{bs}'] = (round(raw, 3), f'{bs} sky scatter, raw (no throughput), %')
+            primary.header[f'FFST{bs}'] = (round(tp_only, 3), f'{bs} sky scatter, RSS throughput only, %')
+            primary.header[f'FFSA{bs}'] = (round(after, 3), f'{bs} sky scatter after fibre flat, %')
+            primary.header[f'FFSN{bs}'] = (round(noise, 3), f'{bs} noise on one fibre sky level, %')
         out_hdul.append(primary)
 
         # sky-subtracted plane — corrected (EXTNAME carried through the copied header)
@@ -1576,10 +1901,231 @@ def apply_fibre_flat_to_rss(rss_file, corrections_file, output_file=None):
             except KeyError:
                 pass
 
+        # FIBERWCS (per-fibre positions + astrometry provenance) carries forward so the FF
+        # stages keep it; it is keyed row-for-row to FIBERMAP, so check that before copying.
+        # NOFLAT is deliberately dropped: a diagnostic plane that is neither flat- nor
+        # pedestal-corrected.
+        if 'FIBERWCS' in hdul:
+            fw = hdul['FIBERWCS'].data
+            same_rows = (len(fw) == len(fibermap)
+                         and np.array_equal(np.asarray(fw['FIBER_ID']), np.asarray(fiber_ids))
+                         and np.array_equal(np.char.strip(np.asarray(fw['BENCHSIDE']).astype(str)),
+                                            benchsides))
+            if not same_rows:
+                raise RSSStageError(f'{os.path.basename(rss_file)}: FIBERWCS rows do not match '
+                                    f'FIBERMAP (FIBER_ID/BENCHSIDE); not carrying it forward')
+            out_hdul.append(hdul['FIBERWCS'].copy())
+
         out_hdul.writeto(output_file, overwrite=True)
         logger.info(f"FF RSS written: {output_file}")
 
     return output_file
+
+
+def _cam_list(items, limit=6):
+    items = list(items)
+    text = ', '.join(items[:limit])
+    return text + (f", … (+{len(items) - limit})" if len(items) > limit else '')
+
+
+def assess_fibre_flat(corrections_file, ff_files, skipped=None):
+    """Summarise a fibre flat for the terminal: a table plus layered warnings.
+
+    Reads only the header cards written by the compute functions (``TI*``) and by
+    :func:`apply_fibre_flat_to_rss` (``FFS*``, ``FFNSKIP``), so it works on resumed
+    runs too.
+
+    The table is the sky scatter left within each benchside after the flat
+    (median over the frames able to measure it). The warnings, from categorical
+    to per-fibre:
+
+    * benchsides on lamp-only throughput, fibres on the benchside-median fallback
+      T_i, and fibres left without a correction;
+    * a benchside whose T_i scatter exceeds ``TI_RELATIVE_OUTLIER`` x the median
+      of the other benchsides of its colour;
+    * benchsides whose sky scatter after the flat exceeds the provisional
+      ``FF_RESIDUAL_CEILING_PCT``, saying so plainly when that is all of them;
+    * fibres more than ``TI_OUTLIER_SIGMA`` robust sigma from their benchside T_i.
+
+    Parameters
+    ----------
+    corrections_file : str
+        ``fibre_flat_corrections.fits``.
+    ff_files : list of str
+        The ``_FF`` RSS files the flat was applied to.
+    skipped : iterable of (channel, benchside, fibre_id), optional
+        Fibres left uncorrected (from ``apply_fibre_flat_to_rss(..., stats=)``),
+        named individually when given.
+
+    Returns
+    -------
+    lines : list of str
+        The table, for the terminal and the log.
+    warnings : list of str
+        One line per check that fired.
+    report_text : str
+        One line for the end-of-run report.
+    """
+    ti = {}
+    lamp_only = []
+    with fits.open(corrections_file) as hdul:
+        method = str(hdul[0].header.get('METHOD', 'unknown'))
+        for ext in hdul[1:]:
+            name = ext.header.get('EXTNAME', '')
+            if name.endswith('_REF') or 'CHANNEL' not in ext.header:
+                continue
+            key = (str(ext.header['CHANNEL']).strip().lower(),
+                   f"{str(ext.header.get('BENCH', '')).strip()}{str(ext.header.get('SIDE', '')).strip()}")
+            ti[key] = ext.header
+            if method == 'lamp_only' or ext.header.get('METHOD') == 'lamp_only':
+                lamp_only.append(key)
+
+    after, before, tp_only = defaultdict(list), defaultdict(list), defaultdict(list)
+    faint = set()
+    n_skip_per_file = []
+    for path in ff_files:
+        try:
+            hdr = fits.getheader(path)
+        except OSError:
+            continue
+        ch = str(hdr.get('CHANNEL', '')).strip().lower()
+        n_skip_per_file.append(int(hdr.get('FFNSKIP', 0) or 0))
+        for bs in BENCHSIDES:
+            a, b, n = hdr.get(f'FFSA{bs}'), hdr.get(f'FFSB{bs}'), hdr.get(f'FFSN{bs}')
+            if a is None:
+                continue
+            if n is not None and n < FF_RESIDUAL_MAX_NOISE_PCT:
+                after[(ch, bs)].append(a)
+                before[(ch, bs)].append(b)
+                # FFST (RSS throughput only) exists from FFVER 2; before that FFSB was it.
+                tp_only[(ch, bs)].append(hdr.get(f'FFST{bs}', b))
+            else:
+                faint.add((ch, bs))
+
+    colours = [c for c in ('red', 'green', 'blue')
+               if any(k[0] == c for k in list(ti) + list(after) + list(faint))]
+    resid = {k: float(np.median(v)) for k, v in after.items()}
+    resid_before = {k: float(np.median(v)) for k, v in before.items()}
+    resid_tp = {k: float(np.median(v)) for k, v in tp_only.items()}
+
+    def cam(key):
+        return f"{key[0]} {key[1]}"
+
+    # ── Table ──
+    label = 'lamp only' if method == 'lamp_only' else method
+    def span(values, ch):
+        v = [values[(ch, bs)] for bs in BENCHSIDES if (ch, bs) in values]
+        return f"{min(v):.1f}–{max(v):.1f}" if v else '—'
+
+    lines = [f"Fibre flat ({label}): sky scatter within each benchside after the flat, %",
+             f"{'':7}" + ''.join(f"{bs:>6}" for bs in BENCHSIDES) + f"   {'raw':<10}tp only"]
+    for ch in colours:
+        cells = ''.join(f"{resid[(ch, bs)]:6.1f}" if (ch, bs) in resid else f"{'—':>6}"
+                        for bs in BENCHSIDES)
+        lines.append(f"{ch:<7}{cells}   {span(resid_before, ch):<10}{span(resid_tp, ch)}")
+    narrow = {k: h['WINRMS'] for k, h in ti.items() if 'WINRMS' in h}
+    if narrow:
+        n_dips = sum(int(h.get('WINDIP', 0) or 0) for h in ti.values())
+        lines.append(f"Lamp shape W_i: narrow rms {min(narrow.values()):.2f}–"
+                     f"{max(narrow.values()):.2f}% (provisional ceiling "
+                     f"{NARROW_CEILING_PCT:g}%), {n_dips} dips deeper than {NARROW_DIP_PCT:g}%")
+    tested = {k: (int(h['WIDIPN']), float(h.get('WIDIPTW', 0.0))) for k, h in ti.items()
+              if int(h.get('WIDIPN', 0) or 0) > 0}
+    if tested:
+        n_t = sum(n for n, _ in tested.values())
+        n_m = sum(round(n * f) for n, f in tested.values())
+        lines.append(f"Twilight check: {n_m}/{n_t} W_i dips deeper than {TWILIGHT_DIP_PCT:g}% "
+                     f"are not in the twilight")
+    if faint - set(resid):
+        lines.append(f"— : sky too faint to measure (noise on a fibre's level ≥ "
+                     f"{FF_RESIDUAL_MAX_NOISE_PCT:.1f}%)")
+
+    # ── Checks ──
+    warnings = []
+    if lamp_only:
+        if method == 'lamp_only' or len(lamp_only) == len(ti):
+            warnings.append("Lamp-only fibre flat (no twilight): the lamp's illumination "
+                            "pattern is left in the science data")
+        else:
+            warnings.append(f"Lamp-only throughput (no twilight data) for "
+                            f"{_cam_list(cam(k) for k in sorted(lamp_only))}")
+
+    fallback = {k: int(h.get('TINFALL', 0) or 0) for k, h in ti.items()}
+    fallback = {k: n for k, n in fallback.items() if n}
+    if fallback:
+        warnings.append(f"{sum(fallback.values())} fibre(s) use the benchside-median T_i "
+                        f"(no usable twilight): "
+                        f"{_cam_list(f'{cam(k)} {n}' for k, n in sorted(fallback.items()))}")
+
+    unflat = sorted(set(skipped or ()))
+    if unflat:
+        warnings.append(f"{len(unflat)} fibre(s) not flat-fielded (MASK_NOT_FLAT_FIELDED): "
+                        f"{_cam_list(f'{c} {bs} #{fid}' for c, bs, fid in unflat)}")
+    elif any(n_skip_per_file):
+        warnings.append(f"Up to {max(n_skip_per_file)} fibre(s) per RSS not flat-fielded "
+                        f"(MASK_NOT_FLAT_FIELDED)")
+
+    lamp_set = set(lamp_only)
+    for ch in colours:
+        scat = {k: h['TIMAD'] for k, h in ti.items()
+                if k[0] == ch and 'TIMAD' in h and k not in lamp_set}
+        for k, v in sorted(scat.items()):
+            others = [o for kk, o in scat.items() if kk != k]
+            if len(others) >= 3 and v > TI_RELATIVE_OUTLIER * np.median(others):
+                warnings.append(f"T_i scatter outlier: {cam(k)} {v:.1f}% "
+                                f"(other {ch} benchsides' median {np.median(others):.1f}%)")
+
+    over = sorted(k for k, v in resid.items() if v > FF_RESIDUAL_CEILING_PCT)
+    worse = sorted(k for k in resid if resid[k] > resid_tp.get(k, np.inf))
+    if worse:
+        warnings.append(f"The fibre flat leaves more sky scatter than the RSS throughput alone "
+                        f"on {len(worse)}/{len(resid)} benchsides: "
+                        f"{_cam_list(f'{cam(k)} {resid_tp[k]:.1f}→{resid[k]:.1f}%' for k in worse)}")
+
+    rough = sorted(k for k, v in narrow.items() if v > NARROW_CEILING_PCT)
+    if rough:
+        warnings.append(f"Narrow structure in the lamp shape W_i above {NARROW_CEILING_PCT:g}% "
+                        f"(provisional) on {len(rough)}/{len(narrow)} benchsides: "
+                        f"{_cam_list(f'{cam(k)} {narrow[k]:.2f}%' for k in rough)}")
+    unseen = sorted(k for k, (n, f) in tested.items() if f > TWILIGHT_UNCONFIRMED_MAX)
+    if unseen:
+        warnings.append(f"W_i dips deeper than {TWILIGHT_DIP_PCT:g}% that the twilight does not "
+                        f"show (more than {TWILIGHT_UNCONFIRMED_MAX:.0%}, provisional) on "
+                        f"{_cam_list(f'{cam(k)} {tested[k][1]:.0%} of {tested[k][0]}' for k in unseen)}"
+                        f": the lamp flat put them there, and each becomes a fake emission bump")
+    if over:
+        n = len(resid)
+        msg = (f"Sky scatter after the flat exceeds the {FF_RESIDUAL_CEILING_PCT:g}% ceiling "
+               f"(provisional) on {len(over)}/{n} benchsides")
+        if len(over) < n:
+            msg += f": {_cam_list(f'{cam(k)} {resid[k]:.1f}%' for k in over)}"
+        if len(over) == n:
+            msg += " — the fibre flat is not flattening the sky"
+        warnings.append(msg)
+
+    outliers = {k: int(h.get('TINOUT', 0) or 0) for k, h in ti.items()}
+    outliers = {k: n for k, n in outliers.items() if n}
+    if outliers:
+        warnings.append(f"{sum(outliers.values())} fibre(s) with T_i > {TI_OUTLIER_SIGMA:g} "
+                        f"robust sigma from their benchside median: "
+                        f"{_cam_list(f'{cam(k)} {n}' for k, n in sorted(outliers.items()))}")
+
+    # ── One line for the end-of-run report ──
+    if resid:
+        report = (f"{label} · sky scatter after flat {min(resid.values()):.1f}–"
+                  f"{max(resid.values()):.1f}%")
+        if resid_tp:
+            report += (f" (throughput only {min(resid_tp.values()):.1f}–"
+                       f"{max(resid_tp.values()):.1f}%)")
+        if narrow:
+            report += f" · W_i narrow rms ≤ {max(narrow.values()):.2f}%"
+        if over:
+            report += f" · over {FF_RESIDUAL_CEILING_PCT:g}% on {len(over)}/{len(resid)} ⚠️"
+    else:
+        report = f"{label} · sky too faint to measure the residual"
+    if unflat or any(n_skip_per_file):
+        report += f" · {len(unflat) or max(n_skip_per_file)} fibres not flat-fielded"
+    return lines, warnings, report
 
 
 # ──────────────────────────────────────────────────────────────────────────────

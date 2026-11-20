@@ -1,14 +1,14 @@
 """
 Interactive sensitivity-function fitting for CubeViewer.
 
-When a loaded RSS is a spectrophotometric standard (identified by the Phase I crossmatch on its
-header), the user defines an aperture on the star in DS9 the same way as for any spectrum, then
+When a loaded RSS is a spectrophotometric standard (identified by crossmatching its header
+pointing), the user defines an aperture on the star in DS9 the same way as for any spectrum, then
 opens this dialog to turn the aperture's summed counts into a sensitivity function.
 
 Two modes, both driven by the same core (:mod:`llamas_pyjamas.Flux.sensFunc`):
 
 * **Auto** — open the dialog and the fit is already there, using the default telluric + stellar
-  masks and a span-derived breakpoint spacing. "Let it rip"; just Save.
+  masks and a span-derived breakpoint spacing; just Save.
 * **Interactive** — drag on the plot to add a mask region, toggle the default masks, and change
   the breakpoint spacing / spline order; the fit and residuals redraw live before you Save.
 
@@ -90,6 +90,9 @@ class SensFuncModel:
     sigma: float = DEFAULT_SIGMA
     throughput_floor: float = DEFAULT_THROUGHPUT_FLOOR
     weighted: bool = True
+    #: Provenance written into the sensfunc (keys <= 8 chars, lower-case, so they survive
+    #: SensFunc.save/load): e.g. rssstage / fibrflat / stdfile of the standard's RSS.
+    meta: Dict = field(default_factory=dict)
 
     def regions(self) -> List[Tuple[float, float]]:
         """Effective hard-exclusion regions: stellar defaults, optional tellurics, user spans."""
@@ -115,6 +118,7 @@ class SensFuncModel:
         """Produce a SensFunc from the current state (same core as the auto path)."""
         from llamas_pyjamas.Flux.sensFunc import build_sensfunc
         full_meta = {'standard': self.standard_name, 'naper': len(self.spectra)}
+        full_meta.update(self.meta)
         full_meta.update(meta or {})
         return build_sensfunc(self.spectra, self.exptime, self.ref_wave, self.ref_flux,
                               regions=self.regions(), bkspace=self.bkspace,

@@ -38,7 +38,6 @@ from llamas_pyjamas.Utils.rayManager import init_ray, shutdown_ray
 import traceback
 from typing import Tuple
 import json
-import pkg_resources
 from pathlib import Path
 
 ####################################################################################
@@ -46,12 +45,13 @@ from pathlib import Path
 from llamas_pyjamas.config import BASE_DIR, OUTPUT_DIR, DATA_DIR, CALIB_DIR, LUT_DIR
 from llamas_pyjamas.Trace.traceLlamas import TraceLlamas
 from llamas_pyjamas.Utils.detectorProps import props_for_header
+from llamas_pyjamas.File.llamasRSS import MASK_CR_MISSING, MASK_CR_PARTIAL
+from llamas_pyjamas.Utils.maskedSums import MIN_VALID_FRAC
 
 logger = logging.getLogger(__name__)
 
-# Detector noise defaults used for per-fibre variance (F4) when the FITS header
-# does not carry EGAIN/RDNOISE. The Poisson term dominates, so these only set
-# the read-noise floor; override via header keywords when available.
+# Detector noise defaults for the per-fibre variance when neither the header nor
+# the detector table supplies EGAIN/RDNOISE. They only set the read-noise floor.
 DEFAULT_GAIN = 1.0        # e-/ADU
 DEFAULT_READNOISE = 2.5   # e-
 
@@ -64,18 +64,11 @@ def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
     pixel count is method-dependent:
 
     - boxcar: a straight (fractional-weight) sum over the +/-halfwidth aperture, so the RN
-      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels. With the current halfwidth=2.5
-      that is ~5 px, NOT the legacy hard-coded 9 (which came from the old 9-px total window
-      and over-counted RN by sqrt(9/5)=1.34x, worst for the faint blue/red).
-    - optimal/Horne: read noise is profile-WEIGHTED, RN variance = sum(w_i^2)*RN^2 with the
-      optimal weights, i.e. an effective aperture of 1/sum(P_i^2) (< the boxcar width, since
-      the wings are downweighted). The Horne estimator is currently disabled (unstable on
-      blended profiles); until it is rebuilt to expose per-column profile weights we fall
-      back to the boxcar-equivalent width (a conservative over-estimate), preferring an
-      explicit trace.extraction_aperture if one has been set.
-
-    Keeping this method-aware means the RN term stays correct if/when optimal is re-enabled,
-    instead of silently reusing the boxcar straight-sum formula.
+      variance is ~sum(w_i^2)*RN^2 ~= (2*halfwidth) pixels (~5 px at halfwidth=2.5).
+    - optimal/Horne: read noise is profile-WEIGHTED, i.e. an effective aperture of
+      1/sum(P_i^2) (< the boxcar width, since the wings are downweighted). Per-column
+      profile weights are not yet exposed, so this falls back to the boxcar-equivalent
+      width (a conservative over-estimate) unless trace.extraction_aperture is set.
     """
     method = str(method).lower()
     half = float(boxcar_halfwidth)
@@ -84,6 +77,47 @@ def effective_aperture_pix(method='boxcar', boxcar_halfwidth=2.5, trace=None):
         return float(ea) if ea else 2.0 * half
     # boxcar / legacy: straight sum over the +/-halfwidth aperture
     return 2.0 * half
+
+
+def aperture_sum(image, traces, half):
+    """Sum of ``image`` over each fibre's boxcar aperture, column by column.
+
+    Uses the boxcar extraction's trace-following aperture of +/-``half`` px with
+    fractional edge weights. ``traces`` is (nfibers, ncols) of row positions;
+    NaN positions give 0. Returns (nfibers, ncols).
+    """
+    image = np.asarray(image, dtype=float)
+    ny, nx = image.shape
+    y = np.asarray(traces, dtype=float)
+    cols = np.broadcast_to(np.arange(y.shape[1]) % nx, y.shape)
+    lo, hi = y - half, y + half
+    j0 = np.floor(lo + 0.5)
+    out = np.zeros(y.shape)
+    with np.errstate(invalid='ignore'):
+        for k in range(int(np.ceil(2.0 * half)) + 2):
+            j = j0 + k
+            w = np.minimum(np.minimum(hi, j + 0.5) - np.maximum(lo, j - 0.5), 1.0)
+            ok = np.isfinite(w) & (w > 0) & (j >= 0) & (j < ny)
+            jj = np.where(ok, j, 0).astype(int)
+            out += np.where(ok, image[jj, cols] * np.where(ok, w, 0.0), 0.0)
+    return out
+
+
+def dark_variance(scaled_dark, traces, half, aperture_pix, gain, readnoise, scale, c_over_n):
+    """Per-fibre variance (DN^2) added by subtracting ``scale x master dark``.
+
+    The dark's own shot noise in the frame, plus the master dark's noise scaled by
+    ``scale^2``: with S = the scaled dark summed over the aperture (clipped at 0),
+
+        var = S/g + scale*(c/N)*S/g + scale^2*(c/N)*A*RN^2/g^2
+
+    where c/N is the master dark's variance per unit single-frame variance (see
+    ``darkLlamas.noise_factor``), A the aperture pixel count, g the gain (e-/ADU)
+    and RN the read noise (e-).
+    """
+    S = np.clip(aperture_sum(np.clip(scaled_dark, 0.0, None), traces, half), 0.0, None)
+    return (S / gain + scale * c_over_n * S / gain
+            + scale ** 2 * c_over_n * aperture_pix * (readnoise / gain) ** 2)
 
 
 class ExtractLlamas:
@@ -110,18 +144,36 @@ class ExtractLlamas:
     """
 
     def __init__(self,trace: TraceLlamas, hdu_data: np.ndarray, hdr: dict,optimal=True,
-                 method=None) -> None:
+                 method=None, dark=None, dark_noise=0.0, cr_mask=None) -> None:
         """Initialize the ExtractLlamas object.
 
         Args:
             trace (TraceLlamas): An instance of the TraceLlamas class containing trace information.
             hdu_data (np.ndarray): The HDU data array from the FITS file.
             hdr (dict): Header information from the FITS file.
-            optimal (bool, optional): Legacy switch — True = profile-weighted mean,
-                False = boxcar. Ignored when ``method`` is given.
-            method (str, optional): 'horne' | 'boxcar' | 'optimal'. 'horne' is the
-                variance-weighted, flux-conserving, mask-aware estimator
-                (Horne 1986) built on the bspline profile images.
+            optimal (bool, optional): True = 'optimal' (Horne), False = boxcar.
+                Ignored when ``method`` is given.
+            method (str, optional): 'horne' | 'optimal' | 'boxcar' | 'legacy'.
+                'horne' (alias 'optimal') is the variance-weighted, flux-conserving,
+                mask-aware estimator (Horne 1986) built on the bspline profile images.
+            dark (np.ndarray, optional): The scaled master dark already subtracted from
+                ``hdu_data`` (pipeline orientation). Only used to add its noise to the
+                per-fibre errors; it is not kept on the object.
+            dark_noise (float): The master dark's variance per unit single-frame
+                variance (c/N, ``darkLlamas.noise_factor``).
+            cr_mask (np.ndarray, optional): Boolean image of cosmic-ray pixels (True), same
+                shape and orientation as ``hdu_data``. Those pixels are MISSING data, whatever
+                value the frame holds there:
+
+                * boxcar: a sample whose aperture holds any of them (weight > 0) has no data:
+                  counts and error NaN, ``dq`` bit ``MASK_CR_MISSING``;
+                * horne: the sample is measured from the other aperture pixels (bit
+                  ``MASK_CR_PARTIAL``, error inflated by the lost information), unless less
+                  than ``MIN_VALID_FRAC`` of its profile is valid (then NaN and
+                  ``MASK_CR_MISSING``);
+                * legacy: ignored (comparison method only).
+
+                None (or no True pixel) leaves the extraction exactly as without it.
 
         Returns:
             None
@@ -148,6 +200,7 @@ class ExtractLlamas:
             self.sensfunc   = None
             self.flux       = None
             self.flux_err   = None
+            self.dq         = None
 
         else:
 
@@ -160,6 +213,16 @@ class ExtractLlamas:
             
             self.hdr    = hdr
             self.frame  = hdu_data.astype(float)
+            cr = None
+            if cr_mask is not None:
+                cr = np.asarray(cr_mask, dtype=bool)
+                if cr.shape != self.frame.shape:
+                    raise ValueError(f'cr_mask shape {cr.shape} does not match the frame '
+                                     f'{self.frame.shape}')
+                if not cr.any():
+                    cr = None
+            # Per-sample flags for the RSS MASK (File/llamasRSS.py bits), live-indexed.
+            self.dq = np.zeros(shape=(trace.nfibers, trace.naxis1), dtype=np.int16)
             self.fiberid = np.arange(trace.nfibers)#np.zeros(shape=(trace.nfibers))
             self.relative_throughput = np.zeros(shape=(trace.nfibers))
 
@@ -171,6 +234,9 @@ class ExtractLlamas:
 
             self.counts     = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.counts_err = np.zeros(shape=(trace.nfibers,trace.naxis1))
+            # Horne only: per column, the variance inflation from pixels masked inside the
+            # aperture, sum_all(P^2/V) / sum_valid(P^2/V) (1 when nothing is masked).
+            horne_var_ratio = np.ones(shape=(trace.nfibers, trace.naxis1))
             self.sky        = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.sensfunc   = np.zeros(shape=(trace.nfibers,trace.naxis1))
             self.flux       = np.zeros(shape=(trace.nfibers,trace.naxis1))
@@ -184,8 +250,7 @@ class ExtractLlamas:
                 method = 'optimal' if optimal else 'boxcar'
             method = str(method).lower()
             # 'optimal' is the user-facing name for the Horne estimator; the
-            # pre-2026-07 profile-weighted mean survives as 'legacy' for
-            # comparison only.
+            # plain profile-weighted mean is 'legacy', for comparison only.
             if method == 'optimal':
                 method = 'horne'
             print(f'Extraction method: {method}')
@@ -215,39 +280,58 @@ class ExtractLlamas:
                 logger.warning(f"Error accessing dead fibers in LUT: {e}")
 
 
+            # ifiber is a LIVE row index, but dead_fibers holds fibremap positions.
+            # Dead fibres never produce a trace, so there is nothing to skip here;
+            # the fibremap expansion happens at RSS generation.
             for ifiber in range(trace.nfibers):
                 extracted = np.zeros(self.trace.naxis1)
-                # print fiber, and list of dead fibers, print also bench and color
-                logger.info(self.dead_fibers)
-                logger.info(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
-                if ifiber in self.dead_fibers:
-                    logger.info(f"Skipping dead fiber # {ifiber}")
-                    self.counts[ifiber,:] = extracted
-                    continue
+                logger.debug(f'Extracting fiber # {ifiber} of {trace.nfibers} for bench {benchside} channel {self.channel}')
 
                 if method == 'horne':
                     # Horne (1986) optimal extraction: variance-weighted,
                     # flux-conserving, mask-aware.
-                    #   F = sum(P*f/V) / sum(P^2/V),  Var(F) = 1/sum(P^2/V)
-                    # with the bspline profile P renormalised to sum to 1 per
-                    # column over the VALID pixels — so missing/bad pixels
-                    # renormalise the profile instead of silently biasing the
-                    # flux (the old profile-weighted mean kept dropped pixels'
-                    # weight in the denominator).
+                    #   F = sum_valid(P*f/V) / sum_valid(P^2/V)
+                    # with the bspline profile P normalised to sum to 1 per column over
+                    # the WHOLE aperture. Masked or non-finite pixels then simply drop
+                    # out of both sums and F stays unbiased. (Renormalising P over the
+                    # valid pixels only, as before 2026-11-14, returned F x the valid
+                    # share of the profile.) The information they carried is lost: the
+                    # column's variance grows by sum_all(P^2/V) / sum_valid(P^2/V).
                     ys, xs = np.where(self.trace.fiberimg == ifiber)
                     if ys.size == 0:
                         logger.warning("No profile pixels for fiber #{}".format(ifiber))
                         continue
                     P = self.trace.profimg[ys, xs]
                     fpix = self.frame[ys, xs]
-                    good = np.isfinite(fpix) & np.isfinite(P) & (P > 0)
-                    ys, xs, P, fpix = ys[good], xs[good], P[good], fpix[good]
+                    inprof = np.isfinite(P) & (P > 0)
+                    ys, xs, P, fpix = ys[inprof], xs[inprof], P[inprof], fpix[inprof]
                     if xs.size == 0:
                         continue
-                    # per-column profile normalisation over valid pixels
+                    # per-column profile normalisation over the whole aperture
                     colP = np.zeros(_nx)
                     np.add.at(colP, xs, P)
                     Pn = P / np.where(colP[xs] > 0, colP[xs], 1.0)
+                    # Cosmic-ray pixels are missing data, like non-finite ones. A column
+                    # with one is measured from the rest of its profile (MASK_CR_PARTIAL),
+                    # or has no data when less than MIN_VALID_FRAC of the profile is left.
+                    crpix = cr[ys, xs] if cr is not None else np.zeros(xs.size, dtype=bool)
+                    valid = np.isfinite(fpix) & ~crpix
+                    cr_lost = cr_part = None
+                    if crpix.any():
+                        cr_hit = np.zeros(_nx, dtype=bool)
+                        cr_hit[xs[crpix]] = True
+                        share = np.zeros(_nx)
+                        np.add.at(share, xs[valid], Pn[valid])
+                        cr_lost = cr_hit & (share < MIN_VALID_FRAC)
+                        cr_part = cr_hit & ~cr_lost
+                        self.dq[ifiber, cr_lost] |= MASK_CR_MISSING
+                        self.dq[ifiber, cr_part] |= MASK_CR_PARTIAL
+                    Pn_all, xs_all = Pn, xs
+                    xs, Pn, fpix = xs[valid], Pn[valid], fpix[valid]
+                    if xs.size == 0:
+                        if cr_lost is not None:
+                            self.counts[ifiber, cr_lost] = np.nan
+                        continue
 
                     # Pass 1: profile-weighted flux with constant variance,
                     # used only to build the MODEL-based variance. Weighting by
@@ -260,8 +344,7 @@ class ExtractLlamas:
                     # Smooth the model along the dispersion axis before it
                     # enters the variance: an unsmoothed F0 makes the weights
                     # track the frame's own noise, decorrelating repeat
-                    # exposures (measured: 4B stability 0.96 -> 0.80). Real
-                    # spectral structure is preserved at the 9-px scale.
+                    # exposures. Real spectral structure survives at 9 px.
                     _k = 9
                     F0s = np.convolve(np.clip(F0, 0, None), np.ones(_k) / _k, mode='same')
 
@@ -275,6 +358,12 @@ class ExtractLlamas:
                     ok = den > 0
                     self.counts[ifiber, :] = np.where(ok, num / np.where(ok, den, 1.0), 0.0)
                     self.counts_err[ifiber, :] = np.where(ok, 1.0 / np.sqrt(np.where(ok, den, 1.0)), 0.0)
+                    den_all = np.zeros(_nx)
+                    np.add.at(den_all, xs_all,
+                              Pn_all ** 2 / (_rn2 + np.clip(F0s[xs_all] * Pn_all, 0, None)))
+                    horne_var_ratio[ifiber, :] = np.where(ok, den_all / np.where(ok, den, 1.0), 1.0)
+                    if cr_lost is not None:
+                        self.counts[ifiber, cr_lost] = np.nan
 
                 elif method == 'legacy':
                     # LEGACY profile-weighted mean (NOT Horne): kept for
@@ -297,22 +386,15 @@ class ExtractLlamas:
                 
                 elif method == 'boxcar':
                     # Boxcar extraction with a trace-following aperture and
-                    # FRACTIONAL pixel weights at the aperture edges.  An
-                    # integer-rounded window (the previous implementation)
-                    # jumps by a whole pixel row whenever the trace crosses a
-                    # half-pixel boundary, imprinting discontinuities along
-                    # the spectrum; weighting the edge pixels by their
-                    # geometric overlap keeps the aperture continuous.
+                    # FRACTIONAL pixel weights at the aperture edges, so the
+                    # aperture does not jump a whole row when the trace crosses
+                    # a half-pixel boundary.
                     logger.info("..Boxcar extracting fiber #{}".format(ifiber))
                     extracted = np.zeros(self.trace.naxis1)
                     tracey = self.trace.traces[ifiber,:]
-                    # Aperture half-width [px]. The legacy window was 9 px total
-                    # (half=4.5), but at the ~6.9 px fibre pitch that reaches the
-                    # neighbouring fibres' cores; 2.5 px (validated on-sky
-                    # 2026-07: frame-to-frame flux stability 0.98-0.99) keeps the
-                    # aperture on this fibre. Overridable via
-                    # LLAMAS_BOXCAR_HALFWIDTH (set by reduce.py from the
-                    # boxcar_halfwidth config key).
+                    # Aperture half-width [px]. At the ~6.9 px fibre pitch a wider
+                    # window reaches the neighbouring fibres' cores. Set via
+                    # LLAMAS_BOXCAR_HALFWIDTH (reduce.py's boxcar_halfwidth key).
                     half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
                     ny = self.frame.shape[0]
                     for i in range(self.trace.naxis1):
@@ -326,53 +408,61 @@ class ExtractLlamas:
                         if j0 < 0 or j1 >= ny:
                             continue   # aperture falls off the detector
                         total = 0.0
+                        hit = False
                         for jj in range(j0, j1 + 1):
                             w = min(hi, jj + 0.5) - max(lo, jj - 0.5)
                             if w > 0:
                                 total += self.frame[jj, i] * min(w, 1.0)
-                        extracted[i] = total
+                                hit = hit or (cr is not None and cr[jj, i])
+                        if hit:
+                            # a cosmic-ray pixel in the aperture: this sample has no data
+                            extracted[i] = np.nan
+                            self.dq[ifiber, i] |= MASK_CR_MISSING
+                        else:
+                            extracted[i] = total
 
                     self.counts[ifiber,:] = extracted
             self.old_count_shape = self.counts.shape
             logger.info(f'Benchside {benchside} counts shape {self.counts.shape}')
-            # NOTE: dead fibres are NOT inserted into counts here. Every per-fibre
-            # array (counts, wave, xshift, sky, throughput, errors, ...) stays
-            # LIVE-indexed and mutually aligned, so per-fibre operations
-            # (arcTransfer, skyModel) pair the correct rows. Previously only
-            # counts was padded to fibremap indexing while wave/xshift/sky stayed
-            # live, so counts[i] and wave[i] described different fibres after the
-            # first dead fibre (a silent misalignment). The fibermap expansion is
-            # done once, explicitly, at RSS generation via
-            # llamas_pyjamas.Utils.deadfibers (dead_fibers holds the fibremap
-            # positions). self.dead_fibers is preserved for that step.
+            # Dead fibres are NOT inserted here: every per-fibre array (counts,
+            # wave, xshift, sky, errors, ...) stays LIVE-indexed and mutually
+            # aligned. The fibremap expansion happens once at RSS generation via
+            # llamas_pyjamas.Utils.deadfibers, using self.dead_fibers.
 
-            # F4 (Pass 1): per-fibre uncertainty from photon + read noise.
-            # Populates `errors`, which llamasRSS writes to the ERROR extension
-            # and which fibreFlat/skySubtract propagate. Previously unset, so the
-            # ERROR extension was all zeros and no S/N was derivable from products.
-            # Detector gain (e-/ADU) and read noise (e-) are read from the header
-            # when available; the Poisson term dominates either way.
-            # Gain/read-noise resolution: explicit header keyword, then the lab
-            # characterisation table (keyed on the CAMSN serial), then defaults.
-            # The lab values make the ERROR extension honest per detector — most
-            # important in the red where sky is faint and read noise is a larger
-            # fraction of the budget, and for S/N-weighted cube combination.
+            # Per-fibre uncertainty from photon + read noise, written to the ERROR
+            # extension and propagated by fibreFlat/skySubtract. Gain (e-/ADU) and
+            # read noise (e-) come from the header, then the lab table (keyed on
+            # CAMSN), then defaults; read noise matters most in the faint red.
             gain, readnoise, src = props_for_header(
                 self.hdr, DEFAULT_GAIN, DEFAULT_READNOISE)
-            # Method-aware effective aperture for the RN term (see effective_aperture_pix).
-            # Boxcar -> ~2*halfwidth px (straight sum); optimal/Horne -> profile-weighted.
-            _method = os.environ.get('LLAMAS_EXTRACT_METHOD', 'boxcar')
+            # Method-aware effective aperture for the RN term (see effective_aperture_pix):
+            # the method this object was extracted with, not the environment (the two differ
+            # when the environment is unset, e.g. in the GUI quick look).
+            _method = method
             _half = float(os.environ.get('LLAMAS_BOXCAR_HALFWIDTH', '2.5'))
             aperture_pix = effective_aperture_pix(_method, _half, self.trace)
+            # A missing sample (NaN counts) gets a NaN error.
             counts_e = np.clip(self.counts, 0.0, None) * gain
             var_adu = (counts_e + aperture_pix * (readnoise ** 2)) / (gain ** 2)
+            # The subtracted dark is no longer in the counts, but its shot noise and
+            # the master dark's own noise are still in the data.
+            if dark is not None and dark.shape == self.frame.shape:
+                scale = float(hdr.get('DARKSCL', 1.0))
+                var_adu = var_adu + dark_variance(dark, self.trace.traces, _half, aperture_pix,
+                                                  gain, readnoise, scale, float(dark_noise))
+                logger.info(f'Added master-dark noise to the errors (scale {scale:.4f}, '
+                            f'c/N {float(dark_noise):.3f})')
+            # Pixels masked inside a Horne aperture carry no information: the column's
+            # flux is measured from the rest, with correspondingly larger variance (all
+            # of it: photon, read and dark noise).
+            var_adu = var_adu * horne_var_ratio
             self.counts_err = np.sqrt(var_adu).astype(np.float32)
             # At extraction, flux == counts (no flux cal), so the error on the
             # written FLUX/COUNTS is the same array.
             self.errors = self.counts_err.copy()
             logger.info(f'Computed per-fibre errors (gain={gain:.3f} e-/ADU, '
                         f'readnoise={readnoise:.2f} e-, aperture={aperture_pix:.0f} '
-                        f'pix, source={src}); median error={np.median(self.counts_err):.3f}')
+                        f'pix, source={src}); median error={np.nanmedian(self.counts_err):.3f}')
 
                     
                 

@@ -1,4 +1,4 @@
-"""Tests for per-fibre plate-solved sky coordinates (llamasRSS._fibre_sky_table, Phase 2).
+"""Tests for per-fibre plate-solved sky coordinates (llamasRSS._fibre_sky_table).
 
 Uses the bundled fibre map (FiberMap_LUT) with a synthetic pointing header. Checks that the rough
 header WCS fills RA/DEC for real fibres, that the fibre-map scale round-trips to 0.75"/unit, and

@@ -8,12 +8,10 @@ Bottom: residual after sky subtraction, (counts - sky)/throughput vs xshift.
 Panels share the x-axis, so zoom/pan (matplotlib toolbar) stays synced — zoom onto a line to see the ring.
 
 NOISE FLOOR: the +/-noise envelope is computed LIVE from the sky model, NOT read from the pkl's
-`errors` array. Those were written at extraction with the legacy aperture_pix=9 (a leftover 9-px
-window) and over-count read noise by ~1.34x. Here the read-noise term uses the corrected method-aware
-aperture (boxcar -> 2*halfwidth = 5 px) and the per-camera gain/RN from the lab table
-(Config/detector_lab_props.csv via props_for_header) — i.e. the values the FIXED pipeline will write:
+`errors` array, using the method-aware aperture (boxcar -> 2*halfwidth = 5 px) and the per-camera
+gain/RN from the lab table (Config/detector_lab_props.csv via props_for_header):
     sigma_counts = sqrt( sky_e + aperture_pix * RN^2 ) / gain ,  sky_e = clip(sky,0) * gain
-This matches the corrected ERROR extension so residual scatter can be judged against the true floor.
+so residual scatter can be judged against the true floor.
 
 Usage (run locally for the interactive window):
     python red_skyfit_viewer.py [--cam 1A] [--channel red] [--pkl PATH] [--all] [--save out.png]
@@ -25,8 +23,7 @@ import numpy as np
 from llamas_pyjamas.Extract.extractLlamas import ExtractLlamas, DEFAULT_GAIN, DEFAULT_READNOISE
 from llamas_pyjamas.Utils.detectorProps import props_for_header
 
-# effective_aperture_pix lives on the error-model fix branch; fall back to a local copy so this
-# diagnostic works whether or not the installed checkout carries it yet (keep in sync with
+# Local fallback for installs without effective_aperture_pix (keep in sync with
 # extractLlamas.effective_aperture_pix).
 try:
     from llamas_pyjamas.Extract.extractLlamas import effective_aperture_pix

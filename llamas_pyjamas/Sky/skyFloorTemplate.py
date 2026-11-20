@@ -7,8 +7,8 @@ between dithers/fields, so each fibre is blank in most frames; object flux is re
 outlier in the per-(fibre, wavelength-bin) combine across frames).
 
 Motivation (Sky/DESIGN.md): each camera carries a fixed, additive, smooth along-slit continuum floor
-(stable across dithers AND fields, corr 0.85-0.98) which the per-camera pooled sky fit mean-removes,
-tiling the IFU in benchside bands -> the stacked-image striping. A static template x one per-frame
+(stable across dithers AND fields) which the per-camera pooled sky fit mean-removes, tiling the IFU
+in benchside bands -> the stacked-image striping. A static template x one per-frame
 amplitude is the safe correction (the shape comes from OTHER frames/fields, so it cannot absorb real
 diffuse emission in the target field).
 
@@ -89,7 +89,9 @@ def build_floor_template(rss_files, channel='green', per_second=True):
                 hdr = h[0].header
                 C = np.asarray(h['COUNTS'].data, float)
                 S = np.asarray(h['SKY'].data, float)
-                msk = np.asarray(h['MASK'].data)
+                # Shared bad-pixel rule (bad MASK bits + zero-count pixels): 0 = usable.
+                from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
+                msk = bad_pixel_mask(h).astype(np.int8)
                 bs = np.array([str(b).strip() for b in h['FIBERMAP'].data['BENCHSIDE']])
         except Exception as exc:                          # noqa: BLE001
             logger.warning('skyFloorTemplate: skipping %s (%s)', f, exc)

@@ -85,7 +85,13 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
                 os.path.basename(ff_fits), os.path.basename(output_file), color)
 
     with fits.open(ff_fits) as hdul:
-        from llamas_pyjamas.File.llamasRSS import skysub_extname
+        from llamas_pyjamas.File.llamasRSS import RSSStageError, rss_stage, skysub_extname
+        stage = rss_stage(hdul)
+        if stage != 'ff':
+            # The framework refines the fibre-flat stage; on base data it would produce a
+            # file that is no pipeline stage, and on its own output it would apply twice.
+            raise RSSStageError(f"{os.path.basename(ff_fits)} is at stage {stage!r}; the sky "
+                                f"framework needs a fibre-flat ('ff') RSS")
         sky_plane = skysub_extname(hdul)      # 'SKYSUB' (or 'FLUX' pre-rename)
         flux = _get_data(hdul, sky_plane)
         if flux is None:
@@ -110,10 +116,9 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
         sky_mask = build_sky_fiber_mask(wl_source, fibermap, config)
         mask = sky_mask.mask
 
-        # 2. Per-fibre OH scaling (in FLUX space). NB scale_sky_per_fiber does not
-        #    use the mask (each fibre is scaled against its own template); only the
-        #    PCA stage below consumes it. Skipped when the pkl-domain sky_line_refine
-        #    already did the OH refinement (config.skip_oh_scale) — avoids double-correction.
+        # 2. Per-fibre OH scaling (in FLUX space; the mask is only used by PCA).
+        #    Skipped when the pkl-domain sky_line_refine already did it, to avoid
+        #    double-correction.
         if getattr(config, "skip_oh_scale", False):
             scale = np.ones(flux.shape[0], dtype=float)
             scale_corr = np.zeros_like(flux)
@@ -136,6 +141,7 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
 
         # --- assemble output, copying every input extension ---
         out = fits.HDUList([h.copy() for h in hdul])
+        out[0].header["RSSSTAGE"] = ("ff_skysub", "RSS processing stage (see rss_stage)")
         out[sky_plane].data = flux_out
         out[sky_plane].header["SKYSUB2"] = (True, "Sky framework refinement applied")
         for key, val in config.to_header_dict().items():
@@ -146,9 +152,8 @@ def subtract_sky_rss(ff_fits, output_file=None, config=None):
                                             "N PCA basis fibres")
         out[sky_plane].header["SKYNCOMP"] = (int(pca_info.get("ncomp", 0)),
                                              "N PCA components removed")
-        # Honest basis provenance: how the mask above was actually chosen. This
-        # can differ from SKYSEL (config.selection_method): SKYSEL drives the base
-        # B-spline model, while this mask is the framework's (broad) PCA basis.
+        # How the mask above was actually chosen. Can differ from SKYSEL, which
+        # drives the base B-spline model; this mask is the (broad) PCA basis.
         out[sky_plane].header["SKYBASIS"] = (sky_mask.method,
                                              "framework mask method (cf. SKYSEL)")
 

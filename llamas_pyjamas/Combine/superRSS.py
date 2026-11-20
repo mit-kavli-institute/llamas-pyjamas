@@ -1,5 +1,5 @@
 """
-Super-RSS: the substrate for combining a field's exposures (Phase 4).
+Super-RSS: the substrate for combining a field's exposures.
 
 Combining LLAMAS dithers is done through a single in-memory table that holds EVERY fibre from EVERY
 exposure of a field, tagged with its plate-solved sky position. The deliverables (co-added images,
@@ -17,11 +17,8 @@ Two design rules shape it:
   (var *= scale^2) at build time, so a downstream inverse-variance co-add both rescales and
   down-weights a hazy exposure in one step. ``scales=None`` leaves everything at 1.0.
 
-The table is built ON THE FLY when you combine; it is not written to disk.
-
-Facility note: this is deliberately general. `plane` (calibrated FLAM vs instrumental SKYSUB),
-`channels`, and the per-exposure `scales` are all caller choices; the combine engine that reads a
-:class:`SuperRSS` picks weighting/units/resampling per product.
+The table is built ON THE FLY when you combine; it is not written to disk. `plane` (calibrated
+FLAM vs instrumental SKYSUB), `channels` and the per-exposure `scales` are caller choices.
 
 Classes
 -------
@@ -45,12 +42,24 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 from astropy.io import fits
 
+from llamas_pyjamas.Utils.maskedSums import MIN_VALID_FRAC, band_integral, common_coverage
+
 logger = logging.getLogger(__name__)
 
 CHANNELS = ('blue', 'green', 'red')
 
-#: Plane pairs: name -> (flux_ext, err_ext). 'flam' = flux-calibrated, 'skysub' = instrumental.
+#: Plane pairs: name -> (flux_ext, err_ext). 'flam' = flux-calibrated, 'skysub' = instrumental
+#: (the sky-subtracted plane is SKYSUB, or FLUX in files written before the rename).
 _PLANES = {'flam': ('FLAM', 'FLAM_ERR'), 'skysub': ('SKYSUB', 'ERROR')}
+PLANES = ('auto',) + tuple(_PLANES)
+
+
+class MissingFluxCalibrationError(ValueError):
+    """``plane='auto'``/``'flam'`` but an exposure has no FLAM/FLAM_ERR in a loaded channel.
+
+    There is no silent fallback to the instrumental SKYSUB plane: an uncalibrated exposure would
+    otherwise be combined in counts/s next to (or instead of) calibrated ones. Flux-calibrate it
+    (apply_fluxcal / promote_final_rss), or ask for ``plane='skysub'`` explicitly."""
 
 
 def exposure_prefix(path: str) -> str:
@@ -79,6 +88,7 @@ class ExposureMeta:
     airmass: float
     mjd: float
     scale: float = 1.0            #: photometric scale applied to flux (var *= scale^2)
+    stage: str = ''               #: RSS processing stage loaded (base / ff / ff_skysub)
 
 
 @dataclass
@@ -94,6 +104,9 @@ class ChannelStack:
     mask: np.ndarray              # (N, nw)  bool, True = reject
     solid_angle: np.ndarray       # (N,)     arcsec^2 per fibre
     exposure: np.ndarray          # (N,)     int index into SuperRSS.exposures
+    #: (N, nw) bool, True = a gap a resampler must never interpolate across (cosmic-ray
+    #: samples, MASK_NO_BRIDGE_BITS); None = no such gaps recorded.
+    nobridge: Optional[np.ndarray] = None
 
     @property
     def n_fibres(self) -> int:
@@ -131,10 +144,25 @@ class SuperRSS:
     bunit: str
     exposures: List[ExposureMeta] = field(default_factory=list)
     channels: Dict[str, ChannelStack] = field(default_factory=dict)
+    stage: str = ''                                #: common RSS stage, or 'mixed'
+    overrides: Dict[str, bool] = field(default_factory=dict)  #: safety checks overridden
+    sky_penalty: float = 0.0                       #: SKYRESID variance penalty applied
 
     @property
     def n_exposures(self) -> int:
         return len(self.exposures)
+
+    def provenance(self) -> Dict[str, object]:
+        """Header cards recording what a product was built from: the data plane, the RSS stage
+        and any safety check that was overridden (``OVR_*``), so a cube says what it is."""
+        meta = {'PLANE': self.plane, 'RSSSTAGE': self.stage or 'unknown'}
+        if self.sky_penalty:
+            meta['SKYPEN'] = float(self.sky_penalty)
+        names = {'header': 'OVR_HDR', 'mixed': 'OVR_MIX', 'nocheck': 'OVR_NCHK'}
+        for key, flag in self.overrides.items():
+            if flag and key in names:
+                meta[names[key]] = True
+        return meta
 
     def n_fibres(self, channels: Optional[Sequence[str]] = None) -> int:
         want = self._resolve_channels(channels)
@@ -146,23 +174,30 @@ class SuperRSS:
         return [c for c in channels if c in self.channels]
 
     def collapse_band(self, wave_min: float, wave_max: float,
-                      channels: Optional[Sequence[str]] = None) -> FibreTable:
-        """Collapse every fibre to its summed flux over ``[wave_min, wave_max]`` in its OWN frame
-        (no cross-fibre resampling), for the image co-add. A fibre whose channel/coverage misses
-        the window contributes nothing (dropped). Variance adds in quadrature over the window."""
+                      channels: Optional[Sequence[str]] = None, *,
+                      min_frac: float = MIN_VALID_FRAC) -> FibreTable:
+        """Collapse every fibre to its integrated flux over ``[wave_min, wave_max]`` in its OWN
+        frame (no cross-fibre resampling), for the image co-add.
+
+        The integral is ``mean(valid) * N`` over the window clipped to the channel's common
+        coverage (:func:`~llamas_pyjamas.Utils.maskedSums.band_integral`): a masked pixel never
+        counts as zero flux, so a fibre with masked pixels in the window is not biased low (and,
+        under ivar weighting, not up-weighted for it). A fibre with less than ``min_frac`` of the
+        window valid, or whose coverage misses it, is dropped. Variance is
+        ``(N/n)^2 * sum(var_valid)``; ``npix`` is the valid count n."""
         want = self._resolve_channels(channels)
         ras, decs, vals, vars, oms, exps, chs, npix = ([] for _ in range(8))
         for c in want:
             st = self.channels[c]
-            inside = (st.wave >= wave_min) & (st.wave <= wave_max) & (~st.mask)
-            n = inside.sum(axis=1)
-            keep = n > 0                              # fibres with any good pixel in the window
+            common = common_coverage(st.wave, ~st.mask & np.isfinite(st.flux))
+            bi = band_integral(st.flux, st.wave, st.mask, wave_min, wave_max, var=st.var,
+                               common=common, min_frac=min_frac)
+            keep = np.isfinite(bi.value)
             if not keep.any():
                 continue
-            fsum = np.where(inside, st.flux, 0.0).sum(axis=1)
-            vsum = np.where(inside, st.var, 0.0).sum(axis=1)
+            n = bi.n
             ras.append(st.ra[keep]); decs.append(st.dec[keep])
-            vals.append(fsum[keep]); vars.append(vsum[keep])
+            vals.append(bi.value[keep]); vars.append(bi.var[keep])
             oms.append(st.solid_angle[keep]); exps.append(st.exposure[keep])
             npix.append(n[keep])
             chs.append(np.full(int(keep.sum()), c))
@@ -220,7 +255,7 @@ class SuperRSS:
         chans = ', '.join(f'{c}:{self.channels[c].n_fibres}' for c in self._resolve_channels(None))
         scales = ', '.join(f'{e.scale:.3f}' for e in self.exposures)
         return (f'SuperRSS[{self.field}] {self.n_exposures} exposure(s), plane={self.plane}, '
-                f'fibres per channel: {chans}; scales: {scales}')
+                f'stage={self.stage or "?"}, fibres per channel: {chans}; scales: {scales}')
 
 
 def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
@@ -232,16 +267,16 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
 
     ``sky_penalty`` (alpha, 0 disables) inflates the variance where the sky-subtraction residual
     exceeds the formal error: ``var *= 1 + (alpha * SKYRESID/ERROR)^2``. The formal ERROR carries
-    sky SHOT noise but not the sky-subtraction SYSTEMATIC (measured ~6x larger at red sky lines),
-    so without this an ivar co-add cannot down-weight sky-line wavelengths and their residuals
-    stack. The SKYRESID/ERROR ratio is plane-independent (the sensfunc cancels), so this is correct
-    for both FLAM and SKYSUB planes."""
+    sky SHOT noise but not the sky-subtraction SYSTEMATIC, so without this an ivar co-add cannot
+    down-weight sky-line wavelengths and their residuals stack. The SKYRESID/ERROR ratio is
+    plane-independent (the sensfunc cancels), so this is correct for both FLAM and SKYSUB planes."""
+    from llamas_pyjamas.File.llamasRSS import bad_pixel_mask
     flux = np.asarray(hdul[flux_ext].data, dtype=np.float32)
     err = np.asarray(hdul[err_ext].data, dtype=np.float32)
     wave = np.asarray(hdul['WAVE'].data, dtype=np.float64)
-    mask = np.zeros(flux.shape, dtype=bool)
-    if 'MASK' in hdul:
-        mask |= np.asarray(hdul['MASK'].data) != 0
+    # The shared rule (bad MASK bits, zero-count pixels); the fibre-flat informational bits
+    # leave a pixel usable.
+    mask = bad_pixel_mask(hdul)
     mask |= ~np.isfinite(flux) | ~np.isfinite(err) | (err <= 0) | ~np.isfinite(wave)
     var = np.where(mask, np.inf, err.astype(np.float64) ** 2)
 
@@ -265,10 +300,9 @@ def _read_channel(hdul, flux_ext, err_ext, sky_penalty=0.0):
 def _hdr_float(*values, default=np.nan):
     """First of ``values`` that casts to float, else ``default``.
 
-    Pre-TCS/old frames can carry an EMPTY header card (key present, value ``None``); then
-    ``hdr.get(key, fallback)`` returns that ``None`` rather than the fallback, and ``float(None)``
-    raises. This skips ``None``/blank/non-numeric entries so a missing MJD-OBS/AIRMASS/EXPTIME
-    degrades to ``default`` (NaN) instead of crashing the whole combine."""
+    Older frames can carry an EMPTY header card (value ``None``), which ``hdr.get(key, fallback)``
+    returns instead of the fallback. Skipping ``None``/blank/non-numeric entries lets a missing
+    MJD-OBS/AIRMASS/EXPTIME degrade to ``default`` (NaN) instead of crashing the combine."""
     for v in values:
         if v is None:
             continue
@@ -279,15 +313,40 @@ def _hdr_float(*values, default=np.nan):
     return float(default)
 
 
-def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
+def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0, stage=None,
+                  check_stages=True, allow_header_mismatch=False, allow_mixed_stage=False):
     """Read one exposure (its channel siblings) into native per-fibre arrays.
 
-    Returns ``(meta, data)`` where ``meta`` is an :class:`ExposureMeta` (scale left at 1.0) and
-    ``data`` maps channel -> dict(wave, flux, var, mask, ra, dec, solid_angle). ``plane='auto'``
-    uses FLAM if the detection channel carries it, else SKYSUB. ``sky_penalty`` -> see
-    :func:`_read_channel`."""
-    from llamas_pyjamas.CubeViewer.cubeViewRSS import channel_siblings
-    siblings = channel_siblings(rss_path) or {'': rss_path}
+    Returns ``(meta, plane, data)``: ``meta`` is an :class:`ExposureMeta` (scale left at 1.0,
+    ``stage`` set), ``plane`` the resolved plane name and ``data`` maps channel ->
+    dict(wave, flux, var, mask, ra, dec, solid_angle).
+
+    ``plane='auto'`` uses FLAM, and requires FLAM and FLAM_ERR in EVERY loaded channel:
+    otherwise :class:`MissingFluxCalibrationError` (no silent fallback to SKYSUB). ``'flam'``
+    is the same requirement; ``'skysub'`` is the explicit opt-in to the instrumental plane.
+
+    ``stage`` picks which stage of the exposure to read, per channel
+    (:func:`~llamas_pyjamas.File.llamasRSS.final_siblings`): ``'auto'`` the most-corrected one on
+    disk, or ``'base'`` / ``'ff'`` / ``'ff_skysub'``; ``None`` reads ``rss_path`` and its
+    same-stage channel siblings exactly as given (a cube rebuild from its recorded files).
+
+    ``check_stages`` runs :func:`~llamas_pyjamas.File.llamasRSS.check_stage_consistency` on each
+    loaded channel file (registration held by another stage, primary headers that differ between
+    stages, duplicate stage files raise). Channels at different stages raise
+    :class:`~llamas_pyjamas.File.llamasRSS.MixedStageError` unless ``allow_mixed_stage``.
+    ``sky_penalty`` -> see :func:`_read_channel`; it needs the SKYRESID extension of the
+    residual-sky stage, and a channel without it raises rather than silently skipping the
+    penalty (which would weight exposures inconsistently)."""
+    from llamas_pyjamas.File.llamasRSS import (MixedStageError, RSSStageError, channel_siblings,
+                                               check_stage_consistency, final_siblings,
+                                               no_bridge_mask, skysub_extname, stage_of)
+    if plane not in PLANES:
+        raise ValueError(f"plane must be one of {PLANES}, not {plane!r}")
+    if stage is None:
+        siblings = channel_siblings(rss_path) or {'': rss_path}
+    else:
+        siblings = (final_siblings(rss_path, stage, allow_mixed=allow_mixed_stage)
+                    or {'': os.path.abspath(rss_path)})
     want = [c for c in CHANNELS if c in siblings] if channels is None \
         else [c for c in channels if c in siblings]
     if not want:
@@ -296,12 +355,8 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
     det = siblings.get('green') or siblings[want[0]]
     with fits.open(det) as hd:
         hdr = hd[0].header
-        if plane == 'auto':
-            resolved_plane = 'flam' if 'FLAM' in hd else 'skysub'
-        else:
-            resolved_plane = plane
         from llamas_pyjamas.Utils.utils import exposure_time
-        exptime = _hdr_float(hdr, exposure_time(hdr, default=None))
+        exptime = _hdr_float(exposure_time(hdr, default=None))
         airmass = _hdr_float(hdr.get('AIRMASS'), hdr.get('TEL AIRMASS'))
         mjd = _hdr_float(hdr.get('MJD-OBS'))
         if not np.isfinite(mjd):                          # pre-TCS: rebuild MJD from TEL DATE-OBS+UTC
@@ -312,12 +367,24 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
                     mjd = float(_t.mjd)
             except Exception:                             # noqa: BLE001 - ordering nicety, never fatal
                 pass
-    flux_ext, err_ext = _PLANES[resolved_plane]
+    resolved_plane = 'flam' if plane == 'auto' else plane
 
-    # SKYSUB is raw counts (NOT exposure-time normalised); FLAM is already per-second (the sensfunc
-    # step divides by exptime). To honour this module's "one photometric system up front" invariant,
-    # put SKYSUB on a counts/SECOND system too, so exposures of different exposure time co-add
-    # coherently and the per-exposure `scale` is left to carry ONLY transparency (not exptime).
+    stages = {}
+    if resolved_plane == 'flam':
+        missing = []
+        for c in want:
+            with fits.open(siblings[c]) as hd:
+                if 'FLAM' not in hd or 'FLAM_ERR' not in hd:
+                    missing.append(c or os.path.basename(siblings[c]))
+        if missing:
+            raise MissingFluxCalibrationError(
+                f'{exposure_prefix(det)}: no FLAM/FLAM_ERR in channel(s) {missing} of '
+                f'{os.path.basename(det)}. Flux-calibrate it (apply_fluxcal, or promote_final_rss '
+                f'for a reduction calibrated at another stage), or combine the instrumental plane '
+                f'explicitly with plane="skysub" / --plane skysub.')
+
+    # SKYSUB is raw counts; FLAM is already per-second. Put SKYSUB on counts/SECOND too, so
+    # exposures of different exptime co-add coherently and `scale` carries ONLY transparency.
     to_per_second = (resolved_plane == 'skysub') and np.isfinite(exptime) and (exptime > 0)
     if resolved_plane == 'skysub' and not to_per_second:
         logger.warning('%s: SKYSUB plane but no usable exposure time (%.3g); combining in raw counts '
@@ -325,28 +392,54 @@ def load_exposure(rss_path, *, plane='auto', channels=None, sky_penalty=0.0):
 
     data = {}
     for c in want:
+        if check_stages:
+            check_stage_consistency(siblings[c], allow_header_mismatch=allow_header_mismatch)
+        stages[c] = stage_of(siblings[c])
         with fits.open(siblings[c]) as hd:
+            if resolved_plane == 'flam':
+                flux_ext, err_ext = _PLANES['flam']
+            else:
+                try:
+                    flux_ext, err_ext = skysub_extname(hd), 'ERROR'
+                except KeyError:
+                    flux_ext, err_ext = 'SKYSUB', 'ERROR'
             if flux_ext not in hd or err_ext not in hd:
                 logger.warning('%s %s: no %s/%s plane; channel skipped',
                                exposure_prefix(rss_path), c, flux_ext, err_ext)
                 continue
+            if sky_penalty and 'SKYRESID' not in hd:
+                raise RSSStageError(f'{os.path.basename(siblings[c])} has no SKYRESID (stage '
+                                    f'{stages[c]!r}), so the sky penalty cannot be applied to it; '
+                                    f'combine the ff_skysub stage or drop --sky-penalty')
             w, f, v, m, ra, dec, om = _read_channel(hd, flux_ext, err_ext, sky_penalty=sky_penalty)
+            nb = no_bridge_mask(hd)
         if to_per_second:
             f = f / exptime
             v = v / (exptime * exptime)                 # variance of counts/s
-        data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om)
+        data[c] = dict(wave=w, flux=f, var=v, mask=m, ra=ra, dec=dec, solid_angle=om, nobridge=nb)
 
+    distinct = sorted(set(stages.values()))
+    if len(distinct) > 1 and not allow_mixed_stage:
+        raise MixedStageError(f'{exposure_prefix(det)}: channels are at different stages {stages}; '
+                              f'combining them mixes flat-fielded and un-flat-fielded data. '
+                              f'Override with allow_mixed_stage / --allow-mixed-stage.')
+    loaded_stage = distinct[0] if len(distinct) == 1 else 'mixed'
     meta = ExposureMeta(exposure_id=exposure_prefix(det), path=det, exptime=exptime,
-                        airmass=airmass, mjd=mjd)
+                        airmass=airmass, mjd=mjd, stage=loaded_stage)
     return meta, resolved_plane, data
 
 
 def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reject_bad_fibres=True,
-                    sky_penalty=0.0):
+                    sky_penalty=0.0, stage='auto', check_stages=True, allow_header_mismatch=False,
+                    allow_mixed_stage=False):
     """Assemble a field's exposures into a :class:`SuperRSS`.
 
-    ``rss_paths`` may list any channel of each exposure (siblings are found automatically) and may
-    repeat an exposure; exposures are de-duplicated by :func:`exposure_prefix` and ordered by MJD.
+    ``rss_paths`` may list any channel -- and any stage -- of each exposure and may repeat an
+    exposure; exposures are de-duplicated by exposure (long per-stage names and a consolidated
+    name are the same exposure) and ordered by MJD. ``stage='auto'`` (default) reads each
+    exposure's most-corrected stage on disk, so whichever file was listed, the combine uses the
+    final one; a named stage forces it; ``None`` reads the given files exactly (see
+    :func:`load_exposure`).
     ``scales`` is an optional ``{exposure_id: scale}`` map (variable-transparency correction);
     missing/None -> 1.0. The scale multiplies flux and scales variance by scale^2, so the substrate
     is on one photometric system and inverse-variance weighting down-weights hazy exposures.
@@ -355,19 +448,27 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
     as no-data via :meth:`mask_bad_fibres`, so they leave a shallower coverage rather than negative
     holes in the co-add.
 
+    ``plane``, ``check_stages``, ``allow_header_mismatch`` and ``allow_mixed_stage`` -> see
+    :func:`load_exposure`. Exposures at different stages raise
+    :class:`~llamas_pyjamas.File.llamasRSS.MixedStageError` unless ``allow_mixed_stage`` (then
+    ``SuperRSS.stage == 'mixed'``). Overrides used are recorded in ``SuperRSS.overrides``.
+
     Returns a SuperRSS holding native per-fibre spectra per channel.
     """
+    from llamas_pyjamas.File.llamasRSS import exposure_key
     prefixes, seen = [], set()
     for p in rss_paths:                              # de-dup exposures, keep first path seen
-        k = exposure_prefix(p)
+        k = exposure_key(p) if stage is not None else exposure_prefix(p)
         if k not in seen:
             seen.add(k)
             prefixes.append(p)
 
     loaded = []
     for p in prefixes:
-        meta, resolved_plane, data = load_exposure(p, plane=plane, channels=channels,
-                                                   sky_penalty=sky_penalty)
+        meta, resolved_plane, data = load_exposure(
+            p, plane=plane, channels=channels, sky_penalty=sky_penalty, stage=stage,
+            check_stages=check_stages, allow_header_mismatch=allow_header_mismatch,
+            allow_mixed_stage=allow_mixed_stage)
         if not data:
             logger.warning('%s: no usable channels; exposure skipped', meta.exposure_id)
             continue
@@ -397,7 +498,21 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
                                meta.exposure_id, s, s / 3600.0)
 
     loaded.sort(key=lambda t: (np.nan_to_num(t[0].mjd, nan=np.inf), t[0].exposure_id))
-    plane_resolved = loaded[0][1]
+    planes = sorted({pl for _, pl, _ in loaded})
+    if len(planes) != 1:                             # cannot happen with the rules above; guard it
+        raise ValueError(f'exposures resolved to different planes {planes}; refusing to co-add '
+                         f'flux-calibrated and instrumental data')
+    plane_resolved = planes[0]
+    from llamas_pyjamas.File.llamasRSS import MixedStageError
+    stages = sorted({m.stage for m, _, _ in loaded})
+    if len(stages) > 1 and not allow_mixed_stage:
+        detail = ', '.join(f'{m.exposure_id}:{m.stage}' for m, _, _ in loaded)
+        raise MixedStageError(f'exposures are at different stages ({detail}); a co-add of '
+                              f'flat-fielded and un-flat-fielded exposures is biased by the flat '
+                              f'factors. Override with allow_mixed_stage / --allow-mixed-stage.')
+    stage = stages[0] if len(stages) == 1 else 'mixed'
+    if stage == 'mixed':
+        logger.warning('combining exposures at mixed stages: %s', stages)
     field_name = ''
     with fits.open(loaded[0][0].path) as hd:
         field_name = str(hd[0].header.get('OBJECT', '')).split('_rank')[0]
@@ -411,13 +526,15 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
         exposures.append(meta)
         for c, d in data.items():
             a = acc.setdefault(c, dict(ra=[], dec=[], wave=[], flux=[], var=[], mask=[],
-                                       solid=[], exp=[]))
+                                       solid=[], exp=[], nobridge=[]))
             n = d['flux'].shape[0]
             a['ra'].append(d['ra']); a['dec'].append(d['dec']); a['wave'].append(d['wave'])
             a['flux'].append((d['flux'] * sc).astype(np.float32))
             a['var'].append((d['var'] * sc ** 2))
             a['mask'].append(d['mask']); a['solid'].append(d['solid_angle'])
             a['exp'].append(np.full(n, idx, dtype=np.int32))
+            nb = d.get('nobridge')
+            a['nobridge'].append(np.zeros(d['flux'].shape, bool) if nb is None else nb)
 
     channels_out: Dict[str, ChannelStack] = {}
     for c, a in acc.items():
@@ -426,10 +543,15 @@ def build_super_rss(rss_paths, *, plane='auto', channels=None, scales=None, reje
             ra=np.concatenate(a['ra']), dec=np.concatenate(a['dec']),
             wave=np.concatenate(a['wave'], axis=0), flux=np.concatenate(a['flux'], axis=0),
             var=np.concatenate(a['var'], axis=0), mask=np.concatenate(a['mask'], axis=0),
-            solid_angle=np.concatenate(a['solid']), exposure=np.concatenate(a['exp']))
+            solid_angle=np.concatenate(a['solid']), exposure=np.concatenate(a['exp']),
+            nobridge=np.concatenate(a['nobridge'], axis=0))
 
+    overrides = {k: True for k, v in (('header', allow_header_mismatch),
+                                       ('mixed', allow_mixed_stage), ('nocheck', not check_stages))
+                 if v}
     sr = SuperRSS(field=field_name, plane=plane_resolved, bunit=bunit,
-                  exposures=exposures, channels=channels_out)
+                  exposures=exposures, channels=channels_out, stage=stage, overrides=overrides,
+                  sky_penalty=float(sky_penalty or 0.0))
     if reject_bad_fibres:
         sr.mask_bad_fibres()
     logger.info(sr.summary())

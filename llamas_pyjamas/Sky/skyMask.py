@@ -5,9 +5,6 @@ Identify sky-dominated fibres in a per-colour RSS so the sky-subtraction
 framework can (a) leave object flux out of the PCA eigenbasis and (b) anchor
 the per-fibre OH scaling on fibres that are genuinely sky-dominated.
 
-This closes the gap noted in ``skyLlamas.skyModel_1d``'s own docstring: *"the
-user must generate a mask to exclude sources from the sky estimation."*
-
 Public API
 ----------
 build_sky_fiber_mask(counts, fibermap, config) -> SkyMask
@@ -19,6 +16,7 @@ import logging
 import numpy as np
 
 from llamas_pyjamas.Sky.skySelect import SkyMask, build_sky_mask
+from llamas_pyjamas.Utils.maskedSums import row_total
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,8 @@ def _decode_column(col):
 
 
 def white_light(counts: np.ndarray) -> np.ndarray:
-    """Per-fibre white-light brightness proxy = nansum over wavelength.
+    """Per-fibre white-light brightness proxy = total over wavelength, with missing (NaN)
+    samples left out rather than counted as zero (:func:`~llamas_pyjamas.Utils.maskedSums.row_total`).
 
     Parameters
     ----------
@@ -49,7 +48,7 @@ def white_light(counts: np.ndarray) -> np.ndarray:
         ``(n_fiber,)`` white-light flux; non-finite fibres map to ``-inf`` so
         they sort to the faint (rejected) end.
     """
-    wl = np.nansum(counts, axis=1)
+    wl = row_total(counts)
     wl[~np.isfinite(wl)] = -np.inf
     return wl
 
@@ -100,16 +99,15 @@ def build_sky_fiber_mask(counts: np.ndarray, fibermap, config) -> SkyMask:
        fibres).
     3. ``mask_method == 'none'`` returns every finite fibre.
 
-    Honest provenance
-    -----------------
+    Provenance
+    ----------
     The white-light cut is a **broad** basis chosen for the PCA eigenstage (a
     narrow ``stratified``/``dimmest`` set would be too few for a stable basis),
     so the returned :class:`SkyMask` records ``method='percentile'`` with the
-    *requested* ``config.selection_method`` kept in the provenance.  It does NOT
-    claim to be ``stratified``: the configured selection drives the **base**
-    B-spline model (``skyModel_1d``), not this basis.  Note the OH-scaling stage
-    (``skyScale.scale_sky_per_fiber``) does not use this mask at all; only the
-    PCA stage (``skyResidual.clean_residuals``, ``run_pca``) does.
+    *requested* ``config.selection_method`` kept in the provenance; the
+    configured selection drives the **base** B-spline model, not this basis.
+    Only the PCA stage (``skyResidual.clean_residuals``) uses this mask; the
+    OH-scaling stage does not.
 
     Parameters
     ----------

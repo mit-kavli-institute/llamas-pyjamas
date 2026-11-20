@@ -25,7 +25,7 @@ The CubeViewer menus: **File** (open RSS/cube) · **WCS** ([registration](03-reg
 
 ## Directory layout of a reduction
 
-Rooted at `output_dir` (default `<raw_night>/reduced/`):
+Rooted at `output_dir` (default `reduced/` next to the first science file, i.e. `<raw_night>/reduced/`):
 
 ```
 reduced/
@@ -73,8 +73,11 @@ quote paths**). The authoritative, annotated list is
 | `red_arc_file` / … , `refine_arc`, `generate_new_wavelength_soln` | wavelength-solution controls |
 | `flux_standard_files` | standard-star exposures for the sensitivity function |
 | `slow_bias_file` / `fast_bias_file` | master bias per readout mode |
-| `output_dir`, `trace_output_dir`, `extraction_output_dir`, `cube_output_dir` | output locations |
-| `extraction_method` (`boxcar`/`horne`/`optimal`), `boxcar_halfwidth` | extraction |
+| `dark_files`, `dark_exptime_tolerance` | raw dark frames, and how close (fraction, default 0.10) their requested exposure must be to a frame's |
+| `remove_cosmic_rays`, `cosmic_ray_channels`, `cosmic_ray_threshold_{c}` / `_contrast_{c}` / `_neighbor_threshold_{c}`, `cosmic_ray_maxiter` | cosmic-ray cleaning: master switch, channels (default blue, green) and per-channel L.A.Cosmic thresholds ([details](../../llamas_pyjamas/Masking/README.md)) |
+| `output_dir`, `trace_output_dir`, `extraction_output_dir`, `cube_output_dir` | output locations (`output_dir` defaults to `reduced/` next to the first science file) |
+| `disk_margin`, `min_free_gb`, `skip_disk_check`, `scratch_dir` | pre-flight disk-space check ([details](02-running-the-reduction.md#disk-space)) |
+| `extraction_method` (`horne` default, `optimal` = `horne`, `boxcar`), `boxcar_halfwidth` | extraction |
 | `sky_subtract`, `sky_selection_method` | sky subtraction |
 | `wave_frame` (`heliocentric`/…) | wavelength reference frame |
 | `apply_fibre_flat`, `twilight_throughput` | throughput corrections |
@@ -96,7 +99,28 @@ quote paths**). The authoritative, annotated list is
   --scale-radius, --scale-sources, --scale-source RA DEC
 --keep-bad-fibres              keep strongly-negative broken fibres (default: masked)
 --dwave A                      cube wavelength step (default: native median)
+--stage {auto,base,ff,ff_skysub}  which stage of each exposure (default: the final one)
+--plane {auto,flam,skysub}     auto/flam need FLAM in every exposure; skysub = instrumental plane
+--allow-mixed-stage            combine exposures/channels at different stages (OVR_MIX)
+--allow-header-mismatch        use files whose header differs from their other stages (OVR_HDR)
+--sky-penalty ALPHA            down-weight sky-line residuals using SKYRESID (ff_skysub only;
+                               default 0 = off; needs tuning; recorded as SKYPEN)
 -o OUT.fits                    --png (preview)
+```
+
+## `promote_final_rss`
+
+Brings a reduction registered / flux-calibrated on the base files across to each exposure's
+final stage (see [Combining](04-combining-dithers.md#which-file-of-each-exposure-is-combined)).
+
+```
+python -m llamas_pyjamas.Postprocessing.promote_final_rss EXTRACTIONS_DIR
+--dry-run                      report only        -y  apply without asking
+--sensfunc FILE                write FLAM on final files that lack it
+--sensfunc-stage {base,ff,ff_skysub}   declare the stage of a sensfunc that records none
+--allow-stage-mismatch         calibrate despite a sensfunc / science stage mismatch (OVR_STG)
+--keep-duplicates {long,consolidated}  move same-stage duplicates to superseded/
+--sync-header-from STAGE       copy differing header keys from STAGE (data-change keys refused)
 ```
 
 ## Troubleshooting
@@ -112,6 +136,10 @@ quote paths**). The authoritative, annotated list is
 | Displayed image looks soft / PSF too big | the gridding kernel softens the *rendered* image only; lower the combine **Kernel FWHM**; point-source extraction is unaffected ([stage 4](04-combining-dithers.md)) |
 | "latex could not be found" when anchoring to Gaia | resolved in current code (gaiaxpy no longer forces LaTeX); update the package |
 | Gaia anchor says *approximate* | the source has no Gaia XP spectrum (faint); it fell back to broadband photometry ([stage 5](05-science-products.md#absolute-flux-anchor-gaia)) |
+| `MissingFluxCalibrationError` when combining | an exposure's final stage has no FLAM: apply the sensfunc (it lands on the final stage), run `promote_final_rss --sensfunc ...` for an older reduction, or combine `--plane skysub` deliberately |
+| `RegistrationMismatchError` | the registration is on another stage (older reductions registered the base file): `promote_final_rss` copies it to the final stage |
+| `SensfuncStageError` | the sensfunc was built from the standard at a different fibre-flat stage than the science: rebuild it from the standard's final stage (or declare an old sensfunc with `--sensfunc-stage`) |
+| `DuplicateStageError` | two files hold the same stage of one exposure (e.g. an old consolidated file next to a new run): `promote_final_rss --keep-duplicates long` moves the old ones to `superseded/` |
 
 ## Other documentation
 

@@ -55,8 +55,8 @@ confirming the dithers are well-registered.*
 ## Narrowband (diffuse emission) images
 
 **Combine ▸ Narrowband line image…** extracts a continuum-subtracted surface-brightness image in a
-window around a chosen wavelength — the headline product for faint extended emission (e.g. Lyα around
-a quasar pair at the pair's redshift).
+window around a chosen wavelength — the headline product for faint extended emission (e.g. line emission
+around a quasar pair at the pair's redshift).
 
 ![Continuum-subtracted narrowband image](images/fig_narrowband.png)
 

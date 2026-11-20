@@ -197,8 +197,7 @@ def qa_cube_spatial_autocorrelation(cube_data):
     3. Compute Moran's I spatial autocorrelation index for immediate
        neighbors (up/down/left/right).
        *Formula: I = (N / W) * sum(w_ij * (x_i - mean)*(x_j - mean)) / sum((x_i - mean)^2)*
-       *(For Claude Code: implement a simplified shifting array matrix approach
-       to calculate correlation with 1-pixel shifted arrays).*
+       computed with 1-pixel shifted arrays.
 
     Returns:
     --------

@@ -451,7 +451,7 @@ def compute_fibre_flat(flat_flux, flat_err, flat_mask, fibermap,
             smoothed_correction[i, :] = np.nan
             dead_fibre_mask[i] = True
             continue
-        # Fill NaN gaps before smoothing (same pattern as flux_calibration.py:147-153)
+        # Fill NaN gaps before smoothing
         row_filled = row.copy()
         if np.any(nan_mask):
             valid_idx   = np.where(~nan_mask)[0]
@@ -999,10 +999,8 @@ class FibreFlatField:
         Write QA plots on :meth:`apply`.  Default True.
     reference_fibre : ignored
         Deprecated — accepted for backward compatibility but not used.
-    smooth_kernel : ignored
-        Deprecated alias for ``savgol_window`` — accepted for backward
-        compatibility but not used (the value is ignored when the OO
-        interface is used directly; use ``savgol_window`` instead).
+    smooth_kernel : int or None
+        Deprecated alias for ``savgol_window``; overrides it if given.
     """
 
     def __init__(self, flat_rss_path,

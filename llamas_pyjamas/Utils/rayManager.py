@@ -1,20 +1,20 @@
 """Central Ray scratch / temp-directory lifecycle management for the pipeline.
 
 Ray, left to its defaults, writes session logs, the object-store spill files, and
-the ``runtime_env`` package uploads into ``/tmp/ray/session_<...>``. The LLAMAS
-pipeline initialises Ray several times per run and never cleans any of it up, so
-``/tmp`` fills and the pipeline crashes with "No space left on device" — and the
-junk survives across runs and users.
+the ``runtime_env`` package uploads into ``/tmp/ray/session_<...>`` and never
+removes them, so ``/tmp`` fills across runs until the pipeline fails with "No space
+left on device".
 
 This module gives Ray **one short, per-run, owned scratch directory** (via the
 ``_temp_dir`` argument every ``ray.init`` should pass) so all of that data can be
 bounded and reliably removed — during the run, on normal exit, and on early
 failure. It also provides:
 
-* a pre-flight disk-space gate (:func:`preflight_disk_check`) that warns when space
-  is tight and aborts *before any work* when it is guaranteed insufficient;
+* :func:`init_ray`, the single Ray session shared by the whole run;
+* the Ray spill folder and object-store size, for the pre-flight disk-space check
+  (``Utils/diskSpace.py``);
 * shared discovery / prune helpers used by the standalone ``clean_ray_scratch`` CLI
-  so existing users can reclaim already-accumulated sessions.
+  to reclaim accumulated sessions.
 
 Design notes
 ------------
@@ -28,10 +28,6 @@ Design notes
   ``sys.exit``) plus a ``SIGTERM``/``SIGHUP`` handler (scheduler kills). ``SIGKILL``
   and power loss cannot be trapped and are recovered by :func:`prune_stale` on the
   next run.
-
-This is Phase 1 of the fix: it does not consolidate the multiple Ray sessions into
-one — a future ``init_ray()`` entry point will. It only controls *where* Ray writes
-and *guarantees* the cleanup.
 """
 
 import os
@@ -242,7 +238,7 @@ def prune_run_sessions():
     """Remove finished Ray session dirs under our run dir (bounds mid-run growth).
 
     Safe to call between stages: it skips the currently-active session so a live Ray
-    instance is never disturbed. Replaces the old ad-hoc ``py_modules_files`` globs.
+    instance is never disturbed.
     """
     if _keep_scratch:
         return
@@ -366,99 +362,20 @@ def check_inputs_reachable(paths, timeout_s=15):
 
 
 # ---------------------------------------------------------------------------
-# pre-flight disk-space gate
+# Ray scratch sizes for the pre-flight disk-space check
 # ---------------------------------------------------------------------------
-def preflight_disk_check(config, output_dir, temp_dir, input_files):
-    """Fail fast when disk space is guaranteed insufficient; warn when it is tight.
+def object_store_bytes(config=None):
+    """Ray object-store size in bytes for this run (clamped to 30% RAM)."""
+    return _object_store_bytes(config=config)
 
-    Two tiers, evaluated per filesystem (temp and output on the same volume are
-    checked once against the summed requirement):
 
-    * **hard stop** — free space below the amount certain to be needed to even start
-      (Ray object store + runtime-env bundle on the temp volume, one copy of the
-      inputs on the output volume) or below ``min_free_gb`` → raise ``RuntimeError``
-      *before any work*.
-    * **warn** — free space above the floor but below the estimated full requirement
-      (``disk_estimate_factor`` × input size) → log a warning and continue.
+def ray_spill_folder(config, temp_dir):
+    """The folder Ray spills objects into: ``<scratch_dir>/ray_spill`` if set, else its temp dir.
 
-    Honours ``skip_disk_check`` as an escape hatch.
+    Ray refuses to spill once this folder's volume is more than 95% full, so the disk-space
+    check (``Utils/diskSpace.py``) applies that limit to this volume.
     """
-    cfg = config or {}
-    if cfg.get('skip_disk_check'):
-        logger.info("Pre-flight disk-space check skipped (skip_disk_check=True).")
-        return
-
-    min_free_gb = float(cfg.get('min_free_gb', 5))
-    factor = float(cfg.get('disk_estimate_factor', 5))
-
-    # Ray object store, clamped to 30% RAM (mirrors the per-stage clamps).
-    try:
-        import psutil
-        total_mb = psutil.virtual_memory().total // (1024 * 1024)
-    except Exception:
-        total_mb = 0
-    store_mb = int(os.environ.get('LLAMAS_RAY_OBJECT_STORE_MB',
-                                  cfg.get('ray_object_store_mb', 8192)))
-    if total_mb:
-        store_mb = min(store_mb, int(total_mb * 0.30))
-    store_bytes = store_mb * 1024 * 1024
-    bundle_bytes = 200 * 1024 * 1024
-
-    input_bytes = 0
-    for f in (input_files or []):
-        try:
-            input_bytes += os.path.getsize(f)
-        except OSError:
-            pass
-
-    temp_need = store_bytes * 2 + bundle_bytes        # store + spill headroom + bundle
-    temp_hard = store_bytes + bundle_bytes
-    out_need = int(factor * input_bytes)
-    floor = int(min_free_gb * (1024 ** 3))
-
-    # Group requirements by filesystem device so a shared volume is checked once.
-    needs = {}    # dev -> [need, hard, sample_path]
-
-    def _add(path, need, hard):
-        if not path:
-            return
-        probe = path
-        while probe and not os.path.exists(probe):
-            probe = os.path.dirname(probe)
-        probe = probe or "/"
-        try:
-            dev = os.stat(probe).st_dev
-        except OSError:
-            return
-        cur = needs.setdefault(dev, [0, 0, probe])
-        cur[0] += need
-        cur[1] = max(cur[1], hard)
-
-    _add(temp_dir or _DEFAULT_BASE, temp_need, temp_hard)
-    _add(output_dir, out_need, input_bytes)
-
-    gib = 1024 ** 3
-    for _dev, (need, hard, sample) in needs.items():
-        try:
-            free = shutil.disk_usage(sample).free
-        except OSError:
-            continue
-        hard_min = max(hard, floor)
-        if free < hard_min:
-            raise RuntimeError(
-                f"Insufficient disk space on the volume containing {sample}: "
-                f"{free / gib:.1f} GB free, but at least {hard_min / gib:.1f} GB is "
-                f"required to start. Aborting before any files are written. Free up "
-                f"space, point scratch_dir/output_dir at a larger volume, or set "
-                f"skip_disk_check=True to override.")
-        if free < need:
-            logger.warning(
-                "Low disk space on the volume containing %s: %.1f GB free, estimated "
-                "~%.1f GB needed for this run — it may fail if the volume fills up.",
-                sample, free / gib, need / gib)
-        else:
-            logger.info("Disk check OK for %s: %.1f GB free (estimated need ~%.1f GB).",
-                        sample, free / gib, need / gib)
+    return _spill_dir(config, temp_dir) or temp_dir or _DEFAULT_BASE
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +471,7 @@ def prune_stale(config=None, hours=6, include_generic=False):
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: single-session consolidation
+# single-session Ray init
 # ---------------------------------------------------------------------------
 def build_runtime_env():
     """The one canonical Ray runtime_env for the whole pipeline.
@@ -589,7 +506,7 @@ def _num_cpus(num_cpus=None):
 
 
 def _object_store_bytes(object_store_mb=None, config=None):
-    """Object-store size in bytes, clamped to ≤30% RAM (mirrors the old per-stage clamp)."""
+    """Object-store size in bytes, clamped to ≤30% RAM."""
     cfg = config or {}
     if object_store_mb is None:
         object_store_mb = int(os.environ.get("LLAMAS_RAY_OBJECT_STORE_MB",

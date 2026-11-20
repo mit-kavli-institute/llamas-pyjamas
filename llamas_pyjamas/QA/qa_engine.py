@@ -611,14 +611,10 @@ class QAEngine:
         metric_type = metric["type"]
 
         if metric_type == "background_gradient_rate":
-            # Camera-warming signal. A warming detector grows a dark-current glow --
-            # a smooth large-scale background gradient -- at a rate (ADU/s) far above
-            # the slow sky/scattered-light gradient of a normal frame. Measure the
-            # gradient with quarter-block MEDIANS (robust to the sparse bright fiber/
-            # target flux, so it tracks the background, not the astrophysical signal)
-            # and divide by exposure time to isolate the dark-current RATE -- which
-            # separates a warming detector (~2 ADU/s) from bright/long science (whose
-            # background gradient accrues at <=~0.06 ADU/s). See QA_TESTS_SUMMARY.md.
+            # Camera-warming signal: a dark-current glow is a smooth background gradient
+            # that grows at ~2 ADU/s, far above normal sky/scattered light (<=~0.06 ADU/s).
+            # Quarter-block MEDIANS track the background, not the sparse fibre flux;
+            # dividing by exposure time gives the RATE. See QA_TESTS_SUMMARY.md.
             if values.ndim < 2:
                 raise QAEngineError("background_gradient_rate requires a 2D region")
             if not exptime or exptime <= 0:
